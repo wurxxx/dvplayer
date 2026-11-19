@@ -40,4 +40,74 @@ public static class MediaText
         Regex.IsMatch(title, @"^[Ee][Pp]?\s*\d{1,4}$") ||
         Regex.IsMatch(title, @"^第\s*\d{1,4}\s*集$") ||
         Regex.IsMatch(title, @"\.(mp4|mkv|avi|ts|mov|wmv|flv|rmvb|m4v)$", RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// 条目类型的中文名。飞牛把「没刮削但对得上剧集结构」的多文件目录标成
+    /// Directory（映射成 folder），对用户来说它就是一部剧，这里统一说成「剧集」。
+    /// </summary>
+    public static string KindLabel(string kind) => kind switch
+    {
+        "movie" => "电影",
+        "series" => "剧集",
+        "season" => "季",
+        "episode" => "单集",
+        "folder" => "剧集",
+        "video" => "视频",
+        _ => kind,
+    };
+
+    /// <summary>能直接交给播放器的类型；其余（剧集 / 季 / 目录）要先看详情。</summary>
+    public static bool IsPlayable(string kind) => kind switch
+    {
+        "movie" or "episode" or "video" => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// 播放记录卡片的标题。单集自己的标题常常是空的（飞牛只给剧名），
+    /// 这时用「剧名 · 第 N 集」，比一张没有名字的卡片有用。
+    /// </summary>
+    public static string RecordTitle(PlayRecordDto record)
+    {
+        var episode = record.EpisodeNumber is > 0 ? $"第 {record.EpisodeNumber} 集" : null;
+
+        if (!string.IsNullOrWhiteSpace(record.SeriesTitle) && episode is not null)
+        {
+            return $"{Clean(record.SeriesTitle)} · {episode}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(record.SeriesTitle) && string.IsNullOrWhiteSpace(record.Title))
+        {
+            return Clean(record.SeriesTitle);
+        }
+
+        return Clean(record.Title);
+    }
+
+    /// <summary>卡片副标题：「剧集 · 81 集 · 10 季」。</summary>
+    public static string Describe(MediaItemDto item)
+    {
+        var parts = new List<string> { KindLabel(item.Kind) };
+
+        // 剧集优先显示集数（比分辨率有用）；未刮削目录的集数核心已从标题解析。
+        var episodes = item.EpisodeCount ?? item.LocalEpisodeCount;
+        if (episodes is > 0)
+        {
+            parts.Add($"{episodes} 集");
+        }
+        else if (item.RuntimeSeconds is > 0)
+        {
+            var time = TimeSpan.FromSeconds(item.RuntimeSeconds.Value);
+            parts.Add(time.TotalHours >= 1
+                ? $"{(int)time.TotalHours}:{time.Minutes:00}"
+                : $"{time.Minutes} 分钟");
+        }
+
+        if (item.SeasonCount is > 1)
+        {
+            parts.Add($"{item.SeasonCount} 季");
+        }
+
+        return string.Join(" · ", parts);
+    }
 }

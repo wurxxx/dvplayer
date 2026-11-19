@@ -34,6 +34,12 @@ public sealed class AppServices
 
     public bool IsConnected => Core is { IsValid: true };
 
+    /// <summary>
+    /// 连接状态变化。冷启动时页面先加载、登录后完成，页面靠这个事件重新拉数据，
+    /// 否则首页会一直停在「未连接媒体源」。
+    /// </summary>
+    public event EventHandler? ConnectionChanged;
+
     /// <summary>连接（或切换）一个媒体源。失败时把旧连接保留为 null。</summary>
     public async Task<(bool Ok, string? Error)> ConnectAsync(SourceConfig config)
     {
@@ -76,6 +82,8 @@ public sealed class AppServices
         CurrentSource = config;
         Settings.LastSourceId = config.Id;
         Settings.Save();
+
+        ConnectionChanged?.Invoke(this, EventArgs.Empty);
         return (true, null);
     }
 

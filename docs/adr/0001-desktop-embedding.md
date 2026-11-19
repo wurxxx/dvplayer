@@ -19,6 +19,12 @@ P7 只剩 BL。
 - **macOS**：`--wid` 不可靠，使用上游 render API（legacy `gpu`），
   v1 不承诺 DV，只做 HDR10。
 
+## 后续
+
+- 2026-11-19：Windows 的落地手段改为「官方 mpv.exe 子进程 + `--wid` + JSON IPC」，
+  见 [ADR-0009](0009-windows-mpv-subprocess.md)。总体路线（mpv 自管窗口、零 fork、
+  macOS 走 render API）不变。
+
 ## 后果
 
 - Windows 上 XAML 无法叠加在视频子窗口上（airspace），控制条必须放在视频外；
@@ -32,4 +38,4 @@ P7 只剩 BL。
 | --- | --- |
 | 上游 render API | 只有 legacy gpu，DV 不正确 |
 | 自编 libmpv + gpu-next 渲染后端 | 需要长期维护未合并补丁 |
-| 独立 mpv 进程 + IPC | 进程/窗口管理复杂，macOS 体验差 |
+| 独立 mpv 进程 + IPC | 当时判断「进程/窗口管理复杂，macOS 体验差」；**Windows 后来改用这条，见 ADR-0009** |

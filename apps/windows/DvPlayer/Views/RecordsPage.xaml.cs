@@ -12,10 +12,24 @@ public partial class RecordsPage : Page
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+    }
+
+    private void OnConnectionChanged(object? sender, EventArgs e) =>
+        // 登录在后台线程完成，重新拉数据必须回到 UI 线程。
+        Dispatcher.BeginInvoke(() => OnLoaded(this, new RoutedEventArgs()));
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // 冷启动时登录还没完成，连上之后靠这个事件重新拉一次。
+        AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+        AppServices.Instance.ConnectionChanged += OnConnectionChanged;
+
         var services = AppServices.Instance;
         if (!services.IsConnected)
         {
@@ -44,10 +58,12 @@ public partial class RecordsPage : Page
 
                 var remaining = Math.Max(0, r.DurationSeconds - r.PositionSeconds);
 
+                var title = MediaText.RecordTitle(r);
+
                 var row = new RecordRow
                 {
                     ItemId = r.ItemId,
-                    Title = r.Title,
+                    Title = title,
                     Progress = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}  ·  {progress:P0}",
                     Remaining = r.DurationSeconds <= 0 ? "" : $"还剩 {Format(remaining)}",
                     LastPlayed = r.LastPlayed is null
@@ -55,9 +71,9 @@ public partial class RecordsPage : Page
                         : DateTimeOffset.FromUnixTimeSeconds(r.LastPlayed.Value).LocalDateTime.ToString("MM-dd HH:mm"),
                     BarWidth = Math.Max(0, BarMax * progress),
                     PosterPath = r.PosterPath,
-                    Initial = Palette.InitialOf(r.Title),
+                    Initial = Palette.InitialOf(title),
                 };
-                row.UseGradient(r.ItemId + r.Title);
+                row.UseGradient(r.ItemId + title);
                 return row;
             })
             .ToList();

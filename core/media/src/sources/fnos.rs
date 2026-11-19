@@ -227,8 +227,20 @@ impl FnOsSource {
                 let duration = d.duration.max(0) as u64;
                 PlayRecord {
                     item_id: d.guid,
-                    title: d.title,
+                    title: d.title.clone(),
                     source_id: self.id.clone(),
+                    series_title: d.tv_title.clone().filter(|s| !s.is_empty()).or_else(|| {
+                        if parse_episode_number(&d.title).is_some() {
+                            d.parent_title.clone().filter(|s| !s.is_empty())
+                        } else {
+                            None
+                        }
+                    }),
+                    season_number: d.season_number.filter(|v| *v > 0),
+                    episode_number: d
+                        .episode_number
+                        .filter(|v| *v > 0)
+                        .or_else(|| parse_episode_number(&d.title)),
                     poster_path: d.poster.or_else(|| d.poster_list.and_then(|p| p.into_iter().next())),
                     // 飞牛把「看到第几秒」放在 ts，watched 只表示是否看完。
                     position_seconds: d.ts.max(0) as u64,
@@ -937,6 +949,9 @@ struct ItemDto {
     parent_guid: Option<String>,
     #[serde(default)]
     parent_title: Option<String>,
+    /// 所属剧名，单集才有值。
+    #[serde(default)]
+    tv_title: Option<String>,
     #[serde(default)]
     is_favorite: i32,
     #[serde(default)]

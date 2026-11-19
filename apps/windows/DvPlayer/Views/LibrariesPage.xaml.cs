@@ -24,10 +24,24 @@ public partial class LibrariesPage : Page
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+    }
+
+    private void OnConnectionChanged(object? sender, EventArgs e) =>
+        // 登录在后台线程完成，重新拉数据必须回到 UI 线程。
+        Dispatcher.BeginInvoke(() => OnLoaded(this, new RoutedEventArgs()));
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // 冷启动时登录还没完成，连上之后靠这个事件重新拉一次。
+        AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+        AppServices.Instance.ConnectionChanged += OnConnectionChanged;
+
         var services = AppServices.Instance;
         if (!services.IsConnected)
         {
@@ -260,33 +274,12 @@ public partial class LibrariesPage : Page
 
     private static ItemCard ToCard(MediaItemDto item)
     {
-        var parts = new List<string> { ShortKind(item.Kind) };
-
-        // 剧集优先显示集数（比分辨率有用）；没刮削的目录从标题里数。
-        var episodes = item.EpisodeCount ?? item.LocalEpisodeCount ?? ParseEpisodeCount(item.Title);
-        if (episodes is > 0)
-        {
-            parts.Add($"{episodes} 集");
-        }
-        else if (item.RuntimeSeconds is > 0)
-        {
-            var time = TimeSpan.FromSeconds(item.RuntimeSeconds.Value);
-            parts.Add(time.TotalHours >= 1
-                ? $"{(int)time.TotalHours}:{time.Minutes:00}"
-                : $"{time.Minutes} 分钟");
-        }
-
-        if (item.SeasonCount is > 1)
-        {
-            parts.Add($"{item.SeasonCount} 季");
-        }
-
         var card = new ItemCard
         {
             Id = item.Id,
             Kind = item.Kind,
             Title = MediaText.Clean(item.Title),
-            Sub = string.Join(" · ", parts),
+            Sub = MediaText.Describe(item),
             Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
             BadgeVisibility = string.IsNullOrEmpty(item.Resolution)
                 ? Visibility.Collapsed
@@ -296,35 +289,6 @@ public partial class LibrariesPage : Page
         };
         card.UseGradient(item.Id + item.Title);
         return card;
-    }
-
-    /// <summary>能直接交给播放器的条目类型；其余（剧集/季/目录）点进去看详情。</summary>
-    private static bool IsPlayableKind(string kind) => kind switch
-    {
-        "movie" or "episode" or "video" => true,
-        _ => false,
-    };
-
-    /// <summary>
-    /// 飞牛把「没刮削但对得上剧集结构」的多文件目录标成 Directory（映射成 folder），
-    /// 对用户来说它就是一部剧，这里统一说成「剧集」。
-    /// </summary>
-    private static string ShortKind(string kind) => kind switch
-    {
-        "movie" => "电影",
-        "series" => "剧集",
-        "season" => "季",
-        "episode" => "单集",
-        "folder" => "剧集",
-        "video" => "视频",
-        _ => kind,
-    };
-
-    /// <summary>「异能寻生机（76集） - SKIT」→ 标题 + 集数。</summary>
-    private static int? ParseEpisodeCount(string title)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(title, @"[（(]\s*(\d{1,4})\s*集\s*[)）]");
-        return match.Success ? int.Parse(match.Groups[1].Value) : null;
     }
 
     private sealed class LibraryChip
@@ -354,6 +318,6 @@ public partial class LibrariesPage : Page
         public string? PosterPath { get; init; }
         public Visibility BadgeVisibility { get; init; } = Visibility.Collapsed;
 
-        public bool IsPlayable => LibrariesPage.IsPlayableKind(Kind);
+        public bool IsPlayable => MediaText.IsPlayable(Kind);
     }
 }

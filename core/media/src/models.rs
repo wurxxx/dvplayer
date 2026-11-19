@@ -111,8 +111,16 @@ pub struct MediaItem {
 #[serde(rename_all = "camelCase")]
 pub struct PlayRecord {
     pub item_id: String,
+    /// 条目自己的标题；单集可能为空（飞牛只给剧名）。
     pub title: String,
     pub source_id: String,
+    /// 所属剧名，单集记录用来补出「剧名 · 第 N 集」。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub season_number: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub episode_number: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poster_path: Option<String>,
     pub position_seconds: u64,

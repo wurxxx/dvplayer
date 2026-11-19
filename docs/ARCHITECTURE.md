@@ -61,7 +61,20 @@ UI / 播放器 / 聚合层
 界面只做两件事：`folder` 当「剧集」显示、集号为空时按顺序补号。
 Emby 接入时它自己的 `Season`/`Episode` 已经在协议里，映射即可，不用再猜文件名。
 
-## 2. PlayerCore 接口（桌面）
+## 2. 播放内核接入（现状）
+
+| 平台 | 接入方式 | 代码 |
+| --- | --- | --- |
+| Windows | 起官方 `mpv.exe`：`--wid=<子窗口>`，控制走 `--input-ipc-server=<命名管道>` 的 JSON IPC，进程用 Job Object 绑在壳上 | `apps/windows/DvPlayer/Player/`（`MpvProcess` / `MpvIpc` / `MpvHost`） |
+| macOS | 链 libmpv 用 render API（ADR-0003），M0 已在 `m0-render` 上验到出画 | `apps/macos/m0-render/` |
+| Android / TV | Media3，进程内 | 未开始 |
+
+Windows 为什么用子进程而不是链 libmpv：见 [ADR-0009](adr/0009-windows-mpv-subprocess.md)。
+要点是 `--wid` 只要求一个父 HWND，子进程照样让 mpv 自己建 VO 和 swapchain，
+拿得到 `gpu-next` 的 FEL；换 mpv 版本只是换个 exe，不碰 MSVC 工具链与 C++ 运行时。
+`core/mpv` 的 C++ 封装因此只留给 macOS。
+
+### 2.1 macOS 的 libmpv 接口（未落地，仅设计）
 
 ```cpp
 enum class SurfaceMode { WindowBinding, RenderApi };
@@ -92,32 +105,29 @@ public:
 };
 ```
 
-原则：
-
-- 事件线程独立跑 `mpv_wait_event`，UI 只收结构化事件。
-- 属性用 `mpv_observe_property`，不轮询。
-- Windows 对 .NET 暴露薄 C ABI，`mpv_node` 不裸传，序列化成 JSON 或扁平结构体。
-- macOS 用 Objective-C++ 桥，不引入 C ABI。
+原则：事件线程独立跑 `mpv_wait_event`，UI 只收结构化事件；属性用
+`mpv_observe_property`，不轮询；`mpv_node` 不裸传给 .NET，序列化成 JSON。
 
 ## 3. 线程模型
 
 | 线程 | 职责 |
 | --- | --- |
-| mpv 事件线程 | `mpv_wait_event`，分发结构化事件 |
+| mpv 进程（Windows） | 自己解复用、解码、渲染；壳通过 JSON IPC `observe_property` 收事件 |
+| IPC 读线程 | 逐行读 mpv 的 JSON，切分事件交给 UI 线程 |
 | UI 线程 | 接收事件，更新界面 |
 | 渲染线程 | Windows 由 mpv 自己驱动；macOS 由 `CADisplayLink` 驱动 `mpv_render_context_render` |
-| 解复用 / 解码 | mpv 内部线程 |
 
 macOS 注意：`mpv_render_context_set_update_callback` 里只做
 `dispatch_async` 到主线程置 `needsDisplay`，不要在回调线程直接渲染。
 
 ## 4. Windows
 
-- 顶层窗口 + 视频子 HWND，`HwndHost` 托管；`mpv_set_option("wid", ...)`。
+- 顶层窗口 + 视频子 HWND，`HwndHost`（`MpvHost`）托管；`mpv --wid=<HostHandle>`。
 - `vo=gpu-next`、`gpu-api=d3d11`、`gpu-context=d3d11`、`target-colorspace-hint=yes`。
 - Airspace：XAML 画不到子 HWND 上面。控制条放视频外；临时提示用 mpv OSD；
   浮层窗口留到 v2。
-- 全屏：resize 顶层窗口 + 子 HWND，不要重挂父窗口。
+- 全屏：resize 顶层窗口 + 子 HWND，不要重挂父窗口（M0 验证壳已实现，产品壳未接）。
+- 进程生命周期：mpv 放进 Job Object，壳崩溃时子进程一起结束，不留后台播放。
 - DPI：手动同步子 HWND 位置与尺寸。
 
 ## 5. macOS

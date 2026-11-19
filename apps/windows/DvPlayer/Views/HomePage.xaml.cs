@@ -12,10 +12,24 @@ public partial class HomePage : Page
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+    }
+
+    private void OnConnectionChanged(object? sender, EventArgs e) =>
+        // 登录在后台线程完成，重新拉数据必须回到 UI 线程。
+        Dispatcher.BeginInvoke(() => OnLoaded(this, new RoutedEventArgs()));
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // 冷启动时登录还没完成，连上之后靠这个事件重新拉一次。
+        AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+        AppServices.Instance.ConnectionChanged += OnConnectionChanged;
+
         var services = AppServices.Instance;
 
         if (!services.IsConnected)
@@ -48,17 +62,19 @@ public partial class HomePage : Page
                     ? 0
                     : Math.Clamp((double)r.PositionSeconds / r.DurationSeconds, 0, 1);
 
+                var title = MediaText.RecordTitle(r);
+
                 var card = new ContinueCard
                 {
                     ItemId = r.ItemId,
-                    Title = r.Title,
+                    Title = title,
                     Sub = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}",
                     PosterPath = r.PosterPath,
-                    Initial = Palette.InitialOf(r.Title),
+                    Initial = Palette.InitialOf(title),
                     BarWidth = Math.Max(0, CardWidth * progress),
                     Time = Format(r.DurationSeconds),
                 };
-                card.UseGradient(r.ItemId + r.Title);
+                card.UseGradient(r.ItemId + title);
                 return card;
             }).ToList();
 
@@ -89,8 +105,9 @@ public partial class HomePage : Page
             var card = new PosterCard
             {
                 ItemId = item.Id,
-                Title = item.Title,
-                Sub = ShortKind(item.Kind),
+                Kind = item.Kind,
+                Title = MediaText.Clean(item.Title),
+                Sub = MediaText.Describe(item),
                 Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
                 PosterPath = item.PosterPath,
                 Initial = Palette.InitialOf(item.Title),
@@ -111,19 +128,15 @@ public partial class HomePage : Page
             return;
         }
 
+        // 剧集 / 目录先看详情，电影和单集直接播。
+        if (sender is FrameworkElement { DataContext: PosterCard card } && !MediaText.IsPlayable(card.Kind))
+        {
+            NavigationService?.Navigate(new SeriesPage(id));
+            return;
+        }
+
         await PlayWindow.OpenAsync(Window.GetWindow(this), id);
     }
-
-    private static string ShortKind(string kind) => kind switch
-    {
-        "movie" => "电影",
-        "series" => "剧集",
-        "season" => "季",
-        "episode" => "单集",
-        "folder" => "文件夹",
-        "video" => "视频",
-        _ => kind,
-    };
 
     private static string Format(long seconds)
     {
@@ -147,6 +160,7 @@ public partial class HomePage : Page
     private sealed class PosterCard : CardVisual
     {
         public string ItemId { get; init; } = "";
+        public string Kind { get; init; } = "";
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Badge { get; init; } = "";

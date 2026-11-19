@@ -1,6 +1,6 @@
 # DVPlayer 项目计划
 
-> 状态：M0 进行中。最后更新：2026-11-19。
+> 状态：M0 完成（仅 A6 待真机）；M1（Windows Alpha）进行中。最后更新：2026-11-19。
 
 ## 1. 目标
 
@@ -42,7 +42,15 @@
 
 ## 4. 里程碑
 
-### M0 — 技术验证（进行中）
+| 里程碑 | 范围 | 状态 |
+| --- | --- | --- |
+| M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
+| M1 Windows Alpha | 媒体库客户端（飞牛 + Emby）、播放与续播、打包 | **进行中**，清单见 [M1.md](M1.md) |
+| M2 Android / TV | Media3 管线、DV 探测与回退、TV 焦点 | 未开始 |
+| M3 macOS | render 全链路、HDR10、公证与 Sparkle | 未开始（M0 已验到出画） |
+| M4 共性层 | 跨端播放记录同步、元数据缓存 | 未开始（共享核心已提前在 M1 落地） |
+
+### M0 — 技术验证（完成）
 
 证明三件事：
 
@@ -52,13 +60,20 @@
 
 验收标准与执行记录见 [M0.md](M0.md)。
 
-### M1 — Windows Alpha
+### M1 — Windows Alpha（进行中）
 
 媒体库客户端：飞牛影视 / Emby 双源、合并搜索、播放记录与续播；
 播放/暂停/seek/轨道/字幕/音频设备与直通/HDR 开关/全屏/快捷键；
 MSIX 打包与自动更新。
 
 共享层见 ADR-0008：媒体库逻辑在 `core/media`（Rust），三端只做界面。
+
+进度（详见 [M1.md](M1.md)）：
+
+- 已完成：飞牛接入、库 → 剧集 → 季 → 集、剧集详情页、未刮削目录当剧集、
+  mpv 播放与硬解、进度回写与续播、播放记录、图片缓存、基本键位；
+- 未开始：Emby 适配器、多源聚合与合并搜索、音轨/字幕面板、
+  音频直通/HDR/全屏、MSIX 打包与自动更新。
 
 ### M2 — Android / TV Alpha
 
@@ -70,7 +85,8 @@ render API 全链路、HDR10 或 SDR 回退、公证与 Sparkle。
 
 ### M4 — 共性层
 
-Rust 共享媒体库 / 元数据 / 续播，收敛三端逻辑。
+跨端同步（播放记录、收藏、续播点）、元数据缓存与服务端聚合搜索。
+「Rust 共享媒体库」已经提前在 M1 落地（ADR-0008），这里不再重复。
 
 ## 5. 非目标（v1）
 
@@ -99,18 +115,24 @@ Rust 共享媒体库 / 元数据 / 续播，收敛三端逻辑。
 | ADR-0003 | macOS v1：render API + HDR10，不含 DV |
 | ADR-0004 | Android：Media3 主 + libass NDK |
 | ADR-0005 | 徽标：DV P7 (FEL/MEL) 明确区分 |
+| ADR-0006 | macOS Vulkan 验证路径 |
+| ADR-0007 | 正式壳是媒体库聚合客户端（M0 壳只做验证） |
+| ADR-0008 | 共享媒体库核心：Rust + C ABI，四端复用 |
+| ADR-0009 | Windows 改用 mpv 子进程 + JSON IPC（修正 ADR-0001 的备选判断） |
 
 ## 8. 目录结构
 
 ```
-docs/            计划、架构、ADR、M0 记录
+docs/            计划、架构、ADR、M0 / M1 记录
 deps/            依赖钉版本
-scripts/         preflight / 拆层 / FEL A-B / 构建
-core/mpv/        libmpv 封装（C++），桌面共享
-core/dovi/       libdovi 封装：RPU / EL 类型
-apps/windows/    .NET 10 + WPF
-apps/macos/      SwiftUI + AppKit
-apps/android/    Kotlin + Compose for TV
+scripts/         preflight / 拆层 / FEL A-B / Windows 构建与验证
+core/media/      共享媒体库核心（Rust，C ABI）：飞牛 / Emby 适配器
+core/mpv/        libmpv 封装（C++，占位，macOS 路线用）
+core/dovi/       libdovi 封装（占位）：RPU / EL 类型
+apps/windows/DvPlayer/         正式壳：媒体库客户端（.NET 10 + WPF-UI）
+apps/windows/DvPlayer.Windows/ M0 验证壳：HwndHost / IPC / DV 徽标（保留参考）
+apps/macos/      SwiftUI + AppKit（M0 验证程序 m0-render）
+apps/android/    Kotlin + Compose for TV（未开始）
 samples/         测试片源（不入库）
 out/             运行产物（不入库）
 ```
