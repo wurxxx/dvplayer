@@ -5,7 +5,7 @@
                  xmlns:player="clr-namespace:DvPlayer.Windows.Player"
                  Title="DV Player"
                  Width="1280" Height="720"
-                 MinWidth="640" MinHeight="360"
+                 MinWidth="720" MinHeight="420"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica">
@@ -13,41 +13,110 @@
     <Grid.RowDefinitions>
       <RowDefinition x:Name="TitleBarRow" Height="Auto" />
       <RowDefinition Height="*" />
+      <RowDefinition x:Name="ControlsRow" Height="Auto" />
     </Grid.RowDefinitions>
 
-    <ui:TitleBar Grid.Row="0" Title="DV Player" />
+    <ui:TitleBar x:Name="AppTitleBar" Grid.Row="0" Title="DV Player" />
 
+    <!-- 视频区：mpv 自己渲染在 HwndHost 里。WPF 元素不能压在 HwndHost 上
+         （airspace），所以控制条放在下面单独一行。 -->
     <Grid Grid.Row="1" Background="Black">
-      <!-- mpv 的父 HWND，视频由 mpv 自己渲染在这里 -->
       <player:MpvHost x:Name="Host" />
-
-      <Border x:Name="OverlayBar"
-              VerticalAlignment="Bottom"
-              Background="#CC000000"
-              Padding="16,10">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-
-          <TextBlock x:Name="StatusText"
-                     Grid.Column="0"
-                     Foreground="White"
-                     VerticalAlignment="Center"
-                     TextTrimming="CharacterEllipsis"
-                     Text="把 P7 样本拖进窗口，或点右侧的 打开" />
-
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <ui:Button Content="打开"
-                       Appearance="Primary"
-                       Margin="0,0,8,0"
-                       Click="OnOpenClick" />
-            <ui:Button Content="全屏 (F11)"
-                       Click="OnFullscreenClick" />
-          </StackPanel>
-        </Grid>
-      </Border>
     </Grid>
+
+    <Border Grid.Row="2"
+            Background="#F51A1A1A"
+            BorderBrush="#22FFFFFF"
+            BorderThickness="0,1,0,0"
+            Padding="14,10">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <ui:Button x:Name="OpenButton"
+                   Grid.Column="0"
+                   Content="打开"
+                   Margin="0,0,10,0"
+                   Click="OnOpenClick" />
+
+        <ui:Button x:Name="PlayButton"
+                   Grid.Column="1"
+                   Content="▶"
+                   Width="44"
+                   Margin="0,0,12,0"
+                   Appearance="Primary"
+                   Click="OnPlayClick" />
+
+        <TextBlock x:Name="ElapsedText"
+                   Grid.Column="2"
+                   Text="00:00"
+                   Width="52"
+                   VerticalAlignment="Center"
+                   Foreground="#CCFFFFFF"
+                   FontFamily="Consolas" />
+
+        <Slider x:Name="SeekSlider"
+                Grid.Column="3"
+                Minimum="0"
+                Maximum="1"
+                Value="0"
+                Margin="0,0,12,0"
+                VerticalAlignment="Center"
+                IsMoveToPointEnabled="True"
+                PreviewMouseLeftButtonDown="OnSeekDown"
+                PreviewMouseLeftButtonUp="OnSeekUp" />
+        <TextBlock x:Name="DurationText"
+                   Grid.Column="4"
+                   Text="00:00"
+                   Width="52"
+                   VerticalAlignment="Center"
+                   Foreground="#88FFFFFF"
+                   FontFamily="Consolas" />
+
+        <Border x:Name="DvBadge"
+                Grid.Column="5"
+                Margin="8,0,14,0"
+                Padding="8,3"
+                CornerRadius="4"
+                Background="#332E7BFF"
+                Visibility="Collapsed">
+          <TextBlock x:Name="DvBadgeText"
+                     Text="DV"
+                     FontSize="11"
+                     Foreground="#FFB9D4FF" />
+        </Border>
+
+        <TextBlock Grid.Column="6"
+                   Text="VOL"
+                   FontSize="10"
+                   VerticalAlignment="Center"
+                   Foreground="#88FFFFFF"
+                   Margin="0,0,6,0" />
+
+        <Slider x:Name="VolumeSlider"
+                Grid.Column="7"
+                Width="96"
+                Minimum="0"
+                Maximum="100"
+                Value="100"
+                VerticalAlignment="Center"
+                Margin="0,0,14,0"
+                ValueChanged="OnVolumeChanged" />
+
+        <ui:Button x:Name="FullscreenButton"
+                   Grid.Column="8"
+                   Content="全屏 (F11)"
+                   Click="OnFullscreenClick" />
+      </Grid>
+    </Border>
   </Grid>
 </ui:FluentWindow>

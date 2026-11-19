@@ -25,6 +25,8 @@ public sealed class MpvHost : HwndHost
     private const int WM_DPICHANGED = 0x02E0;
 
     private const uint GW_CHILD = 5;
+    private const int GWL_EXSTYLE = -20;
+    private const long WS_EX_NOACTIVATE = 0x08000000;
 
     private const string WindowClass = "DvPlayerMpvHost";
 
@@ -52,6 +54,13 @@ public sealed class MpvHost : HwndHost
         }
 
         _mpvChild = GetWindow(_hwnd, GW_CHILD);
+        if (_mpvChild != IntPtr.Zero)
+        {
+            // 别让点视频把键盘焦点抢走：壳要一直能收到 Space / F11 / 方向键。
+            var ex = GetWindowLongPtr(_mpvChild, GWL_EXSTYLE).ToInt64();
+            SetWindowLongPtr(_mpvChild, GWL_EXSTYLE, new IntPtr(ex | WS_EX_NOACTIVATE));
+        }
+
         ResizeMpvChild();
     }
 
@@ -229,4 +238,10 @@ public sealed class MpvHost : HwndHost
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 }

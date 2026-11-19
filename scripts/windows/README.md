@@ -24,6 +24,8 @@ schtasks /run /tn verify-a5
 | `wssh.sh` | Mac 侧跑远程 PowerShell |
 | `run-a5.ps1` | 计划任务：启动 exe、播样本、抓屏、拷 mpv.log、退出 |
 | `verify-a5.ps1` | 计划任务：抓 HWND/矩形/DPI、按 F11、改尺寸、三张截图 |
+| `verify-ipc.ps1` | 计划任务：连 mpv 命名管道读时间/时长/暂停/DV 轨道，改暂停、跳转，按 Space，截图 |
+| `verify-window.ps1` | 计划任务：`PrintWindow` 抓窗口自身（不受屏幕位置影响） |
 
 ## 远程代跑（agent，备用）
 

@@ -15,6 +15,8 @@ public sealed class MpvProcess : IDisposable
     private Process? _process;
     private FileStream? _logStream;
     private StreamWriter? _log;
+    private MpvIpc? _ipc;
+    private int _session;
     private readonly object _gate = new();
 
     public bool IsRunning
@@ -25,6 +27,12 @@ public sealed class MpvProcess : IDisposable
             return p is not null && !p.HasExited;
         }
     }
+
+    /// <summary>当前这次播放的 IPC 通道；连上之前是 null。</summary>
+    public MpvIpc? Ipc => _ipc;
+
+    /// <summary>连上 IPC 的任务；<see cref="Start"/> 之后才有值。</summary>
+    public Task<bool>? IpcReady { get; private set; }
 
     public event EventHandler? Exited;
 
@@ -43,6 +51,8 @@ public sealed class MpvProcess : IDisposable
         Stop();
 
         var exe = mpvPath ?? FindMpv();
+        var pipeName = $"dvplayer-{Environment.ProcessId}-{++_session}";
+
         var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
@@ -52,7 +62,7 @@ public sealed class MpvProcess : IDisposable
             WorkingDirectory = AppContext.BaseDirectory,
         };
 
-        foreach (var arg in BuildArgs(wid, file))
+        foreach (var arg in BuildArgs(wid, file, pipeName))
         {
             psi.ArgumentList.Add(arg);
         }
@@ -72,16 +82,31 @@ public sealed class MpvProcess : IDisposable
         {
             _process = process;
         }
+
+        // 命名管道要等 mpv 起来才存在，这里后台重试，不阻塞 UI。
+        var ipc = new MpvIpc(pipeName);
+        lock (_gate)
+        {
+            _ipc = ipc;
+        }
+
+        IpcReady = ipc.ConnectAsync(TimeSpan.FromSeconds(10));
     }
 
     public void Stop()
     {
         Process? process;
+        MpvIpc? ipc;
         lock (_gate)
         {
             process = _process;
             _process = null;
+            ipc = _ipc;
+            _ipc = null;
         }
+
+        IpcReady = null;
+        ipc?.Dispose();
 
         if (process is null)
         {
@@ -116,7 +141,7 @@ public sealed class MpvProcess : IDisposable
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "dvplayer", "mpv.log");
 
-    private static IEnumerable<string> BuildArgs(IntPtr wid, string file)
+    private static IEnumerable<string> BuildArgs(IntPtr wid, string file, string pipeName)
     {
         yield return "--no-config";
         yield return "--vo=gpu-next";             // gpu-next；DV 整形只在这条路径上（ADR-0003）
@@ -124,6 +149,9 @@ public sealed class MpvProcess : IDisposable
         yield return $"--wid={wid.ToInt64()}";           // 挂进壳的 HWND
         yield return "--osc=no";                         // UI 由壳提供
         yield return "--keep-open=yes";                  // 播完留住最后一帧，别闪回桌面
+        yield return $"--input-ipc-server=\\\\.\\pipe\\{pipeName}";
+        yield return "--input-default-bindings=no";      // 快捷键归壳，mpv 不抢键盘
+        yield return "--input-vo-keyboard=no";
         yield return "--msg-level=all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info";
         yield return file;
     }
