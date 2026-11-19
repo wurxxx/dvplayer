@@ -29,15 +29,8 @@ public sealed class MediaCore : IDisposable
     {
         try
         {
-            var ptr = dv_version();
-            try
-            {
-                return ReadEnvelope<string>(ptr) ?? "unknown";
-            }
-            finally
-            {
-                dv_string_free(ptr);
-            }
+            // ReadEnvelope 内部已经 dv_string_free，这里不能再释放一次（会堆损坏）。
+            return ReadEnvelope<string>(dv_version()) ?? "unknown";
         }
         catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
         {

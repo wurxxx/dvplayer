@@ -1,11 +1,14 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
 
 public partial class HomePage : Page
 {
+    private const double CardWidth = 240;
+
     public HomePage()
     {
         InitializeComponent();
@@ -19,41 +22,107 @@ public partial class HomePage : Page
         if (!services.IsConnected)
         {
             StatusText.Text = "未连接媒体源，先在「设置」里添加。";
+            RecentStatus.Text = string.Empty;
             return;
         }
-
-        StatusText.Text = "正在读取播放记录…";
 
         var core = services.Core!;
-        var result = await Task.Run(core.Records).ConfigureAwait(true);
+        StatusText.Text = "正在读取…";
 
-        if (!result.Ok)
+        var recordsResult = await Task.Run(core.Records).ConfigureAwait(true);
+        if (!recordsResult.Ok)
         {
-            StatusText.Text = "读取失败：" + (result.Error ?? "未知错误");
+            StatusText.Text = "读取失败：" + (recordsResult.Error ?? "未知错误");
+        }
+        else
+        {
+            var records = (recordsResult.Data ?? new List<PlayRecordDto>())
+                .OrderByDescending(r => r.LastPlayed ?? 0)
+                .Take(12)
+                .ToList();
+
+            StatusText.Text = records.Count == 0 ? "还没有播放记录。" : $"{records.Count} 条接着看";
+
+            ContinueList.ItemsSource = records.Select(r =>
+            {
+                var progress = r.DurationSeconds <= 0
+                    ? 0
+                    : Math.Clamp((double)r.PositionSeconds / r.DurationSeconds, 0, 1);
+
+                return new ContinueCard
+                {
+                    Title = r.Title,
+                    Sub = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}",
+                    Gradient = Palette.GradientFor(r.ItemId + r.Title),
+                    Initial = Palette.InitialOf(r.Title),
+                    BarWidth = Math.Max(0, CardWidth * progress),
+                    Time = Format(r.DurationSeconds),
+                };
+            }).ToList();
+        }
+
+        var librariesResult = await Task.Run(core.Libraries).ConfigureAwait(true);
+        if (!librariesResult.Ok || librariesResult.Data is not { Count: > 0 })
+        {
+            RecentStatus.Text = librariesResult.Ok ? "这个源里没有媒体库。" : "读取媒体库失败。";
             return;
         }
 
-        var records = result.Data ?? new List<PlayRecordDto>();
-        StatusText.Text = records.Count == 0
-            ? "还没有播放记录。"
-            : $"{records.Count} 条记录";
+        var library = librariesResult.Data[0];
+        var itemsResult = await Task.Run(() => core.Items(library.Id, 1, 18)).ConfigureAwait(true);
+        if (!itemsResult.Ok || itemsResult.Data is null)
+        {
+            RecentStatus.Text = "读取条目失败：" + (itemsResult.Error ?? "未知错误");
+            return;
+        }
 
-        RecordList.ItemsSource = records
-            .OrderByDescending(r => r.LastPlayed ?? 0)
-            .Take(24)
-            .Select(r => new RecordCard(
-                r.Title,
-                services.CurrentSource?.Name ?? r.SourceId,
-                r.DurationSeconds == 0 ? 0 : r.PositionSeconds * 100.0 / r.DurationSeconds,
-                $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}"))
-            .ToList();
+        RecentStatus.Text = $"{library.Title} · 共 {itemsResult.Data.Total} 条";
+
+        RecentList.ItemsSource = itemsResult.Data.Items.Select(item => new PosterCard
+        {
+            Title = item.Title,
+            Sub = ShortKind(item.Kind),
+            Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
+            Gradient = Palette.GradientFor(item.Id + item.Title),
+            Initial = Palette.InitialOf(item.Title),
+        }).ToList();
     }
+
+    private static string ShortKind(string kind) => kind switch
+    {
+        "movie" => "电影",
+        "series" => "剧集",
+        "season" => "季",
+        "episode" => "单集",
+        "folder" => "文件夹",
+        "video" => "视频",
+        _ => kind,
+    };
 
     private static string Format(long seconds)
     {
-        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        return t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes:00}:{t.Seconds:00}";
+        var time = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return time.TotalHours >= 1
+            ? $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}"
+            : $"{time.Minutes:00}:{time.Seconds:00}";
     }
 
-    private sealed record RecordCard(string Title, string Source, double ProgressPercent, string Detail);
+    private sealed class ContinueCard
+    {
+        public string Title { get; init; } = "";
+        public string Sub { get; init; } = "";
+        public string Time { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public Brush Gradient { get; init; } = Brushes.DimGray;
+        public double BarWidth { get; init; }
+    }
+
+    private sealed class PosterCard
+    {
+        public string Title { get; init; } = "";
+        public string Sub { get; init; } = "";
+        public string Badge { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public Brush Gradient { get; init; } = Brushes.DimGray;
+    }
 }

@@ -3,68 +3,91 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="DV Player"
-                 Width="1360" Height="860"
-                 MinWidth="1000" MinHeight="640"
-                 WindowStartupLocation="CenterScreen">
+                 Width="1440" Height="900"
+                 MinWidth="1080" MinHeight="680"
+                 WindowStartupLocation="CenterScreen"
+                 Background="{StaticResource BgBrush}">
 
   <Grid>
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="232" />
+      <ColumnDefinition Width="236" />
       <ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
 
-    <!-- 左侧导航 -->
-    <Border Grid.Column="0" Background="#17171A">
+    <!-- 侧栏 -->
+    <Border Grid.Column="0" Background="{StaticResource SidebarBrush}">
       <DockPanel>
-        <StackPanel DockPanel.Dock="Top" Margin="22,26,22,18">
-          <TextBlock Text="DV Player" FontSize="22" FontWeight="SemiBold" Foreground="White" />
-          <TextBlock Text="媒体库" FontSize="12" Foreground="#8A8A93" Margin="0,4,0,0" />
+
+        <StackPanel DockPanel.Dock="Top" Margin="20,22,20,18">
+          <StackPanel Orientation="Horizontal">
+            <Border Width="32" Height="32" CornerRadius="9" Background="{StaticResource AccentBrush}">
+              <TextBlock Text="&#xE786;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                         Foreground="#1A1200" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
+              <TextBlock Text="DV Player" FontFamily="{StaticResource DisplayFont}"
+                         FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+              <TextBlock Text="媒体库" FontSize="11" Foreground="{StaticResource FaintBrush}" Margin="0,1,0,0" />
+            </StackPanel>
+          </StackPanel>
         </StackPanel>
 
-        <StackPanel DockPanel.Dock="Bottom" Margin="22,0,22,20">
-          <TextBlock x:Name="SourceStatus" Text="未连接" FontSize="12" Foreground="#8A8A93" />
-        </StackPanel>
+        <!-- 底部：连接状态 -->
+        <Border DockPanel.Dock="Bottom" Margin="14,0,14,14" Padding="12,10"
+                CornerRadius="10" Background="{StaticResource SurfaceBrush}">
+          <StackPanel>
+            <TextBlock x:Name="SourceStatus" Text="未连接"
+                       FontSize="12" Foreground="{StaticResource MutedBrush}"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="SourceHint" Text="在设置里添加媒体源" FontSize="11"
+                       Foreground="{StaticResource FaintBrush}" Margin="0,3,0,0" />
+          </StackPanel>
+        </Border>
 
         <ListBox x:Name="Nav"
                  Background="Transparent"
                  BorderThickness="0"
-                 Foreground="White"
-                 Margin="10,0"
+                 Margin="0,4,0,0"
+                 ItemContainerStyle="{StaticResource NavItem}"
                  SelectionChanged="OnNavSelectionChanged">
-          <ListBox.ItemContainerStyle>
-            <Style TargetType="ListBoxItem">
-              <Setter Property="Padding" Value="14,11" />
-              <Setter Property="Margin" Value="0,2" />
-              <Setter Property="FontSize" Value="14" />
-              <Setter Property="Template">
-                <Setter.Value>
-                  <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
-                      <ContentPresenter />
-                    </Border>
-                    <ControlTemplate.Triggers>
-                      <Trigger Property="IsSelected" Value="True">
-                        <Setter TargetName="Bd" Property="Background" Value="#2A2A31" />
-                      </Trigger>
-                      <Trigger Property="IsMouseOver" Value="True">
-                        <Setter TargetName="Bd" Property="Background" Value="#232329" />
-                      </Trigger>
-                    </ControlTemplate.Triggers>
-                  </ControlTemplate>
-                </Setter.Value>
-              </Setter>
-            </Style>
-          </ListBox.ItemContainerStyle>
 
-          <ListBoxItem Content="首页" Tag="home" IsSelected="True" />
-          <ListBoxItem Content="媒体库" Tag="libraries" />
-          <ListBoxItem Content="播放记录" Tag="records" />
-          <ListBoxItem Content="设置" Tag="settings" />
+          <ListBoxItem Tag="home">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE80F;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="首页" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </ListBoxItem>
+
+          <ListBoxItem Tag="libraries">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE8B2;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="媒体库" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </ListBoxItem>
+
+          <ListBoxItem Tag="records">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="播放记录" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </ListBoxItem>
+
+          <ListBoxItem Tag="settings">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="设置" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </ListBoxItem>
         </ListBox>
       </DockPanel>
     </Border>
 
     <!-- 内容区 -->
-    <Frame x:Name="ContentFrame" Grid.Column="1" NavigationUIVisibility="Hidden" Background="#111114" />
+    <Frame x:Name="ContentFrame" Grid.Column="1" NavigationUIVisibility="Hidden"
+           Background="{StaticResource BgBrush}" />
   </Grid>
 </ui:FluentWindow>

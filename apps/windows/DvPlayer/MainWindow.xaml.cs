@@ -17,7 +17,7 @@ public partial class MainWindow : FluentWindow
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        Navigate("home");
+        SelectNav("home");
         await TryAutoConnectAsync();
 
         var shotDir = ScreenshotDir();
@@ -34,10 +34,24 @@ public partial class MainWindow : FluentWindow
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 
+    /// <summary>--screenshot 之后可再跟页面名，只巡检指定的页。</summary>
+    private static string[] ScreenshotPages()
+    {
+        var args = Environment.GetCommandLineArgs();
+        var index = Array.IndexOf(args, "--screenshot");
+        if (index < 0 || index + 2 >= args.Length)
+        {
+            return new[] { "home", "libraries", "records", "settings", "home" };
+        }
+
+        var pages = args.Skip(index + 2).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+        return pages.Length == 0 ? new[] { "home" } : pages;
+    }
+
     /// <summary>依次打开每个页面并保存一张 PNG，然后退出。用于无桌面环境的回归。</summary>
     private async Task CaptureTourAsync(string dir)
     {
-        foreach (var tag in new[] { "home", "libraries", "records", "settings", "home" })
+        foreach (var tag in ScreenshotPages())
         {
             SelectNav(tag);
             await Task.Delay(5000);
@@ -65,12 +79,17 @@ public partial class MainWindow : FluentWindow
         SourceStatus.Text = ok
             ? AppServices.Instance.CurrentSource?.Name ?? "已连接"
             : error ?? "未连接";
+        SourceHint.Text = ok ? "媒体库已连接" : "在设置里添加媒体源";
     }
 
     /// <summary>设置页连接成功后刷新左下角状态。</summary>
     public void RefreshSourceStatus()
     {
-        SourceStatus.Text = AppServices.Instance.CurrentSource?.Name ?? "未连接";
+        var connected = AppServices.Instance.IsConnected;
+        SourceStatus.Text = connected
+            ? AppServices.Instance.CurrentSource?.Name ?? "已连接"
+            : "未连接";
+        SourceHint.Text = connected ? "媒体库已连接" : "在设置里添加媒体源";
     }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)

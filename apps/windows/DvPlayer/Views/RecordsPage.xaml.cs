@@ -1,11 +1,14 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
 
 public partial class RecordsPage : Page
 {
+    private const double BarMax = 320;
+
     public RecordsPage()
     {
         InitializeComponent();
@@ -34,23 +37,49 @@ public partial class RecordsPage : Page
 
         var records = (result.Data ?? new List<PlayRecordDto>())
             .OrderByDescending(r => r.LastPlayed ?? 0)
-            .Select(r => new RecordRow(
-                r.Title,
-                $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}",
-                r.LastPlayed is null
-                    ? "—"
-                    : DateTimeOffset.FromUnixTimeSeconds(r.LastPlayed.Value).LocalDateTime.ToString("MM-dd HH:mm")))
+            .Select(r =>
+            {
+                var progress = r.DurationSeconds <= 0
+                    ? 0
+                    : Math.Clamp((double)r.PositionSeconds / r.DurationSeconds, 0, 1);
+
+                var remaining = Math.Max(0, r.DurationSeconds - r.PositionSeconds);
+
+                return new RecordRow
+                {
+                    Title = r.Title,
+                    Progress = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}  ·  {progress:P0}",
+                    Remaining = r.DurationSeconds <= 0 ? "" : $"还剩 {Format(remaining)}",
+                    LastPlayed = r.LastPlayed is null
+                        ? ""
+                        : DateTimeOffset.FromUnixTimeSeconds(r.LastPlayed.Value).LocalDateTime.ToString("MM-dd HH:mm"),
+                    BarWidth = Math.Max(0, BarMax * progress),
+                    Gradient = Palette.GradientFor(r.ItemId + r.Title),
+                    Initial = Palette.InitialOf(r.Title),
+                };
+            })
             .ToList();
 
         RecordList.ItemsSource = records;
-        StatusText.Text = records.Count == 0 ? "还没有播放记录。" : $"{records.Count} 条";
+        StatusText.Text = records.Count == 0 ? "还没有播放记录。" : $"{records.Count} 条，继续上次看到的位置";
     }
 
     private static string Format(long seconds)
     {
         var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        return t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes:00}:{t.Seconds:00}";
+        return t.TotalHours >= 1
+            ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
+            : $"{t.Minutes:00}:{t.Seconds:00}";
     }
 
-    private sealed record RecordRow(string Title, string Progress, string LastPlayed);
+    private sealed class RecordRow
+    {
+        public string Title { get; init; } = "";
+        public string Progress { get; init; } = "";
+        public string Remaining { get; init; } = "";
+        public string LastPlayed { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public double BarWidth { get; init; }
+        public Brush Gradient { get; init; } = Brushes.DimGray;
+    }
 }

@@ -16,6 +16,22 @@ public sealed class AppServices
 
     public SourceConfig? CurrentSource { get; private set; }
 
+    /// <summary>共享核心版本号；DLL 缺失时返回 null。</summary>
+    public string? CoreVersion
+    {
+        get
+        {
+            try
+            {
+                return MediaCore.Version();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+    }
+
     public bool IsConnected => Core is { IsValid: true };
 
     /// <summary>连接（或切换）一个媒体源。失败时把旧连接保留为 null。</summary>

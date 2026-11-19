@@ -9,15 +9,28 @@ public partial class SettingsPage : Page
     public SettingsPage()
     {
         InitializeComponent();
-        Loaded += (_, _) => RefreshSources();
+        Loaded += (_, _) =>
+        {
+            RefreshSources();
+            var version = AppServices.Instance.CoreVersion ?? "未加载";
+            VersionText.Text = "DV Player · 核心 " + version;
+        };
     }
 
     private void RefreshSources()
     {
         SourceList.ItemsSource = AppServices.Instance.Settings.Sources
-            .Select(s => new SourceRow(
-                $"{s.Name} · {s.Base}",
-                s.Id == AppServices.Instance.Settings.LastSourceId ? "当前" : ""))
+            .Select(s =>
+            {
+                var isCurrent = s.Id == AppServices.Instance.Settings.LastSourceId;
+                return new SourceRow
+                {
+                    Title = s.Name,
+                    Url = s.Base,
+                    Badge = isCurrent ? "当前" : "",
+                    BadgeVisibility = isCurrent ? Visibility.Visible : Visibility.Collapsed,
+                };
+            })
             .ToList();
     }
 
@@ -74,5 +87,11 @@ public partial class SettingsPage : Page
         }
     }
 
-    private sealed record SourceRow(string Title, string Badge);
+    private sealed class SourceRow
+    {
+        public string Title { get; init; } = "";
+        public string Url { get; init; } = "";
+        public string Badge { get; init; } = "";
+        public Visibility BadgeVisibility { get; init; } = Visibility.Collapsed;
+    }
 }
