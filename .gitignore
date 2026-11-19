@@ -18,6 +18,9 @@ apps/macos/m0-render/m0-render
 # .NET
 apps/windows/**/bin/
 apps/windows/**/obj/
+
+# Rust
+core/target/
 apps/windows/packages/
 
 # Python

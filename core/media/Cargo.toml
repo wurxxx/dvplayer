@@ -1,0 +1,19 @@
+[package]
+name = "dvplayer-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "DVPlayer shared media library core (fnOS Media / Emby)."
+
+[lib]
+name = "dvplayer_media"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 先不启用 TLS：飞牛/Emby 在内网多为 http，且 windows-gnu 下 TLS 后端需要额外 C 工具链。
+# reqwest 无 TLS feature 时 https 请求会报错，等 dlltool 就位后再开 native-tls。
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+md-5 = "0.10"
+thiserror = "2"

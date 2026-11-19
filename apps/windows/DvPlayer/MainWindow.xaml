@@ -1,0 +1,70 @@
+<ui:FluentWindow x:Class="DvPlayer.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="DV Player"
+                 Width="1360" Height="860"
+                 MinWidth="1000" MinHeight="640"
+                 WindowStartupLocation="CenterScreen">
+
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="232" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <!-- 左侧导航 -->
+    <Border Grid.Column="0" Background="#17171A">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="22,26,22,18">
+          <TextBlock Text="DV Player" FontSize="22" FontWeight="SemiBold" Foreground="White" />
+          <TextBlock Text="媒体库" FontSize="12" Foreground="#8A8A93" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Margin="22,0,22,20">
+          <TextBlock x:Name="SourceStatus" Text="未连接" FontSize="12" Foreground="#8A8A93" />
+        </StackPanel>
+
+        <ListBox x:Name="Nav"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 Foreground="White"
+                 Margin="10,0"
+                 SelectionChanged="OnNavSelectionChanged">
+          <ListBox.ItemContainerStyle>
+            <Style TargetType="ListBoxItem">
+              <Setter Property="Padding" Value="14,11" />
+              <Setter Property="Margin" Value="0,2" />
+              <Setter Property="FontSize" Value="14" />
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                      <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsSelected" Value="True">
+                        <Setter TargetName="Bd" Property="Background" Value="#2A2A31" />
+                      </Trigger>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="Bd" Property="Background" Value="#232329" />
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
+            </Style>
+          </ListBox.ItemContainerStyle>
+
+          <ListBoxItem Content="首页" Tag="home" IsSelected="True" />
+          <ListBoxItem Content="媒体库" Tag="libraries" />
+          <ListBoxItem Content="播放记录" Tag="records" />
+          <ListBoxItem Content="设置" Tag="settings" />
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- 内容区 -->
+    <Frame x:Name="ContentFrame" Grid.Column="1" NavigationUIVisibility="Hidden" Background="#111114" />
+  </Grid>
+</ui:FluentWindow>

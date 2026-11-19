@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DvPlayer</RootNamespace>
+    <AssemblyName>DvPlayer</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <!-- 共享媒体库核心由 scripts/windows/build-core.ps1 生成，构建后拷到输出目录。 -->
+  <PropertyGroup>
+    <MediaCoreDir>$(MSBuildThisFileDirectory)..\..\..\core\target\x86_64-pc-windows-gnu\release\</MediaCoreDir>
+  </PropertyGroup>
+
+  <Target Name="CopyMediaCore" AfterTargets="Build">
+    <Copy SourceFiles="$(MediaCoreDir)dvplayer_media.dll"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(MediaCoreDir)dvplayer_media.dll')" />
+    <Warning Condition="!Exists('$(MediaCoreDir)dvplayer_media.dll')"
+             Text="dvplayer_media.dll 不存在，先运行 scripts/windows/build-core.ps1" />
+  </Target>
+
+</Project>

@@ -54,8 +54,11 @@
 
 ### M1 — Windows Alpha
 
+媒体库客户端：飞牛影视 / Emby 双源、合并搜索、播放记录与续播；
 播放/暂停/seek/轨道/字幕/音频设备与直通/HDR 开关/全屏/快捷键；
 MSIX 打包与自动更新。
+
+共享层见 ADR-0008：媒体库逻辑在 `core/media`（Rust），三端只做界面。
 
 ### M2 — Android / TV Alpha
 
