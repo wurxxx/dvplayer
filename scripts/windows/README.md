@@ -26,6 +26,14 @@ schtasks /run /tn verify-a5
 | `verify-a5.ps1` | 计划任务：抓 HWND/矩形/DPI、按 F11、改尺寸、三张截图 |
 | `verify-ipc.ps1` | 计划任务：连 mpv 命名管道读时间/时长/暂停/DV 轨道，改暂停、跳转，按 Space，截图 |
 | `verify-window.ps1` | 计划任务：`PrintWindow` 抓窗口自身（不受屏幕位置影响） |
+| `decode-check.ps1` | 计划任务：纯解码吞吐（`--untimed --vo=null`）+ 实时播放日志 |
+| `decode-ipc.ps1` | 计划任务：壳 + IPC，读分辨率/硬解/色彩元数据（`DVPLAYER_FILE` 指定样本） |
+| `decode-render.ps1` | 计划任务：真实 gpu-next 窗口 + `--untimed`，测渲染吞吐 |
+| `decode-tune.ps1` | 计划任务：缩放器对比（`--scale=bilinear` / `lanczos`） |
+| `probe-hdr10plus.ps1` | 计划任务：播放 HDR10+ 样本并抓 gpu-next 日志 |
+
+> PowerShell 5.1 按 ANSI 解析无 BOM 的 `.ps1`，中文注释会把引号弄坏。
+> 这些脚本一律写成纯 ASCII。
 
 ## 远程代跑（agent，备用）
 

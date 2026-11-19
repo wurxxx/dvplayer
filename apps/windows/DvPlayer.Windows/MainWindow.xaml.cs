@@ -21,7 +21,31 @@ namespace DvPlayer.Windows;
 /// </summary>
 public partial class MainWindow : FluentWindow
 {
-    private const string DefaultSample = @"D:\dvplayer\samples\p7-fel.mkv";
+    /// <summary>
+    /// 默认样片：命令行第一个存在的文件 > DVPLAYER_FILE > 内置样本。
+    /// 验收脚本靠这个逐个跑片源。
+    /// </summary>
+    private static string DefaultSample
+    {
+        get
+        {
+            foreach (var arg in Environment.GetCommandLineArgs().Skip(1))
+            {
+                if (File.Exists(arg))
+                {
+                    return arg;
+                }
+            }
+
+            var fromEnv = Environment.GetEnvironmentVariable("DVPLAYER_FILE");
+            if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv))
+            {
+                return fromEnv;
+            }
+
+            return @"D:\dvplayer\samples\p7-fel.mkv";
+        }
+    }
 
     private const uint MONITOR_DEFAULTTONEAREST = 2;
     private const uint SWP_NOZORDER = 0x0004;
