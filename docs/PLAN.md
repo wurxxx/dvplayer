@@ -25,8 +25,8 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 源 | 协议 | 状态 | 备注 |
 | --- | --- | --- | --- |
 | 飞牛影视（fnOS Media） | 原生 `/v/api/v1` + authx 签名 | **已接入** | 见 [FNOS-API.md](FNOS-API.md) |
-| Emby | `/emby/*` + `X-Emby-Token` | 未开始（M1） | 官方 API 稳定，作为第二个源 |
-| Jellyfin | 与 Emby 同源 | 未开始 | 与 Emby 共用一个适配器，只换协议头 |
+| Emby | `/Users/*` + `X-Emby-Token` | **适配器已完成，待联调** | 见 [EMBY-API.md](EMBY-API.md) |
+| Jellyfin | 与 Emby 同源 | **适配器已完成，待联调** | 与 Emby 共用 `emby.rs`，只多认一个 `Authorization` 头 |
 | Plex | `/library/*` + `X-Plex-Token` | 未开始 | 需要独立适配器 |
 | SMB / NFS / WebDAV | 文件系统 | 未开始 | 无刮削，按 `SxxExx` / `第 N 集` 认集号（同 Directory 的处理） |
 
