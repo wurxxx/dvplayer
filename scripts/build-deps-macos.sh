@@ -51,7 +51,10 @@ else
       --enable-shared \
       --disable-static \
       --enable-videotoolbox \
-      --enable-audiotoolbox
+      --enable-audiotoolbox \
+      --enable-zlib \
+      --enable-encoder=png \
+      --enable-decoder=png
   fi
   make -j"$JOBS"
   make install

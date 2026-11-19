@@ -81,7 +81,7 @@ def main() -> int:
                     help="gpu-next 需要 Vulkan（配合 --gpu-context=macvk）")
     ap.add_argument("--gpu-context", default="",
                     help="如 macvk（macOS 上 gpu-next 用）")
-    ap.add_argument("--screenshot-format", default="jpg",
+    ap.add_argument("--screenshot-format", default="png",
                     choices=["jpg", "png", "webp"],
                     help="png 需要 FFmpeg 的 zlib 支持；本仓库构建默认没有")
     ap.add_argument("--extra", action="append", default=[], metavar="ARG")

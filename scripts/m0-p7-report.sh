@@ -142,7 +142,12 @@ if [ -x "$VK_MPV" ] && [ -f "$VK_ICD" ]; then
     say "$(cat "$OUT/ab.txt")"
     say '```'
     say
-    say "判读：PSNR 18–25 dB 说明 EL 参与了重建；接近 inf 说明只播了 BL。"
+    say "判读：SDR 8bit 会压掉大部分 FEL 残差，PSNR 高**不代表** EL 未参与。"
+    say "结构性复验（临时放大 NLQ 残差，证明 EL 进了 shader）："
+    say
+    say '```bash'
+    say "./scripts/fel-amplify.sh \"$IN\" $AB_T 100"
+    say '```'
   else
     say "A/B 失败，见 \`$OUT/ab.txt\`。"
   fi
@@ -167,7 +172,12 @@ else
       say "$(cat "$OUT/ab.txt")"
       say '```'
       say
-      say "判读：PSNR 18–25 dB 说明 EL 参与了重建；接近 inf 说明只播了 BL。"
+      say "判读：SDR 8bit 会压掉大部分 FEL 残差，PSNR 高**不代表** EL 未参与。"
+    say "结构性复验（临时放大 NLQ 残差，证明 EL 进了 shader）："
+    say
+    say '```bash'
+    say "./scripts/fel-amplify.sh \"$IN\" $AB_T 100"
+    say '```'
     else
       say "A/B 失败，见 \`$OUT/ab.txt\`。"
     fi
