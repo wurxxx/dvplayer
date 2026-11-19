@@ -51,3 +51,11 @@ P5 的像素是 IPTPQc2，没有 HDR10 兼容层。legacy `gpu` 在
 P7 / P8.1 不受影响：BL 是真 HDR10，可以正常 tone map，只是增强层不参与。
 这是 macOS v1「只保证 HDR10」的又一个具体后果：**P5 素材在 macOS v1 上不可用**
 （要么转码成 P8.1，要么等 DV 路径）。详见 `docs/M0.md` §5.3。
+
+### 后续：验证用的 Vulkan 构建
+
+为了在 macOS 上验证 P5 的正确颜色与 A2（FEL A/B），新增了独立的
+`prefix-vk/`（MoltenVK + gpu-next + mpv 原生窗口），见 ADR-0006。
+它**不改变**本 ADR 的产品决策：产品仍走 render API + HDR10。
+原因是 libmpv 的 render API 没有 gpu-next 后端，
+Vulkan 只能让 mpv 自己的窗口拿到 DV。

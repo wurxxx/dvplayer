@@ -2,6 +2,7 @@
 out/
 build/
 prefix/
+prefix-vk/
 tools/bin/
 tools/*.zip
 samples/*

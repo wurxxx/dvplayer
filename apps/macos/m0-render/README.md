@@ -78,5 +78,12 @@ P7 / P8.1 不受影响：它们的 BL 是真 HDR10，legacy `gpu` 可以正常 t
 MPV_EXTRA='vf=format:colormatrix=bt.2020-ncl' ./m0-render samples/p5.mkv 15
 ```
 
-结论：**这个程序不用于验收色彩**，只验证渲染管线。P5/P7 的 DV 整形在
-Windows 的 gpu-next 上验（A2/A4）。
+结论：**这个程序不用于验收色彩**，只验证渲染管线。
+想看 P5 的正确颜色，用 Vulkan 验证路径（ADR-0006）：
+
+```bash
+./scripts/build-vk-macos.sh
+./scripts/mpv-vk.sh samples/p5.mkv
+```
+
+P7/P8.1 的 DV 整形在 gpu-next 上验（`fel-ab.sh --vk`，或 Windows 的 A4）。

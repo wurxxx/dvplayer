@@ -26,8 +26,15 @@ samples/p7-fel.mkv
 第 30 秒起无损 20 秒（`scripts/nas-fetch-sample.sh`）。**不是 P7，不能用于 A1/A2。**
 
 > ⚠️ P5 是 IPTPQc2，没有 HDR10 兼容层。macOS 的 legacy `gpu` 不做 DV 整形，
-> 所以 `samples/p5.mkv` 在这台机器上必然偏紫——这是预期，不是样本坏了。
-> 颜色回归请用 P8.1（NAS 上的 `F1` / `Zootopia 2`），P5 只用来冒烟解码与管线。
+> 所以 `samples/p5.mkv` 在 m0-render 里必然偏紫——这是预期，不是样本坏了。
+> 想看它的正确颜色（gpu-next + Vulkan）：
+>
+> ```bash
+> ./scripts/build-vk-macos.sh   # 首次构建
+> ./scripts/mpv-vk.sh samples/p5.mkv
+> ```
+>
+> 颜色回归仍建议用 P8.1（NAS 上的 `F1` / `Zootopia 2`），P5 用来冒烟 P5 路径本身。
 
 ## 还缺
 

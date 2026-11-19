@@ -49,6 +49,14 @@ if command -v mpv >/dev/null 2>&1; then
   fi
 fi
 
+# macOS Vulkan 验证路径（ADR-0006）。缺了不影响产品构建，只是看不了 P5 的正确颜色。
+if [ -x "$ROOT/prefix-vk/bin/mpv" ] &&
+   grep -q 'pl_has_vulkan=1' "$ROOT/prefix-vk/lib/pkgconfig/libplacebo.pc" 2>/dev/null; then
+  pass "prefix-vk mpv（Vulkan/gpu-next 验证路径）"
+else
+  warn "prefix-vk 未构建：DV 验证路径不可用（scripts/build-vk-macos.sh，见 ADR-0006）"
+fi
+
 if command -v ffmpeg >/dev/null 2>&1; then
   ffmpeg -version 2>/dev/null | head -1
   if ffmpeg -hide_banner -bsfs 2>/dev/null | grep -qx 'dovi_split'; then
