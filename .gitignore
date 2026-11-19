@@ -19,3 +19,7 @@ apps/macos/m0-render/m0-render
 apps/windows/**/bin/
 apps/windows/**/obj/
 apps/windows/packages/
+
+# Python
+__pycache__/
+*.pyc
