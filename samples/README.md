@@ -27,7 +27,17 @@ samples/p7-fel.mkv
 
 ## 还缺
 
-真正的 P7 双层（BL+EL+RPU）。可用来源：UHD 蓝光 remux、dovi_tool 的测试片。
+真正的 P7 双层（BL+EL+RPU）。
+
+已知**不可用**的来源（2026-11-19 核查）：
+
+- NAS `/vol1/1000/影视` 全库：170 个 4K 候选里 22 个带 DV，全是 P5 或 P8.1；
+  4 个 ISO + 20 个 BDMV 全是 1080p AVC，唯一 4K 盘源是单轨 HDR10。
+- Jellyfin 测试库：只有 P5 / P8.1 / P8.4。
+- MEGA、Google Drive：本网络不可达（连接超时）。
+
+要拿到 P7，需要 UHD 蓝光**原盘**（BDMV/ISO，且该片确实带 DV 双层），
+或别人做好的 P7 remux。
 
 ## 自检
 
