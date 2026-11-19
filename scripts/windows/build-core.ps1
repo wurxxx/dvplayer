@@ -21,7 +21,15 @@ $core = Join-Path $repo 'core'
 
 $env:CARGO_HOME = $cargoHome
 $env:RUSTUP_HOME = 'D:\dvplayer\tools\rust'
-$env:PATH = "$cargoHome\bin;$env:SystemRoot\System32;$env:SystemRoot"
+
+# dlltool：新增依赖（如 native-tls → schannel → windows-sys）触发重编时，
+# rustc 要调用它生成 raw-dylib 的 import library。
+#
+# 用独立目录 D:\dvplayer	ools\dlltool：里面是 llvm-dlltool.exe（改名 dlltool.exe）
+# 和它的运行时 dll。**不能**把 llvm-mingw\bin 整个放进 PATH——那里有 gcc.exe，
+# rustc 会改用它当 linker，然后找不到 -lgcc。见 docs/BUILD-WINDOWS.md §2。
+$dlltool = 'D:\dvplayer\tools\dlltool'
+$env:PATH = "$cargoHome\bin;$dlltool;$env:SystemRoot\System32;$env:SystemRoot"
 
 & "$cargoHome\bin\cargo.exe" build --manifest-path (Join-Path $core 'Cargo.toml') `
     -p dvplayer-media --release --target x86_64-pc-windows-gnu | Out-Host

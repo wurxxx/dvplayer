@@ -12,8 +12,9 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 先不启用 TLS：飞牛/Emby 在内网多为 http，且 windows-gnu 下 TLS 后端需要额外 C 工具链。
-# reqwest 无 TLS feature 时 https 请求会报错，等 dlltool 就位后再开 native-tls。
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+# TLS 用 native-tls：Windows 走 SChannel、macOS 走 Security.framework，
+# 都不需要 OpenSSL 或额外 C 工具链，windows-gnu 也能直接编。
+# 内网 http 照常可用；公网反代（https）现在也能接了。
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 md-5 = "0.10"
 thiserror = "2"
