@@ -56,6 +56,8 @@ step "libplacebo v7.387.0"
 if [ ! -d "$SRC/libplacebo" ]; then
   git clone --depth 1 --branch v7.387.0 https://code.videolan.org/videolan/libplacebo.git "$SRC/libplacebo"
 fi
+git -C "$SRC/libplacebo" submodule update --init --recursive
+rm -rf "$SRC/libplacebo/_build"
 meson setup "$SRC/libplacebo/_build" "$SRC/libplacebo" \
   --prefix="$PREFIX" \
   --buildtype=release \
@@ -74,6 +76,7 @@ step "mpv v0.42.0"
 if [ ! -d "$SRC/mpv" ]; then
   git clone --depth 1 --branch v0.42.0 https://github.com/mpv-player/mpv.git "$SRC/mpv"
 fi
+rm -rf "$SRC/mpv/_build"
 meson setup "$SRC/mpv/_build" "$SRC/mpv" \
   --prefix="$PREFIX" \
   --buildtype=release \
