@@ -19,8 +19,9 @@
 - 媒体库：飞牛影视已打通（登录、媒体库、剧集 / 季 / 集、未刮削目录、详情页、海报）；
   Emby 适配器待接（`MediaSource` trait 已就位，加一个文件即可），
   Jellyfin / Plex / 目录源排在后面
-- 聚合：还没做——目前一次只连一个源，合并搜索与合并记录的设计见
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1.2
+- 聚合：`MediaHub` 已落地——多个源同时连、条目 id 统一成 `<sourceId>:<itemId>`、
+  媒体库与播放记录合并展示；合并搜索与跨源去重还没做，
+  设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1.2
 - 播放：Windows 用 mpv 子进程挂 `wid`，`gpu-next` + `d3d11va`，DV P7 FEL 走官方构建
 - 续播：进度回写到服务器，详情页「继续观看 第 N 集」
 - 共享核心：`core/media`（Rust + C ABI），媒体库逻辑只写一次，四端复用
