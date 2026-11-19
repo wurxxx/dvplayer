@@ -4,8 +4,10 @@
 //! （见 `crate::models`）。上层的界面、播放器、聚合逻辑都只认这套模型，
 //! 换服务器不用改界面。
 
+pub mod emby;
 pub mod fnos;
 
+pub use emby::EmbySource;
 pub use fnos::FnOsSource;
 
 use serde::{Deserialize, Serialize};
@@ -31,7 +33,7 @@ pub struct SourceConfig {
 }
 
 /// 当前实现的适配器类型。界面的「添加源」下拉框直接用它。
-pub const SUPPORTED_KINDS: &[&str] = &["fnos"];
+pub const SUPPORTED_KINDS: &[&str] = &["fnos", "emby", "jellyfin"];
 
 /// 媒体源的最小接口。
 ///
@@ -77,6 +79,13 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
     let kind = config.kind.trim().to_ascii_lowercase();
     match kind.as_str() {
         "fnos" | "feiniu" => Some(Box::new(FnOsSource::new(
+            config.id.clone(),
+            config.name.clone(),
+            config.base.clone(),
+            config.username.clone(),
+            config.password.clone(),
+        ))),
+        "emby" | "jellyfin" => Some(Box::new(EmbySource::new(
             config.id.clone(),
             config.name.clone(),
             config.base.clone(),

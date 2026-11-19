@@ -136,9 +136,13 @@ public partial class SettingsPage : Page
             return;
         }
 
-        if (string.IsNullOrEmpty(user))
+        // Emby / Jellyfin 支持只填 API Key：用户名留空，密码框里放 Key。
+        var apiKeyOnly = kind is "emby" or "jellyfin";
+        if (string.IsNullOrEmpty(user) && (!apiKeyOnly || string.IsNullOrEmpty(pass)))
         {
-            StatusText.Text = "请填写用户名。";
+            StatusText.Text = apiKeyOnly
+                ? "请填写用户名，或只填 API Key（密码框）。"
+                : "请填写用户名。";
             return;
         }
 

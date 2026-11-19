@@ -72,7 +72,7 @@
               Padding="20" Margin="0,20,0,0" Width="480" HorizontalAlignment="Left">
         <StackPanel>
           <TextBlock Text="添加媒体源" Style="{StaticResource SectionTitle}" />
-          <TextBlock Text="支持飞牛影视；Emby / Jellyfin 接入后这里会多出对应类型。"
+          <TextBlock Text="支持飞牛影视与 Emby / Jellyfin（同一套 API）。Emby 也可以只填 API Key，用户名留空。"
                      Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap" />
 
           <TextBlock Text="类型" Style="{StaticResource FieldLabel}" />
@@ -88,10 +88,10 @@
           <TextBlock Text="服务器地址" Style="{StaticResource FieldLabel}" />
           <TextBox x:Name="BaseBox" Text="http://10.0.0.134:8005" Style="{StaticResource Input}" />
 
-          <TextBlock Text="用户名" Style="{StaticResource FieldLabel}" />
+          <TextBlock Text="用户名（Emby 可留空）" Style="{StaticResource FieldLabel}" />
           <TextBox x:Name="UserBox" Style="{StaticResource Input}" />
 
-          <TextBlock Text="密码" Style="{StaticResource FieldLabel}" />
+          <TextBlock Text="密码 / API Key" Style="{StaticResource FieldLabel}" />
           <PasswordBox x:Name="PassBox" Style="{StaticResource InputPassword}" />
 
           <Button Content="添加并连接" Click="OnAddClick" Margin="0,20,0,0"
