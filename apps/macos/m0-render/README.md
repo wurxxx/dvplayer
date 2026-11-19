@@ -25,6 +25,7 @@
 | 第 2 个参数 | 运行秒数，默认 10 |
 | `HWDEC` | `no`（默认）或 `videotoolbox` |
 | `MPV_MSGLVL` | mpv 日志级别，默认 `all=info`，排查时用 `all=v` |
+| `MPV_EXTRA` | 额外 mpv 选项，`;` 分隔，如 `tone-mapping=clip;vf=format:colormatrix=bt.2020-ncl` |
 
 `q` 退出，空格暂停。输出里的 `[probe]` 段是观察到的属性，其余是 mpv 日志。
 
@@ -58,3 +59,24 @@ decoder-frame-drop-count     0
   macOS 想走 gpu-next 只能上 Vulkan。
 - 不能替代 Windows 的 D3D11 路径验证。
 - 没有 HDR 显示器时，只能验证渲染是否正常，不能目视验收 HDR10。
+
+## P5 是紫色（预期）
+
+`samples/p5.mkv` 能正常解码、帧率也对，但画面偏紫红。
+
+原因：Profile 5 的像素是 IPTPQc2（不是 YCbCr），正确显示需要 libplacebo 的
+DV reshape（`pl_shader_dovi_reshape`），而这只在 gpu-next 里启用。
+legacy `gpu` 在 `video/out/gpu/video.c` 里调 `mp_image_params_restore_dovi_mapping()`，
+把 `repr.sys` 从 `DOLBYVISION` 换回 BT.2020-NCL——等于把 IPT 当 YCbCr 解。
+
+P7 / P8.1 不受影响：它们的 BL 是真 HDR10，legacy `gpu` 可以正常 tone map，
+只是增强层不参与。P5 没有 HDR10 回退，所以只有它错。
+
+对照实验（强制成普通 YCbCr 后会更紫，说明不是 tone mapping 参数问题）：
+
+```bash
+MPV_EXTRA='vf=format:colormatrix=bt.2020-ncl' ./m0-render samples/p5.mkv 15
+```
+
+结论：**这个程序不用于验收色彩**，只验证渲染管线。P5/P7 的 DV 整形在
+Windows 的 gpu-next 上验（A2/A4）。

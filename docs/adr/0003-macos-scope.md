@@ -39,3 +39,15 @@ mpv 0.42 在 macOS 上**已经没有 OpenGL 的 GPU context**：
 
 本机自建构建（Vulkan 关闭）实测 render API 正常出画，
 所以这个决策在 0.42 上不是“偏好”，而是“唯一可行”。
+
+### 补充实测：P5 会显示成紫色
+
+P5 的像素是 IPTPQc2，没有 HDR10 兼容层。legacy `gpu` 在
+`video/out/gpu/video.c` 里调 `mp_image_params_restore_dovi_mapping()`，
+把 `repr.sys` 从 `DOLBYVISION` 换回 BT.2020-NCL —— 等于把 IPT 当 YCbCr 解，
+画面必然偏紫。正确路径是 gpu-next 的 `pl_shader_dovi_reshape()`，
+本机的 render API 够不到。
+
+P7 / P8.1 不受影响：BL 是真 HDR10，可以正常 tone map，只是增强层不参与。
+这是 macOS v1「只保证 HDR10」的又一个具体后果：**P5 素材在 macOS v1 上不可用**
+（要么转码成 P8.1，要么等 DV 路径）。详见 `docs/M0.md` §5.3。

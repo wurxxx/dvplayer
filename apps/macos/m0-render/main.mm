@@ -92,6 +92,30 @@ static const char* const k_probe_names[] = {
     mpv_set_option_string(h, "terminal", "yes");
     mpv_set_option_string(h, "msg-level",
                           getenv("MPV_MSGLVL") ? getenv("MPV_MSGLVL") : "all=info");
+
+    // MPV_EXTRA：额外的 mpv 选项，用来做对比实验，例如
+    //   MPV_EXTRA='tone-mapping=clip;vf=format:colormatrix=bt.2020-ncl'
+    // 多个选项用 ';' 分隔，每个都是 name=value。
+    if (const char* extra = getenv("MPV_EXTRA")) {
+        std::string s(extra);
+        size_t pos = 0;
+        while (pos <= s.size()) {
+            size_t end = s.find(';', pos);
+            if (end == std::string::npos) end = s.size();
+            std::string item = s.substr(pos, end - pos);
+            size_t eq = item.find('=');
+            if (eq != std::string::npos && eq > 0) {
+                std::string name = item.substr(0, eq);
+                std::string value = item.substr(eq + 1);
+                if (mpv_set_option_string(h, name.c_str(), value.c_str()) < 0)
+                    fprintf(stderr, "[MPV_EXTRA] 设置失败: %s=%s\n", name.c_str(), value.c_str());
+                else
+                    fprintf(stdout, "[MPV_EXTRA] %s=%s\n", name.c_str(), value.c_str());
+            }
+            pos = end + 1;
+        }
+    }
+
     if (mpv_initialize(h) < 0) {
         fprintf(stderr, "mpv_initialize failed\n");
         exit(1);

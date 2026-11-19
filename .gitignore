@@ -6,6 +6,7 @@ tools/bin/
 tools/*.zip
 samples/*
 !samples/README.md
+apps/macos/m0-render/m0-render
 *.log
 *.png
 *.hevc

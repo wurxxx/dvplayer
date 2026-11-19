@@ -20,10 +20,14 @@ samples/p7-fel.mkv
 
 | 文件 | 实际内容 | 用途 |
 | --- | --- | --- |
-| `samples/p5.mkv` | 4K24 HEVC，`dv_profile=5`，`el_present_flag=0`，EAC3 Atmos | P5 回归（颜色、徽标 `DV P5`） |
+| `samples/p5.mkv` | 4K24 HEVC，`dv_profile=5`，`el_present_flag=0`，EAC3 Atmos | P5 路径冒烟（**本机颜色是紫的**，见下） |
 
 来源：10.0.0.100 的 `I.Will.Find.You.2026.S01E01...DV.H.265-DepWeb.mkv`，
 第 30 秒起无损 20 秒（`scripts/nas-fetch-sample.sh`）。**不是 P7，不能用于 A1/A2。**
+
+> ⚠️ P5 是 IPTPQc2，没有 HDR10 兼容层。macOS 的 legacy `gpu` 不做 DV 整形，
+> 所以 `samples/p5.mkv` 在这台机器上必然偏紫——这是预期，不是样本坏了。
+> 颜色回归请用 P8.1（NAS 上的 `F1` / `Zootopia 2`），P5 只用来冒烟解码与管线。
 
 ## 还缺
 
