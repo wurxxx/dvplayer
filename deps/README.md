@@ -1,21 +1,40 @@
 # 依赖
 
-M0 直接使用 Homebrew 的二进制包，目的是尽快验证行为：
+M0 起就走项目内源码构建，全部装进 `prefix/`，不碰系统目录、不依赖 Homebrew：
 
 ```bash
-brew install mpv ffmpeg libplacebo dovi_tool
+./scripts/build-deps-macos.sh
 ```
 
-M0 用到的版本：
+| 包 | 版本 | 说明 |
+| --- | --- | --- |
+| FFmpeg | `n9.0.2` | `--disable-autodetect --disable-x86asm`，保留 `dovi_split` |
+| libplacebo | `v7.387.0` | 只开 OpenGL；`PL_API_VER=387`，有 `enhancement_layer` |
+| libass | `0.17.4` | mpv 0.42 的硬依赖 |
+| mpv | `v0.42.0` | `-Dgpl=false`，关 Vulkan/X11/Wayland/Lua；打一个 `CAMetalLayer` 补丁 |
+| dovi_tool | `2.3.4` | 官方 universal 预编译，放在 `tools/bin/` |
 
-| 包 | 版本 |
-| --- | --- |
-| mpv | 0.42.0 |
-| ffmpeg | 9.0.2 |
-| libplacebo | 7.387.0 |
-| dovi_tool | brew 当前版本 |
+## 为什么不用 Homebrew
 
-## 为什么 M1 要改成 vendored
+本机是 Intel + macOS 26，Homebrew 已把该配置列为 Tier 3，不再提供 bottle；
+而且本机 `/usr/local` 权限异常，`brew install` 直接失败在不可写的
+`python@3.9/site-packages`。所以全部自建。
+
+## 为什么不用 IINA 的库
+
+IINA 1.5.0 内置 `libplacebo.360`（`PL_API_VER 360 < 370`），没有 FEL API。
+
+## 为什么要打 mpv 补丁
+
+`-Dvulkan=disabled` 时 `video/out/mac/metal_layer.swift` 不进编译，
+而 `view.swift` 里还在用 `MetalLayer` 类型，编译直接失败。
+补丁改成 `CAMetalLayer` 并显式 `import QuartzCore`：
+
+```
+patches/mpv/0001-view-cametal-layer.patch
+```
+
+## 为什么 M1 还要继续 vendored
 
 libplacebo 7.387 换过 soname，FFmpeg 9.0 也是 ABI break。产品不能依赖用户机器上
 碰巧装对的版本，否则会出现“能启动、只有 BL、不报错”的经典问题。

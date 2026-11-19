@@ -2,7 +2,7 @@
 # 编译 m0-render。需要先跑 scripts/build-deps-macos.sh。
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 PREFIX="$ROOT/prefix"
 
 if [ ! -f "$PREFIX/include/mpv/client.h" ] || [ ! -f "$PREFIX/lib/libmpv.dylib" ]; then

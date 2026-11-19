@@ -25,6 +25,27 @@ static void* get_proc_address(void* /*ctx*/, const char* name) {
 
 static void on_mpv_update(void* ctx);
 
+static long g_draws = 0;
+
+// mpv 0.42 没有 dolby-vision-profile 属性：
+// DV 只能靠 video-params/colormatrix=dolbyvision 判断，
+// profile 与 EL 类型要自己解析 RPU（见 core/dovi）。
+static const char* const k_probe_names[] = {
+    "video-params/w",
+    "video-params/h",
+    "video-params/pixelformat",
+    "video-params/colormatrix",
+    "video-params/primaries",
+    "video-params/gamma",
+    "video-params/sig-peak",
+    "video-codec",
+    "estimated-frame-number",
+    "decoder-frame-drop-count",
+    "vo-drop-frame-count",
+    "vo-configured",
+    nullptr,
+};
+
 @interface MpvView : NSOpenGLView
 @property(nonatomic) mpv_handle* mpv;
 @property(nonatomic) mpv_render_context* render;
@@ -34,6 +55,7 @@ static void on_mpv_update(void* ctx);
 
 - (instancetype)initWithFrame:(NSRect)frame {
     NSOpenGLPixelFormatAttribute attrs[] = {
+        NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersion3_2Core,
         NSOpenGLPFAAccelerated,
         NSOpenGLPFADoubleBuffer,
         NSOpenGLPFAColorSize, 24,
@@ -62,24 +84,32 @@ static void on_mpv_update(void* ctx);
         exit(1);
     }
     mpv_set_option_string(h, "vo", "libmpv");
-    mpv_set_option_string(h, "hwdec", "no");
+    mpv_set_option_string(h, "hwdec", getenv("HWDEC") ? getenv("HWDEC") : "no");
     mpv_set_option_string(h, "osc", "no");
     mpv_set_option_string(h, "input-default-bindings", "no");
     mpv_set_option_string(h, "input-vo-keyboard", "no");
     mpv_set_option_string(h, "keep-open", "yes");
     mpv_set_option_string(h, "terminal", "yes");
-    mpv_set_option_string(h, "msg-level", "all=info");
+    mpv_set_option_string(h, "msg-level",
+                          getenv("MPV_MSGLVL") ? getenv("MPV_MSGLVL") : "all=info");
     if (mpv_initialize(h) < 0) {
         fprintf(stderr, "mpv_initialize failed\n");
         exit(1);
     }
     mpv_request_log_messages(h, "info");
 
+    // 用观察代替主动读取：跨线程 mpv_get_property 会卡住，
+    // observe 的回调直接带值，事件线程里打印即可。
+    for (int i = 0; k_probe_names[i]; i++)
+        mpv_observe_property(h, 100 + i, k_probe_names[i], MPV_FORMAT_STRING);
+
     mpv_opengl_init_params gl_init = {
         .get_proc_address = get_proc_address,
         .get_proc_address_ctx = nullptr,
     };
-    int advanced = 1;
+    // 先不用 advanced control：它要求精确的 update/report_swap 节奏，
+    // 这里的 drawRect 驱动模型用普通模式更稳。
+    int advanced = 0;
     mpv_render_param params[] = {
         {MPV_RENDER_PARAM_API_TYPE, const_cast<char*>(MPV_RENDER_API_TYPE_OPENGL)},
         {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init},
@@ -96,19 +126,31 @@ static void on_mpv_update(void* ctx);
 
     // 事件线程
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        char* g_last_value[sizeof(k_probe_names) / sizeof(k_probe_names[0])] = {0};
+        bool header = false;
         while (h) {
             mpv_event* ev = mpv_wait_event(h, 1.0);
             if (!ev) continue;
-            if (ev->event_id == MPV_EVENT_NONE) continue;
             if (ev->event_id == MPV_EVENT_SHUTDOWN) break;
-            if (ev->event_id == MPV_EVENT_FILE_LOADED) {
-                char* vp = mpv_get_property_string(h, "video-params");
-                char* dv = mpv_get_property_string(h, "dolby-vision-profile");
-                fprintf(stdout, "[file-loaded]\n  video-params: %s\n  dv-profile: %s\n",
-                        vp ? vp : "-", dv ? dv : "-");
-                fflush(stdout);
-                mpv_free(vp);
-                mpv_free(dv);
+            if (ev->event_id == MPV_EVENT_PROPERTY_CHANGE) {
+                mpv_event_property* p = (mpv_event_property*)ev->data;
+                if (p && p->name && p->format == MPV_FORMAT_STRING && p->data) {
+                    int idx = (int)ev->reply_userdata - 100;
+                    if (idx >= 0 && idx < (int)(sizeof(g_last_value) / sizeof(g_last_value[0]))) {
+                        if (!header) {
+                            fprintf(stdout, "[probe]\n");
+                            header = true;
+                        }
+                        const char* v = *(char**)p->data;
+                        char* last = g_last_value[idx];
+                        if (!last || !v || strcmp(last, v) != 0) {
+                            free(g_last_value[idx]);
+                            g_last_value[idx] = v ? strdup(v) : nullptr;
+                            fprintf(stdout, "  %-28s %s\n", p->name, v ? v : "-");
+                            fflush(stdout);
+                        }
+                    }
+                }
             }
             if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
                 mpv_event_log_message* m = (mpv_event_log_message*)ev->data;
@@ -124,6 +166,7 @@ static void on_mpv_update(void* ctx);
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
     if (!_render) return;
+    g_draws++;
     [[self openGLContext] makeCurrentContext];
 
     NSRect backing = [self convertRectToBacking:[self bounds]];
@@ -218,7 +261,7 @@ static void on_mpv_update(void* ctx) {
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        fprintf(stdout, "[done] %.1fs\n", seconds);
+        fprintf(stdout, "[done] %.1fs draws=%ld\n", seconds, g_draws);
         fflush(stdout);
         [NSApp terminate:nil];
     });

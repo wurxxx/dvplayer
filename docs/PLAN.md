@@ -37,8 +37,8 @@
 | libass | 最新稳定 | ASS 特效字幕 |
 | Media3 | 当前稳定线 | Android / TV 播放内核 |
 
-版本钉在 `deps/pins.env`。桌面端最终会 vendored 构建，不依赖系统库；
-M0 阶段允许用 Homebrew 的版本先验证行为。
+版本钉在 `deps/pins.env`。M0 已经开始 vendored 构建（`scripts/build-deps-macos.sh`
+把 FFmpeg / libplacebo / libass / mpv 全部装进项目内 `prefix/`），不依赖系统库。
 
 ## 4. 里程碑
 
