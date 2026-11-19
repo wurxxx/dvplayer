@@ -101,11 +101,14 @@ public partial class LibrariesPage : Page
             return;
         }
 
-        ItemGrid.ItemsSource = result.Data.Items.Select(ToCard).ToList();
+        var cards = result.Data.Items.Select(ToCard).ToList();
+        ItemGrid.ItemsSource = cards;
         StatusText.Text = $"{_libraryTitle} · 共 {result.Data.Total} 条";
         MoreButton.Visibility = result.Data.Items.Count < result.Data.Total
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
     private async void OnMoreClick(object sender, RoutedEventArgs e)
@@ -127,12 +130,16 @@ public partial class LibrariesPage : Page
         }
 
         var existing = (ItemGrid.ItemsSource as List<ItemCard>) ?? new List<ItemCard>();
-        existing.AddRange(result.Data.Items.Select(ToCard));
+        var added = result.Data.Items.Select(ToCard).ToList();
+        existing.AddRange(added);
+        ItemGrid.ItemsSource = null;
         ItemGrid.ItemsSource = existing;
 
         MoreButton.Visibility = existing.Count < result.Data.Total
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        await Task.WhenAll(added.Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
     private static ItemCard ToCard(MediaItemDto item)
@@ -152,7 +159,7 @@ public partial class LibrariesPage : Page
                 : $"{time.Minutes} 分钟");
         }
 
-        return new ItemCard
+        var card = new ItemCard
         {
             Title = item.Title,
             Sub = string.Join(" · ", parts),
@@ -160,9 +167,11 @@ public partial class LibrariesPage : Page
             BadgeVisibility = string.IsNullOrEmpty(item.Resolution)
                 ? Visibility.Collapsed
                 : Visibility.Visible,
-            Gradient = Palette.GradientFor(item.Id + item.Title),
+            PosterPath = item.PosterPath,
             Initial = Palette.InitialOf(item.Title),
         };
+        card.UseGradient(item.Id + item.Title);
+        return card;
     }
 
     private static string ShortKind(string kind) => kind switch
@@ -192,13 +201,13 @@ public partial class LibrariesPage : Page
         public bool Active { get; set; }
     }
 
-    private sealed class ItemCard
+    private sealed class ItemCard : CardVisual
     {
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Badge { get; init; } = "";
         public string Initial { get; init; } = "";
-        public System.Windows.Media.Brush Gradient { get; init; } = System.Windows.Media.Brushes.DimGray;
+        public string? PosterPath { get; init; }
         public Visibility BadgeVisibility { get; init; } = Visibility.Collapsed;
     }
 }

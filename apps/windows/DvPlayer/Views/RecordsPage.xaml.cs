@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -45,7 +44,7 @@ public partial class RecordsPage : Page
 
                 var remaining = Math.Max(0, r.DurationSeconds - r.PositionSeconds);
 
-                return new RecordRow
+                var row = new RecordRow
                 {
                     Title = r.Title,
                     Progress = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}  ·  {progress:P0}",
@@ -54,14 +53,18 @@ public partial class RecordsPage : Page
                         ? ""
                         : DateTimeOffset.FromUnixTimeSeconds(r.LastPlayed.Value).LocalDateTime.ToString("MM-dd HH:mm"),
                     BarWidth = Math.Max(0, BarMax * progress),
-                    Gradient = Palette.GradientFor(r.ItemId + r.Title),
+                    PosterPath = r.PosterPath,
                     Initial = Palette.InitialOf(r.Title),
                 };
+                row.UseGradient(r.ItemId + r.Title);
+                return row;
             })
             .ToList();
 
         RecordList.ItemsSource = records;
         StatusText.Text = records.Count == 0 ? "还没有播放记录。" : $"{records.Count} 条，继续上次看到的位置";
+
+        await Task.WhenAll(records.Select(r => r.ApplyPosterAsync(r.PosterPath)));
     }
 
     private static string Format(long seconds)
@@ -72,14 +75,14 @@ public partial class RecordsPage : Page
             : $"{t.Minutes:00}:{t.Seconds:00}";
     }
 
-    private sealed class RecordRow
+    private sealed class RecordRow : CardVisual
     {
         public string Title { get; init; } = "";
         public string Progress { get; init; } = "";
         public string Remaining { get; init; } = "";
         public string LastPlayed { get; init; } = "";
         public string Initial { get; init; } = "";
+        public string? PosterPath { get; init; }
         public double BarWidth { get; init; }
-        public Brush Gradient { get; init; } = Brushes.DimGray;
     }
 }

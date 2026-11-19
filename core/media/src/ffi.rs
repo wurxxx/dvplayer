@@ -14,7 +14,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::error::MediaError;
-use crate::models::{Envelope, MediaItem, MediaLibrary, Paged, PlayRecord};
+use crate::models::{Envelope, ImageSource, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource};
 use crate::sources::FnOsSource;
 
 /// 句柄只持有飞牛源；后续 Emby 用同一入口按 `kind` 分发。
@@ -206,6 +206,34 @@ pub extern "C" fn dv_report_progress(
             return reply::<()>(Err(MediaError::Other("null item id".into())));
         };
         reply(h.inner.report_progress(&id, position, duration))
+    })
+}
+
+/// 取播放源：直链 + 必须的请求头 + 续播点 + 音轨/字幕轨。
+#[no_mangle]
+pub extern "C" fn dv_play_source(handle: *mut SourceHandle, item_id: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_mut() }) else {
+            return reply::<PlaySource>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<PlaySource>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.play_source(&id))
+    })
+}
+
+/// 图片（海报）地址与鉴权头。
+#[no_mangle]
+pub extern "C" fn dv_image_source(handle: *mut SourceHandle, path: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_mut() }) else {
+            return reply::<ImageSource>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(p) = read_cstr(path) else {
+            return reply::<ImageSource>(Err(MediaError::Other("null image path".into())));
+        };
+        reply(h.inner.image_source(&p))
     })
 }
 

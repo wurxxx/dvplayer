@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -43,22 +42,28 @@ public partial class HomePage : Page
 
             StatusText.Text = records.Count == 0 ? "还没有播放记录。" : $"{records.Count} 条接着看";
 
-            ContinueList.ItemsSource = records.Select(r =>
+            var cards = records.Select(r =>
             {
                 var progress = r.DurationSeconds <= 0
                     ? 0
                     : Math.Clamp((double)r.PositionSeconds / r.DurationSeconds, 0, 1);
 
-                return new ContinueCard
+                var card = new ContinueCard
                 {
                     Title = r.Title,
                     Sub = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}",
-                    Gradient = Palette.GradientFor(r.ItemId + r.Title),
+                    PosterPath = r.PosterPath,
                     Initial = Palette.InitialOf(r.Title),
                     BarWidth = Math.Max(0, CardWidth * progress),
                     Time = Format(r.DurationSeconds),
                 };
+                card.UseGradient(r.ItemId + r.Title);
+                return card;
             }).ToList();
+
+            ContinueList.ItemsSource = cards;
+
+            await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
         }
 
         var librariesResult = await Task.Run(core.Libraries).ConfigureAwait(true);
@@ -78,14 +83,23 @@ public partial class HomePage : Page
 
         RecentStatus.Text = $"{library.Title} · 共 {itemsResult.Data.Total} 条";
 
-        RecentList.ItemsSource = itemsResult.Data.Items.Select(item => new PosterCard
+        var posters = itemsResult.Data.Items.Select(item =>
         {
-            Title = item.Title,
-            Sub = ShortKind(item.Kind),
-            Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
-            Gradient = Palette.GradientFor(item.Id + item.Title),
-            Initial = Palette.InitialOf(item.Title),
+            var card = new PosterCard
+            {
+                Title = item.Title,
+                Sub = ShortKind(item.Kind),
+                Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
+                PosterPath = item.PosterPath,
+                Initial = Palette.InitialOf(item.Title),
+            };
+            card.UseGradient(item.Id + item.Title);
+            return card;
         }).ToList();
+
+        RecentList.ItemsSource = posters;
+
+        await Task.WhenAll(posters.Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
     private static string ShortKind(string kind) => kind switch
@@ -107,22 +121,22 @@ public partial class HomePage : Page
             : $"{time.Minutes:00}:{time.Seconds:00}";
     }
 
-    private sealed class ContinueCard
+    private sealed class ContinueCard : CardVisual
     {
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Time { get; init; } = "";
         public string Initial { get; init; } = "";
-        public Brush Gradient { get; init; } = Brushes.DimGray;
+        public string? PosterPath { get; init; }
         public double BarWidth { get; init; }
     }
 
-    private sealed class PosterCard
+    private sealed class PosterCard : CardVisual
     {
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Badge { get; init; } = "";
         public string Initial { get; init; } = "";
-        public Brush Gradient { get; init; } = Brushes.DimGray;
+        public string? PosterPath { get; init; }
     }
 }

@@ -135,13 +135,63 @@ POST /v/api/v1/item/getEditDetail
 
 ## 5. 播放
 
+真实链路是三步（已全部实测通过，客户端 `FnOsSource::play_source` 就是这么做的）：
+
+### 5.1 取播放信息
+
+```http
+POST /v/api/v1/play/info   {"item_guid": "<条目 guid>"}
+```
+
+```json
+{"code":0,"data":{
+  "guid":"28f8ff84...","ts":149,"type":"Movie",
+  "media_guid":"0d5c213f...","video_guid":"1701eed1...",
+  "audio_guid":"613146ce...","subtitle_guid":"2878a0cc...",
+  "direct_link_audio_index":-1,
+  "item":{"title":"奥德赛","overview":"...","duration":10355,
+          "posters":"/ec/16/xxx.webp","backdrops":"/94/05/xxx.webp",
+          "media_stream":{"resolutions":["4k"],"color_range_type":["HDR10"],"audio_type":["DTS-HD MA"]}}
+}}
+```
+
+- `ts` 是续播秒数，直接拿来当 `--start`。
+- `media_guid` 是后面两步的主键，**不是**条目 guid。
+- 只支持 POST，GET 返回 501 `Not Implemented, please update.`。
+- `/play/play` 实测返回 `{"code":-6,"msg":"Not Found"}`，不用调。
+
+### 5.2 取轨道
+
+```http
+POST /v/api/v1/stream   {"media_guid":"...","ip":"<任意 uuid>","header":{"User-Agent":["DVPlayer"]}}
+```
+
+返回 `file_stream`（path/size/type）、`video_stream`（`codec_name`、`resolution_type`、
+`color_range_type`、`dv_profile`、`profile`、`width`/`height`）、`audio_streams[]`、
+`subtitle_streams[]`、`qualities[]`（只有 `bitrate` + `resolution`，**没有 URL**）。
+
+HDR 判断看 `video_stream.color_range_type`（`HDR10` / `DoVi` / 空 = SDR）与
+`dv_profile > 0`。
+
+### 5.3 播放直链
+
+```http
+GET /v/api/v1/media/range/<media_guid>
+Authorization: <登录 token>
+Range: bytes=0-1023
+```
+
+- 返回 `206 video/mp2t`，`Accept-Ranges: bytes`，`Content-Range: bytes 0-1023/94917009408`。
+- 单文件 94.9 GB 蓝光原盘也能正常 Range 拖动。
+- **不带 `Authorization` 就 `{"msg":"Auth Failed","code":-2}`**，不认 query 参数。
+- 播放器要带上这个头：mpv 用 `--http-header-fields="Authorization: <token>"`。
+
+其余端点：
+
 | 端点 | 作用 |
 | --- | --- |
-| `POST /v/api/v1/play/info` | 取播放信息（含直链/转码选项） |
-| `POST /v/api/v1/play/play` | 开始播放 |
 | `POST /v/api/v1/play/quality` | 切清晰度 |
-| `POST /v/api/v1/media` | 取播放链接（`getPlayLink`），也用于退出播放 |
-| `POST /v/api/v1/media/p` | 重置音轨/字幕、检查链接、退出 |
+| `POST /v/api/v1/media/p` | 重置音轨/字幕、退出播放 |
 | `POST /v/api/v1/play/record` | 上报播放记录 |
 | `POST /v/api/v1/item/<guid>/playing` | 播放心跳 |
 
@@ -174,6 +224,10 @@ GET /v/api/v1/play/list
 
 `media_stream.resolutions` 在列表接口里是 `null`，分辨率要等详情接口。
 
+注意：列表里的 `poster` 虽然是 2:1 横图（`poster_width: 3840, poster_height: 2160`），
+不是竖版海报。首页 16:9 的「继续观看」卡片正好能用；竖版网格里会被裁切，需要时可换成
+`/play/info` 返回的 `item.posters`。
+
 ## 7. 其它有用端点
 
 搜索、收藏、字幕、人物：
@@ -195,11 +249,36 @@ GET /v/api/v1/play/list
 
 1. **签名要逐字节对齐**：先序列化成紧凑 JSON 字符串，同一份字符串既做 body 又做哈希输入。
 2. **token 有效期未测**：先按 `code == -2 (Auth Failed)` 触发重新登录。
-3. **图片地址（未解决）**：`poster` 是 `/94/05/xxx.webp` 这种相对路径。
-   实测 `{base}{poster}`、`/v/static{poster}`、`/v/img{poster}` 都落到 SPA 的 index.html；
-   `/v/media{poster}` 返回 `{"msg":"Auth Failed"}`，说明图片服务存在但要鉴权，
-   而 `<img>` 不能带 Authorization 头，前端应该用 query 参数或 cookie，尚未确认。
-   当前界面上海报位留空占位。
+3. **图片地址（已解决）**：`poster` 是 `/94/05/xxx.webp` 这种相对路径，拼成
+   `GET /v/api/v1/sys/img{poster}` 再带 `Authorization: <token>` 即可，返回真实 JPEG
+   （服务端 `Content-Type` 写成 `image/webp`，实际字节是 `FF D8 FF E0`，按 JPEG 解码）。
+   **不能**把 URL 直接交给 `<img>` / `Image`，因为只认请求头，不认 `?token=` / `?authx=`。
+   当前实现是 C# 自己下字节 + 落盘缓存 + `ImageBrush`（`Services/PosterLoader.cs`）。
 4. **多服务器聚合**：每个源一个适配器（`FnOsSource` / `EmbySource`），统一成
-   `MediaLibrary / MediaItem / PlayRecord`，再做合并与去重。实现在 `core/media`（Rust），
+   `MediaLibrary / MediaItem / PlayRecord / PlaySource`，再做合并与去重。实现在 `core/media`（Rust），
    三端只做界面，见 ADR-0008。
+
+## 9. Jellyfin / Emby 兼容层（Infuse / VidHub 走的那条）
+
+`GET /emby/System/Info` 返回 `ProductName: "Jellyfin Server"`, `Version: 10.10.0`,
+`OperatingSystem: "fnOS"`，所以飞牛确实内置了一个 Jellyfin 兼容层。但它**只实现了一部分**：
+
+| 能力 | 实测结果 |
+| --- | --- |
+| `POST /emby/Users/AuthenticateByName` | ✅ 200，返回 `AccessToken` + `User.Id` |
+| `GET /emby/Users/{uid}/Views` | ✅ 200，能列出「影视」媒体库 |
+| `GET /emby/Users/{uid}/Items?...` | ⚠️ 只在同时带 `ParentId` + `Recursive` + `Fields` + `Limit` 时才 200；少一个就 400（空 body） |
+| `GET /emby/Users/{uid}/Items/Resume` | ❌ 400 |
+| `GET /emby/Users/{uid}/Items/{id}` | ✅ 200，3.2 万字节，字段接近 Jellyfin |
+| `GET /emby/Items/{id}`（不带 user） | ❌ 回落到 SPA `index.html`（4303 B） |
+| `GET /emby/Items/{id}/Images/Primary?tag=...` | ✅ 200 真图（约 1.3 MB） |
+| `POST /emby/Items/{id}/PlaybackInfo` | ❌ **恒 403**（空 body），换客户端名、加 `MediaSourceId` 都不行 |
+| `GET /emby/Videos/{id}/stream` | ❌ 回落到 SPA `index.html`（4303 B） |
+| `POST /emby/Sessions/Playing/Progress` | ✅ 204（能写进度） |
+
+结论：**兼容层拿不到播放直链**（`PlaybackInfo` 全 403、`Videos/stream` 没实现），
+照抄 Infuse 的调用方式行不通；但原生 API 的 `/media/range` 就是它实际在播的那条流，
+所以**不需要抓包**，直接用原生链路即可。
+
+鉴权头：`X-Emby-Token: <token>` 有效；`Authorization: MediaBrowser ..., Token=` 形式**不认**
+（返回 `{"error":"Token is missing"}`）。

@@ -30,9 +30,10 @@
 
                 <!-- 占位缩略图（海报未接入） -->
                 <Border Grid.Column="0" Width="96" Height="54" CornerRadius="7"
-                        Background="{Binding Gradient}" Margin="0,0,14,0">
+                        Background="{Binding Background}" Margin="0,0,14,0">
                   <TextBlock Text="{Binding Initial}" FontSize="20" FontWeight="SemiBold"
                              Foreground="#30FFFFFF" HorizontalAlignment="Center"
+                             Visibility="{Binding PlaceholderVisibility}"
                              VerticalAlignment="Center" />
                 </Border>
 

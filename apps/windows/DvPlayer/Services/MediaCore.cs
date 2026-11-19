@@ -88,6 +88,20 @@ public sealed class MediaCore : IDisposable
         return ReadOk(ptr);
     }
 
+    /// <summary>取播放源：直链 + 请求头 + 续播点 + 音轨字幕。</summary>
+    public ApiResult<PlaySourceDto> PlaySource(string itemId)
+    {
+        var ptr = dv_play_source(_handle, itemId);
+        return Read(ptr, root => root.Deserialize<PlaySourceDto>(Json)!);
+    }
+
+    /// <summary>海报地址与鉴权头（图片不能直接给 Image，要自己下载）。</summary>
+    public ApiResult<ImageSourceDto> ImageSource(string posterPath)
+    {
+        var ptr = dv_image_source(_handle, posterPath);
+        return Read(ptr, root => root.Deserialize<ImageSourceDto>(Json)!);
+    }
+
     /// <summary>只关心 ok/error 的调用（成功时没有 data）。</summary>
     private static ApiResult<bool> ReadOk(IntPtr ptr)
     {
@@ -247,6 +261,16 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_version", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_version();
+
+    [DllImport(Lib, EntryPoint = "dv_play_source", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_play_source(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
+
+    [DllImport(Lib, EntryPoint = "dv_image_source", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_image_source(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string posterPath);
 }
 
 public sealed record SourceConfig(
@@ -290,6 +314,48 @@ public sealed record PlayRecordDto(
     long PositionSeconds,
     long DurationSeconds,
     long? LastPlayed);
+
+public sealed record HttpHeaderDto(string Name, string Value);
+
+public sealed record ImageSourceDto(string Url, List<HttpHeaderDto> Headers);
+
+public sealed record AudioTrackDto(
+    string Guid,
+    string? Language,
+    string? Codec,
+    string? Profile,
+    int Channels,
+    bool IsDefault);
+
+public sealed record SubtitleTrackDto(
+    string Guid,
+    string? Language,
+    string? Codec,
+    string? Format,
+    bool IsExternal,
+    bool IsBitmap);
+
+public sealed record PlaySourceDto(
+    string ItemId,
+    string Title,
+    string Url,
+    List<HttpHeaderDto> Headers,
+    bool IsDirect,
+    string MediaGuid,
+    string? VideoGuid,
+    string? AudioGuid,
+    string? SubtitleGuid,
+    long PositionSeconds,
+    long DurationSeconds,
+    string? Overview,
+    string? PosterPath,
+    string? Resolution,
+    string? ColorRange,
+    bool DolbyVision,
+    string? VideoCodec,
+    string? AudioCodec,
+    List<AudioTrackDto> AudioStreams,
+    List<SubtitleTrackDto> SubtitleStreams);
 
 public readonly record struct ApiResult<T>(bool Ok, T? Data, string? Error)
 {

@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::error::{compact_json, percent_decode, percent_encode, ApiEnvelope, MediaError, Result};
-use crate::models::{MediaItem, MediaKind, MediaLibrary, Paged, PlayRecord};
+use crate::models::{
+    AudioTrack, HttpHeader, ImageSource, MediaItem, MediaKind, MediaLibrary, Paged, PlayRecord,
+    PlaySource, SubtitleTrack,
+};
 
 const API_PREFIX: &str = "/v/api/v1";
 const SIGN_SALT: &str = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh";
@@ -278,6 +281,263 @@ impl FnOsSource {
         }
     }
 
+    /// 取播放所需的一切：直链、续播点、音轨/字幕轨、HDR 信息。
+    ///
+    /// 飞牛的原生播放链路是两步：
+    ///   1. `POST /play/info`（item_guid）→ 拿到 media_guid 与各轨 guid；
+    ///   2. `POST /stream`（media_guid）→ 视频/音频/字幕轨详情；
+    ///   3. 直链是 `GET /media/range/{media_guid}`，需要 `Authorization`，支持 Range。
+    pub fn play_source(&self, item_id: &str) -> Result<PlaySource> {
+        #[derive(Deserialize)]
+        struct InfoDto {
+            #[serde(default)]
+            media_guid: String,
+            #[serde(default)]
+            video_guid: String,
+            #[serde(default)]
+            audio_guid: String,
+            #[serde(default)]
+            subtitle_guid: String,
+            #[serde(default)]
+            ts: i64,
+            #[serde(default)]
+            item: Option<DetailDto>,
+            #[serde(default)]
+            direct_link_audio_index: i32,
+        }
+
+        #[derive(Deserialize)]
+        struct DetailDto {
+            #[serde(default)]
+            title: String,
+            #[serde(default)]
+            overview: String,
+            #[serde(default)]
+            posters: String,
+            #[serde(default)]
+            backdrops: String,
+            #[serde(default)]
+            duration: i64,
+            #[serde(default)]
+            media_stream: Option<StreamMetaDto>,
+        }
+
+        #[derive(Deserialize, Default)]
+        struct StreamMetaDto {
+            #[serde(default)]
+            resolutions: Vec<String>,
+            #[serde(default)]
+            color_range_type: Vec<String>,
+            #[serde(default)]
+            audio_type: Vec<String>,
+        }
+
+        #[derive(Deserialize, Default)]
+        struct StreamDto {
+            #[serde(default)]
+            video_stream: Option<VideoDto>,
+            #[serde(default)]
+            audio_streams: Vec<AudioDto>,
+            #[serde(default)]
+            subtitle_streams: Vec<SubtitleDto>,
+        }
+
+        #[derive(Deserialize, Default)]
+        struct VideoDto {
+            #[serde(default)]
+            codec_name: String,
+            #[serde(default)]
+            resolution_type: String,
+            #[serde(default)]
+            color_range_type: String,
+            #[serde(default)]
+            dv_profile: i32,
+        }
+
+        #[derive(Deserialize, Default)]
+        struct AudioDto {
+            #[serde(default)]
+            guid: String,
+            #[serde(default)]
+            language: String,
+            #[serde(default)]
+            codec_name: String,
+            #[serde(default)]
+            profile: String,
+            #[serde(default)]
+            channels: i32,
+            #[serde(default)]
+            is_default: i32,
+        }
+
+        #[derive(Deserialize, Default)]
+        struct SubtitleDto {
+            #[serde(default)]
+            guid: String,
+            #[serde(default)]
+            language: String,
+            #[serde(default)]
+            codec_name: String,
+            #[serde(default)]
+            format: String,
+            #[serde(default)]
+            is_external: i32,
+            #[serde(default)]
+            is_bitmap: i32,
+        }
+
+        let body = compact_json(&serde_json::json!({ "item_guid": item_id }))?;
+        let env: ApiEnvelope<InfoDto> =
+            self.send(Method::POST, "/play/info", &BTreeMap::new(), Some(&body))?;
+        let info = env.data.ok_or_else(|| MediaError::Api {
+            code: env.code,
+            msg: env.msg.unwrap_or_else(|| "no play info".into()),
+        })?;
+
+        if info.media_guid.is_empty() {
+            return Err(MediaError::Other("该条目没有可播放的媒体文件".into()));
+        }
+
+        // 只有带文件才需要 /stream；失败时退回 play/info 里的信息。
+        let stream_body = compact_json(&serde_json::json!({
+            "media_guid": info.media_guid,
+            "ip": "00000000-0000-4000-8000-000000000000",
+            "header": { "User-Agent": ["DVPlayer"] }
+        }))?;
+        let stream: StreamDto = self
+            .send::<StreamDto>(Method::POST, "/stream", &BTreeMap::new(), Some(&stream_body))
+            .ok()
+            .and_then(|e| e.data)
+            .unwrap_or_default();
+
+        let detail = info.item.unwrap_or_else(|| DetailDto {
+            title: String::new(),
+            overview: String::new(),
+            posters: String::new(),
+            backdrops: String::new(),
+            duration: 0,
+            media_stream: None,
+        });
+
+        let meta = detail.media_stream.unwrap_or_default();
+        let video = stream.video_stream.unwrap_or_default();
+
+        let color_range = if !video.color_range_type.is_empty() {
+            Some(video.color_range_type.clone())
+        } else {
+            meta.color_range_type.first().cloned()
+        };
+
+        let resolution = if !video.resolution_type.is_empty() {
+            Some(video.resolution_type.clone())
+        } else {
+            meta.resolutions.first().cloned()
+        };
+
+        let audio_streams: Vec<AudioTrack> = stream
+            .audio_streams
+            .into_iter()
+            .map(|a| AudioTrack {
+                guid: a.guid,
+                language: empty_to_none(a.language),
+                codec: empty_to_none(a.codec_name),
+                profile: empty_to_none(a.profile),
+                channels: a.channels,
+                is_default: a.is_default > 0,
+            })
+            .collect();
+
+        // 飞牛在 play/info 里给的是「上次用的音轨下标」，优先用它。
+        let audio_streams = if info.direct_link_audio_index >= 0 {
+            audio_streams
+                .into_iter()
+                .enumerate()
+                .map(|(i, mut a)| {
+                    a.is_default = i as i32 == info.direct_link_audio_index;
+                    a
+                })
+                .collect()
+        } else {
+            audio_streams
+        };
+
+        let subtitle_streams: Vec<SubtitleTrack> = stream
+            .subtitle_streams
+            .into_iter()
+            .map(|s| SubtitleTrack {
+                guid: s.guid,
+                language: empty_to_none(s.language),
+                codec: empty_to_none(s.codec_name),
+                format: empty_to_none(s.format),
+                is_external: s.is_external > 0,
+                is_bitmap: s.is_bitmap > 0,
+            })
+            .collect();
+
+        let poster = if detail.posters.is_empty() {
+            empty_to_none(detail.backdrops)
+        } else {
+            Some(detail.posters)
+        };
+
+        Ok(PlaySource {
+            item_id: item_id.to_string(),
+            title: detail.title,
+            url: format!("{}/v/api/v1/media/range/{}", self.base, info.media_guid),
+            headers: self.auth_headers(),
+            is_direct: true,
+            media_guid: info.media_guid,
+            video_guid: empty_to_none(info.video_guid),
+            audio_guid: empty_to_none(info.audio_guid),
+            subtitle_guid: empty_to_none(info.subtitle_guid),
+            position_seconds: info.ts.max(0) as u64,
+            duration_seconds: detail.duration.max(0) as u64,
+            overview: empty_to_none(detail.overview),
+            poster_path: poster,
+            resolution,
+            color_range,
+            dolby_vision: video.dv_profile > 0,
+            video_codec: if video.codec_name.is_empty() {
+                None
+            } else {
+                Some(video.codec_name)
+            },
+            audio_codec: meta.audio_type.first().cloned(),
+            audio_streams,
+            subtitle_streams,
+        })
+    }
+
+    /// 海报地址：图片接口只认 Authorization 头，调用方要带着头去取字节。
+    pub fn image_source(&self, path: &str) -> Result<ImageSource> {
+        if path.is_empty() {
+            return Err(MediaError::Other("empty image path".into()));
+        }
+
+        let normalized = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{}", path)
+        };
+
+        Ok(ImageSource {
+            url: format!("{}/v/api/v1/sys/img{}", self.base, normalized),
+            headers: self.auth_headers(),
+        })
+    }
+
+    fn auth_headers(&self) -> Vec<HttpHeader> {
+        self.token
+            .as_ref()
+            .map(|t| {
+                vec![HttpHeader {
+                    name: "Authorization".into(),
+                    value: t.clone(),
+                }]
+            })
+            .unwrap_or_default()
+    }
+
     fn send<T: for<'de> Deserialize<'de>>(
         &self,
         method: Method,
@@ -327,6 +587,14 @@ fn truncate(value: &str, max: usize) -> String {
         value.to_string()
     } else {
         format!("{}…", &value[..max])
+    }
+}
+
+fn empty_to_none(value: String) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 
