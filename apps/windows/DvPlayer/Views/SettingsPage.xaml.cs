@@ -53,10 +53,12 @@ public partial class SettingsPage : Page
             return;
         }
 
+        // 适配器类型由核心决定；接 Emby 后这里会变成可选项。
+        var kind = MediaCore.SupportedKinds().FirstOrDefault() ?? "fnos";
         var config = new SourceConfig(
-            "fnos-" + Guid.NewGuid().ToString("N")[..8],
+            "src-" + Guid.NewGuid().ToString("N")[..8],
             name,
-            "fnos",
+            kind,
             baseUri,
             user,
             pass);

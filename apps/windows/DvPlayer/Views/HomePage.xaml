@@ -28,7 +28,8 @@
             <DataTemplate>
               <StackPanel Width="240" Margin="0,0,12,6">
                 <Border Height="135" CornerRadius="12" Background="{Binding Background}"
-                        SnapsToDevicePixels="True">
+                        SnapsToDevicePixels="True" Tag="{Binding ItemId}"
+                        Cursor="Hand" MouseLeftButtonUp="OnCardClick">
                   <Grid ClipToBounds="True">
                     <TextBlock Text="{Binding Initial}" FontSize="46" FontWeight="SemiBold"
                                Foreground="#2AFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -74,7 +75,8 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate>
               <StackPanel Width="132" Margin="0,0,14,6">
-                <Border Height="198" CornerRadius="10" Background="{Binding Background}">
+                <Border Height="198" CornerRadius="10" Background="{Binding Background}"
+                        Tag="{Binding ItemId}" Cursor="Hand" MouseLeftButtonUp="OnCardClick">
                   <Grid>
                     <TextBlock Text="{Binding Initial}" FontSize="34" FontWeight="SemiBold"
                                Foreground="#2AFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"

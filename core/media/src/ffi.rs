@@ -15,11 +15,12 @@ use serde::Serialize;
 
 use crate::error::MediaError;
 use crate::models::{Envelope, ImageSource, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource};
-use crate::sources::FnOsSource;
+use crate::sources::{self, MediaSource, SourceConfig};
 
-/// 句柄只持有飞牛源；后续 Emby 用同一入口按 `kind` 分发。
+/// 句柄持有一个多态媒体源。具体是飞牛还是 Emby 由 `kind` 决定，
+/// 上层（C# / Swift / Kotlin）看到的接口完全一样。
 pub struct SourceHandle {
-    inner: FnOsSource,
+    inner: Box<dyn MediaSource>,
 }
 
 fn read_cstr(ptr: *const c_char) -> Option<String> {
@@ -60,19 +61,16 @@ where
     })
 }
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SourceConfig {
-    id: String,
-    name: String,
-    kind: String,
-    base: String,
-    username: String,
-    password: String,
+/// 支持的适配器类型，返回 `["fnos"]`。界面用它填「添加源」的下拉框。
+#[no_mangle]
+pub extern "C" fn dv_source_kinds() -> *mut c_char {
+    guard(|| reply(Ok(sources::SUPPORTED_KINDS)))
 }
 
 /// 创建源。config 是 JSON：
 /// {"id":"fnos-1","name":"飞牛影视","kind":"fnos","base":"http://host:8005","username":"","password":""}
+///
+/// `kind` 不认识时返回空指针（调用方按「不支持的类型」提示）。
 #[no_mangle]
 pub extern "C" fn dv_source_create(config: *const c_char) -> *mut SourceHandle {
     catch_unwind(AssertUnwindSafe(|| {
@@ -80,22 +78,13 @@ pub extern "C" fn dv_source_create(config: *const c_char) -> *mut SourceHandle {
             return ptr::null_mut();
         };
 
-        let parsed: SourceConfig = match serde_json::from_str(&json) {
-            Ok(v) => v,
-            Err(_) => return ptr::null_mut(),
+        let Ok(parsed) = serde_json::from_str::<SourceConfig>(&json) else {
+            return ptr::null_mut();
         };
 
-        if !parsed.kind.eq_ignore_ascii_case("fnos") {
+        let Some(source) = sources::create(&parsed) else {
             return ptr::null_mut();
-        }
-
-        let source = FnOsSource::new(
-            parsed.id,
-            parsed.name,
-            parsed.base,
-            parsed.username,
-            parsed.password,
-        );
+        };
 
         Box::into_raw(Box::new(SourceHandle { inner: source }))
     }))
@@ -129,7 +118,10 @@ pub extern "C" fn dv_connect(handle: *mut SourceHandle) -> *mut c_char {
         };
 
         match h.inner.login() {
-            Ok(()) => reply(Ok(serde_json::json!({ "name": h.inner.name }))),
+            Ok(()) => reply(Ok(serde_json::json!({
+                "name": h.inner.name(),
+                "kind": h.inner.kind(),
+            }))),
             Err(e) => reply::<()>(Err(e)),
         }
     })

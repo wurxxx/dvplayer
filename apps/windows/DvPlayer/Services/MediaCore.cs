@@ -38,6 +38,19 @@ public sealed class MediaCore : IDisposable
         }
     }
 
+    /// <summary>核心支持的适配器类型（"fnos" / 以后的 "emby"）。</summary>
+    public static List<string> SupportedKinds()
+    {
+        try
+        {
+            return ReadEnvelope<List<string>>(dv_source_kinds()) ?? new List<string>();
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
+        {
+            return new List<string>();
+        }
+    }
+
     public static MediaCore? Create(SourceConfig config)
     {
         var json = JsonSerializer.Serialize(config, Json);
@@ -222,6 +235,9 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_source_create", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_source_create([MarshalAs(UnmanagedType.LPUTF8Str)] string configJson);
+
+    [DllImport(Lib, EntryPoint = "dv_source_kinds", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_source_kinds();
 
     [DllImport(Lib, EntryPoint = "dv_source_free", CallingConvention = CallingConvention.Cdecl)]
     private static extern void dv_source_free(IntPtr handle);

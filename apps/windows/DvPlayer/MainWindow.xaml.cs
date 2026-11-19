@@ -20,6 +20,22 @@ public partial class MainWindow : FluentWindow
         SelectNav("home");
         await TryAutoConnectAsync();
 
+        // 脚本化验证用：--play <itemId>，可再加 --play-seconds N 自动退出。
+        var playId = ArgumentAfter("--play");
+        if (playId is not null)
+        {
+            var player = await PlayWindow.OpenAsync(this, playId);
+
+            if (int.TryParse(ArgumentAfter("--play-seconds"), out var seconds) && seconds > 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(seconds));
+                player?.Close();
+                Close();
+            }
+
+            return;
+        }
+
         var shotDir = ScreenshotDir();
         if (shotDir is not null)
         {
@@ -27,10 +43,12 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    private static string? ScreenshotDir()
+    private static string? ScreenshotDir() => ArgumentAfter("--screenshot");
+
+    private static string? ArgumentAfter(string flag)
     {
         var args = Environment.GetCommandLineArgs();
-        var index = Array.IndexOf(args, "--screenshot");
+        var index = Array.IndexOf(args, flag);
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 

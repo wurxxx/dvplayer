@@ -186,14 +186,44 @@ Range: bytes=0-1023
 - **不带 `Authorization` 就 `{"msg":"Auth Failed","code":-2}`**，不认 query 参数。
 - 播放器要带上这个头：mpv 用 `--http-header-fields="Authorization: <token>"`。
 
+### 5.4 回写进度
+
+```http
+POST /v/api/v1/play/record   {"item_guid":"...","media_guid":"...","ts":170}
+```
+
+- **`ts` 是「看到第几秒」**，和 `play/list` 读出来的同一个字段，读写共用。
+- 必须带 `media_guid`（不是条目 guid），否则记录写不进去。
+- 前端还有 `resolution` / `bitrate` / `audio_guid` / `direct_link_audio_index` 几个可选字段，
+  不传也能正常写。
+- 注意 `/item/<guid>/playing` 不是这个用的：它返回 `code: 0` 但**不会改 `ts`**，
+  容易误判成成功。
+
 其余端点：
 
 | 端点 | 作用 |
 | --- | --- |
 | `POST /v/api/v1/play/quality` | 切清晰度 |
 | `POST /v/api/v1/media/p` | 重置音轨/字幕、退出播放 |
-| `POST /v/api/v1/play/record` | 上报播放记录 |
-| `POST /v/api/v1/item/<guid>/playing` | 播放心跳 |
+| `POST /v/api/v1/play/record` | **回写进度（就这一个有用）** |
+| `POST /v/api/v1/item/<guid>/playing` | 返回 0 但不生效，别用 |
+
+### 5.5 实测（mpv 直连）
+
+`mpv --http-header-fields-add="Authorization: <token>" <range URL>` 直接可播：
+
+```
+Video  --vid=1  (hevc [Main 10] 3840x2160 23.976 fps)
+Audio  --aid=1  (dts [DTS-HD MA] 6ch 48000 Hz)
+Audio  --aid=2/3 (dts 6ch)
+Subs   --sid=1..9 (hdmv_pgs_subtitle)
+Using hardware decoding (d3d11va).
+VO: [gpu-next] 3840x2160 d3d11[p010]
+```
+
+注意容器其实是 **MPEG-TS**（服务端实时 remux），即使源是 mkv 原盘；
+所以 `Content-Type: video/mp2t` 是对的，海报那个 `image/webp` 才是写错的。
+蓝光原盘的 3 条音轨、9 条 PGS 字幕都完整带过来。
 
 ## 6. 播放记录
 

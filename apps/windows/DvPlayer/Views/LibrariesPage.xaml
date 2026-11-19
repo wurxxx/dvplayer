@@ -15,7 +15,22 @@
       <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" Margin="0,6,0,0" />
     </StackPanel>
 
-    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Hidden"
+    <StackPanel Grid.Row="1">
+
+      <!-- 进入目录后的返回条 -->
+      <StackPanel x:Name="Breadcrumb" Orientation="Horizontal" Visibility="Collapsed"
+                  Margin="0,14,0,0">
+        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
+                Cursor="Hand" MouseLeftButtonUp="OnBackClick">
+          <TextBlock Text="&#xE72B;  返回上层" FontFamily="{StaticResource IconFont}"
+                     FontSize="12" Foreground="{StaticResource AccentBrush}" />
+        </Border>
+        <TextBlock x:Name="BreadcrumbText" FontSize="12.5"
+                   Foreground="{StaticResource MutedBrush}"
+                   VerticalAlignment="Center" Margin="12,0,0,0" />
+      </StackPanel>
+
+    <ScrollViewer HorizontalScrollBarVisibility="Hidden"
                   VerticalScrollBarVisibility="Disabled" Margin="0,16,0,0">
       <ItemsControl x:Name="LibraryBar">
         <ItemsControl.ItemsPanel>
@@ -45,6 +60,7 @@
         </ItemsControl.ItemTemplate>
       </ItemsControl>
     </ScrollViewer>
+    </StackPanel>
 
     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,20,0,0">
       <StackPanel>
@@ -58,7 +74,8 @@
             <DataTemplate>
               <StackPanel Width="148" Margin="0,0,16,22">
                 <Border Height="222" CornerRadius="10" Background="{Binding Background}"
-                        SnapsToDevicePixels="True">
+                        SnapsToDevicePixels="True" Tag="{Binding Id}"
+                        Cursor="Hand" MouseLeftButtonUp="OnCardClick">
                   <Grid>
                     <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
                                Foreground="#2AFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"

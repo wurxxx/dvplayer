@@ -46,6 +46,7 @@ public partial class RecordsPage : Page
 
                 var row = new RecordRow
                 {
+                    ItemId = r.ItemId,
                     Title = r.Title,
                     Progress = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}  ·  {progress:P0}",
                     Remaining = r.DurationSeconds <= 0 ? "" : $"还剩 {Format(remaining)}",
@@ -67,6 +68,16 @@ public partial class RecordsPage : Page
         await Task.WhenAll(records.Select(r => r.ApplyPosterAsync(r.PosterPath)));
     }
 
+    private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+    }
+
     private static string Format(long seconds)
     {
         var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
@@ -77,6 +88,7 @@ public partial class RecordsPage : Page
 
     private sealed class RecordRow : CardVisual
     {
+        public string ItemId { get; init; } = "";
         public string Title { get; init; } = "";
         public string Progress { get; init; } = "";
         public string Remaining { get; init; } = "";

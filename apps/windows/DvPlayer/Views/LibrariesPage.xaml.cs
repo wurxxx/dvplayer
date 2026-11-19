@@ -9,8 +9,16 @@ public partial class LibrariesPage : Page
     private const int PageSize = 60;
 
     private string? _libraryId;
-    private int _page;
     private string _libraryTitle = "";
+
+    /// <summary>当前列表的父节点（媒体库或某个目录）。</summary>
+    private string? _parentId;
+    private bool _childrenMode;
+
+    /// <summary>目录路径，用于面包屑和「返回上层」。</summary>
+    private readonly List<(string Id, string Title)> _stack = new();
+
+    private int _page;
 
     public LibrariesPage()
     {
@@ -43,7 +51,9 @@ public partial class LibrariesPage : Page
 
         if (libraries.Count > 0)
         {
-            await LoadLibraryAsync(libraries[0].Id, libraries[0].Title).ConfigureAwait(true);
+            _libraryId = libraries[0].Id;
+            _libraryTitle = libraries[0].Title;
+            await LoadAsync(_libraryId, _libraryTitle, children: false).ConfigureAwait(true);
         }
         else
         {
@@ -73,11 +83,56 @@ public partial class LibrariesPage : Page
         LibraryBar.ItemsSource = null;
         LibraryBar.ItemsSource = chips;
 
-        var title = chips.FirstOrDefault(c => c.Id == id)?.Title ?? "";
-        await LoadLibraryAsync(id, title).ConfigureAwait(true);
+        _libraryId = id;
+        _libraryTitle = chips.FirstOrDefault(c => c.Id == id)?.Title ?? "";
+        _stack.Clear();
+        await LoadAsync(_libraryId, _libraryTitle, children: false).ConfigureAwait(true);
     }
 
-    private async Task LoadLibraryAsync(string libraryId, string libraryTitle)
+    private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        var cards = ItemGrid.ItemsSource as List<ItemCard>;
+        var card = cards?.FirstOrDefault(c => c.Id == id);
+        if (card is null)
+        {
+            return;
+        }
+
+        if (card.IsPlayable)
+        {
+            await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+            return;
+        }
+
+        _stack.Add((card.Id, card.Title));
+        await LoadAsync(card.Id, card.Title, children: true).ConfigureAwait(true);
+    }
+
+    private async void OnBackClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_stack.Count == 0)
+        {
+            return;
+        }
+
+        _stack.RemoveAt(_stack.Count - 1);
+
+        if (_stack.Count == 0)
+        {
+            await LoadAsync(_libraryId!, _libraryTitle, children: false).ConfigureAwait(true);
+            return;
+        }
+
+        var parent = _stack[^1];
+        await LoadAsync(parent.Id, parent.Title, children: true).ConfigureAwait(true);
+    }
+
+    private async Task LoadAsync(string parentId, string title, bool children)
     {
         var services = AppServices.Instance;
         if (!services.IsConnected)
@@ -85,15 +140,18 @@ public partial class LibrariesPage : Page
             return;
         }
 
-        _libraryId = libraryId;
-        _libraryTitle = libraryTitle;
+        _parentId = parentId;
+        _childrenMode = children;
         _page = 1;
         StatusText.Text = "正在加载…";
         ItemGrid.ItemsSource = null;
         MoreButton.Visibility = Visibility.Collapsed;
+        UpdateBreadcrumb();
 
         var core = services.Core!;
-        var result = await Task.Run(() => core.Items(libraryId, 1, PageSize)).ConfigureAwait(true);
+        var result = await Task.Run(() => children
+            ? core.Children(parentId, 1, PageSize)
+            : core.Items(parentId, 1, PageSize)).ConfigureAwait(true);
 
         if (!result.Ok || result.Data is null)
         {
@@ -103,7 +161,7 @@ public partial class LibrariesPage : Page
 
         var cards = result.Data.Items.Select(ToCard).ToList();
         ItemGrid.ItemsSource = cards;
-        StatusText.Text = $"{_libraryTitle} · 共 {result.Data.Total} 条";
+        StatusText.Text = $"{title} · 共 {result.Data.Total} 条";
         MoreButton.Visibility = result.Data.Items.Count < result.Data.Total
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -113,7 +171,7 @@ public partial class LibrariesPage : Page
 
     private async void OnMoreClick(object sender, RoutedEventArgs e)
     {
-        if (_libraryId is null || !AppServices.Instance.IsConnected)
+        if (_parentId is null || !AppServices.Instance.IsConnected)
         {
             return;
         }
@@ -121,7 +179,12 @@ public partial class LibrariesPage : Page
         _page++;
         var core = AppServices.Instance.Core!;
         var page = _page;
-        var result = await Task.Run(() => core.Items(_libraryId, page, PageSize)).ConfigureAwait(true);
+        var children = _childrenMode;
+        var parentId = _parentId;
+
+        var result = await Task.Run(() => children
+            ? core.Children(parentId, page, PageSize)
+            : core.Items(parentId, page, PageSize)).ConfigureAwait(true);
 
         if (!result.Ok || result.Data is null)
         {
@@ -140,6 +203,18 @@ public partial class LibrariesPage : Page
             : Visibility.Collapsed;
 
         await Task.WhenAll(added.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    private void UpdateBreadcrumb()
+    {
+        var inFolder = _childrenMode && _stack.Count > 0;
+        Breadcrumb.Visibility = inFolder ? Visibility.Visible : Visibility.Collapsed;
+
+        if (inFolder)
+        {
+            var trail = string.Join("  ›  ", _stack.Select(s => s.Title));
+            BreadcrumbText.Text = $"{_libraryTitle}  ›  {trail}";
+        }
     }
 
     private static ItemCard ToCard(MediaItemDto item)
@@ -161,6 +236,8 @@ public partial class LibrariesPage : Page
 
         var card = new ItemCard
         {
+            Id = item.Id,
+            Kind = item.Kind,
             Title = item.Title,
             Sub = string.Join(" · ", parts),
             Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
@@ -173,6 +250,13 @@ public partial class LibrariesPage : Page
         card.UseGradient(item.Id + item.Title);
         return card;
     }
+
+    /// <summary>能直接交给播放器的条目类型；其余是目录，点进去看下一层。</summary>
+    private static bool IsPlayableKind(string kind) => kind switch
+    {
+        "movie" or "episode" or "video" => true,
+        _ => false,
+    };
 
     private static string ShortKind(string kind) => kind switch
     {
@@ -203,11 +287,15 @@ public partial class LibrariesPage : Page
 
     private sealed class ItemCard : CardVisual
     {
+        public string Id { get; init; } = "";
+        public string Kind { get; init; } = "";
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Badge { get; init; } = "";
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
         public Visibility BadgeVisibility { get; init; } = Visibility.Collapsed;
+
+        public bool IsPlayable => LibrariesPage.IsPlayableKind(Kind);
     }
 }

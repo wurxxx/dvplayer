@@ -9,6 +9,7 @@ use crate::models::{
     AudioTrack, HttpHeader, ImageSource, MediaItem, MediaKind, MediaLibrary, Paged, PlayRecord,
     PlaySource, SubtitleTrack,
 };
+use crate::sources::MediaSource;
 
 const API_PREFIX: &str = "/v/api/v1";
 const SIGN_SALT: &str = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh";
@@ -93,6 +94,9 @@ pub struct FnOsSource {
     password: String,
     token: Option<String>,
     http: Client,
+    /// item_guid → media_guid。`play_source` 时记下，回写进度要用。
+    /// 换片源不重启客户端也没关系：缓存没有时现查一次 `play/info`。
+    media_cache: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl FnOsSource {
@@ -104,6 +108,7 @@ impl FnOsSource {
             username,
             password,
             token: None,
+            media_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             http: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
@@ -234,15 +239,22 @@ impl FnOsSource {
             .collect())
     }
 
-    pub fn report_progress(&self, item_id: &str, position: i64, duration: i64) -> Result<()> {
+    /// 回写进度。飞牛的格式是 `POST /play/record {item_guid, media_guid, ts}`，
+    /// 其中 `ts` 就是「看到第几秒」（和 `play/list` 里读出来的是同一个字段）。
+    ///
+    /// `duration` 目前用不上（服务端自己知道片长），保留参数是为了让 C ABI
+    /// 对 Emby / Jellyfin 也够用——它们上报要带 `RunTimeTicks`。
+    pub fn report_progress(&self, item_id: &str, position: i64, _duration: i64) -> Result<()> {
+        let media_guid = self.media_guid_for(item_id)?;
+
         let body = compact_json(&serde_json::json!({
-            "position": position,
-            "duration": duration,
+            "item_guid": item_id,
+            "media_guid": media_guid,
+            "ts": position.max(0),
         }))?;
 
-        let path = format!("/item/{}/playing", item_id);
         let env: ApiEnvelope<serde_json::Value> =
-            self.send(Method::POST, &path, &BTreeMap::new(), Some(&body))?;
+            self.send(Method::POST, "/play/record", &BTreeMap::new(), Some(&body))?;
 
         if env.code != 0 {
             return Err(MediaError::Api {
@@ -251,6 +263,38 @@ impl FnOsSource {
             });
         }
         Ok(())
+    }
+
+    /// 拿条目对应的 media_guid：先用 `play_source` 记下的缓存，
+    /// 没有就现查 `play/info`（比如客户端重启后直接播历史记录）。
+    fn media_guid_for(&self, item_id: &str) -> Result<String> {
+        if let Some(cached) = self
+            .media_cache
+            .lock()
+            .ok()
+            .and_then(|m| m.get(item_id).cloned())
+            .filter(|v| !v.is_empty())
+        {
+            return Ok(cached);
+        }
+
+        #[derive(Deserialize)]
+        struct InfoDto {
+            #[serde(default)]
+            media_guid: String,
+        }
+
+        let body = compact_json(&serde_json::json!({ "item_guid": item_id }))?;
+        let env: ApiEnvelope<InfoDto> =
+            self.send(Method::POST, "/play/info", &BTreeMap::new(), Some(&body))?;
+
+        match env.data {
+            Some(d) if !d.media_guid.is_empty() => Ok(d.media_guid),
+            _ => Err(MediaError::Api {
+                code: env.code,
+                msg: env.msg.unwrap_or_else(|| "没有可播放的媒体文件".into()),
+            }),
+        }
     }
 
     fn map_item(&self, d: ItemDto) -> MediaItem {
@@ -480,6 +524,10 @@ impl FnOsSource {
             Some(detail.posters)
         };
 
+        if let Ok(mut cache) = self.media_cache.lock() {
+            cache.insert(item_id.to_string(), info.media_guid.clone());
+        }
+
         Ok(PlaySource {
             item_id: item_id.to_string(),
             title: detail.title,
@@ -638,4 +686,46 @@ pub(crate) struct MediaStreamDto {
     pub audio_type: Option<String>,
     #[serde(default)]
     pub color_range_type: Option<String>,
+}
+
+impl MediaSource for FnOsSource {
+    fn kind(&self) -> &'static str {
+        "fnos"
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn login(&mut self) -> Result<()> {
+        FnOsSource::login(self)
+    }
+
+    fn libraries(&self) -> Result<Vec<MediaLibrary>> {
+        FnOsSource::libraries(self)
+    }
+
+    fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        FnOsSource::items(self, library_id, page, page_size)
+    }
+
+    fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        FnOsSource::children(self, parent_id, page, page_size)
+    }
+
+    fn records(&self) -> Result<Vec<PlayRecord>> {
+        FnOsSource::records(self)
+    }
+
+    fn report_progress(&self, item_id: &str, position: i64, duration: i64) -> Result<()> {
+        FnOsSource::report_progress(self, item_id, position, duration)
+    }
+
+    fn play_source(&self, item_id: &str) -> Result<PlaySource> {
+        FnOsSource::play_source(self, item_id)
+    }
+
+    fn image_source(&self, path: &str) -> Result<ImageSource> {
+        FnOsSource::image_source(self, path)
+    }
 }

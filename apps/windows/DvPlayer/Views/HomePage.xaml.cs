@@ -50,6 +50,7 @@ public partial class HomePage : Page
 
                 var card = new ContinueCard
                 {
+                    ItemId = r.ItemId,
                     Title = r.Title,
                     Sub = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}",
                     PosterPath = r.PosterPath,
@@ -87,6 +88,7 @@ public partial class HomePage : Page
         {
             var card = new PosterCard
             {
+                ItemId = item.Id,
                 Title = item.Title,
                 Sub = ShortKind(item.Kind),
                 Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
@@ -100,6 +102,16 @@ public partial class HomePage : Page
         RecentList.ItemsSource = posters;
 
         await Task.WhenAll(posters.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        await PlayWindow.OpenAsync(Window.GetWindow(this), id);
     }
 
     private static string ShortKind(string kind) => kind switch
@@ -123,6 +135,7 @@ public partial class HomePage : Page
 
     private sealed class ContinueCard : CardVisual
     {
+        public string ItemId { get; init; } = "";
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Time { get; init; } = "";
@@ -133,6 +146,7 @@ public partial class HomePage : Page
 
     private sealed class PosterCard : CardVisual
     {
+        public string ItemId { get; init; } = "";
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Badge { get; init; } = "";
