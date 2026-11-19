@@ -67,7 +67,7 @@ public sealed class MpvHost : HwndHost
             0, 0, 1, 1,
             hwndParent.Handle,
             IntPtr.Zero,
-            IntPtr.Zero,
+            GetModuleHandle(null),
             IntPtr.Zero);
 
         if (_hwnd == IntPtr.Zero)
@@ -103,7 +103,8 @@ public sealed class MpvHost : HwndHost
         var wc = new WNDCLASSEX
         {
             cbSize = Marshal.SizeOf<WNDCLASSEX>(),
-            lpfnWndProc = WndProcHolder,
+            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(WndProcHolder),
+            hInstance = GetModuleHandle(null),
             lpszClassName = WindowClass,
         };
 
@@ -175,7 +176,7 @@ public sealed class MpvHost : HwndHost
     {
         public int cbSize;
         public uint style;
-        public WndProcDelegate lpfnWndProc;
+        public IntPtr lpfnWndProc;
         public int cbClsExtra;
         public int cbWndExtra;
         public IntPtr hInstance;
@@ -225,4 +226,7 @@ public sealed class MpvHost : HwndHost
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
 }

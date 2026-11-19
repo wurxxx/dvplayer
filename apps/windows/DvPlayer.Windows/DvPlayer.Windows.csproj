@@ -14,7 +14,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="WPF-UI" Version="4.*" />
+    <!-- 4.3.0 带 net10.0-windows7.0 资产；版本固定，避免 restore 时飘。 -->
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
 </Project>

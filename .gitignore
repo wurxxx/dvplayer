@@ -18,3 +18,4 @@ apps/macos/m0-render/m0-render
 # .NET
 apps/windows/**/bin/
 apps/windows/**/obj/
+apps/windows/packages/
