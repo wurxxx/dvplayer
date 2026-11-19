@@ -72,6 +72,38 @@ pub struct MediaItem {
     /// 上次观看（unix 秒）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_played: Option<i64>,
+
+    // —— 剧集相关（电影/单集留空）——
+    /// 季号，从 1 开始。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub season_number: Option<i32>,
+    /// 集号，从 1 开始。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub episode_number: Option<i32>,
+    /// 全剧集数（服务器给的总数，可能大于本地已有）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub episode_count: Option<i32>,
+    /// 本地已有集数。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_episode_count: Option<i32>,
+    /// 季数。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub season_count: Option<i32>,
+    /// 评分（0..10）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+    /// 上映 / 首播日期（YYYY-MM-DD）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+    /// 连载状态，如 "Returning Series"。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// 横版背景图（详情页顶部）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backdrop_path: Option<String>,
+    /// 只有一季时，服务器直接给出那一季的 id，能少一层请求。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single_child_id: Option<String>,
 }
 
 /// 各源的播放记录。
@@ -194,6 +226,54 @@ pub struct ImageSource {
     pub url: String,
     #[serde(default)]
     pub headers: Vec<HttpHeader>,
+}
+
+/// 条目详情：列表接口不带的信息（背景图、简介、季集数、播放入口）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaDetail {
+    pub id: String,
+    pub title: String,
+    pub kind: MediaKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poster_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backdrop_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub season_count: Option<i32>,
+    /// 本地已有季数（服务器可能只刮到第一季，TMDB 却写着 10 季）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_season_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub episode_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_episode_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_range: Option<String>,
+    /// 「继续观看」该播哪个条目（剧集里是某一集）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub play_item_id: Option<String>,
+    /// 只有一季时，直接给出季 id，少一次请求。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single_child_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

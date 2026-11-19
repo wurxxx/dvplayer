@@ -14,7 +14,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::error::MediaError;
-use crate::models::{Envelope, ImageSource, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource};
+use crate::models::{
+    Envelope, ImageSource, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource,
+};
 use crate::sources::{self, MediaSource, SourceConfig};
 
 /// 句柄持有一个多态媒体源。具体是飞牛还是 Emby 由 `kind` 决定，
@@ -198,6 +200,20 @@ pub extern "C" fn dv_report_progress(
             return reply::<()>(Err(MediaError::Other("null item id".into())));
         };
         reply(h.inner.report_progress(&id, position, duration))
+    })
+}
+
+/// 条目详情：背景图、简介、季集数、播放入口。
+#[no_mangle]
+pub extern "C" fn dv_item_detail(handle: *mut SourceHandle, item_id: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_mut() }) else {
+            return reply::<MediaDetail>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<MediaDetail>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.detail(&id))
     })
 }
 

@@ -62,13 +62,30 @@ public partial class MainWindow : FluentWindow
             return new[] { "home", "libraries", "records", "settings", "home" };
         }
 
-        var pages = args.Skip(index + 2).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+        var known = new[] { "home", "libraries", "records", "settings" };
+        var pages = args.Skip(index + 2).Where(known.Contains).ToArray();
         return pages.Length == 0 ? new[] { "home" } : pages;
     }
 
     /// <summary>依次打开每个页面并保存一张 PNG，然后退出。用于无桌面环境的回归。</summary>
     private async Task CaptureTourAsync(string dir)
     {
+        // --series <id>[,<id>...]：额外截详情页，用来验证剧集 / 未刮削目录两种布局。
+        var seriesIds = ArgumentAfter("--series")?
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (seriesIds is not null)
+        {
+            for (var i = 0; i < seriesIds.Length; i++)
+            {
+                ContentFrame.Navigate(new SeriesPage(seriesIds[i]));
+                await Task.Delay(6000);
+                var name = seriesIds.Length == 1 ? "series.png" : $"series-{i + 1}.png";
+                UiCapture.Save(this, Path.Combine(dir, name));
+                Navigate("libraries");
+                await Task.Delay(1500);
+            }
+        }
+
         foreach (var tag in ScreenshotPages())
         {
             SelectNav(tag);

@@ -11,7 +11,9 @@ pub use fnos::FnOsSource;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::models::{ImageSource, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource};
+use crate::models::{
+    ImageSource, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource,
+};
 
 /// 一个媒体源的连接参数。序列化后就是 `dv_source_create` 的入参。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +55,9 @@ pub trait MediaSource: Send + Sync {
 
     /// 某个条目下的子条目（剧集 → 季 → 集）。
     fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>>;
+
+    /// 条目详情：背景图、简介、季集数等列表接口没有的信息。
+    fn detail(&self, item_id: &str) -> Result<MediaDetail>;
 
     /// 继续观看列表，按最近播放排序。
     fn records(&self) -> Result<Vec<PlayRecord>>;

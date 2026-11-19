@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::error::{compact_json, percent_decode, percent_encode, ApiEnvelope, MediaError, Result};
 use crate::models::{
-    AudioTrack, HttpHeader, ImageSource, MediaItem, MediaKind, MediaLibrary, Paged, PlayRecord,
-    PlaySource, SubtitleTrack,
+    AudioTrack, HttpHeader, ImageSource, MediaDetail, MediaItem, MediaKind, MediaLibrary, Paged,
+    PlayRecord, PlaySource, SubtitleTrack,
 };
 use crate::sources::MediaSource;
 
@@ -298,31 +298,182 @@ impl FnOsSource {
     }
 
     fn map_item(&self, d: ItemDto) -> MediaItem {
+        let kind = MediaKind::from_raw(d.item_type.as_deref().unwrap_or(""));
+
+        // 刮削好的条目服务器会直接给集号；没刮削的目录只能从文件名里认。
+        // 这一步放在核心里，四端看到的结果才一致。
+        let episode_number = d
+            .episode_number
+            .filter(|v| *v > 0)
+            .or_else(|| parse_episode_number(&d.title));
+        let episode_count = d.number_of_episodes.filter(|v| *v > 0).or_else(|| {
+            // 「（76集）」只有剧集/目录级别的标题才有意义。
+            matches!(kind, MediaKind::Folder | MediaKind::Series)
+                .then(|| parse_episode_count(&d.title))
+                .flatten()
+        });
+
+        let resolution = first_string(
+            d.media_stream
+                .as_ref()
+                .and_then(|m| m.resolutions.as_ref()),
+        );
+
+        let progress = if d.duration > 0 && d.ts > 0 {
+            (d.ts as f64 / d.duration as f64).clamp(0.0, 1.0)
+        } else if d.watched > 0 {
+            1.0
+        } else {
+            0.0
+        };
+
         MediaItem {
             id: d.guid,
             title: d.title,
-            kind: MediaKind::from_raw(d.item_type.as_deref().unwrap_or("")),
+            kind,
             source_id: self.id.clone(),
-            poster_path: d.poster.or_else(|| d.poster_list.and_then(|p| p.into_iter().next())),
+            poster_path: d
+                .poster
+                .filter(|s| !s.is_empty())
+                .or_else(|| d.poster_list.and_then(|p| p.into_iter().next()))
+                .filter(|s| !s.is_empty()),
             parent_id: d.parent_guid.filter(|s| !s.is_empty()),
             parent_title: d.parent_title.filter(|s| !s.is_empty()),
-            year: None,
-            runtime_seconds: if d.duration > 0 {
-                Some(d.duration as u64)
-            } else {
-                None
-            },
-            progress: if d.watched > 0 { 1.0 } else { 0.0 },
+            year: d
+                .release_date
+                .as_deref()
+                .and_then(|s| s.get(..4))
+                .and_then(|s| s.parse().ok()),
+            runtime_seconds: (d.duration > 0).then_some(d.duration as u64),
+            progress,
             is_favorite: d.is_favorite > 0,
-            overview: None,
-            resolution: d
-                .media_stream
-                .as_ref()
-                .and_then(|m| m.resolutions.as_ref())
-                .and_then(|r| r.first())
-                .cloned(),
-            last_played: if d.watched_ts > 0 { Some(d.watched_ts) } else { None },
+            overview: empty_to_none(d.overview.unwrap_or_default()),
+            resolution,
+            last_played: (d.watched_ts > 0).then_some(d.watched_ts),
+
+            season_number: d.season_number.filter(|v| *v > 0),
+            episode_number,
+            episode_count,
+            local_episode_count: d.local_number_of_episodes.filter(|v| *v > 0),
+            season_count: d.number_of_seasons.filter(|v| *v > 0),
+            rating: d.vote_average.as_ref().and_then(json_number),
+            release_date: empty_to_none(d.release_date.unwrap_or_default()),
+            status: empty_to_none(d.status.unwrap_or_default()),
+            backdrop_path: empty_to_none(d.backdrops.unwrap_or_default()),
+            single_child_id: d.single_child_guid.filter(|s| !s.is_empty()),
         }
+    }
+
+    /// 条目详情：列表接口没有的简介、背景图、季集数。
+    ///
+    /// 注意飞牛对 `Episode` 的 `/item/<guid>` 返回空对象，调用方要按
+    /// 「字段可能为空」处理；剧集的完整信息用 `children(series)` 已经够。
+    pub fn item_detail(&self, item_id: &str) -> Result<MediaDetail> {
+        // 飞牛大量字段会直接给 null（不只省略），所以字符串一律 Option，
+        // 否则 serde 会整条解析失败。
+        #[derive(Deserialize, Default)]
+        struct DetailDto {
+            #[serde(default)]
+            guid: Option<String>,
+            #[serde(default)]
+            title: Option<String>,
+            #[serde(default)]
+            original_title: Option<String>,
+            #[serde(default, rename = "type")]
+            item_type: Option<String>,
+            #[serde(default)]
+            overview: Option<String>,
+            #[serde(default)]
+            posters: Option<String>,
+            #[serde(default)]
+            poster: Option<String>,
+            /// 目录（Directory）没有 `posters`，只有 `poster_list` 数组。
+            #[serde(default)]
+            poster_list: Option<Vec<String>>,
+            #[serde(default)]
+            backdrops: Option<String>,
+            #[serde(default)]
+            logos: Option<String>,
+            #[serde(default)]
+            vote_average: Option<serde_json::Value>,
+            #[serde(default)]
+            release_date: Option<String>,
+            #[serde(default)]
+            runtime: Option<i32>,
+            #[serde(default)]
+            duration: Option<i64>,
+            #[serde(default)]
+            number_of_seasons: Option<i32>,
+            #[serde(default)]
+            number_of_episodes: Option<i32>,
+            #[serde(default)]
+            local_number_of_seasons: Option<i32>,
+            #[serde(default)]
+            local_number_of_episodes: Option<i32>,
+            #[serde(default)]
+            status: Option<String>,
+            #[serde(default)]
+            play_item_guid: Option<String>,
+            #[serde(default)]
+            single_child_guid: Option<String>,
+            #[serde(default)]
+            media_stream: Option<MediaStreamDto>,
+        }
+
+        let path = format!("/item/{}", item_id);
+        let env: ApiEnvelope<DetailDto> =
+            self.send(Method::GET, &path, &BTreeMap::new(), None)?;
+
+        let d = env.data.unwrap_or_default();
+        let title = d.title.clone().unwrap_or_default();
+        let episode_count = d
+            .number_of_episodes
+            .filter(|v| *v > 0)
+            .or_else(|| parse_episode_count(&title));
+
+        Ok(MediaDetail {
+            id: d
+                .guid
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| item_id.to_string()),
+            title,
+            kind: MediaKind::from_raw(d.item_type.as_deref().unwrap_or("")),
+            original_title: empty_to_none(d.original_title.unwrap_or_default()),
+            overview: empty_to_none(d.overview.unwrap_or_default()),
+            poster_path: empty_to_none(d.posters.unwrap_or_default())
+                .or_else(|| empty_to_none(d.poster.unwrap_or_default()))
+                .or_else(|| {
+                    d.poster_list
+                        .and_then(|list| list.into_iter().find(|s| !s.is_empty()))
+                }),
+            backdrop_path: empty_to_none(d.backdrops.unwrap_or_default()),
+            logo_path: empty_to_none(d.logos.unwrap_or_default()),
+            rating: d.vote_average.as_ref().and_then(json_number),
+            release_date: empty_to_none(d.release_date.unwrap_or_default()),
+            runtime_seconds: match (d.runtime, d.duration) {
+                (Some(m), _) if m > 0 => Some(m as u64 * 60),
+                (_, Some(sec)) if sec > 0 => Some(sec as u64),
+                _ => None,
+            },
+            season_count: d.number_of_seasons.filter(|v| *v > 0),
+            local_season_count: d.local_number_of_seasons.filter(|v| *v > 0),
+            episode_count,
+            local_episode_count: d.local_number_of_episodes.filter(|v| *v > 0),
+            status: empty_to_none(d.status.unwrap_or_default()),
+            resolution: first_string(
+                d.media_stream.as_ref().and_then(|m| m.resolutions.as_ref()),
+            ),
+            audio_type: first_string(
+                d.media_stream.as_ref().and_then(|m| m.audio_type.as_ref()),
+            ),
+            color_range: first_string(
+                d.media_stream
+                    .as_ref()
+                    .and_then(|m| m.color_range_type.as_ref()),
+            ),
+            play_item_id: empty_to_none(d.play_item_guid.unwrap_or_default()),
+            single_child_id: empty_to_none(d.single_child_guid.unwrap_or_default()),
+        })
     }
 
     /// 取播放所需的一切：直链、续播点、音轨/字幕轨、HDR 信息。
@@ -621,21 +772,36 @@ impl FnOsSource {
         let status = response.status();
         let text = response.text()?;
 
-        let envelope: ApiEnvelope<T> = serde_json::from_str(&text).map_err(|_| MediaError::Api {
-            code: status.as_u16() as i64,
-            msg: format!("bad response: {}", truncate(&text, 200)),
-        })?;
+        let envelope: ApiEnvelope<T> =
+            serde_json::from_str(&text).map_err(|e| MediaError::Api {
+                code: status.as_u16() as i64,
+                msg: format!(
+                    "parse error at {}:{} ({}) | {}",
+                    e.line(),
+                    e.column(),
+                    e,
+                    truncate(&text, 160)
+                ),
+            })?;
 
         Ok(envelope)
     }
 }
 
+/// 按**字符**截断：`&s[..n]` 切在 UTF-8 字符中间会 panic（中文响应很常见）。
 fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        value.to_string()
-    } else {
-        format!("{}…", &value[..max])
+    match value.char_indices().nth(max) {
+        Some((idx, _)) => format!("{}…", &value[..idx]),
+        None => value.to_string(),
     }
+}
+
+/// 飞牛的评分字段有时是 `"0"`、有时是 `8.046...`，统一成 f64。
+fn json_number(value: &serde_json::Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+        .filter(|v| *v > 0.0)
 }
 
 fn empty_to_none(value: String) -> Option<String> {
@@ -644,6 +810,115 @@ fn empty_to_none(value: String) -> Option<String> {
     } else {
         Some(value)
     }
+}
+
+/// 从标题里认集号：`S01E76`、`第 76 集`、`EP06`。
+///
+/// 刮削好的剧集由服务器给 `episode_number`，这里只是给没刮削的目录兜底；
+/// 放在核心里，四端（桌面 / Android / TV）看到的集号才一致。
+pub(crate) fn parse_episode_number(title: &str) -> Option<i32> {
+    parse_sxxexx(title)
+        .or_else(|| parse_between(title, '第', '集'))
+        .or_else(|| parse_ep_prefix(title))
+}
+
+/// 从标题里认总集数，只认括号里的：`异能寻生机（76集）`。
+///
+/// 「第 76 集」是单集标题，不能当总集数，所以必须有括号。
+pub(crate) fn parse_episode_count(title: &str) -> Option<i32> {
+    let chars: Vec<char> = title.chars().collect();
+
+    for (i, &c) in chars.iter().enumerate() {
+        if c != '集' {
+            continue;
+        }
+
+        // 往前跳过空格，再取连续数字。
+        let mut start = i;
+        while start > 0 && chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+
+        let end = start;
+        while start > 0 && chars[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+
+        if start == end || start == 0 {
+            continue;
+        }
+
+        // 数字前面必须是左括号。
+        if !matches!(chars[start - 1], '（' | '(') {
+            continue;
+        }
+
+        let digits: String = chars[start..end].iter().collect();
+        if let Ok(count) = digits.parse::<i32>() {
+            if count > 0 && count <= 2000 {
+                return Some(count);
+            }
+        }
+    }
+
+    None
+}
+
+/// `S01E76` / `s1e7`
+fn parse_sxxexx(title: &str) -> Option<i32> {
+    let bytes = title.as_bytes();
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        if byte != b'S' && byte != b's' {
+            continue;
+        }
+
+        let mut j = i + 1;
+        let mut season_len = 0;
+        while j < bytes.len() && bytes[j].is_ascii_digit() && season_len < 2 {
+            j += 1;
+            season_len += 1;
+        }
+
+        if season_len == 0 || j >= bytes.len() || (bytes[j] != b'E' && bytes[j] != b'e') {
+            continue;
+        }
+
+        j += 1;
+        let mut episode = String::new();
+        while j < bytes.len() && bytes[j].is_ascii_digit() && episode.len() < 4 {
+            episode.push(bytes[j] as char);
+            j += 1;
+        }
+
+        if let Ok(number) = episode.parse::<i32>() {
+            if number > 0 {
+                return Some(number);
+            }
+        }
+    }
+
+    None
+}
+
+/// `第 76 集`
+fn parse_between(title: &str, start: char, end: char) -> Option<i32> {
+    let offset = title.find(start)?;
+    let rest = &title[offset + start.len_utf8()..];
+    let tail = rest.find(end)?;
+    let digits: String = rest[..tail].chars().filter(|c| !c.is_whitespace()).collect();
+
+    digits.parse::<i32>().ok().filter(|n| *n > 0)
+}
+
+/// `EP06`
+fn parse_ep_prefix(title: &str) -> Option<i32> {
+    let lower = title.to_ascii_lowercase();
+    let offset = lower.rfind("ep")?;
+    let rest = &title[offset + 2..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+
+    digits.parse::<i32>().ok().filter(|n| *n > 0)
 }
 
 #[derive(Debug, Deserialize)]
@@ -676,16 +951,63 @@ struct ItemDto {
     ts: i64,
     #[serde(default)]
     media_stream: Option<MediaStreamDto>,
+
+    // —— 刮削信息（TV / Movie 才有，Directory 多为空）——
+    #[serde(default)]
+    overview: Option<String>,
+    #[serde(default)]
+    backdrops: Option<String>,
+    /// 评分：飞牛有时给字符串 "0"，有时给数字，用 Value 兜住。
+    #[serde(default)]
+    vote_average: Option<serde_json::Value>,
+    #[serde(default)]
+    release_date: Option<String>,
+    // 服务器可能给 null，所以一律用 Option。
+    #[serde(default)]
+    number_of_seasons: Option<i32>,
+    #[serde(default)]
+    number_of_episodes: Option<i32>,
+    #[serde(default)]
+    local_number_of_episodes: Option<i32>,
+    #[serde(default)]
+    single_child_guid: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    season_number: Option<i32>,
+    #[serde(default)]
+    episode_number: Option<i32>,
 }
 
+/// 列表和详情里的 `media_stream`。
+///
+/// 飞牛这几个字段的形状不稳定：`resolutions` 是数组，`audio_type` 在列表里
+/// 可能是 `null`、也可能直接是字符串，详情里又是数组。用 `Value` 兜住，
+/// 取值统一走 [`first_string`]。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MediaStreamDto {
     #[serde(default)]
-    pub resolutions: Option<Vec<String>>,
+    pub resolutions: Option<serde_json::Value>,
     #[serde(default)]
-    pub audio_type: Option<String>,
+    pub audio_type: Option<serde_json::Value>,
     #[serde(default)]
-    pub color_range_type: Option<String>,
+    pub color_range_type: Option<serde_json::Value>,
+}
+
+/// 从「字符串或字符串数组」里取第一个非空值。
+pub(crate) fn first_string(value: Option<&serde_json::Value>) -> Option<String> {
+    let value = value?;
+
+    if let Some(text) = value.as_str() {
+        return (!text.is_empty()).then(|| text.to_string());
+    }
+
+    value
+        .as_array()?
+        .iter()
+        .filter_map(|item| item.as_str())
+        .find(|text| !text.is_empty())
+        .map(|text| text.to_string())
 }
 
 impl MediaSource for FnOsSource {
@@ -711,6 +1033,10 @@ impl MediaSource for FnOsSource {
 
     fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
         FnOsSource::children(self, parent_id, page, page_size)
+    }
+
+    fn detail(&self, item_id: &str) -> Result<MediaDetail> {
+        FnOsSource::item_detail(self, item_id)
     }
 
     fn records(&self) -> Result<Vec<PlayRecord>> {

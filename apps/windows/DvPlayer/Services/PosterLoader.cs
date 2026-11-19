@@ -31,32 +31,38 @@ public static class PosterLoader
         }
     }
 
-    public static Task<BitmapSource?> LoadAsync(string? posterPath)
+    /// <summary>
+    /// 取图。<paramref name="width"/> 是解码宽度：卡片 400 就够，
+    /// 详情页的横版背景要 1280，不然铺满窗口会糊。
+    /// </summary>
+    public static Task<BitmapSource?> LoadAsync(string? posterPath, int width = 400)
     {
         if (string.IsNullOrWhiteSpace(posterPath))
         {
             return Task.FromResult<BitmapSource?>(null);
         }
 
+        var key = $"{width}:{posterPath}";
+
         lock (Gate)
         {
-            if (Memory.TryGetValue(posterPath, out var cached))
+            if (Memory.TryGetValue(key, out var cached))
             {
                 return Task.FromResult<BitmapSource?>(cached);
             }
 
-            if (Pending.TryGetValue(posterPath, out var running))
+            if (Pending.TryGetValue(key, out var running))
             {
                 return running;
             }
 
-            var task = Task.Run(() => LoadCoreAsync(posterPath));
-            Pending[posterPath] = task;
+            var task = Task.Run(() => LoadCoreAsync(posterPath, key, width));
+            Pending[key] = task;
             return task;
         }
     }
 
-    private static async Task<BitmapSource?> LoadCoreAsync(string posterPath)
+    private static async Task<BitmapSource?> LoadCoreAsync(string posterPath, string key, int width)
     {
         try
         {
@@ -96,12 +102,12 @@ public static class PosterLoader
                 await File.WriteAllBytesAsync(file, bytes).ConfigureAwait(false);
             }
 
-            var bitmap = Decode(bytes);
+            var bitmap = Decode(bytes, width);
             if (bitmap is not null)
             {
                 lock (Gate)
                 {
-                    Memory[posterPath] = bitmap;
+                    Memory[key] = bitmap;
                 }
             }
 
@@ -116,12 +122,12 @@ public static class PosterLoader
         {
             lock (Gate)
             {
-                Pending.Remove(posterPath);
+                Pending.Remove(key);
             }
         }
     }
 
-    private static BitmapSource? Decode(byte[] bytes)
+    private static BitmapSource? Decode(byte[] bytes, int width)
     {
         try
         {
@@ -130,7 +136,7 @@ public static class PosterLoader
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
             image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-            image.DecodePixelWidth = 400;
+            image.DecodePixelWidth = width;
             image.StreamSource = stream;
             image.EndInit();
             image.Freeze();

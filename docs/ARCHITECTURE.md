@@ -46,8 +46,20 @@ UI / 播放器 / 聚合层
 | `PlaySource` | 播放器只吃「URL + 请求头 + 续播秒数 + 轨道」，不关心谁给的 |
 | 界面 | 源类型来自 `dv_source_kinds()`，不写死字符串 |
 
-新增一个服务器的步骤：实现 `MediaSource`（9 个方法）→ 在 `create()` 加一行
+新增一个服务器的步骤：实现 `MediaSource`（10 个方法：登录、媒体库、条目列表、子项、
+详情、播放源、进度、播放记录、图片、能力表）→ 在 `create()` 加一行
 → 在 `SUPPORTED_KINDS` 注册。界面和播放器不需要改动。
+
+层级怎么解释也归核心管，否则四端会各写一套：
+
+| 服务器原样 | 核心给界面的 | 谁负责 |
+| --- | --- | --- |
+| `TV → Season → Episode` | 同样的三层，`kind` 分别是 series / season / episode | 适配器直接映射 |
+| `Directory → Video`（未刮削） | **一部剧**：`kind=folder`，子项是集，`episode_number` 从文件名解析 | `fnos.rs` 的 `parse_episode_number` |
+| 标题里的 `（76集）` | `episode_count` | `parse_episode_count`（只认括号） |
+
+界面只做两件事：`folder` 当「剧集」显示、集号为空时按顺序补号。
+Emby 接入时它自己的 `Season`/`Episode` 已经在协议里，映射即可，不用再猜文件名。
 
 ## 2. PlayerCore 接口（桌面）
 

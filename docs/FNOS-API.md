@@ -133,6 +133,45 @@ GET  /v/api/v1/item/<guid>
 POST /v/api/v1/item/getEditDetail
 ```
 
+`GET /item/<guid>` 返回比列表多这些字段（剧集样本实测）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `overview` | 简介（TMDB 中文） |
+| `backdrops` / `posters` / `logos` | 横版图 / 海报 / 标题图，相对路径 |
+| `poster_list` | **目录（Directory）没有 `posters`，只有这个数组** |
+| `vote_average` | 评分，**字符串** `"0"` 或数字，两种都会出现 |
+| `number_of_seasons` / `number_of_episodes` | TMDB 的总季数 / 总集数 |
+| `local_number_of_seasons` / `local_number_of_episodes` | **本地**实际有的季数 / 集数 |
+| `play_item_guid` | 「继续观看」该播的条目（目录会指向第一个视频，剧集常为空） |
+| `media_stream` | `resolutions` 是数组，`audio_type` / `color_range_type` **详情里是数组、列表里是字符串或 null** |
+
+两个坑：
+
+- 字符串字段大量给 `null` 而不是省略，serde 必须写 `Option`，否则整条解析失败；
+- `Episode` 类型的 `/item/<guid>` 返回空对象 `{}`，单集信息只能用列表项；
+- `POST /movie/<guid>` 恒 501，别用。
+
+### 4.4 层级：媒体库 → 剧集 → 季 → 集
+
+```
+媒体库 (aa12d2c6...)
+├── TV 御兽：从退婚开始无敌          type=TV        number_of_seasons=10
+│   └── Season 第一季               type=Season    season_number=1
+│       └── Episode 第 1 集         type=Episode   episode_number=1
+├── Directory 异能寻生机（76集）      type=Directory  ← 未刮削的多文件目录
+│   └── Video 异能寻生机 - S01E76.mp4 type=Video    episode_number=0
+└── Movie 枫                       type=Movie
+```
+
+- 用 `parent_guid` 往下取一层：`POST /item/list {"parent_guid":"<id>","page":1,"page_size":50}`；
+- **`Directory` 不是文件夹，而是一部没刮削的剧**：子项是一堆 `Video`，没有季这一层，
+  集号只能从文件名认（`S01E76` / `第 76 集` / `EP06`），客户端必须按集号排序（接口不排序）；
+- `Directory` 的详情没有简介和横版图，但 `poster_list` 里有封面；
+- `Video` 列表项自带**剧照**（`poster`）和时长，集列表可以直接用；
+- 本地集数可能少于 TMDB 总集数（样本：10 季 81 集本地、标题写 76 集但只有 53 个文件），
+  展示时以本地为准，别拿标题里的集数当真。
+
 ## 5. 播放
 
 真实链路是三步（已全部实测通过，客户端 `FnOsSource::play_source` 就是这么做的）：

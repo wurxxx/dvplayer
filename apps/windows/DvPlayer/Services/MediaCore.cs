@@ -101,6 +101,13 @@ public sealed class MediaCore : IDisposable
         return ReadOk(ptr);
     }
 
+    /// <summary>条目详情：背景图、简介、季集数、播放入口。</summary>
+    public ApiResult<MediaDetailDto> ItemDetail(string itemId)
+    {
+        var ptr = dv_item_detail(_handle, itemId);
+        return Read(ptr, root => root.Deserialize<MediaDetailDto>(Json)!);
+    }
+
     /// <summary>取播放源：直链 + 请求头 + 续播点 + 音轨字幕。</summary>
     public ApiResult<PlaySourceDto> PlaySource(string itemId)
     {
@@ -278,6 +285,11 @@ public sealed class MediaCore : IDisposable
     [DllImport(Lib, EntryPoint = "dv_version", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_version();
 
+    [DllImport(Lib, EntryPoint = "dv_item_detail", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_item_detail(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
+
     [DllImport(Lib, EntryPoint = "dv_play_source", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_play_source(
         IntPtr handle,
@@ -320,7 +332,40 @@ public sealed record MediaItemDto(
     bool IsFavorite,
     string? Overview,
     string? Resolution,
-    long? LastPlayed);
+    long? LastPlayed,
+    int? SeasonNumber,
+    int? EpisodeNumber,
+    int? EpisodeCount,
+    int? LocalEpisodeCount,
+    int? SeasonCount,
+    double? Rating,
+    string? ReleaseDate,
+    string? Status,
+    string? BackdropPath,
+    string? SingleChildId);
+
+public sealed record MediaDetailDto(
+    string Id,
+    string Title,
+    string Kind,
+    string? OriginalTitle,
+    string? Overview,
+    string? PosterPath,
+    string? BackdropPath,
+    string? LogoPath,
+    double? Rating,
+    string? ReleaseDate,
+    long? RuntimeSeconds,
+    int? SeasonCount,
+    int? LocalSeasonCount,
+    int? EpisodeCount,
+    int? LocalEpisodeCount,
+    string? Status,
+    string? Resolution,
+    string? AudioType,
+    string? ColorRange,
+    string? PlayItemId,
+    string? SingleChildId);
 
 public sealed record PlayRecordDto(
     string ItemId,
