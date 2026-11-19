@@ -123,7 +123,7 @@ public sealed class MpvProcess : IDisposable
         yield return "--hwdec=auto-safe";                // QSV/D3D11VA 可用就用，拿不到就软解
         yield return $"--wid={wid.ToInt64()}";           // 挂进壳的 HWND
         yield return "--osc=no";                         // UI 由壳提供
-        yield return "--keep-open=no";
+        yield return "--keep-open=yes";                  // 播完留住最后一帧，别闪回桌面
         yield return "--msg-level=all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info";
         yield return file;
     }

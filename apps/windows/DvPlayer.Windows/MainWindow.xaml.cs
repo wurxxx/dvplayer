@@ -1,6 +1,9 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Shell;
 using System.Windows.Threading;
 using DvPlayer.Windows.Player;
 using Microsoft.Win32;
@@ -16,8 +19,14 @@ public partial class MainWindow : FluentWindow
 {
     private const string DefaultSample = @"D:\dvplayer\samples\p7-fel.mkv";
 
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+
     private readonly MpvProcess _mpv = new();
     private bool _isFullscreen;
+    private RECT _restoreRect;
+    private WindowChrome? _savedChrome;
 
     public MainWindow()
     {
@@ -113,22 +122,91 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>
+    /// 真全屏：不碰 WindowStyle（那会让 WPF 重建 HWND，HwndHost 和 mpv 的子窗口
+    /// 会一起被销毁，画面直接黑掉）。这里只做三件事：
+    /// 收起标题栏/控制条、把窗口摆到显示器物理矩形、把 WindowChrome 的边框清零。
+    /// </summary>
     private void ToggleFullscreen()
     {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
         _isFullscreen = !_isFullscreen;
 
         if (_isFullscreen)
         {
-            WindowState = WindowState.Normal;
-            WindowStyle = WindowStyle.None;
-            ResizeMode = ResizeMode.NoResize;
-            WindowState = WindowState.Maximized;
+            GetWindowRect(hwnd, out _restoreRect);
+
+            TitleBarRow.Height = new GridLength(0);
+            OverlayBar.Visibility = Visibility.Collapsed;
+
+            _savedChrome = WindowChrome.GetWindowChrome(this);
+            WindowChrome.SetWindowChrome(this, new WindowChrome
+            {
+                CaptionHeight = 0,
+                ResizeBorderThickness = new Thickness(0),
+                GlassFrameThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(0),
+                UseAeroCaptionButtons = false,
+            });
+
+            var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (GetMonitorInfo(monitor, ref info))
+            {
+                var r = info.rcMonitor;
+                SetWindowPos(hwnd, IntPtr.Zero, r.Left, r.Top,
+                    r.Right - r.Left, r.Bottom - r.Top, SWP_NOZORDER | SWP_SHOWWINDOW);
+            }
         }
         else
         {
-            WindowState = WindowState.Normal;
-            WindowStyle = WindowStyle.SingleBorderWindow;
-            ResizeMode = ResizeMode.CanResize;
+            TitleBarRow.Height = GridLength.Auto;
+            OverlayBar.Visibility = Visibility.Visible;
+
+            if (_savedChrome is not null)
+            {
+                WindowChrome.SetWindowChrome(this, _savedChrome);
+            }
+
+            SetWindowPos(hwnd, IntPtr.Zero, _restoreRect.Left, _restoreRect.Top,
+                _restoreRect.Right - _restoreRect.Left, _restoreRect.Bottom - _restoreRect.Top,
+                SWP_NOZORDER | SWP_SHOWWINDOW);
         }
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after,
+        int x, int y, int cx, int cy, uint flags);
 }

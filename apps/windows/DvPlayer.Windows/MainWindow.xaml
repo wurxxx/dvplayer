@@ -11,7 +11,7 @@
                  WindowBackdropType="Mica">
   <Grid>
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
+      <RowDefinition x:Name="TitleBarRow" Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
@@ -21,7 +21,8 @@
       <!-- mpv 的父 HWND，视频由 mpv 自己渲染在这里 -->
       <player:MpvHost x:Name="Host" />
 
-      <Border VerticalAlignment="Bottom"
+      <Border x:Name="OverlayBar"
+              VerticalAlignment="Bottom"
               Background="#CC000000"
               Padding="16,10">
         <Grid>

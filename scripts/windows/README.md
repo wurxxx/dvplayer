@@ -1,6 +1,33 @@
 # Windows 上的 A4 验证脚本
 
-## 远程代跑（agent）
+## 远程驱动（SSH，当前在用）
+
+笔记本装了 Win32-OpenSSH 10.4，`sshd` 开机自启，Mac 的 ed25519 公钥已经写进
+`C:\ProgramData\ssh\administrators_authorized_keys`（`ssh-setup.bat` 干的）。
+
+```bash
+sh scripts/windows/wssh.sh 'Get-Date'     # 远程跑 PowerShell，base64 传参、UTF-8 输出
+scp -i ~/.ssh/dvplayer_win a.zip wucl@192.168.0.154:D:/dvplayer/
+```
+
+SSH 会话在 session 0，GUI 起在那里你看不见。要跑带窗口的东西，用计划任务在
+交互会话里起：
+
+```powershell
+schtasks /create /tn verify-a5 /tr "powershell -NoProfile -File D:\dvplayer\setup\verify-a5.ps1" /sc once /st 00:00 /it /f
+schtasks /run /tn verify-a5
+```
+
+| 脚本 | 作用 |
+| --- | --- |
+| `ssh-setup.bat` | 装 OpenSSH MSI、开机自启、放行 22、写入 Mac 公钥（一次双击） |
+| `wssh.sh` | Mac 侧跑远程 PowerShell |
+| `run-a5.ps1` | 计划任务：启动 exe、播样本、抓屏、拷 mpv.log、退出 |
+| `verify-a5.ps1` | 计划任务：抓 HWND/矩形/DPI、按 F11、改尺寸、三张截图 |
+
+## 远程代跑（agent，备用）
+
+Windows 家庭版没有 RDP 主机，SSH/WinRM 也没开时，这个反向代理可以顶一下：
 
 Windows 家庭版没有 RDP 主机，SSH/WinRM 也没开，所以用一个**反向代理**把机器交给 Mac 驱动：
 
