@@ -18,7 +18,11 @@ cd /d "%~dp0"
 set MSI=OpenSSH-Win64-v10.4.0.0.msi
 
 if not exist "%MSI%" (
-    echo ERROR: %MSI% not found next to this script.
+    echo        downloading %MSI% from the Mac ...
+    powershell -NoProfile -Command "$wc = New-Object Net.WebClient; $wc.Proxy = $null; $wc.DownloadFile('http://192.168.0.15:8080/OpenSSH-Win64-v10.4.0.0.msi', '%~dp0%MSI%')"
+)
+if not exist "%MSI%" (
+    echo ERROR: %MSI% not found and download failed.
     pause
     exit /b 1
 )
