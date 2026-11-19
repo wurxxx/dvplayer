@@ -1,0 +1,52 @@
+<ui:FluentWindow x:Class="DvPlayer.Windows.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:player="clr-namespace:DvPlayer.Windows.Player"
+                 Title="DV Player"
+                 Width="1280" Height="720"
+                 MinWidth="640" MinHeight="360"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar Grid.Row="0" Title="DV Player" />
+
+    <Grid Grid.Row="1" Background="Black">
+      <!-- mpv 的父 HWND，视频由 mpv 自己渲染在这里 -->
+      <player:MpvHost x:Name="Host" />
+
+      <Border VerticalAlignment="Bottom"
+              Background="#CC000000"
+              Padding="16,10">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock x:Name="StatusText"
+                     Grid.Column="0"
+                     Foreground="White"
+                     VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis"
+                     Text="把 P7 样本拖进窗口，或点右侧的 打开" />
+
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <ui:Button Content="打开"
+                       Appearance="Primary"
+                       Margin="0,0,8,0"
+                       Click="OnOpenClick" />
+            <ui:Button Content="全屏 (F11)"
+                       Click="OnFullscreenClick" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</ui:FluentWindow>

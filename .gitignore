@@ -14,3 +14,7 @@ apps/macos/m0-render/m0-render
 *.mkv
 *.mp4
 .DS_Store
+
+# .NET
+apps/windows/**/bin/
+apps/windows/**/obj/

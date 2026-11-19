@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DvPlayer.Windows</RootNamespace>
+    <AssemblyName>DvPlayer.Windows</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 允许在非 Windows 上 restore/编译；运行仍然需要 Windows。 -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.*" />
+  </ItemGroup>
+
+</Project>
