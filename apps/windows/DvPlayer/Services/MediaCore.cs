@@ -51,12 +51,12 @@ public sealed class MediaCore : IDisposable
         }
     }
 
-    public static MediaCore? Create(SourceConfig config)
+    /// <summary>新建一个空聚合句柄；随后用 <see cref="Add"/> 逐个接源。</summary>
+    public static MediaCore? Create()
     {
-        var json = JsonSerializer.Serialize(config, Json);
         try
         {
-            var handle = dv_source_create(json);
+            var handle = dv_hub_new();
             return handle == IntPtr.Zero ? null : new MediaCore(handle);
         }
         catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
@@ -65,60 +65,69 @@ public sealed class MediaCore : IDisposable
         }
     }
 
-    public ApiResult<string> Connect()
+    /// <summary>添加并登录一个源。单个源失败不影响已连上的源。</summary>
+    public ApiResult<SourceInfoDto> Add(SourceConfig config)
     {
-        var ptr = dv_connect(_handle);
-        return Read(ptr, root => root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "");
+        var json = JsonSerializer.Serialize(config, Json);
+        var ptr = dv_hub_add(_handle, json);
+        return Read(ptr, root => root.Deserialize<SourceInfoDto>(Json)!);
+    }
+
+    /// <summary>已连上的源（设置页显示状态用）。</summary>
+    public ApiResult<List<SourceInfoDto>> Sources()
+    {
+        var ptr = dv_hub_sources(_handle);
+        return Read(ptr, root => root.Deserialize<List<SourceInfoDto>>(Json) ?? new());
     }
 
     public ApiResult<List<MediaLibraryDto>> Libraries()
     {
-        var ptr = dv_libraries(_handle);
+        var ptr = dv_hub_libraries(_handle);
         return Read(ptr, root => root.Deserialize<List<MediaLibraryDto>>(Json) ?? new());
     }
 
     public ApiResult<PagedDto<MediaItemDto>> Items(string libraryId, int page, int pageSize)
     {
-        var ptr = dv_items(_handle, libraryId, page, pageSize);
+        var ptr = dv_hub_items(_handle, libraryId, page, pageSize);
         return Read(ptr, root => root.Deserialize<PagedDto<MediaItemDto>>(Json)!);
     }
 
     public ApiResult<PagedDto<MediaItemDto>> Children(string parentId, int page, int pageSize)
     {
-        var ptr = dv_children(_handle, parentId, page, pageSize);
+        var ptr = dv_hub_children(_handle, parentId, page, pageSize);
         return Read(ptr, root => root.Deserialize<PagedDto<MediaItemDto>>(Json)!);
     }
 
     public ApiResult<List<PlayRecordDto>> Records()
     {
-        var ptr = dv_records(_handle);
+        var ptr = dv_hub_records(_handle);
         return Read(ptr, root => root.Deserialize<List<PlayRecordDto>>(Json) ?? new());
     }
 
     public ApiResult<bool> ReportProgress(string itemId, long position, long duration)
     {
-        var ptr = dv_report_progress(_handle, itemId, position, duration);
+        var ptr = dv_hub_report_progress(_handle, itemId, position, duration);
         return ReadOk(ptr);
     }
 
     /// <summary>条目详情：背景图、简介、季集数、播放入口。</summary>
     public ApiResult<MediaDetailDto> ItemDetail(string itemId)
     {
-        var ptr = dv_item_detail(_handle, itemId);
+        var ptr = dv_hub_detail(_handle, itemId);
         return Read(ptr, root => root.Deserialize<MediaDetailDto>(Json)!);
     }
 
     /// <summary>取播放源：直链 + 请求头 + 续播点 + 音轨字幕。</summary>
     public ApiResult<PlaySourceDto> PlaySource(string itemId)
     {
-        var ptr = dv_play_source(_handle, itemId);
+        var ptr = dv_hub_play_source(_handle, itemId);
         return Read(ptr, root => root.Deserialize<PlaySourceDto>(Json)!);
     }
 
     /// <summary>海报地址与鉴权头（图片不能直接给 Image，要自己下载）。</summary>
     public ApiResult<ImageSourceDto> ImageSource(string posterPath)
     {
-        var ptr = dv_image_source(_handle, posterPath);
+        var ptr = dv_hub_image_source(_handle, posterPath);
         return Read(ptr, root => root.Deserialize<ImageSourceDto>(Json)!);
     }
 
@@ -233,50 +242,55 @@ public sealed class MediaCore : IDisposable
     {
         if (_handle != IntPtr.Zero)
         {
-            dv_source_free(_handle);
+            dv_hub_free(_handle);
             _handle = IntPtr.Zero;
         }
     }
 
     // —— P/Invoke ——
 
-    [DllImport(Lib, EntryPoint = "dv_source_create", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_source_create([MarshalAs(UnmanagedType.LPUTF8Str)] string configJson);
+    [DllImport(Lib, EntryPoint = "dv_hub_new", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_new();
+
+    [DllImport(Lib, EntryPoint = "dv_hub_free", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void dv_hub_free(IntPtr handle);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_add", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_add(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string configJson);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_sources", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_sources(IntPtr handle);
 
     [DllImport(Lib, EntryPoint = "dv_source_kinds", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_source_kinds();
 
-    [DllImport(Lib, EntryPoint = "dv_source_free", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void dv_source_free(IntPtr handle);
-
     [DllImport(Lib, EntryPoint = "dv_string_free", CallingConvention = CallingConvention.Cdecl)]
     private static extern void dv_string_free(IntPtr text);
 
-    [DllImport(Lib, EntryPoint = "dv_connect", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_connect(IntPtr handle);
+    [DllImport(Lib, EntryPoint = "dv_hub_libraries", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_libraries(IntPtr handle);
 
-    [DllImport(Lib, EntryPoint = "dv_libraries", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_libraries(IntPtr handle);
-
-    [DllImport(Lib, EntryPoint = "dv_items", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_items(
+    [DllImport(Lib, EntryPoint = "dv_hub_items", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_items(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string libraryId,
         int page,
         int pageSize);
 
-    [DllImport(Lib, EntryPoint = "dv_children", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_children(
+    [DllImport(Lib, EntryPoint = "dv_hub_children", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_children(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string parentId,
         int page,
         int pageSize);
 
-    [DllImport(Lib, EntryPoint = "dv_records", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_records(IntPtr handle);
+    [DllImport(Lib, EntryPoint = "dv_hub_records", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_records(IntPtr handle);
 
-    [DllImport(Lib, EntryPoint = "dv_report_progress", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_report_progress(
+    [DllImport(Lib, EntryPoint = "dv_hub_report_progress", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_report_progress(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
         long position,
@@ -285,18 +299,18 @@ public sealed class MediaCore : IDisposable
     [DllImport(Lib, EntryPoint = "dv_version", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_version();
 
-    [DllImport(Lib, EntryPoint = "dv_item_detail", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_item_detail(
+    [DllImport(Lib, EntryPoint = "dv_hub_detail", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_detail(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
-    [DllImport(Lib, EntryPoint = "dv_play_source", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_play_source(
+    [DllImport(Lib, EntryPoint = "dv_hub_play_source", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_play_source(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
-    [DllImport(Lib, EntryPoint = "dv_image_source", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_image_source(
+    [DllImport(Lib, EntryPoint = "dv_hub_image_source", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_image_source(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string posterPath);
 }
@@ -308,6 +322,8 @@ public sealed record SourceConfig(
     string Base,
     string Username,
     string Password);
+
+public sealed record SourceInfoDto(string Id, string Name, string Kind);
 
 public sealed record MediaLibraryDto(
     string Id,

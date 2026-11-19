@@ -14,6 +14,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::error::MediaError;
+use crate::hub::MediaHub;
 use crate::models::{
     Envelope, ImageSource, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource,
 };
@@ -236,6 +237,198 @@ pub extern "C" fn dv_play_source(handle: *mut SourceHandle, item_id: *const c_ch
 pub extern "C" fn dv_image_source(handle: *mut SourceHandle, path: *const c_char) -> *mut c_char {
     guard(|| {
         let Some(h) = (unsafe { handle.as_mut() }) else {
+            return reply::<ImageSource>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(p) = read_cstr(path) else {
+            return reply::<ImageSource>(Err(MediaError::Other("null image path".into())));
+        };
+        reply(h.inner.image_source(&p))
+    })
+}
+
+// —— 聚合层（多源合并）——
+//
+// 界面只跟 hub 打交道：id 都是 `<sourceId>:<itemId>`，图片路径同理。
+// 读写函数都用 `*const`：海报是并发加载的，不能同时造出多个 `&mut`。
+
+/// 聚合句柄：持有 0..N 个已登录的媒体源。
+pub struct HubHandle {
+    inner: MediaHub,
+}
+
+/// 新建一个空的聚合句柄（还没有源）。
+#[no_mangle]
+pub extern "C" fn dv_hub_new() -> *mut HubHandle {
+    catch_unwind(AssertUnwindSafe(|| {
+        Box::into_raw(Box::new(HubHandle {
+            inner: MediaHub::new(),
+        }))
+    }))
+    .unwrap_or(ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_free(handle: *mut HubHandle) {
+    if !handle.is_null() {
+        unsafe {
+            drop(Box::from_raw(handle));
+        }
+    }
+}
+
+/// 添加并登录一个源。config 同 `dv_source_create`。
+///
+/// 单个源失败不影响已经加进来的源；调用方按返回值决定提示。
+#[no_mangle]
+pub extern "C" fn dv_hub_add(handle: *mut HubHandle, config: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_mut() }) else {
+            return reply::<()>(Err(MediaError::Other("null handle".into())));
+        };
+
+        let Some(json) = read_cstr(config) else {
+            return reply::<()>(Err(MediaError::Other("null config".into())));
+        };
+
+        let parsed: SourceConfig = match serde_json::from_str(&json) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                return reply::<()>(Err(MediaError::Other(format!("config 解析失败：{err}"))));
+            }
+        };
+
+        match h.inner.add(&parsed) {
+            Ok(()) => reply(Ok(serde_json::json!({
+                "id": parsed.id,
+                "name": parsed.name,
+                "kind": parsed.kind,
+            }))),
+            Err(err) => reply::<()>(Err(err)),
+        }
+    })
+}
+
+/// 已连接的源，用于设置页显示状态。
+#[no_mangle]
+pub extern "C" fn dv_hub_sources(handle: *const HubHandle) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<crate::hub::SourceInfo>(Err(MediaError::Other("null handle".into())));
+        };
+        reply(Ok(h.inner.sources()))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_libraries(handle: *const HubHandle) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Vec<MediaLibrary>>(Err(MediaError::Other("null handle".into())));
+        };
+        reply(h.inner.libraries())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_items(
+    handle: *const HubHandle,
+    library_id: *const c_char,
+    page: i32,
+    page_size: i32,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Paged<MediaItem>>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(library_id) else {
+            return reply::<Paged<MediaItem>>(Err(MediaError::Other("null library id".into())));
+        };
+        reply(h.inner.items(&id, page, page_size))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_children(
+    handle: *const HubHandle,
+    parent_id: *const c_char,
+    page: i32,
+    page_size: i32,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Paged<MediaItem>>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(parent_id) else {
+            return reply::<Paged<MediaItem>>(Err(MediaError::Other("null parent id".into())));
+        };
+        reply(h.inner.children(&id, page, page_size))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_detail(handle: *const HubHandle, item_id: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<MediaDetail>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<MediaDetail>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.detail(&id))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_play_source(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<PlaySource>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<PlaySource>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.play_source(&id))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_report_progress(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+    position: i64,
+    duration: i64,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<()>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<()>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.report_progress(&id, position, duration))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_records(handle: *const HubHandle) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Vec<PlayRecord>>(Err(MediaError::Other("null handle".into())));
+        };
+        reply(h.inner.records())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_image_source(
+    handle: *const HubHandle,
+    path: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<ImageSource>(Err(MediaError::Other("null handle".into())));
         };
         let Some(p) = read_cstr(path) else {

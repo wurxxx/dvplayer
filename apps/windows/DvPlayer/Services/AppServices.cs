@@ -1,5 +1,8 @@
 namespace DvPlayer.Services;
 
+/// <summary>一个源的连接结果，设置页与顶栏用它显示状态。</summary>
+public sealed record SourceConnection(string Id, string Name, string Kind, bool Ok, string? Error);
+
 /// <summary>进程级服务容器。正式项目会用依赖注入，这里先保持简单。</summary>
 public sealed class AppServices
 {
@@ -12,9 +15,19 @@ public sealed class AppServices
 
     public AppSettings Settings { get; }
 
+    /// <summary>聚合句柄：内部持有所有已连上的源。</summary>
     public MediaCore? Core { get; private set; }
 
-    public SourceConfig? CurrentSource { get; private set; }
+    /// <summary>每个配置源的连接结果（失败的也留着，好让设置页说明原因）。</summary>
+    public IReadOnlyList<SourceConnection> Connections { get; private set; } = Array.Empty<SourceConnection>();
+
+    /// <summary>顶栏那一行：一个源显示名字，多个源显示数量。</summary>
+    public string SourceSummary => Connections.Count(c => c.Ok) switch
+    {
+        0 => "未连接",
+        1 => Connections.First(c => c.Ok).Name,
+        var n => $"{n} 个源",
+    };
 
     /// <summary>共享核心版本号；DLL 缺失时返回 null。</summary>
     public string? CoreVersion
@@ -40,17 +53,26 @@ public sealed class AppServices
     /// </summary>
     public event EventHandler? ConnectionChanged;
 
-    /// <summary>连接（或切换）一个媒体源。失败时把旧连接保留为 null。</summary>
-    public async Task<(bool Ok, string? Error)> ConnectAsync(SourceConfig config)
+    /// <summary>
+    /// 把所有配置好的源接进聚合句柄。单个源失败不影响其它源：
+    /// 只要有一个连上就算成功，失败的会在设置页标出来。
+    /// </summary>
+    public async Task<(bool Ok, string? Error)> ConnectAllAsync()
     {
         Core?.Dispose();
         Core = null;
-        CurrentSource = null;
+
+        var configs = Settings.Sources.ToList();
+        if (configs.Count == 0)
+        {
+            Connections = Array.Empty<SourceConnection>();
+            return (false, "还没有配置媒体源");
+        }
 
         MediaCore? core;
         try
         {
-            core = MediaCore.Create(config);
+            core = MediaCore.Create();
         }
         catch (MediaCoreMissingException ex)
         {
@@ -62,42 +84,64 @@ public sealed class AppServices
             return (false, "无法加载共享核心 dvplayer_media（检查 DLL 是否在输出目录）");
         }
 
-        ApiResult<string> result;
-        try
+        var results = new List<SourceConnection>();
+        foreach (var config in configs)
         {
-            result = await Task.Run(core.Connect).ConfigureAwait(false);
+            ApiResult<SourceInfoDto> added;
+            try
+            {
+                added = await Task.Run(() => core.Add(config)).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                added = ApiResult<SourceInfoDto>.Fail("调用共享核心失败：" + ex.Message);
+            }
+
+            results.Add(new SourceConnection(
+                config.Id,
+                config.Name,
+                config.Kind,
+                added.Ok,
+                added.Ok ? null : added.Error ?? "连接失败"));
         }
-        catch (Exception ex)
+
+        Connections = results;
+
+        if (!results.Any(r => r.Ok))
         {
             core.Dispose();
-            return (false, "调用共享核心失败：" + ex.Message);
-        }
-        if (!result.Ok)
-        {
-            core.Dispose();
-            return (false, result.Error ?? "连接失败");
+            var errors = results.Select(r => $"{r.Name}：{r.Error}");
+            return (false, string.Join("；", errors));
         }
 
         Core = core;
-        CurrentSource = config;
-        Settings.LastSourceId = config.Id;
         Settings.Save();
 
         ConnectionChanged?.Invoke(this, EventArgs.Empty);
-        return (true, null);
+
+        var failed = results.Where(r => !r.Ok).ToList();
+        return (true, failed.Count == 0
+            ? null
+            : "部分源不可用：" + string.Join("；", failed.Select(r => $"{r.Name}：{r.Error}")));
     }
 
-    /// <summary>按配置里的 LastSourceId 自动连一次。</summary>
-    public async Task<(bool Ok, string? Error)> ConnectLastAsync()
+    /// <summary>启动时自动连一次。</summary>
+    public Task<(bool Ok, string? Error)> ConnectSavedAsync()
     {
         if (IsConnected)
         {
-            return (true, null);
+            return Task.FromResult((true, (string?)null));
         }
 
-        var source = Settings.Sources.FirstOrDefault(s => s.Id == Settings.LastSourceId)
-                     ?? Settings.Sources.FirstOrDefault();
+        return ConnectAllAsync();
+    }
 
-        return source is null ? (false, "还没有配置媒体源") : await ConnectAsync(source).ConfigureAwait(false);
+    /// <summary>断开所有源（删除最后一个源时用）。</summary>
+    public void Disconnect()
+    {
+        Core?.Dispose();
+        Core = null;
+        Connections = Array.Empty<SourceConnection>();
+        ConnectionChanged?.Invoke(this, EventArgs.Empty);
     }
 }

@@ -56,6 +56,17 @@ public static class MediaText
         _ => kind,
     };
 
+    /// <summary>媒体源类型的中文名（设置页与状态提示用）。</summary>
+    public static string SourceKindLabel(string kind) => kind switch
+    {
+        "fnos" => "飞牛影视",
+        "emby" => "Emby",
+        "jellyfin" => "Jellyfin",
+        "plex" => "Plex",
+        "directory" => "本地目录",
+        _ => kind,
+    };
+
     /// <summary>能直接交给播放器的类型；其余（剧集 / 季 / 目录）要先看详情。</summary>
     public static bool IsPlayable(string kind) => kind switch
     {
@@ -76,12 +87,38 @@ public static class MediaText
             return $"{Clean(record.SeriesTitle)} · {episode}";
         }
 
+        // 未刮削目录：记录标题是文件名（`剧名 - S01E106.mp4`），拆成「剧名 · 第 N 集」。
+        var (fileSeries, fileEpisode) = SplitEpisodeFile(record.Title);
+        if (fileSeries is not null && fileEpisode is not null)
+        {
+            return $"{fileSeries} · 第 {fileEpisode} 集";
+        }
+
         if (!string.IsNullOrWhiteSpace(record.SeriesTitle) && string.IsNullOrWhiteSpace(record.Title))
         {
             return Clean(record.SeriesTitle);
         }
 
         return Clean(record.Title);
+    }
+
+    /// <summary>「剧名 - S01E106.mp4」→（「剧名」, 106）；拆不出返回 (null, null)。</summary>
+    private static (string? Series, int? Episode) SplitEpisodeFile(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return (null, null);
+        }
+
+        var name = TrimExtension(title);
+        var match = Regex.Match(name, @"^(?<name>.+?)[\s._-]*[Ss]\d{1,2}\s*[Ee](?<e>\d{1,4})$");
+        if (!match.Success || !int.TryParse(match.Groups["e"].Value, out var number))
+        {
+            return (null, null);
+        }
+
+        var series = Clean(match.Groups["name"].Value.Trim(' ', '-', '.', '_'));
+        return (series, number);
     }
 
     /// <summary>卡片副标题：「剧集 · 81 集 · 10 季」。</summary>

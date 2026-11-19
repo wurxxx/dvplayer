@@ -112,21 +112,23 @@ public partial class MainWindow : FluentWindow
 
     private async Task TryAutoConnectAsync()
     {
-        var (ok, error) = await AppServices.Instance.ConnectLastAsync();
-        SourceStatus.Text = ok
-            ? AppServices.Instance.CurrentSource?.Name ?? "已连接"
-            : error ?? "未连接";
-        SourceHint.Text = ok ? "媒体库已连接" : "在设置里添加媒体源";
+        var (ok, error) = await AppServices.Instance.ConnectSavedAsync();
+        RefreshSourceStatus();
+
+        // 全部连不上时才把原因挂出来；部分失败在设置页看。
+        if (!ok && error is not null)
+        {
+            SourceHint.Text = error;
+            SourceHint.ToolTip = error;
+        }
     }
 
-    /// <summary>设置页连接成功后刷新左下角状态。</summary>
+    /// <summary>连接状态变化后刷新左下角。</summary>
     public void RefreshSourceStatus()
     {
-        var connected = AppServices.Instance.IsConnected;
-        SourceStatus.Text = connected
-            ? AppServices.Instance.CurrentSource?.Name ?? "已连接"
-            : "未连接";
-        SourceHint.Text = connected ? "媒体库已连接" : "在设置里添加媒体源";
+        var services = AppServices.Instance;
+        SourceStatus.Text = services.SourceSummary;
+        SourceHint.Text = services.IsConnected ? "媒体库已连接" : "在设置里添加媒体源";
     }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)

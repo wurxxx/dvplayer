@@ -9,7 +9,16 @@
       <TextBlock Text="设置" Style="{StaticResource PageTitle}" />
       <TextBlock Text="管理媒体库来源" Style="{StaticResource Caption}" Margin="0,6,0,0" />
 
-      <TextBlock Text="媒体源" Style="{StaticResource SectionTitle}" Margin="0,28,0,10" />
+      <Grid Margin="0,28,0,10">
+        <TextBlock Text="媒体源" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" />
+        <Button x:Name="ConnectAllButton" Content="重新连接全部" Click="OnReconnectClick"
+                Style="{StaticResource GhostButton}" HorizontalAlignment="Right"
+                Padding="12,5" FontSize="12" />
+      </Grid>
+
+      <TextBlock x:Name="EmptyHint" Text="还没有媒体源，用下面的表单添加一个。"
+                 Style="{StaticResource Caption}" Margin="0,0,0,10"
+                 Visibility="Collapsed" />
 
       <ItemsControl x:Name="SourceList">
         <ItemsControl.ItemTemplate>
@@ -20,6 +29,7 @@
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
@@ -34,17 +44,24 @@
                   <TextBlock Text="{Binding Title}" FontSize="13.5"
                              Foreground="{StaticResource TextBrush}"
                              TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding Url}" FontSize="11.5"
+                  <TextBlock Text="{Binding Subtitle}" FontSize="11.5"
                              Foreground="{StaticResource FaintBrush}" Margin="0,2,0,0"
-                             TextTrimming="CharacterEllipsis" />
+                             TextTrimming="CharacterEllipsis"
+                             ToolTip="{Binding Subtitle}" />
                 </StackPanel>
 
                 <Border Grid.Column="2" Background="#1FFFFFFF" CornerRadius="6"
-                        Padding="8,2" VerticalAlignment="Center"
-                        Visibility="{Binding BadgeVisibility}">
+                        Padding="8,2" VerticalAlignment="Center" Margin="0,0,8,0">
                   <TextBlock Text="{Binding Badge}" FontSize="10.5"
-                             Foreground="{StaticResource AccentBrush}" />
+                             Foreground="{Binding BadgeBrush}" />
                 </Border>
+
+                <Button Grid.Column="3" Tag="{Binding Id}" Click="OnRemoveClick"
+                        Style="{StaticResource GhostButton}" Padding="7,4"
+                        VerticalAlignment="Center" ToolTip="删除这个源">
+                  <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                             FontSize="12" Foreground="{StaticResource MutedBrush}" />
+                </Button>
               </Grid>
             </Border>
           </DataTemplate>
@@ -54,9 +71,16 @@
       <Border Background="{StaticResource SurfaceBrush}" CornerRadius="12"
               Padding="20" Margin="0,20,0,0" Width="480" HorizontalAlignment="Left">
         <StackPanel>
-          <TextBlock Text="添加飞牛影视" Style="{StaticResource SectionTitle}" />
-          <TextBlock Text="登录后即可浏览媒体库与播放记录。" Style="{StaticResource Caption}"
-                     Margin="0,5,0,0" />
+          <TextBlock Text="添加媒体源" Style="{StaticResource SectionTitle}" />
+          <TextBlock Text="支持飞牛影视；Emby / Jellyfin 接入后这里会多出对应类型。"
+                     Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap" />
+
+          <TextBlock Text="类型" Style="{StaticResource FieldLabel}" />
+          <ComboBox x:Name="KindBox" Height="34" FontSize="13"
+                    DisplayMemberPath="Label"
+                    Background="{StaticResource SurfaceHoverBrush}"
+                    Foreground="{StaticResource TextBrush}"
+                    BorderBrush="{StaticResource LineBrush}" />
 
           <TextBlock Text="名称" Style="{StaticResource FieldLabel}" />
           <TextBox x:Name="NameBox" Text="飞牛影视" Style="{StaticResource Input}" />

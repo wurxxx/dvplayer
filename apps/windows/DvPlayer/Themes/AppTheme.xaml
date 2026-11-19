@@ -11,6 +11,7 @@
   <Color x:Key="MutedColor">#9A9AA6</Color>
   <Color x:Key="FaintColor">#64646F</Color>
   <Color x:Key="AccentColor">#FFB020</Color>
+  <Color x:Key="DangerColor">#FF6B6B</Color>
 
   <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}" />
   <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource SidebarColor}" />
@@ -21,6 +22,7 @@
   <SolidColorBrush x:Key="MutedBrush" Color="{StaticResource MutedColor}" />
   <SolidColorBrush x:Key="FaintBrush" Color="{StaticResource FaintColor}" />
   <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+  <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
   <SolidColorBrush x:Key="NavSelectedBrush" Color="#1FFFFFFF" />
   <SolidColorBrush x:Key="NavHoverBrush" Color="#0FFFFFFF" />
 
