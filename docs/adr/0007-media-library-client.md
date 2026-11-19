@@ -27,7 +27,9 @@ M0 的 `DvPlayer.Windows` 只是为了验收 mpv 嵌入、IPC、DV 徽标和全�
      └── EmbySource    (Emby 标准 API，X-Emby-Token)
    ```
 
-3. 统一模型只有四个：`MediaLibrary`、`MediaItem`、`PlayRecord`、`PlaySource`（可播地址）。
+3. 统一模型只有四个核心类型：`MediaLibrary`、`MediaItem`、`PlayRecord`、`PlaySource`（可播地址）。
+   实现中另补了 `MediaDetail`（详情页字段）与 `ImageSource`（带鉴权的图片地址），
+   都只是同一套模型的补充，不是新的抽象。
 4. 聚合层负责合并、去重、排序与搜索；UI 只认统一模型，不认具体服务器。
 5. 播放仍然交给 mpv（ADR-0001），播放地址由各源给出（直链或转码流）。
 

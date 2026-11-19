@@ -4,18 +4,42 @@
 
 ## 1. 目标
 
-做一个跨 macOS、Windows、Android、Android TV 的原生播放器。
+做一个跨 macOS、Windows、Android、Android TV 的原生播放器，三条并列主线：
 
-桌面端的核心差异点是 **Dolby Vision Profile 7 双层（BL + EL + RPU）的完整重建**，
-包含 FEL（Full Enhancement Layer）——不是丢掉 EL 只播 BL，也不是转 P8.1。
+1. **格式覆盖**——市面上绝大部分编码与 HDR 格式都能解、能正确呈现：
+   HEVC / H.264 / AV1 / VP9、Dolby Vision（P5 / P7 / P8）、HDR10 / HDR10+ / HLG、
+   DTS-HD / TrueHD / Atmos 直通、PGS / ASS 字幕。
+   设备做不到的要**明确降级并说明**（例如"这台机器只能播 BL"），不能黑屏、花屏或假装支持。
+2. **资源库整合**——飞牛影视、Emby、Jellyfin、Plex，以及 SMB / NFS / WebDAV 目录，
+   统一接入、统一浏览、统一播放。新增一种源只写一个适配器，界面不动（ADR-0008）。
+3. **聚合搜索与统一进度**——一次搜索覆盖所有已接入的源，播放记录与续播点合并展示，
+   同一部片在多个源里出现时按规则去重、选最优的一路播。
+
+Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的一格），但不再是唯一目标。
+
+> 2026-11-19 调整：原目标只写「DV P7 FEL 完整重建」，是单点突破的思路；
+> 实际产品要解决的是「什么都能放 + 片源都在一个界面里」，因此扩成上面三条。
+
+### 1.1 资源库接入范围
+
+| 源 | 协议 | 状态 | 备注 |
+| --- | --- | --- | --- |
+| 飞牛影视（fnOS Media） | 原生 `/v/api/v1` + authx 签名 | **已接入** | 见 [FNOS-API.md](FNOS-API.md) |
+| Emby | `/emby/*` + `X-Emby-Token` | 未开始（M1） | 官方 API 稳定，作为第二个源 |
+| Jellyfin | 与 Emby 同源 | 未开始 | 与 Emby 共用一个适配器，只换协议头 |
+| Plex | `/library/*` + `X-Plex-Token` | 未开始 | 需要独立适配器 |
+| SMB / NFS / WebDAV | 文件系统 | 未开始 | 无刮削，按 `SxxExx` / `第 N 集` 认集号（同 Directory 的处理） |
+
+同一部片出现在多个源时怎么选、搜索怎么合并，见
+[ARCHITECTURE.md](ARCHITECTURE.md) §1.2。
 
 ## 2. 已定技术路线
 
-| 平台 | UI | 视频面 | 播放内核 | DV 能力 |
+| 平台 | UI | 视频面 | 播放内核 | 格式能力 |
 | --- | --- | --- | --- | --- |
-| Windows | .NET 10 + WPF + WPF-UI | mpv 子 HWND（`wid`），mpv 自管 swapchain | libmpv（`vo=gpu-next`） | P7 FEL 完整 |
-| macOS | SwiftUI + AppKit | libmpv render API + NSOpenGLView | libmpv（legacy `gpu`） | v1 仅 HDR10 |
-| Android / TV | Kotlin + Compose for TV | SurfaceView / SurfaceTexture | Media3 (ExoPlayer) | 依赖设备，P7 回退 |
+| Windows | .NET 10 + WPF + WPF-UI | mpv 子 HWND（`wid`），mpv 自管 swapchain | 官方 `mpv.exe` 子进程 + JSON IPC（ADR-0009，`vo=gpu-next`） | DV P7 FEL 完整；HDR10 / HDR10+ / HLG；硬解看 GPU（已验 4K120 / 8K60） |
+| macOS | SwiftUI + AppKit | libmpv render API + NSOpenGLView | libmpv（legacy `gpu`） | v1 只做 HDR10，无 DV（render API 拿不到 gpu-next） |
+| Android / TV | Kotlin + Compose for TV | SurfaceView / SurfaceTexture | Media3 (ExoPlayer) | 取决于设备解码器；DV 按机型，P7 回退 BL 并标注 |
 
 关键结论（详见 ADR）：
 
@@ -45,10 +69,25 @@
 | 里程碑 | 范围 | 状态 |
 | --- | --- | --- |
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
-| M1 Windows Alpha | 媒体库客户端（飞牛 + Emby）、播放与续播、打包 | **进行中**，清单见 [M1.md](M1.md) |
-| M2 Android / TV | Media3 管线、DV 探测与回退、TV 焦点 | 未开始 |
-| M3 macOS | render 全链路、HDR10、公证与 Sparkle | 未开始（M0 已验到出画） |
+| M1 Windows Alpha | 多源接入（飞牛 + Emby）、聚合搜索、播放与续播、打包 | **进行中**，清单见 [M1.md](M1.md) |
+| M2 Android / TV | Media3 管线、格式矩阵（DV 探测与回退）、TV 焦点 | 未开始 |
+| M3 macOS | render 全链路、HDR10 呈现、公证与 Sparkle | 未开始（M0 已验到出画） |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | 未开始（共享核心已提前在 M1 落地） |
+
+### 解码与呈现能力矩阵（横跨 M1–M3，不是独立里程碑）
+
+格式覆盖是一条贯穿三端的线，用矩阵驱动，验证记录写在 [DECODE.md](DECODE.md)：
+
+| 能力 | Windows | macOS | Android / TV |
+| --- | --- | --- | --- |
+| HEVC / H.264 硬解 | **已验**（4K/8K、120 fps） | 待验 | 待验 |
+| AV1 / VP9 | 待验 | 待验 | 待验 |
+| DV P7（FEL） | **已验** | 不支持（v1） | 回退 BL |
+| DV P5 / P8 | 部分验（P5 颜色待修，见 M0 §5.3） | 不支持 | 待验 |
+| HDR10 / HDR10+ / HLG 识别 | **已验**（元数据正确） | 待验 | 待验 |
+| HDR 直通到 HDR 屏 | 待验（本机 SDR 屏） | 待验 | 待验 |
+| 音频直通（DTS-HD / TrueHD / Atmos） | 未做 | 未做 | 未做 |
+| PGS / ASS 字幕 | 未验 | 未验 | libass NDK 未做 |
 
 ### M0 — 技术验证（完成）
 
@@ -62,9 +101,9 @@
 
 ### M1 — Windows Alpha（进行中）
 
-媒体库客户端：飞牛影视 / Emby 双源、合并搜索、播放记录与续播；
+对应主线 2 与 3 的第一版：飞牛 + Emby 双源、跨源合并搜索、合并播放记录与续播；
 播放/暂停/seek/轨道/字幕/音频设备与直通/HDR 开关/全屏/快捷键；
-MSIX 打包与自动更新。
+MSIX 打包与自动更新。Jellyfin / Plex / 目录源排在 Emby 之后。
 
 共享层见 ADR-0008：媒体库逻辑在 `core/media`（Rust），三端只做界面。
 

@@ -1,15 +1,26 @@
 # DVPlayer
 
-跨平台原生播放器（macOS / Windows / Android / Android TV），桌面端目标是把
-Dolby Vision Profile 7 双层（BL + EL + RPU）完整重建，包括 FEL。
+跨平台原生播放器（macOS / Windows / Android / Android TV）。三个目标：
+
+1. **格式覆盖**：主流编码与 HDR 格式都能解、能正确呈现——HEVC / H.264 / AV1 / VP9、
+   Dolby Vision（P5 / P7 / P8，其中 P7 双层 BL+EL+RPU 完整重建）、HDR10 / HDR10+ / HLG、
+   DTS-HD / TrueHD / Atmos 直通、PGS / ASS 字幕；设备做不到的明确降级，不装支持。
+2. **资源库整合**：飞牛影视、Emby、Jellyfin、Plex，以及 SMB / NFS / WebDAV 目录，
+   统一接入、统一浏览、统一播放。
+3. **聚合搜索**：一次搜索覆盖所有已接入的源，播放记录与续播点合并展示。
 
 当前阶段：**M1 — Windows Alpha 进行中**。底层能力见 [docs/M0.md](docs/M0.md)（已完成），
 产品进度见 [docs/M1.md](docs/M1.md)。
 
 ## 能力现状
 
+- 格式：Windows 上已验 4K120 / 8K60 硬解、HDR10 / HDR10+ / HLG 元数据、
+  DV P7 FEL 完整重建；矩阵与边界见 [docs/DECODE.md](docs/DECODE.md) 和 [docs/M0.md](docs/M0.md)
 - 媒体库：飞牛影视已打通（登录、媒体库、剧集 / 季 / 集、未刮削目录、详情页、海报）；
-  Emby 适配器待接（`MediaSource` trait 已就位，加一个文件即可）
+  Emby 适配器待接（`MediaSource` trait 已就位，加一个文件即可），
+  Jellyfin / Plex / 目录源排在后面
+- 聚合：还没做——目前一次只连一个源，合并搜索与合并记录的设计见
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1.2
 - 播放：Windows 用 mpv 子进程挂 `wid`，`gpu-next` + `d3d11va`，DV P7 FEL 走官方构建
 - 续播：进度回写到服务器，详情页「继续观看 第 N 集」
 - 共享核心：`core/media`（Rust + C ABI），媒体库逻辑只写一次，四端复用

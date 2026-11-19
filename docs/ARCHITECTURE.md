@@ -61,6 +61,36 @@ UI / 播放器 / 聚合层
 界面只做两件事：`folder` 当「剧集」显示、集号为空时按顺序补号。
 Emby 接入时它自己的 `Season`/`Episode` 已经在协议里，映射即可，不用再猜文件名。
 
+### 1.2 聚合层（规划，M1 第二步）
+
+单源能播之后，产品价值在「一个界面看所有片源」。聚合层同样放在核心，
+否则四端会各写一套合并逻辑。
+
+```
+UI
+ └── MediaHub（core/media 内，持有 0..N 个 MediaSource）
+       ├── search(keyword)        各源并发，合并去重
+       ├── records()              各源合并，按 lastPlayed 倒序
+       ├── resolve(itemId)        按 "<sourceId>:<itemId>" 找到源并取播放源
+       └── libraries()            各源库列表，按用户排序分组
+```
+
+规则：
+
+| 主题 | 规则 |
+| --- | --- |
+| 身份 | `ItemId = "<sourceId>:<itemId>"`，源内 id 只在自己的适配器里有意义 |
+| 去重 | 标题归一（去发布组/季集后缀）+ 年份 + 类型；剧集再比集数，不做模糊合并 |
+| 选择 | 同一片多源：**有进度 > 用户设的源优先级 > 分辨率/码率高** |
+| 搜索 | 各源并发，超时/失败的源单独标灰，不拖垮整次搜索 |
+| 进度 | 只在**播放的那个源**回写，不做跨源同步（M4 再谈） |
+| 缓存 | 库列表与图片本地缓存（图片已做），带 TTL 和手动清理 |
+| 失败隔离 | 一个源挂了不影响其他源；设置页显示每个源的健康状态 |
+
+实现方式：核心加一个 `MediaHub`（持有 `Vec<SourceHandle>`），C ABI 多一组
+`dv_hub_*`；界面维持现在的调用形状，只把「单个 SourceHandle」换成 hub。
+如果实现时发现形状差异大，再单独写 ADR。
+
 ## 2. 播放内核接入（现状）
 
 | 平台 | 接入方式 | 代码 |
@@ -107,6 +137,22 @@ public:
 
 原则：事件线程独立跑 `mpv_wait_event`，UI 只收结构化事件；属性用
 `mpv_observe_property`，不轮询；`mpv_node` 不裸传给 .NET，序列化成 JSON。
+
+### 2.2 格式覆盖与降级策略
+
+「什么都能放」靠的是内核能力 + 明确的降级路径，不是自己实现解码器：
+
+| 环节 | 做法 | 现状 |
+| --- | --- | --- |
+| 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60 |
+| HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | 识别已验，直通待 HDR 屏 |
+| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | P7 FEL 已验，P5 颜色待修 |
+| 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | 未做 |
+| 字幕 | PGS / ASS / SRT 走内核；Android 用 libass NDK 自绘 | 桌面未验，Android 未做 |
+
+原则：**UI 显示的是实际行为，不是文件声称的格式**。播放页要给一条「源 → 输出」的信息
+（例如 `DV P7 (FEL) → HDR10 直通`、`DV P7 → 本机只播 BL`），
+避免"看起来支持、其实降级了"。
 
 ## 3. 线程模型
 
