@@ -94,6 +94,33 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 程序依次打开首页 / 媒体库 / 播放记录 / 设置，各渲染一张 PNG 后退出。
 走 `RenderTargetBitmap`，不依赖桌面合成，锁屏或 SSH 会话里也能用。
 
+常用参数：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--screenshot <dir> [页面...]` | 只截指定页（`home` / `libraries` / `records` / `settings`） |
+| `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`） |
+| `--series-season <n>` | 详情页默认展开第 n 季（验证季切换） |
+| `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
+
+## 需要出画面的验证（mpv / D3D11）
+
+`--screenshot` 不需要桌面，但**播放**需要：D3D11 的 swapchain 只在已登录的
+桌面会话（Session 2）里可用，SSH 属于 Session 0，直接启动会报
+`Failed to create swapchain: 0x887A0022`。用交互式计划任务启动即可：
+
+```powershell
+.\scripts\windows\run-session2.ps1 `
+  -Exe D:\dvplayer\apps\windows\DvPlayer\bin\Release\net10.0-windows\DvPlayer.exe `
+  -Arguments "--play <guid> --play-seconds 20"
+```
+
+脚本注册一个 `-LogonType Interactive` 的计划任务、启动、等进程退出，
+最后打印 `LastTaskResult`（0 = 正常）。
+
+> 注意：PowerShell 5.1 按 ANSI 读 `.ps1`，带中文的脚本必须存成 **UTF-8 with BOM**，
+> 否则解析直接报「字符串缺少终止符」。仓库里的 `run-session2.ps1` 已经带 BOM。
+
 ## 相关
 
 - `docs/adr/0008-rust-shared-core.md`：为什么用 Rust + C ABI

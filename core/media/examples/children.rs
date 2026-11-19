@@ -18,12 +18,14 @@ fn main() {
             println!("total={} items={}", page.total, page.items.len());
             for item in page.items.iter().take(12) {
                 println!(
-                    "{:?} s={:?} e={:?} dur={:?} poster={:?}\n    {:?}",
+                    "{} {:?} s={:?} e={:?} dur={:?} prog={:.2} p={:?}\n    {:?}",
+                    item.id,
                     item.kind,
                     item.season_number,
                     item.episode_number,
                     item.runtime_seconds,
-                    item.poster_path.as_deref().map(|p| &p[..p.len().min(40)]),
+                    item.progress,
+                    item.poster_path.as_deref().map(|p| &p[..p.len().min(20)]),
                     item.title
                 );
             }

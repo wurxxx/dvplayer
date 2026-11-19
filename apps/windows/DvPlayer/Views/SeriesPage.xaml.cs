@@ -17,6 +17,7 @@ public partial class SeriesPage : Page
     private const double TileWidth = 226;
 
     private readonly string _itemId;
+    private readonly int _initialSeason;
     private MediaDetailDto? _detail;
 
     private string? _playTargetId;
@@ -30,9 +31,11 @@ public partial class SeriesPage : Page
     /// <summary>本地实际有几个文件；未刮削目录的标题写着「76集」，但可能只有 53 个。</summary>
     private int _localEpisodeCount;
 
-    public SeriesPage(string itemId)
+    /// <param name="initialSeason">默认显示第几季（0 起，脚本截图用）。</param>
+    public SeriesPage(string itemId, int initialSeason = 0)
     {
         _itemId = itemId;
+        _initialSeason = Math.Max(0, initialSeason);
         InitializeComponent();
         Loaded += OnLoaded;
         KeyDown += OnKeyDown;
@@ -77,12 +80,17 @@ public partial class SeriesPage : Page
         if (seasons.Count > 0)
         {
             // 剧集：先季，再集。
+            var start = Math.Min(_initialSeason, seasons.Count - 1);
+
             SeasonBar.ItemsSource = seasons
-                .Select((s, i) => new SeasonChip(s.Id, string.IsNullOrWhiteSpace(s.Title) ? $"第 {i + 1} 季" : s.Title, i == 0))
+                .Select((s, i) => new SeasonChip(
+                    s.Id,
+                    string.IsNullOrWhiteSpace(s.Title) ? $"第 {s.SeasonNumber ?? i + 1} 季" : s.Title,
+                    i == start))
                 .ToList();
             SeasonBarHost.Visibility = seasons.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
 
-            await LoadSeasonAsync(seasons[0].Id).ConfigureAwait(true);
+            await LoadSeasonAsync(seasons[start].Id).ConfigureAwait(true);
             return;
         }
 

@@ -75,9 +75,11 @@ public partial class MainWindow : FluentWindow
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (seriesIds is not null)
         {
+            var season = int.TryParse(ArgumentAfter("--series-season"), out var n) ? n - 1 : 0;
+
             for (var i = 0; i < seriesIds.Length; i++)
             {
-                ContentFrame.Navigate(new SeriesPage(seriesIds[i]));
+                ContentFrame.Navigate(new SeriesPage(seriesIds[i], season));
                 await Task.Delay(6000);
                 var name = seriesIds.Length == 1 ? "series.png" : $"series-{i + 1}.png";
                 UiCapture.Save(this, Path.Combine(dir, name));
