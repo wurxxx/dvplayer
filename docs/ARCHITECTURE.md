@@ -22,6 +22,33 @@
 └──────────────────────────────────────────────┘
 ```
 
+## 1.1 媒体源适配（多服务器）
+
+正式产品是聚合客户端（飞牛影视 + Emby 合并搜索、播放记录、续播），
+所以「哪台服务器」必须是可插拔的，不能长在界面里。
+
+```
+UI / 播放器 / 聚合层
+        │  只认 MediaLibrary / MediaItem / PlayRecord / PlaySource
+        ▼
+  core/media  ── trait MediaSource ──┬── FnOsSource（飞牛原生 API，已实现）
+  (Rust，C ABI)                      ├── EmbySource（下一步）
+                                     └── …
+```
+
+约定：
+
+| 位置 | 规则 |
+| --- | --- |
+| `sources/mod.rs` | `MediaSource` trait + `create(config)` 工厂，新增服务器只加一个分支 |
+| `models.rs` | 各服务器差异在适配器内部消化，对外只有一套模型 |
+| `ffi.rs` | `SourceHandle` 持有 `Box<dyn MediaSource>`，C ABI 不随服务器变化 |
+| `PlaySource` | 播放器只吃「URL + 请求头 + 续播秒数 + 轨道」，不关心谁给的 |
+| 界面 | 源类型来自 `dv_source_kinds()`，不写死字符串 |
+
+新增一个服务器的步骤：实现 `MediaSource`（9 个方法）→ 在 `create()` 加一行
+→ 在 `SUPPORTED_KINDS` 注册。界面和播放器不需要改动。
+
 ## 2. PlayerCore 接口（桌面）
 
 ```cpp
