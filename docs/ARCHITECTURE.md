@@ -1,0 +1,113 @@
+# 架构
+
+## 1. 分层
+
+```
+┌──────────────────────────────────────────────┐
+│ UI 壳                                         │
+│  WPF (Win) / SwiftUI (macOS) / Compose (TV)  │
+├──────────────────────────────────────────────┤
+│ 播放服务层                                    │
+│  C++ PlayerCore + C ABI（Windows）            │
+│  Objective-C++ 桥（macOS）                    │
+│  Media3 Player（Android）                     │
+├──────────────────────────────────────────────┤
+│ 内核                                          │
+│  libmpv 0.42（桌面） / Media3（Android）       │
+│  FFmpeg 9 · libplacebo 7.387 · libdovi        │
+├──────────────────────────────────────────────┤
+│ 输出                                          │
+│  GPU surface（D3D11 / OpenGL / SurfaceView）  │
+│  音频（WASAPI / CoreAudio / AudioTrack）      │
+└──────────────────────────────────────────────┘
+```
+
+## 2. PlayerCore 接口（桌面）
+
+```cpp
+enum class SurfaceMode { WindowBinding, RenderApi };
+
+struct Config {
+  SurfaceMode mode;
+  std::string vo;        // "gpu-next" | "gpu"
+  std::string gpu_api;   // "d3d11" | "opengl"
+  void*       native;    // HWND（Windows）；macOS 传 nullptr
+  bool        hdr_passthrough = true;
+};
+
+class PlayerCore {
+public:
+  static std::unique_ptr<PlayerCore> create(const Config&);
+
+  void open(const std::string& url);
+  void command(std::string_view name, const std::vector<std::string>& args);
+  void set(std::string_view prop, const mpv_node& v);
+  mpv_node get(std::string_view prop);
+
+  // macOS render 路径
+  void render(int fbo, int w, int h, bool flip_y);
+  void report_swap();
+
+  void set_event_handler(std::function<void(const mpv_event*)>);
+  void set_render_update_handler(std::function<void()>);
+};
+```
+
+原则：
+
+- 事件线程独立跑 `mpv_wait_event`，UI 只收结构化事件。
+- 属性用 `mpv_observe_property`，不轮询。
+- Windows 对 .NET 暴露薄 C ABI，`mpv_node` 不裸传，序列化成 JSON 或扁平结构体。
+- macOS 用 Objective-C++ 桥，不引入 C ABI。
+
+## 3. 线程模型
+
+| 线程 | 职责 |
+| --- | --- |
+| mpv 事件线程 | `mpv_wait_event`，分发结构化事件 |
+| UI 线程 | 接收事件，更新界面 |
+| 渲染线程 | Windows 由 mpv 自己驱动；macOS 由 `CADisplayLink` 驱动 `mpv_render_context_render` |
+| 解复用 / 解码 | mpv 内部线程 |
+
+macOS 注意：`mpv_render_context_set_update_callback` 里只做
+`dispatch_async` 到主线程置 `needsDisplay`，不要在回调线程直接渲染。
+
+## 4. Windows
+
+- 顶层窗口 + 视频子 HWND，`HwndHost` 托管；`mpv_set_option("wid", ...)`。
+- `vo=gpu-next`、`gpu-api=d3d11`、`gpu-context=d3d11`、`target-colorspace-hint=yes`。
+- Airspace：XAML 画不到子 HWND 上面。控制条放视频外；临时提示用 mpv OSD；
+  浮层窗口留到 v2。
+- 全屏：resize 顶层窗口 + 子 HWND，不要重挂父窗口。
+- DPI：手动同步子 HWND 位置与尺寸。
+
+## 5. macOS
+
+- SwiftUI + `NSViewRepresentable` 包 `NSOpenGLView`，CGL 3.2 core。
+- `mpv_render_context_create` 用 `MPV_RENDER_API_TYPE_OPENGL`。
+- `MPV_RENDER_PARAM_OPENGL_FBO` + `FLIP_Y`。
+- `hwdec=videotoolbox`；VideoToolbox 的矩形纹理路径是已知坑，M0 要压测 4K60。
+- v1 不接 Metal、不接 MoltenVK。
+- HDR10 走 `target-colorspace-hint`；不行就退固定 SDR tone-map 并在 UI 明示。
+
+## 6. Android / TV
+
+- Media3 + `SurfaceView`，TV 开 tunneling。
+- 运行时用 `MediaCodecInfo` 探测 DV profile；探不到播 BL 轨并标 HDR10。
+- ASS 字幕：NDK 编 libass 自绘。不给 TV 挂 libmpv 软解。
+- 一个 module，两个 launcher activity；`androidx.tv:tv-material` 做 TV 皮肤。
+
+## 7. 徽标
+
+| 条件 | 徽标 |
+| --- | --- |
+| profile 7 + EL 有残差 | `DV P7 (FEL)` |
+| profile 7 + EL 无残差 | `DV P7 (MEL)` |
+| profile 5 | `DV P5` |
+| profile 8.x | `DV P8.x` |
+| HDR10+ | `HDR10+` |
+| HDR10 | `HDR10` |
+| Android 设备解码 | `DV`（不标层类型） |
+
+数据来源：mpv 只暴露 `dolby-vision-profile`；FEL/MEL 由 `core/dovi` 用 libdovi
+解析第一个 RPU 的 `disable_residual_flag` 判定，在 `file-loaded` 时缓存为自定义属性。

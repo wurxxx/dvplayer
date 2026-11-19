@@ -1,0 +1,14 @@
+.DS_Store
+out/
+build/
+prefix/
+tools/bin/
+tools/*.zip
+samples/*
+!samples/README.md
+*.log
+*.png
+*.hevc
+*.mkv
+*.mp4
+.DS_Store
