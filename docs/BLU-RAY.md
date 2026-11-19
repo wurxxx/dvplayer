@@ -47,10 +47,10 @@ M0 用 A。mpls 解析很轻：`PlayListStart` 处的 `PlayItem` 列表，每项
 +8   PlayListStart (4, BE)
 +12  PlayListMarkStart (4, BE)
 PlayListStart:
-+0   length (4, BE)
++0   length (4, BE)          段内容长度，不含自身 4 字节
 +6   numberOfPlayItems (2, BE)
 +10  第一项 PlayItem:
-     +0  length (2, BE)
+     +0  length (2, BE)      项长度，不含自身 2 字节
      +2  clip name (5)
      +7  codec id (4)
      +11 flags (2)   reserved(11) + is_multi_angle(1) + connection_condition(4)
@@ -58,6 +58,7 @@ PlayListStart:
      then STC_sequence_id (1)
      then IN_time (4, BE)
      then OUT_time (4, BE)
+     下一项 = 当前位置 + 2 + length
 ```
 
 `scripts/windows/iso-titles.ps1` 按这个结构枚举，输出每个 playlist 的
@@ -68,22 +69,25 @@ PlayListStart:
 
 ## 3. 章节
 
-章节在 `BDMV/PLAYLIST/*.mpls` 的 `PlayListMark` 段（`PlayListMarkStart`）：
+章节在 `BDMV/PLAYLIST/*.mpls` 的 `PlayListMark` 段（`PlayListMarkStart`）。
+
+**每条 mark 是定长 14 字节，没有逐项 length 字段**，mark 数在段头 `+4`：
 
 ```text
 PlayListMark 段:
 +0  length (4, BE)
-+6  numberOfPlayListMarks (2, BE)
-+8  第一条 mark:
-    +0  length (2, BE)
-    +2  reserved (1)
-    +3  mark_type (1)        1 = 章节，2 = link point
-    +4  ref_to_PlayItem_id (2, BE)
-    +6  mark_time_stamp (4, BE, 45 kHz)
++4  numberOfPlayListMarks (2, BE)
++6  第一条 mark（14 字节，定长）:
+    +0 reserved (1)
+    +1 mark_type (1)             1 = 章节，2 = link point
+    +2 ref_to_PlayItem_id (2, BE)
+    +4 mark_time_stamp (4, BE, 45 kHz)
+    +8 entry_ES_PID (2, BE)
+    +10 duration (4, BE)         到下一个 mark 的时长
 ```
 
-注意 `mark_type` 在 **+3**，不是紧跟 length 的 +2。Hush 这盘每个正片 playlist
-只有 1 个 mark，即没有分章。
+实测 Hush 2in1 的两个正片各 13 章，与 libbluray 的 `chapter-list/count` 一致；
+`00000.mpls` 有 1 个 mark。解析结果在 `iso-titles.ps1` 里按 `mark_type == 1` 计数。
 
 ## 4. 实测（2026-11-19，Hush 2016 2in1）
 
@@ -93,10 +97,10 @@ PlayListMark 段:
 ### 4.1 播放列表枚举
 
 ```
-3 playlists, total 02:44:35
-01:21:47  4907.0s  items=1  ch=0  00002.mpls  00002
-01:21:47  4907.0s  items=1  ch=0  00001.mpls  00001
-00:01:01    61.1s  items=30 ch=0  00000.mpls  00000
+3 playlists, total 03:14:07
+01:21:47  4907.0s  items=1  ch=13  00002.mpls
+01:21:47  4907.0s  items=1  ch=13  00001.mpls
+00:30:33  1833.1s  items=30 ch=1   00000.mpls
 ```
 
 libbluray 自己的列表完全对上：
@@ -111,7 +115,8 @@ libbluray 自己的列表完全对上：
 - 脚本算 4907.0s，libbluray 报 01:21:46.985，差 0.015s（45 kHz 取整），
   说明**大端读取和 PlayItem 偏移是对的**；
 - 两个 81:47 的正片正是 2in1 的两个剪辑版本；
-- `00000.mpls` 是 30 段花絮拼起来的 61 秒。
+- `00000.mpls` 是 30 段花絮拼起来的 30:33；
+- 章节数 13 与 libbluray 的 `chapter-list/count` 一致。
 
 ### 4.2 选集落到哪个 clip
 
@@ -152,6 +157,7 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
 
 - ISO 直读、不挂载（`--bluray-device`）；
 - 播放列表枚举、时长计算与 libbluray 一致；
+- 章节枚举（13 章与 libbluray 一致）；
 - `bd://mpls/N` 与 `--edition=N` 两种选集方式；
 - 1080p AVC 硬解、PGS 字幕轨识别。
 
@@ -167,7 +173,6 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
 | 6 | 4K UHD 蓝光 ISO 未测 | 当前样本都是 1080p AVC | 需要 UHD BD 原盘（HEVC + HDR10/DV） |
 | 7 | AACS / BD+ 加密盘 | 加密原盘可能打不开 | mpv 不带解密；需要 MakeMKV/抽流，产品上要么不支持，要么提示 |
 | 8 | 播放进度记忆 | 长片中断后要重找 | 按 ISO + playlist 记 `time-pos` |
-| 9 | 章节解析已实现但无样本 | 这盘没有分章，验证不充分 | 找一张有章节的盘复核 `mark_type` |
 
 ## 6. 与 4K/8K/HDR 的关系
 

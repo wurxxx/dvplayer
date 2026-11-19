@@ -64,8 +64,9 @@ try {
 
         for ($i = 0; $i -lt $numItems; $i++) {
             if ($pos + 12 -gt $b.Length) { $ok = $false; break }
+            # PlayItem length does NOT include its own 2 bytes.
             $itemLen = BE16 $b $pos
-            if ($itemLen -lt 20 -or ($pos + $itemLen) -gt $b.Length) { $ok = $false; break }
+            if ($itemLen -lt 20 -or ($pos + 2 + $itemLen) -gt $b.Length) { $ok = $false; break }
 
             $clip = [Text.Encoding]::ASCII.GetString($b, $pos + 2, 5)
             [void]$clips.Add($clip)
@@ -84,25 +85,25 @@ try {
             $outTime = BE32 $b ($p + 4)
             if ($outTime -gt $inTime) { $ticks += ($outTime - $inTime) }
 
-            $pos += $itemLen
+            $pos += 2 + $itemLen
         }
 
         # chapters: PlayListMark segment
-        # mark layout: +0 len(2), +2 reserved(1), +3 mark_type(1),
-        #              +4 ref_to_PlayItem_id(2), +6 mark_time_stamp(4)
+        # Segment: +0 length(4), +4 numberOfPlayListMarks(2), +6 first mark.
+        # Each mark is a FIXED 14 bytes (no per-mark length field):
+        #   +0 reserved(1), +1 mark_type(1), +2 ref_to_PlayItem_id(2),
+        #   +4 mark_time_stamp(4), +8 entry_ES_PID(2), +10 duration(4)
         $markStart = BE32 $b 12
         $chapters = 0
-        if ($markStart -gt 0 -and ($markStart + 8) -lt $b.Length) {
+        if ($markStart -gt 0 -and ($markStart + 6) -lt $b.Length) {
             $mpos = [int]$markStart
-            $marks = BE16 $b ($mpos + 6)
-            $mp = $mpos + 8
+            $marks = BE16 $b ($mpos + 4)
+            $mp = $mpos + 6
             for ($i = 0; $i -lt $marks; $i++) {
-                if ($mp + 8 -gt $b.Length) { break }
-                $markLen = BE16 $b $mp
-                if ($markLen -lt 8) { break }
-                $markType = $b[$mp + 3]
+                if ($mp + 14 -gt $b.Length) { break }
+                $markType = $b[$mp + 1]
                 if ($markType -eq 1) { $chapters++ }
-                $mp += $markLen
+                $mp += 14
             }
         }
 
