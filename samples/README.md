@@ -16,6 +16,19 @@
 samples/p7-fel.mkv
 ```
 
+## 已有
+
+| 文件 | 实际内容 | 用途 |
+| --- | --- | --- |
+| `samples/p5.mkv` | 4K24 HEVC，`dv_profile=5`，`el_present_flag=0`，EAC3 Atmos | P5 回归（颜色、徽标 `DV P5`） |
+
+来源：10.0.0.100 的 `I.Will.Find.You.2026.S01E01...DV.H.265-DepWeb.mkv`，
+第 30 秒起无损 20 秒（`scripts/nas-fetch-sample.sh`）。**不是 P7，不能用于 A1/A2。**
+
+## 还缺
+
+真正的 P7 双层（BL+EL+RPU）。可用来源：UHD 蓝光 remux、dovi_tool 的测试片。
+
 ## 自检
 
 ```bash

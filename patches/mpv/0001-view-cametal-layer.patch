@@ -1,0 +1,21 @@
+diff --git a/video/out/mac/view.swift b/video/out/mac/view.swift
+index f8cc625..f84328a 100644
+--- a/video/out/mac/view.swift
++++ b/video/out/mac/view.swift
+@@ -16,6 +16,7 @@
+  */
+ 
+ import Cocoa
++import QuartzCore
+ 
+ class View: NSView, CALayerDelegate {
+     unowned var common: Common
+@@ -29,7 +30,7 @@ class View: NSView, CALayerDelegate {
+     override var acceptsFirstResponder: Bool { return true }
+ 
+     override var isOpaque: Bool {
+-        if let metalLayer = layer as? MetalLayer {
++        if let metalLayer = layer as? CAMetalLayer {
+             return !metalLayer.isOpaque
+         }
+ 

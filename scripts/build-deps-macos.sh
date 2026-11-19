@@ -104,6 +104,17 @@ else
   if [ ! -d "$SRC/mpv" ]; then
     git clone --depth 1 --branch v0.42.0 https://github.com/mpv-player/mpv.git "$SRC/mpv"
   fi
+
+  # macOS 补丁：-Dvulkan=disabled 时 metal_layer.swift 不进编译，
+  # view.swift 里的 MetalLayer 类型就找不到。改成 CAMetalLayer 并显式 import QuartzCore。
+  patch_file="$ROOT/patches/mpv/0001-view-cametal-layer.patch"
+  if git -C "$SRC/mpv" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
+    step "mpv 补丁已应用，跳过"
+  else
+    git -C "$SRC/mpv" apply --check "$patch_file"
+    git -C "$SRC/mpv" apply "$patch_file"
+  fi
+
   rm -rf "$SRC/mpv/_build"
   meson setup "$SRC/mpv/_build" "$SRC/mpv" \
     --prefix="$PREFIX" \
