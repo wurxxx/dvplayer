@@ -52,27 +52,42 @@ mingw-w64 运行库（`lib\rustlib\x86_64-pc-windows-gnu\lib\self-contained`）�
 然后因为找不到 `-lmsvcrt`、`-lmingw32` 这类库而链接失败。
 **构建时的 PATH 只保留 `cargo\bin` 和系统目录。**
 
-### 2. dlltool 要换成 llvm 版
+### 2. dlltool 要用 llvm 版，并且单独放一个目录
 
-`windows-sys` 用 `raw-dylib`，rustc 调 `dlltool.exe` 生成 import library。
-工具链自带的 `self-contained\dlltool.exe` 是 GNU 版，内部会去调用 `as.exe`，
-而 self-contained 里没有 `as.exe`，于是报 `CreateProcess 失败`。
+`windows-sys` 用 `raw-dylib`，rustc 需要 `dlltool.exe` 生成 import library。
+直接换会踩两个坑：
 
-把 llvm-mingw 的 `llvm-dlltool.exe` 复制过去覆盖（原文件先备份）：
+- 工具链自带的 GNU `dlltool` 会调 `as.exe`，而 self-contained 里没有；
+- 把 `llvm-dlltool.exe` 单独复制进 self-contained 也不行——它依赖
+  `libLLVM-23.dll`、`libc++.dll` 这些同目录运行时，只复制 exe 会报
+  0xC0000135（找不到 DLL）。
+
+做法是建一个独立目录，放 dlltool 和它的运行时：
 
 ```powershell
-$sc = 'D:\dvplayer\tools\rust\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained'
-Copy-Item "$sc\dlltool.exe" "$sc\dlltool-gnu.exe" -Force
-Copy-Item 'D:\dvplayer\tools\llvm-mingw\bin\llvm-dlltool.exe' "$sc\dlltool.exe" -Force
+$d = 'D:\dvplayer\tools\dlltool'
+New-Item -ItemType Directory -Force $d | Out-Null
+Copy-Item 'D:\dvplayer\tools\llvm-mingw\bin\llvm-dlltool.exe' "$d\llvm-dlltool.exe" -Force
+Copy-Item 'D:\dvplayer\tools\llvm-mingw\bin\*.dll' $d -Force
+Copy-Item "$d\llvm-dlltool.exe" "$d\dlltool.exe" -Force
+& "$d\dlltool.exe" --help    # 能打出 usage 就对了
 ```
 
-注意：升级 Rust 工具链会覆盖这个文件，升级后要重新替换。
+`scripts\windows\build-core.ps1` 会把这个目录放进 PATH。
 
-### 3. 没有 TLS 后端
+**不要把 `llvm-mingw\bin` 整个加进 PATH**：那里有 `gcc.exe`，rustc 会改用它
+当 linker，然后报 `unable to find library -lgcc`。
 
-`reqwest` 暂时没启用 TLS（`default-features = false, features = ["blocking", "json"]`）：
-飞牛和 Emby 在内网基本都是 http。等需要 https 时再开 `native-tls`
-（Windows 用 SChannel，不需要 C 编译器）。
+升级 Rust 工具链不影响这个目录；换 llvm-mingw 版本时同步更新里面的 dll。
+
+### 3. TLS 用 native-tls
+
+`reqwest` 开了 `native-tls`：Windows 走 SChannel、macOS 走 Security.framework，
+都不需要 OpenSSL 或额外 C 工具链。内网 http 照常可用，公网 `https://`
+反代的 Emby / Jellyfin 也能连。
+
+代价是会把 `schannel → windows-sys` 拉进来，**第一次编译（或升级依赖后）需要
+dlltool**，见上一节。
 
 ## 构建
 

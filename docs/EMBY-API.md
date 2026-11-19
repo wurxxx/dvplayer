@@ -1,8 +1,8 @@
 # Emby / Jellyfin 接口（适配器实现记录）
 
-> 2026-11-19。适配器在 `core/media/src/sources/emby.rs`，Jellyfin 复用同一份实现。
-> **状态：代码与解析单测已完成，还没连过真实服务器**（缺地址/凭据）。
-> 这份文档记录「按官方 API 写、哪些还没验」。
+> 2026-11-20。适配器在 `core/media/src/sources/emby.rs`，Jellyfin 复用同一份实现。
+> **状态：已在一个 Emby 4.10 的 https 实例上跑通**——登录、库列表、层级、
+> 详情、图片都验证过；播放直链与进度回写还差实测（换服务器后重跑）。
 
 ## 1. 认证
 
@@ -75,13 +75,16 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 
 ## 5. 还没验证 / 已知风险
 
-| 项 | 风险 |
+| 项 | 状态 |
 | --- | --- |
-| 真实登录 | 未连过服务器；`/Users/AuthenticateByName` 与 `/Users/Me` 的返回形状按官方文档写 |
-| `PlaybackInfo` 是否需要 `DeviceProfile` | 现在只传 `{UserId}`，直连应该够；如果服务器不给 `MediaSources`，要补一个最小 `DeviceProfile` |
-| 剧本层级 | 用 `ParentId` 递归列子项（Series → Season → Episode）；某些库可能直接挂 Episode（无 Season），界面按已返回的层级显示 |
+| 登录 | **已验证**：`POST /Users/AuthenticateByName` 返回 200 + `AccessToken`，`/Users/Me` 拿到用户 id；API Key 方式要看服务器是否签发了有效 Key（无效会返回 401 `Access token is invalid or expired.`） |
+| https / 反代 | **已验证**：公网域名 + `native-tls` 正常；`/System/Info/Public` 可直接用来探活 |
+| 库与层级 | **已验证**：`Views` 返回 3 个库；`ParentId` 能列 `Folder → Movie` 与 `Folder → Folder → Movie`，界面上按实际层级显示 |
+| 详情与图片 | **已验证**：海报、背景图、简介、时长、`RecursiveItemCount`（「N 集」）都正常；没有剧照的条目回退成渐变占位（服务器没生成图，不是 bug） |
+| 播放直链 | **待验**：`PlaybackInfo` 只传 `{UserId}`，若服务器不给 `MediaSources` 要补最小 `DeviceProfile` |
+| 进度回写 | **待验**：`POST /Users/{uid}/Items/{id}/UserData` |
 | 外挂字幕 | 只给了轨道信息，没给 `DeliveryUrl`；字幕选择（B12）做的时候再拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` |
-| Jellyfin 差异 | 同一套 API；认证头 Jellyfin 也认 `X-Emby-Token`。登录字段名一致，暂未单独验证 |
+| Jellyfin 差异 | 同一套 API、登录字段一致；认证头两个都发。暂未单独验证 |
 
 ## 6. 相关
 
