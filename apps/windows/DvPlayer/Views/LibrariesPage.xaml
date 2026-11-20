@@ -89,14 +89,14 @@
             <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8"
                     Background="#59000000" CornerRadius="5" Padding="6,2"
                     Visibility="{Binding BadgeVisibility}">
-              <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#CCFFFFFF" />
+              <TextBlock Text="{Binding Badge}" FontSize="11.5" Foreground="#CCFFFFFF" />
             </Border>
           </Grid>
         </Border>
-        <TextBlock Text="{Binding Title}" FontSize="12.5" Margin="1,9,0,0"
+        <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
                    Foreground="{StaticResource TextBrush}"
                    TextTrimming="CharacterEllipsis" />
-        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{StaticResource FaintBrush}"
+        <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{StaticResource FaintBrush}"
                    Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
       </StackPanel>
     </DataTemplate>
@@ -116,8 +116,8 @@
                     Margin="0,0,10,10" Background="#8C000000" CornerRadius="6" Padding="7,3">
               <StackPanel Orientation="Horizontal">
                 <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
-                           FontSize="9" Foreground="#E6FFFFFF" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding Time}" FontSize="10" Foreground="#E6FFFFFF"
+                           FontSize="10.5" Foreground="#E6FFFFFF" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Time}" FontSize="11.5" Foreground="#E6FFFFFF"
                            Margin="4,0,0,0" />
               </StackPanel>
             </Border>
@@ -127,10 +127,10 @@
             </Border>
           </Grid>
         </Border>
-        <TextBlock Text="{Binding Title}" FontSize="13.5" Margin="2,9,0,0"
+        <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
                    Foreground="{StaticResource TextBrush}"
                    TextTrimming="CharacterEllipsis" />
-        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{StaticResource FaintBrush}"
+        <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{StaticResource FaintBrush}"
                    Margin="2,3,0,0" TextTrimming="CharacterEllipsis" />
       </StackPanel>
     </DataTemplate>
@@ -159,7 +159,7 @@
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="{Binding CountLabel}" FontSize="14"
                          Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-              <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="11"
+              <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="12"
                          Foreground="{StaticResource FaintBrush}" Margin="5,0,0,0"
                          VerticalAlignment="Center" />
             </StackPanel>
@@ -224,7 +224,7 @@
                          FontFamily="{StaticResource DisplayFont}" FontWeight="SemiBold"
                          Foreground="#FAFFFFFF" TextTrimming="CharacterEllipsis"
                          HorizontalAlignment="Center" TextAlignment="Center" />
-              <TextBlock x:Name="HeroMeta" FontSize="13" Foreground="#D9FFFFFF"
+              <TextBlock x:Name="HeroMeta" FontSize="13.5" Foreground="#D9FFFFFF"
                          Margin="0,11,0,0" HorizontalAlignment="Center" />
               <ItemsControl x:Name="HeroChips" Margin="0,12,0,0" HorizontalAlignment="Center"
                             Visibility="Collapsed">
@@ -236,13 +236,13 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Border Background="#2EFFFFFF" CornerRadius="5" Padding="8,3" Margin="4,0">
-                      <TextBlock Text="{Binding}" FontSize="11" Foreground="#E6FFFFFF" />
+                      <TextBlock Text="{Binding}" FontSize="12" Foreground="#E6FFFFFF" />
                     </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
 
-              <TextBlock x:Name="HeroOverview" FontSize="13.5" Foreground="#C2FFFFFF"
+              <TextBlock x:Name="HeroOverview" FontSize="14" Foreground="#C2FFFFFF"
                          Margin="0,13,0,0" MaxHeight="66" TextTrimming="CharacterEllipsis"
                          TextWrapping="Wrap" LineHeight="22" TextAlignment="Center" />
             </StackPanel>
@@ -350,9 +350,9 @@
                     VerticalAlignment="Center" Margin="0,0,0,60">
           <TextBlock Text="&#xE721;" Style="{StaticResource EmptyIcon}" />
           <TextBlock x:Name="InlineSearchEmptyTitle" Text="搜索此服务器中的内容"
-                     Style="{StaticResource EmptyText}" FontSize="13.5" />
+                     Style="{StaticResource EmptyText}" FontSize="14" />
           <TextBlock x:Name="InlineSearchEmptyHint" Text="输入片名、剧名或关键词"
-                     Style="{StaticResource EmptyText}" FontSize="11.5" Margin="0,6,0,0"
+                     Style="{StaticResource EmptyText}" FontSize="12.5" Margin="0,6,0,0"
                      Foreground="{StaticResource FaintBrush}" />
         </StackPanel>
 
@@ -377,9 +377,9 @@
     <StackPanel x:Name="FavoriteEmpty" HorizontalAlignment="Center"
                 VerticalAlignment="Center" Margin="0,0,0,80" Visibility="Collapsed">
       <TextBlock Text="&#xE734;" Style="{StaticResource EmptyIcon}" />
-      <TextBlock Text="还没有收藏" Style="{StaticResource EmptyText}" FontSize="13.5" />
+      <TextBlock Text="还没有收藏" Style="{StaticResource EmptyText}" FontSize="14" />
       <TextBlock Text="收藏的影片会集中在这里" Style="{StaticResource EmptyText}"
-                 FontSize="11.5" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
+                 FontSize="12.5" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
     </StackPanel>
 
     <!-- 媒体库内容（原网格视图） -->
@@ -417,9 +417,9 @@
           <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
                   Cursor="Hand" MouseLeftButtonUp="OnBackClick">
             <TextBlock Text="&#xE72B;  返回上层" FontFamily="{StaticResource IconFont}"
-                       FontSize="12" Foreground="{StaticResource AccentBrush}" />
+                       FontSize="12.5" Foreground="{StaticResource AccentBrush}" />
           </Border>
-          <TextBlock x:Name="BreadcrumbText" FontSize="12.5"
+          <TextBlock x:Name="BreadcrumbText" FontSize="13"
                      Foreground="{StaticResource MutedBrush}"
                      VerticalAlignment="Center" Margin="12,0,0,0" />
         </StackPanel>
@@ -448,7 +448,7 @@
                       </Style.Triggers>
                     </Style>
                   </Border.Style>
-                  <TextBlock Text="{Binding Title}" FontSize="13" />
+                  <TextBlock Text="{Binding Title}" FontSize="13.5" />
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
@@ -481,14 +481,14 @@
                       <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8"
                               Background="#59000000" CornerRadius="5" Padding="6,2"
                               Visibility="{Binding BadgeVisibility}">
-                        <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#CCFFFFFF" />
+                        <TextBlock Text="{Binding Badge}" FontSize="11.5" Foreground="#CCFFFFFF" />
                       </Border>
                     </Grid>
                   </Border>
-                  <TextBlock Text="{Binding Title}" FontSize="12.5" Margin="1,9,0,0"
+                  <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
                              Foreground="{StaticResource TextBrush}"
                              TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{StaticResource FaintBrush}"
+                  <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{StaticResource FaintBrush}"
                              Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
               </DataTemplate>

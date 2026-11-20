@@ -10,7 +10,7 @@
       <Grid Height="330" ClipToBounds="True">
         <Border x:Name="BackdropBrush">
           <Border.Background>
-            <SolidColorBrush Color="#141419" />
+            <SolidColorBrush Color="#1F1F27" />
           </Border.Background>
         </Border>
 
@@ -25,9 +25,9 @@
         <Border>
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-              <GradientStop Color="#0008080A" Offset="0" />
-              <GradientStop Color="#6608080A" Offset="0.55" />
-              <GradientStop Color="#FF08080A" Offset="1" />
+              <GradientStop Color="#000E0E12" Offset="0" />
+              <GradientStop Color="#660E0E12" Offset="0.55" />
+              <GradientStop Color="#FF0E0E12" Offset="1" />
             </LinearGradientBrush>
           </Border.Background>
         </Border>
@@ -61,19 +61,19 @@
           <TextBlock x:Name="TitleText" FontFamily="{StaticResource DisplayFont}"
                      FontSize="30" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
                      TextWrapping="Wrap" />
-          <TextBlock x:Name="OriginalTitleText" FontSize="13" Foreground="{StaticResource FaintBrush}"
+          <TextBlock x:Name="OriginalTitleText" FontSize="13.5" Foreground="{StaticResource FaintBrush}"
                      Margin="0,5,0,0" TextWrapping="Wrap" />
 
           <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-            <TextBlock x:Name="RatingText" FontSize="13" Foreground="{StaticResource AccentBrush}"
+            <TextBlock x:Name="RatingText" FontSize="13.5" Foreground="{StaticResource AccentBrush}"
                        VerticalAlignment="Center" Margin="0,0,14,0" />
-            <TextBlock x:Name="MetaText" FontSize="13" Foreground="{StaticResource MutedBrush}"
+            <TextBlock x:Name="MetaText" FontSize="13.5" Foreground="{StaticResource MutedBrush}"
                        VerticalAlignment="Center" />
           </StackPanel>
 
           <StackPanel x:Name="TagBar" Orientation="Horizontal" Margin="0,12,0,0" />
 
-          <TextBlock x:Name="OverviewText" FontSize="13" Foreground="#B8B8C2"
+          <TextBlock x:Name="OverviewText" FontSize="13.5" Foreground="#B8B8C2"
                      TextWrapping="Wrap" MaxWidth="760" Margin="0,16,0,0"
                      LineHeight="22" MaxHeight="88" TextTrimming="CharacterEllipsis" />
 
@@ -81,9 +81,9 @@
             <Button x:Name="PlayButton" Style="{StaticResource AccentButton}"
                     Click="OnPlayClick" Padding="22,10">
               <StackPanel Orientation="Horizontal">
-                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" FontSize="13"
+                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" FontSize="13.5"
                            VerticalAlignment="Center" />
-                <TextBlock x:Name="PlayButtonText" Text="播放" FontSize="13.5" FontWeight="SemiBold"
+                <TextBlock x:Name="PlayButtonText" Text="播放" FontSize="14" FontWeight="SemiBold"
                            Margin="8,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
@@ -117,7 +117,7 @@
                     </Style.Triggers>
                   </Style>
                 </Border.Style>
-                <TextBlock Text="{Binding Title}" FontSize="13" />
+                <TextBlock Text="{Binding Title}" FontSize="13.5" />
               </Border>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
@@ -150,7 +150,7 @@
                     <!-- 集号 -->
                     <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
                             Background="#8C000000" CornerRadius="5" Padding="7,2">
-                      <TextBlock Text="{Binding Badge}" FontSize="10.5" Foreground="#F2FFFFFF" />
+                      <TextBlock Text="{Binding Badge}" FontSize="11.5" Foreground="#F2FFFFFF" />
                     </Border>
 
                     <!-- 播放态 -->
@@ -169,10 +169,10 @@
                 </Border>
 
                 <StackPanel Orientation="Horizontal" Margin="2,9,0,0">
-                  <TextBlock Text="{Binding Title}" FontSize="12.5"
+                  <TextBlock Text="{Binding Title}" FontSize="13"
                              Foreground="{StaticResource TextBrush}"
                              TextTrimming="CharacterEllipsis" MaxWidth="150" />
-                  <TextBlock Text="{Binding Duration}" FontSize="11.5"
+                  <TextBlock Text="{Binding Duration}" FontSize="12.5"
                              Foreground="{StaticResource FaintBrush}" Margin="8,0,0,0"
                              VerticalAlignment="Bottom" />
                 </StackPanel>

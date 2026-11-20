@@ -46,9 +46,9 @@
                 VerticalAlignment="Center" Margin="0,0,0,80" MaxWidth="420">
       <TextBlock x:Name="EmptyGlyph" Text="&#xE721;" Style="{StaticResource EmptyIcon}" />
       <TextBlock x:Name="EmptyTitle" Text="搜索「所有媒体库」中的内容"
-                 Style="{StaticResource EmptyText}" FontSize="13.5" />
+                 Style="{StaticResource EmptyText}" FontSize="14" />
       <TextBlock x:Name="EmptyHint" Text="输入片名、剧名或关键词"
-                 Style="{StaticResource EmptyText}" FontSize="11.5" Margin="0,6,0,0"
+                 Style="{StaticResource EmptyText}" FontSize="12.5" Margin="0,6,0,0"
                  Foreground="{StaticResource FaintBrush}" />
     </StackPanel>
 
@@ -76,14 +76,14 @@
                     <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8"
                             Background="#59000000" CornerRadius="5" Padding="6,2"
                             Visibility="{Binding BadgeVisibility}">
-                      <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#CCFFFFFF" />
+                      <TextBlock Text="{Binding Badge}" FontSize="11.5" Foreground="#CCFFFFFF" />
                     </Border>
                   </Grid>
                 </Border>
-                <TextBlock Text="{Binding Title}" FontSize="12.5" Margin="1,9,0,0"
+                <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
                            Foreground="{StaticResource TextBrush}"
                            TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{Binding Sub}" FontSize="11"
+                <TextBlock Text="{Binding Sub}" FontSize="12"
                            Foreground="{StaticResource FaintBrush}"
                            Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
               </StackPanel>

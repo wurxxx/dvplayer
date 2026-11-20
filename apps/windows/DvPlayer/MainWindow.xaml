@@ -37,7 +37,7 @@
             <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
               <TextBlock Text="DV Player" FontFamily="{StaticResource DisplayFont}"
                          FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-              <TextBlock Text="媒体库" FontSize="11" Foreground="{StaticResource FaintBrush}" Margin="0,1,0,0" />
+              <TextBlock Text="媒体库" FontSize="12" Foreground="{StaticResource FaintBrush}" Margin="0,1,0,0" />
             </StackPanel>
           </StackPanel>
         </StackPanel>
@@ -48,10 +48,10 @@
             <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{StaticResource FaintBrush}"
                      VerticalAlignment="Center" />
             <TextBlock x:Name="SourceStatus" Text="未连接"
-                       FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"
+                       FontSize="12.5" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"
                        TextTrimming="CharacterEllipsis" />
           </StackPanel>
-          <TextBlock x:Name="SourceHint" Text="在「媒体源」里添加" FontSize="10.5"
+          <TextBlock x:Name="SourceHint" Text="在「媒体源」里添加" FontSize="11.5"
                      Foreground="{StaticResource FaintBrush}" Margin="14,3,0,0"
                      TextTrimming="CharacterEllipsis" />
         </StackPanel>
@@ -68,7 +68,7 @@
               <StackPanel Orientation="Horizontal">
                 <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="15"
                            VerticalAlignment="Center" />
-                <TextBlock Text="服务器" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <TextBlock Text="服务器" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
             </ListBoxItem>
 
@@ -76,7 +76,7 @@
               <StackPanel Orientation="Horizontal">
                 <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="15"
                            VerticalAlignment="Center" />
-                <TextBlock Text="记录" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <TextBlock Text="记录" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
             </ListBoxItem>
 
@@ -84,7 +84,7 @@
               <StackPanel Orientation="Horizontal">
                 <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="15"
                            VerticalAlignment="Center" />
-                <TextBlock Text="搜索" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <TextBlock Text="搜索" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
             </ListBoxItem>
 
@@ -92,13 +92,13 @@
               <StackPanel Orientation="Horizontal">
                 <TextBlock Text="&#xE713;" FontFamily="{StaticResource IconFont}" FontSize="15"
                            VerticalAlignment="Center" />
-                <TextBlock Text="设置" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <TextBlock Text="设置" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
             </ListBoxItem>
           </ListBox>
 
           <!-- 服务器：点一项直接进这个源的首页 -->
-          <TextBlock Text="服务器" FontSize="10.5" Foreground="{StaticResource FaintBrush}"
+          <TextBlock Text="服务器" FontSize="11.5" Foreground="{StaticResource FaintBrush}"
                      Margin="22,20,0,6" />
           <ListBox x:Name="SourceNav"
                    Background="Transparent"
@@ -115,7 +115,7 @@
                   </Grid.ColumnDefinitions>
                   <TextBlock Grid.Column="0" Text="&#xE774;" FontFamily="{StaticResource IconFont}"
                              FontSize="14" VerticalAlignment="Center" />
-                  <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" Margin="12,0,0,0"
+                  <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13.5" Margin="12,0,0,0"
                              VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </Grid>
               </DataTemplate>

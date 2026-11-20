@@ -46,7 +46,7 @@
                            VerticalAlignment="Center" />
                   <TextBlock Text="{Binding Title}" FontSize="14"
                              Foreground="{StaticResource TextBrush}" Margin="8,0,0,0" />
-                  <TextBlock Text="{Binding CountText}" FontSize="11"
+                  <TextBlock Text="{Binding CountText}" FontSize="12"
                              Foreground="{StaticResource FaintBrush}" Margin="10,0,0,0"
                              VerticalAlignment="Center" />
                 </StackPanel>
@@ -77,9 +77,9 @@
                                         Padding="7,3">
                                   <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
-                                               FontSize="9" Foreground="#E6FFFFFF"
+                                               FontSize="10.5" Foreground="#E6FFFFFF"
                                                VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding Time}" FontSize="10" Foreground="#E6FFFFFF"
+                                    <TextBlock Text="{Binding Time}" FontSize="11.5" Foreground="#E6FFFFFF"
                                                Margin="4,0,0,0" />
                                   </StackPanel>
                                 </Border>
@@ -91,10 +91,10 @@
                               </Grid>
                             </Border>
 
-                            <TextBlock Text="{Binding Title}" FontSize="13.5" Margin="2,9,0,0"
+                            <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
                                        Foreground="{StaticResource TextBrush}"
                                        TextTrimming="CharacterEllipsis" />
-                            <TextBlock Text="{Binding Sub}" FontSize="11"
+                            <TextBlock Text="{Binding Sub}" FontSize="12"
                                        Foreground="{StaticResource FaintBrush}" Margin="2,3,0,0"
                                        TextTrimming="CharacterEllipsis" />
                           </StackPanel>
@@ -153,9 +153,9 @@
                           Padding="7,3">
                     <StackPanel Orientation="Horizontal">
                       <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="9" Foreground="#E6FFFFFF"
+                                 FontSize="10.5" Foreground="#E6FFFFFF"
                                  VerticalAlignment="Center" />
-                      <TextBlock Text="{Binding Time}" FontSize="10" Foreground="#E6FFFFFF"
+                      <TextBlock Text="{Binding Time}" FontSize="11.5" Foreground="#E6FFFFFF"
                                  Margin="4,0,0,0" />
                     </StackPanel>
                   </Border>
@@ -167,10 +167,10 @@
                 </Grid>
               </Border>
 
-              <TextBlock Text="{Binding Title}" FontSize="13.5" Margin="2,9,0,0"
+              <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
                          Foreground="{StaticResource TextBrush}"
                          TextTrimming="CharacterEllipsis" />
-              <TextBlock Text="{Binding Sub}" FontSize="11"
+              <TextBlock Text="{Binding Sub}" FontSize="12"
                          Foreground="{StaticResource FaintBrush}" Margin="2,3,0,0"
                          TextTrimming="CharacterEllipsis" />
             </StackPanel>
@@ -183,9 +183,9 @@
     <StackPanel x:Name="FavoritePanel" Grid.Row="2" HorizontalAlignment="Center"
                 VerticalAlignment="Center" Margin="0,0,0,80" Visibility="Collapsed">
       <TextBlock Text="&#xE734;" Style="{StaticResource EmptyIcon}" />
-      <TextBlock Text="还没有收藏" Style="{StaticResource EmptyText}" FontSize="13.5" />
+      <TextBlock Text="还没有收藏" Style="{StaticResource EmptyText}" FontSize="14" />
       <TextBlock Text="收藏的视频和文件夹会集中在这里" Style="{StaticResource EmptyText}"
-                 FontSize="11.5" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
+                 FontSize="12.5" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
     </StackPanel>
   </Grid>
 </Page>

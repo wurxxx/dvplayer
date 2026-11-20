@@ -14,7 +14,7 @@
     <Grid Height="52">
       <TextBlock Text="设置" Style="{StaticResource PageTitle}" VerticalAlignment="Center" />
       <TextBlock x:Name="StatusText" HorizontalAlignment="Right" VerticalAlignment="Center"
-                 FontSize="11.5" Foreground="{StaticResource FaintBrush}" />
+                 FontSize="12.5" Foreground="{StaticResource FaintBrush}" />
     </Grid>
 
     <!-- 分段：通用 / 列表 / 播放 / 关于 -->
@@ -52,10 +52,10 @@
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                  <TextBlock Text="启动时自动连接" FontSize="13.5"
+                  <TextBlock Text="启动时自动连接" FontSize="14"
                              Foreground="{StaticResource TextBrush}" />
                   <TextBlock Text="打开 DV Player 后连接所有已配置的服务器"
-                             FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                             FontSize="12.5" Foreground="{StaticResource FaintBrush}"
                              Margin="0,4,0,0" />
                 </StackPanel>
                 <ToggleButton x:Name="AutoConnectSwitch" Grid.Column="1"
@@ -69,16 +69,13 @@
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                  <TextBlock Text="打开时显示" FontSize="13.5"
+                  <TextBlock Text="打开时显示" FontSize="14"
                              Foreground="{StaticResource TextBrush}" />
-                  <TextBlock Text="启动后先看到哪一页" FontSize="11.5"
+                  <TextBlock Text="启动后先看到哪一页" FontSize="12.5"
                              Foreground="{StaticResource FaintBrush}" Margin="0,4,0,0" />
                 </StackPanel>
-                <ComboBox x:Name="StartPageBox" Grid.Column="1" Width="132" Height="32"
-                          FontSize="12.5" VerticalAlignment="Center"
-                          Background="{StaticResource SurfaceHoverBrush}"
-                          Foreground="{StaticResource TextBrush}"
-                          BorderBrush="{StaticResource LineBrush}"
+                <ComboBox x:Name="StartPageBox" Grid.Column="1" Width="140" Height="34"
+                          Style="{StaticResource Select}" VerticalAlignment="Center"
                           SelectionChanged="OnSettingChanged">
                   <ComboBoxItem Content="服务器首页" Tag="libraries" />
                   <ComboBoxItem Content="记录" Tag="records" />
@@ -96,11 +93,11 @@
               </Grid.ColumnDefinitions>
               <StackPanel>
                 <TextBlock Text="服务器" Style="{StaticResource SectionTitle}" FontSize="14" />
-                <TextBlock x:Name="SourceSummaryText" FontSize="11.5"
+                <TextBlock x:Name="SourceSummaryText" FontSize="12.5"
                            Foreground="{StaticResource FaintBrush}" Margin="0,5,0,0" />
               </StackPanel>
               <Button Content="管理服务器" Grid.Column="1" Style="{StaticResource GhostButton}"
-                      Padding="14,7" FontSize="12" VerticalAlignment="Center"
+                      Padding="14,7" FontSize="12.5" VerticalAlignment="Center"
                       Click="OnManageSourcesClick" />
             </Grid>
           </Border>
@@ -118,17 +115,14 @@
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                  <TextBlock Text="每页条数" FontSize="13.5"
+                  <TextBlock Text="每页条数" FontSize="14"
                              Foreground="{StaticResource TextBrush}" />
                   <TextBlock Text="一次从服务器取多少条；滚动到底再取下一页"
-                             FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                             FontSize="12.5" Foreground="{StaticResource FaintBrush}"
                              Margin="0,4,0,0" />
                 </StackPanel>
-                <ComboBox x:Name="PageSizeBox" Grid.Column="1" Width="96" Height="32"
-                          FontSize="12.5" VerticalAlignment="Center"
-                          Background="{StaticResource SurfaceHoverBrush}"
-                          Foreground="{StaticResource TextBrush}"
-                          BorderBrush="{StaticResource LineBrush}"
+                <ComboBox x:Name="PageSizeBox" Grid.Column="1" Width="104" Height="34"
+                          Style="{StaticResource Select}" VerticalAlignment="Center"
                           SelectionChanged="OnSettingChanged">
                   <ComboBoxItem Content="40" />
                   <ComboBoxItem Content="60" />
@@ -143,10 +137,10 @@
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                  <TextBlock Text="显示分辨率角标" FontSize="13.5"
+                  <TextBlock Text="显示分辨率角标" FontSize="14"
                              Foreground="{StaticResource TextBrush}" />
                   <TextBlock Text="在卡片右上角标出 1080P / 4K"
-                             FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                             FontSize="12.5" Foreground="{StaticResource FaintBrush}"
                              Margin="0,4,0,0" />
                 </StackPanel>
                 <ToggleButton x:Name="ResolutionSwitch" Grid.Column="1"
@@ -169,9 +163,9 @@
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                  <TextBlock Text="从上次位置继续" FontSize="13.5"
+                  <TextBlock Text="从上次位置继续" FontSize="14"
                              Foreground="{StaticResource TextBrush}" />
-                  <TextBlock Text="播放时跳到上次停下的位置" FontSize="11.5"
+                  <TextBlock Text="播放时跳到上次停下的位置" FontSize="12.5"
                              Foreground="{StaticResource FaintBrush}" Margin="0,4,0,0" />
                 </StackPanel>
                 <ToggleButton x:Name="ResumeSwitch" Grid.Column="1"
@@ -180,7 +174,7 @@
               </Grid>
 
               <TextBlock Text="Windows 端用 mpv 自管窗口（--wid）渲染，不维护 libmpv 私有补丁；能直连的资源直接给 mpv，不让服务器转码。"
-                         FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                         FontSize="12.5" Foreground="{StaticResource FaintBrush}"
                          TextWrapping="Wrap" Margin="0,18,0,0" LineHeight="18" />
             </StackPanel>
           </Border>
@@ -189,7 +183,7 @@
             <StackPanel>
               <TextBlock Text="进度回写" Style="{StaticResource SectionTitle}" FontSize="14" />
               <TextBlock Text="播放中每 10 秒把位置写回源，关闭播放器时再写一次。飞牛与 Emby 各自用自己的接口。"
-                         FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                         FontSize="12.5" Foreground="{StaticResource FaintBrush}"
                          TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="18" />
             </StackPanel>
           </Border>
@@ -205,8 +199,8 @@
                   <ColumnDefinition Width="110" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="DV Player" FontSize="12.5" Foreground="{StaticResource MutedBrush}" />
-                <TextBlock x:Name="AppVersionText" Grid.Column="1" FontSize="12.5"
+                <TextBlock Text="DV Player" FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                <TextBlock x:Name="AppVersionText" Grid.Column="1" FontSize="13"
                            Foreground="{StaticResource TextBrush}" />
               </Grid>
               <Grid Margin="0,10,0,0">
@@ -214,8 +208,8 @@
                   <ColumnDefinition Width="110" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="共享核心" FontSize="12.5" Foreground="{StaticResource MutedBrush}" />
-                <TextBlock x:Name="CoreVersionText" Grid.Column="1" FontSize="12.5"
+                <TextBlock Text="共享核心" FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                <TextBlock x:Name="CoreVersionText" Grid.Column="1" FontSize="13"
                            Foreground="{StaticResource TextBrush}" />
               </Grid>
             </StackPanel>
@@ -225,9 +219,9 @@
             <StackPanel>
               <TextBlock Text="项目" Style="{StaticResource SectionTitle}" FontSize="14" />
               <TextBlock Text="四端共用同一份媒体库核心（core/media，Rust）。Windows、macOS、Android、iOS 只是各自的界面层。"
-                         FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                         FontSize="12.5" Foreground="{StaticResource FaintBrush}"
                          TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="18" />
-              <TextBlock Text="gitee.com/luckywur/dvplayer" FontSize="12"
+              <TextBlock Text="gitee.com/luckywur/dvplayer" FontSize="12.5"
                          Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" />
             </StackPanel>
           </Border>

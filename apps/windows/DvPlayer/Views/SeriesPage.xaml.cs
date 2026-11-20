@@ -326,7 +326,7 @@ public partial class SeriesPage : Page
                 Child = new TextBlock
                 {
                     Text = tag,
-                    FontSize = 11,
+                    FontSize = 12,
                     Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
                 },
             };
