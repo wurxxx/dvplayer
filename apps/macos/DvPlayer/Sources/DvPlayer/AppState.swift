@@ -24,6 +24,8 @@ final class AppState: ObservableObject {
     @Published var connecting = false
     @Published var coreError: String?
     @Published var toast: String?
+    /// 待确认的操作；ShellView 负责画那张深色确认卡片。
+    @Published var confirm: ConfirmRequest?
 
     private(set) var core: Core?
     private var toastTask: Task<Void, Never>?
@@ -196,6 +198,14 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - 提示
+
+    /// 弹一张确认卡片。`action` 只在用户点确认后执行。
+    func askConfirm(title: String, message: String, confirmTitle: String = "确定",
+                    danger: Bool = true, action: @escaping () -> Void) {
+        confirm = ConfirmRequest(title: title, message: message,
+                                 confirmTitle: confirmTitle, danger: danger,
+                                 action: action)
+    }
 
     func showToast(_ text: String) {
         toast = text

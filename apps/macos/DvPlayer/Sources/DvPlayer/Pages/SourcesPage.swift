@@ -46,6 +46,16 @@ struct SourcesPage: View {
             .frame(maxWidth: 900, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 截图巡检：直接把确认卡片弹出来看样式。
+        .task {
+            if ProcessInfo.processInfo.environment["DVPLAYER_CONFIRM"] == "1" {
+                state.askConfirm(
+                    title: "删除服务器",
+                    message: "删除服务器「飞牛影视」？\n播放记录与已收藏的进度都还在，\n重新添加这个源就能接上。",
+                    confirmTitle: "删除"
+                ) {}
+            }
+        }
     }
 
     private var header: some View {
@@ -142,9 +152,17 @@ struct SourcesPage: View {
                                 in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
+            .help("编辑这个源")
 
             Button {
-                Task { await state.removeSource(config.id) }
+                // 删除会重连整库，误触代价不小，先弹确认卡片。
+                state.askConfirm(
+                    title: "删除服务器",
+                    message: "删除服务器「\(config.name)」？\n播放记录与已收藏的进度都还在，\n重新添加这个源就能接上。",
+                    confirmTitle: "删除"
+                ) {
+                    Task { await state.removeSource(config.id) }
+                }
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 13))
@@ -154,6 +172,7 @@ struct SourcesPage: View {
                                 in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
+            .help("删除这个源")
         }
         .padding(16)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusCard))

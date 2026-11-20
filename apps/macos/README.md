@@ -67,6 +67,9 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_ARROWS` | `1` = 强制显示横向行的左右箭头（截图用，正常是悬停才出） |
 | `DVPLAYER_SHOT_SCALE` | 渲染倍数；JPEG 默认 1x，PNG 默认屏幕倍数（Retina 是 2x） |
 | `DVPLAYER_MENU` | `audio` / `subtitle` = 打开详情页后自动展开音轨 / 字幕弹层（截图用） |
+| `DVPLAYER_TAB` | `search` / `favorites` = 源首页直接落在搜索 / 收藏页签（截图用） |
+| `DVPLAYER_SEARCH` | 配合 `DVPLAYER_TAB=search`：预填关键词 |
+| `DVPLAYER_CONFIRM` | `1` = 打开「服务器」页时把删除确认卡片弹出来（截图用） |
 | `DVPLAYER_SHOT_FRAME` | `1` = 连窗口边框一起截（窗口没有标题栏，通常用不上） |
 | `DVPLAYER_WINDOWTEST` | `1` = 依次点三个窗口按钮（最小化 / 缩放 / 关闭），结果打到日志，验证完自动退出 |
 

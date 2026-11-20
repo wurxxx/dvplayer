@@ -25,6 +25,17 @@ struct ShellView: View {
         }
         .background(Theme.bg)
         .ignoresSafeArea(.container, edges: .top)
+        // 确认卡片盖住整窗（含侧栏），和 Windows 的模态确认框一致。
+        .overlay {
+            if let request = state.confirm {
+                ConfirmDialogView(request: request,
+                                  onCancel: { state.confirm = nil },
+                                  onConfirm: {
+                                      state.confirm = nil
+                                      request.action()
+                                  })
+            }
+        }
         .overlay(alignment: .bottom) {
             if let toast = state.toast {
                 Text(toast)
@@ -39,6 +50,7 @@ struct ShellView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: state.toast)
+        .animation(.easeOut(duration: 0.16), value: state.confirm?.id)
     }
 
     @ViewBuilder

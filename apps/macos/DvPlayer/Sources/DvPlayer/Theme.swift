@@ -132,6 +132,19 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// 危险操作（删除 / 清空）：红色实底，和 Windows 的 DangerButton 一致。
+struct DangerButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13.5, weight: .semibold))
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color(hex: 0xC42B1C).opacity(configuration.isPressed ? 0.82 : 1),
+                        in: RoundedRectangle(cornerRadius: Theme.radiusControl))
+    }
+}
+
 // MARK: - 输入
 
 struct FieldLabel: View {

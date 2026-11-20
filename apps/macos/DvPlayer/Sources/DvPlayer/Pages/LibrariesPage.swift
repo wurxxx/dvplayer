@@ -43,6 +43,13 @@ struct LibrariesPage: View {
     @State private var searchResults: [MediaItem] = []
     @State private var searching = false
     @State private var heroHovering = false
+    @State private var tab: SourceTab = .media
+
+    private enum SourceTab: String, CaseIterable {
+        case media = "媒体"
+        case search = "搜索"
+        case favorites = "收藏"
+    }
 
     private var sourceName: String {
         state.connections.first { $0.id == sourceId }?.name ?? "媒体库"
@@ -69,7 +76,7 @@ struct LibrariesPage: View {
                            onOpen: { self.detailId = $0 })
                     .transition(.opacity)
             } else {
-                overview
+                sourceHome
                     .transition(.opacity)
             }
         }
@@ -79,43 +86,147 @@ struct LibrariesPage: View {
 
     // MARK: - 首屏
 
-    private var overview: some View {
+    /// 媒体 / 搜索 / 收藏三个页签，和 Windows 的源首页对齐。
+    @ViewBuilder
+    private var sourceHome: some View {
+        Group {
+            switch tab {
+            case .media: mediaTab
+            case .search: searchTab
+            case .favorites: favoritesTab
+            }
+        }
+        .overlay(alignment: .top) {
+            ZStack(alignment: .top) {
+                if tab == .media {
+                    // 页签压在 Hero 上，只用渐变压暗，不做实底。
+                    LinearGradient(colors: [Color.black.opacity(0.55), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 112)
+                        .allowsHitTesting(false)
+                }
+
+                tabBar
+                    .padding(.top, 16)
+            }
+        }
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 2) {
+            ForEach(SourceTab.allCases, id: \.self) { item in
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) { tab = item }
+                } label: {
+                    Text(item.rawValue)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(tab == item ? Theme.text : Color.white.opacity(0.72))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(tab == item ? Color.white.opacity(0.12) : .clear)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private var mediaTab: some View {
         PageScroll {
             LazyVStack(alignment: .leading, spacing: 0) {
                 hero
                     .frame(height: 560)
 
-                if !searchText.isEmpty {
-                    searchBlock
-                        .padding(.horizontal, 32)
-                        .padding(.top, 24)
-                } else {
-                    VStack(alignment: .leading, spacing: 26) {
-                        librariesBlock
-                        continueBlock
-                        ForEach(sections) { section in
-                            sectionBlock(section)
-                        }
+                VStack(alignment: .leading, spacing: 26) {
+                    librariesBlock
+                    continueBlock
+                    ForEach(sections) { section in
+                        sectionBlock(section)
                     }
-                    .padding(.horizontal, 32)
-                    .padding(.top, 26)
-                    .padding(.bottom, 48)
                 }
+                .padding(.horizontal, 32)
+                .padding(.top, 26)
+                .padding(.bottom, 48)
             }
-        }
-        .overlay(alignment: .topTrailing) {
-            SearchField(placeholder: "在当前服务器中查找", text: $searchText, width: 260)
-                .padding(.top, 18)
-                .padding(.trailing, 28)
-        }
-        .onChange(of: searchText) { _ in
-            Task { await runSearch() }
         }
         .overlay(alignment: .center) {
             if loading && sections.isEmpty {
                 ProgressView().controlSize(.large)
             }
         }
+    }
+
+    private var searchTab: some View {
+        PageScroll {
+            VStack(alignment: .leading, spacing: 18) {
+                // 让出顶部页签。
+                SearchField(placeholder: "在当前服务器中查找", text: $searchText, width: 420)
+                    .padding(.top, 58)
+
+                HStack(spacing: 8) {
+                    if searching {
+                        ProgressView().controlSize(.small)
+                        Caption(text: "正在搜索…", size: 12)
+                    } else if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Caption(text: "输入片名、剧名或关键词", size: 12)
+                    } else {
+                        Caption(text: searchResults.isEmpty ? "没有找到匹配的内容"
+                                                            : "\(searchResults.count) 个结果",
+                                size: 12)
+                    }
+                    Spacer()
+                }
+
+                LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 22) {
+                    ForEach(searchResults) { item in
+                        PosterCard(item: item, width: cardWidth) { open(item) }
+                    }
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 40)
+        }
+        .onChange(of: searchText) { _ in
+            Task { await runSearch() }
+        }
+    }
+
+    private var favoritesTab: some View {
+        PageScroll {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionTitle(text: "收藏",
+                             trailing: sourceFavorites.isEmpty ? nil : "\(sourceFavorites.count)")
+                    .padding(.top, 58)
+
+                if sourceFavorites.isEmpty {
+                    EmptyState(icon: "heart", title: "还没有收藏",
+                               hint: "在详情页点「加入收藏」就会出现在这里")
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 36)
+                } else {
+                    LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 22) {
+                        ForEach(sourceFavorites) { item in
+                            PosterCard(item: item, width: cardWidth) { open(item) }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 40)
+        }
+    }
+
+    private var sourceFavorites: [MediaItem] {
+        state.favorites.filter { $0.sourceId == sourceId }
     }
 
     private var hero: some View {
@@ -265,27 +376,6 @@ struct LibrariesPage: View {
         }
     }
 
-    private var searchBlock: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if searching {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Caption(text: "正在搜索…", size: 12)
-                }
-            } else {
-                Caption(text: searchResults.isEmpty ? "没有找到匹配的内容"
-                                                    : "\(searchResults.count) 个结果",
-                        size: 12)
-            }
-
-            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 22) {
-                ForEach(searchResults) { item in
-                    PosterCard(item: item, width: cardWidth) { open(item) }
-                }
-            }
-        }
-    }
-
     // MARK: - 动作
 
     private func open(_ item: MediaItem) {
@@ -381,6 +471,20 @@ struct LibrariesPage: View {
             browseTarget = BrowseTarget(id: section.library.id,
                                         title: MediaText.clean(section.library.title),
                                         isLibrary: true)
+        }
+
+        // 截图巡检：`DVPLAYER_TAB=search|favorites` 直接落在某个页签，
+        // `DVPLAYER_SEARCH=<关键词>` 预填搜索词。
+        let env = ProcessInfo.processInfo.environment
+        switch env["DVPLAYER_TAB"] {
+        case "search": tab = .search
+        case "favorites", "fav": tab = .favorites
+        default: break
+        }
+
+        if let keyword = env["DVPLAYER_SEARCH"], !keyword.isEmpty {
+            searchText = keyword
+            await runSearch()
         }
     }
 
