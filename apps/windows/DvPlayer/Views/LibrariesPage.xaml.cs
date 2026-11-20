@@ -85,6 +85,9 @@ public partial class LibrariesPage : Page
     /// <summary>「继续观看」行。移除观看记录时直接从这里删一张。</summary>
     private readonly ObservableCollection<RecordCard> _continueCards = new();
 
+    /// <summary>首页「继续观看」的卡片 → 原始记录：续播要拿剧名 / 季号去拼选集。</summary>
+    private readonly Dictionary<string, PlayRecordDto> _continueRecords = new();
+
     private int _total;
     private bool _loadingPage;
     private bool _hasMore;
@@ -433,9 +436,15 @@ public partial class LibrariesPage : Page
 
         var cards = continuing.Select(ToRecordCard).ToList();
         _continueCards.Clear();
+        _continueRecords.Clear();
         foreach (var card in cards)
         {
             _continueCards.Add(card);
+        }
+
+        foreach (var record in continuing)
+        {
+            _continueRecords[record.ItemId] = record;
         }
 
         ContinueEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1330,9 +1339,16 @@ public partial class LibrariesPage : Page
         // 网格卡片、库分组海报、搜索结果、继续观看卡片共用这个处理器。
         // 按卡片类型判断，不能按 id 查「是否在继续观看里」——搜索同一部片
         // 时也会命中，结果点搜索结果就变成直接起播了。
-        if (sender is FrameworkElement { DataContext: RecordCard record })
+        if (sender is FrameworkElement { DataContext: RecordCard card })
         {
-            await PlayWindow.OpenAsync(Window.GetWindow(this), record.ItemId);
+            // 续播：单集记录要带上它那一季的选集，否则播完没有下一集。
+            if (_continueRecords.TryGetValue(card.ItemId, out var record))
+            {
+                await Playlists.PlayRecordAsync(Window.GetWindow(this), record);
+                return;
+            }
+
+            await PlayWindow.OpenAsync(Window.GetWindow(this), card.ItemId);
             return;
         }
 
@@ -1436,6 +1452,13 @@ public partial class LibrariesPage : Page
     {
         if (MenuItemId(sender) is not { Length: > 0 } id)
         {
+            return;
+        }
+
+        // 继续观看卡片走续播（带选集），其余照样直接播。
+        if (_continueRecords.TryGetValue(id, out var record))
+        {
+            await Playlists.PlayRecordAsync(Window.GetWindow(this), record);
             return;
         }
 

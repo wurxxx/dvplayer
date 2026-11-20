@@ -265,6 +265,17 @@ public partial class MainWindow : FluentWindow
         }
 
         await Task.Delay(9000);
+
+        // --play-end：从续播放到片尾，验证真的接上了下一集。
+        if (ArgumentAfter("--play-end") is not null)
+        {
+            player.SkipToEndForShot();
+            await Task.Delay(22000);
+            Trace.Write("eof state " + player.DescribePlaybackState());
+            player.Close();
+            return;
+        }
+
         player.ShowChromeForShot();
         await Task.Delay(600);
         Trace.Write($"record player bounds {player.DescribeBounds()}");

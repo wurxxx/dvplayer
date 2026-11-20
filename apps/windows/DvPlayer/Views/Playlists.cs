@@ -7,8 +7,14 @@ namespace DvPlayer.Views;
 /// 拼播放页右侧「选集」用的列表。
 ///
 /// 详情页本来就知道当前是哪一季，直接把自己那行集传进来；续播（观看记录、
-/// 收藏里的单集）只有一条记录，所以要顺着记录的 <see cref="PlayRecordDto.ParentId"/>
-/// 再查一次那一季的集，不然播放页就只剩一个孤零零的片子，没有上一集 / 下一集。
+/// 收藏里的单集）只有一条记录，要顺着记录把所在的容器找回来再列一遍，
+/// 不然播放页就只剩一个孤零零的片子，没有上一集 / 下一集。
+///
+/// 各源给的线索不一样，所以按顺序试：
+/// 1. <see cref="PlayRecordDto.ParentId"/>：Emby 的单集父条目就是那一季；
+/// 2. 记录里的剧名：飞牛的 <c>parent_guid</c> 常常不是可浏览的目录，
+///    按剧名搜回剧集再取对应那一季；
+/// 3. 都不行就正常播，不硬拼。
 /// </summary>
 internal static class Playlists
 {
@@ -57,39 +63,103 @@ internal static class Playlists
     public static async Task<PlayWindow?> PlayRecordAsync(Window? owner, PlayRecordDto record)
     {
         var core = AppServices.Instance.Core;
-        if (core is null)
+        if (core is null || !LooksLikeEpisode(record))
         {
             return await PlayWindow.OpenAsync(owner, record.ItemId);
         }
 
-        // 1) 记录的父条目能直接列出集：Emby 的单集父条目就是「季」，一次请求搞定。
-        if (!string.IsNullOrEmpty(record.ParentId))
+        // 1) 记录的父条目能直接列出集。
+        if (WithSource(record, record.ParentId) is { } parentId &&
+            await TryOpenAsync(owner, core, parentId, record, record.SeriesTitle) is { } byParent)
         {
-            var (items, title) = await LoadAsync(core, record.ParentId, record.SeriesTitle);
-            if (items.Any(item => item.Id == record.ItemId))
-            {
-                Trace.Write($"record play parent={record.ParentId} episodes={items.Count}");
-                return await PlayWindow.OpenAsync(owner, record.ItemId, null, items, title);
-            }
+            return byParent;
         }
 
-        // 2) 飞牛的记录里 parent_guid 不是可浏览的目录，只能按剧名把剧集找回来。
+        // 2) 飞牛的 parent_guid 不是可浏览的目录，按剧名把剧集找回来。
         if (!string.IsNullOrWhiteSpace(record.SeriesTitle) &&
-            await FindSeriesAsync(core, record.SeriesTitle!) is { } seriesId)
+            await FindSeriesAsync(core, record.SeriesTitle!) is { } seriesId &&
+            await TryOpenAsync(owner, core, seriesId, record, record.SeriesTitle) is { } bySeries)
         {
-            var (items, title) = await LoadAsync(
-                core, seriesId, record.SeriesTitle, record.SeasonNumber);
-            if (items.Any(item => item.Id == record.ItemId))
-            {
-                Trace.Write($"record play series={seriesId} episodes={items.Count} " +
-                            $"season={record.SeasonNumber}");
-                return await PlayWindow.OpenAsync(owner, record.ItemId, null, items, title);
-            }
+            return bySeries;
         }
 
-        Trace.Write($"record {record.ItemId} no playlist");
+        Trace.Write($"record {record.ItemId} no playlist title='{record.Title}'");
         return await PlayWindow.OpenAsync(owner, record.ItemId);
     }
+
+    /// <summary>
+    /// 列出容器里的集，认出记录对应的是哪一集再打开。
+    /// 记录的 item id 有时是「播放用」的 guid，和列表里的条目 id 对不上，
+    /// 所以还要按标题兜一层。
+    /// </summary>
+    private static async Task<PlayWindow?> TryOpenAsync(
+        Window? owner,
+        MediaCore core,
+        string containerId,
+        PlayRecordDto record,
+        string? title)
+    {
+        var (items, seriesTitle) = await LoadAsync(core, containerId, title, record.SeasonNumber);
+        if (items.Count < 2)
+        {
+            return null;
+        }
+
+        var target = items.FirstOrDefault(item => item.Id == record.ItemId)
+                     ?? MatchByTitle(items, record);
+
+        if (target is null)
+        {
+            Trace.Write($"record {record.ItemId} not in {containerId} " +
+                        $"first={items[0].Id}/{items[0].Title}");
+            return null;
+        }
+
+        Trace.Write($"record play {record.ItemId} -> {target.Id} " +
+                    $"container={containerId} episodes={items.Count}");
+        return await PlayWindow.OpenAsync(owner, target.Id, null, items, seriesTitle);
+    }
+
+    /// <summary>按标题认集：记录的标题多半就是文件名，去掉扩展名后和列表对得上。</summary>
+    private static PlayEpisode? MatchByTitle(List<PlayEpisode> items, PlayRecordDto record)
+    {
+        var wanted = Normalize(record.Title);
+        if (wanted.Length == 0)
+        {
+            return null;
+        }
+
+        var named = items.Where(item => !string.IsNullOrWhiteSpace(item.Title)).ToList();
+
+        return named.FirstOrDefault(item =>
+                   string.Equals(Normalize(item.Title), wanted, StringComparison.OrdinalIgnoreCase))
+               ?? named.FirstOrDefault(item =>
+                   Normalize(item.Title).Contains(wanted, StringComparison.OrdinalIgnoreCase))
+               ?? named.FirstOrDefault(item =>
+                   wanted.Contains(Normalize(item.Title), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string Normalize(string? title) =>
+        MediaText.TrimExtension(MediaText.Clean(title)).Trim();
+
+    /// <summary>记录里的 guid 是裸的，要补 <c>&lt;sourceId&gt;:</c> 前缀核心才认。</summary>
+    private static string? WithSource(PlayRecordDto record, string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        return id.Contains(':') || string.IsNullOrEmpty(record.SourceId)
+            ? id
+            : $"{record.SourceId}:{id}";
+    }
+
+    /// <summary>电影 / 单个视频没有集的概念，不需要选集。</summary>
+    private static bool LooksLikeEpisode(PlayRecordDto record) =>
+        record.EpisodeNumber is > 0 ||
+        record.SeasonNumber is > 0 ||
+        !string.IsNullOrWhiteSpace(record.SeriesTitle);
 
     /// <summary>按剧名找回剧集 id：只认标题对得上的 series / tv，宁可不找也不错找。</summary>
     private static async Task<string?> FindSeriesAsync(MediaCore core, string title)
@@ -106,8 +176,12 @@ internal static class Playlists
                ?? series.FirstOrDefault()?.Id;
     }
 
+    /// <summary>
+    /// 只认 kind：未刮削的目录里每个文件的 seasonNumber 也可能是 0/1，
+    /// 用「seasonNumber 有值」判断会把整排视频当成季，再下一层就空了。
+    /// </summary>
     private static bool IsSeason(MediaItemDto item) =>
-        item.Kind is "season" or "Season" || item.SeasonNumber is not null;
+        string.Equals(item.Kind, "season", StringComparison.OrdinalIgnoreCase);
 
     private static List<PlayEpisode> ToEpisodes(List<MediaItemDto> items)
     {
