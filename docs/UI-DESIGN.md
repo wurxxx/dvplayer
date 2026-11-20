@@ -63,6 +63,11 @@
 - **圆角**：卡片 12、按钮 / 输入框 / 下拉框 9、小角标 5–6；
 - **焦点框**：主题层把所有 `FocusVisualStyle` 设为 `{x:Null}`。按 Alt
   不会再多出一圈虚线框，键盘操作靠选中背景辨认；
+- **搜索框**：`SearchBoxBorder` + `SearchBoxInput` + `SearchBoxPlaceholder`，
+  整块挂 `controls:SearchBoxFocus.Enabled="True"`（点图标 / 内边距也能开始输入）；
+  `SearchBoxInput` 的模板里 **不要再给 `PART_ContentHost` 加
+  `Margin="{TemplateBinding Padding}"`**——TextBox 引擎已经套过一次 `Padding`，
+  双重内边距会把文本挤出可视区，只剩一根光标（看起来像字体颜色不对）；
 - **下拉框**：不要用系统模板（深色主题下弹层是白底），统一用
   `{StaticResource Select}`，里面已经把弹层、选中项、箭头都重画了；
 - **顶栏**：始终浮在内容上，只用顶部渐变压暗，**不要做实底**——实底会在海报上

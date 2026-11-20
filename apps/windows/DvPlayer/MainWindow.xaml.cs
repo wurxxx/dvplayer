@@ -1095,11 +1095,12 @@ public partial class MainWindow : FluentWindow
             Style = (Style)FindResource("SearchBoxInput"),
         };
         grid.Children.Add(input);
-        grid.Children.Add(new System.Windows.Controls.TextBlock
+        var placeholder = new System.Windows.Controls.TextBlock
         {
             Text = "搜索",
             Style = (Style)FindResource("SearchBoxPlaceholder"),
-        });
+        };
+        grid.Children.Add(placeholder);
         searchBorder.Child = grid;
 
         var scroll = new ScrollViewer
@@ -1120,6 +1121,8 @@ public partial class MainWindow : FluentWindow
         panel.Children.Add(scroll);
         window.Content = panel;
 
+        input.Text = "搜索测试 abc";
+        placeholder.Visibility = Visibility.Collapsed;
         window.Show();
         await Task.Delay(600);
 
@@ -1132,6 +1135,7 @@ public partial class MainWindow : FluentWindow
         await Task.Delay(200);
 
         Log($"search focus={input.IsFocused}");
+        Log($"input text={input.Text}");
         Log($"scroll visible={scroll.ComputedVerticalScrollBarVisibility}");
         UiCapture.Save(window, Path.Combine(dir, "ui-test.png"));
 

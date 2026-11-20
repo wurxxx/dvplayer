@@ -899,10 +899,15 @@
     <Setter Property="Padding" Value="34,8,10,8" />
     <Setter Property="FontSize" Value="13.5" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <!-- `Padding` 由 TextBox 引擎自己套到文本上；这里再给它一个 Margin
+         会变成双重内边距，把文本挤出可视区（只剩光标，字看不见）。 -->
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="TextBox">
-          <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" />
+          <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                        Background="Transparent"
+                        HorizontalScrollBarVisibility="Hidden"
+                        VerticalScrollBarVisibility="Hidden" />
         </ControlTemplate>
       </Setter.Value>
     </Setter>
