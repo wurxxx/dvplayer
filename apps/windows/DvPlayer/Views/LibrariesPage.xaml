@@ -532,7 +532,8 @@
       </StackPanel>
 
       <ScrollViewer x:Name="BrowseScroll" Grid.Row="4" VerticalScrollBarVisibility="Hidden"
-                    Margin="0,14,0,0" ScrollChanged="OnBrowseScroll">
+                    Margin="0,14,0,0" ScrollChanged="OnBrowseScroll"
+                    SizeChanged="OnBrowseSizeChanged">
         <StackPanel>
           <ItemsControl x:Name="ItemGrid">
             <ItemsControl.ItemsPanel>
@@ -542,8 +543,11 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <StackPanel Width="148" Margin="0,0,16,22">
-                  <Border Height="222" CornerRadius="10" Background="{Binding Background}"
+                <StackPanel Width="{Binding CardSlot, RelativeSource={RelativeSource AncestorType=Page}}"
+                            Margin="0,0,0,22">
+                  <Border Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=Page}}"
+                          Height="{Binding CardHeight, RelativeSource={RelativeSource AncestorType=Page}}"
+                          CornerRadius="10" Background="{Binding Background}"
                           SnapsToDevicePixels="True" Tag="{Binding Id}"
                           Cursor="Hand" MouseLeftButtonUp="OnCardClick">
                     <Grid>
@@ -559,10 +563,13 @@
                     </Grid>
                   </Border>
                   <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
+                             Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=Page}}"
                              Foreground="{StaticResource TextBrush}"
                              TextTrimming="CharacterEllipsis" />
                   <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{StaticResource FaintBrush}"
-                             Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
+                             Margin="1,2,0,0"
+                             Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=Page}}"
+                             TextTrimming="CharacterEllipsis" />
                 </StackPanel>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

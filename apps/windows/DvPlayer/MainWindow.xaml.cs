@@ -112,6 +112,20 @@ public partial class MainWindow : FluentWindow
     /// <summary>依次打开每个页面并保存一张 PNG，然后退出。用于无桌面环境的回归。</summary>
     private async Task CaptureTourAsync(string dir)
     {
+        // --window <宽>x<高>：换窗口尺寸再截图，用来验证自适应网格。
+        if (ArgumentAfter("--window")?.Split('x') is { Length: 2 } size &&
+            double.TryParse(size[0], out var windowWidth) &&
+            double.TryParse(size[1], out var windowHeight))
+        {
+            WindowState = WindowState.Normal;
+            Left = 0;
+            Top = 0;
+            Width = Math.Max(MinWidth, windowWidth);
+            Height = Math.Max(MinHeight, windowHeight);
+            UpdateLayout();
+            await Task.Delay(600);
+        }
+
         // --series <id>[,<id>...]：额外截详情页，用来验证剧集 / 未刮削目录两种布局。
         var seriesIds = ArgumentAfter("--series")?
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

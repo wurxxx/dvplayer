@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,10 +17,16 @@ namespace DvPlayer.Views;
 /// 分段，下面是 Hero 横幅、「我的媒体」库卡片、继续观看，以及每个库一行横向海报。
 /// 点库卡片或某行的箭头进入原来的网格视图（可下钻目录、加载更多）。
 /// </summary>
-public partial class LibrariesPage : Page
+public partial class LibrariesPage : Page, INotifyPropertyChanged
 {
     private const int PreviewPerLibrary = 12;
     private const double ScrollStep = 262;
+
+    /// <summary>网格卡片之间的横向间距。列宽按可用宽度算，卡片跟着缩放宽。</summary>
+    private const double CardGap = 16;
+    private const double MinCardWidth = 160;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     private static int PageSize => Math.Max(10, AppServices.Instance.Settings.PageSize);
 
@@ -63,6 +70,18 @@ public partial class LibrariesPage : Page
             // 计时失败不影响首页。
         }
     }
+
+    // —— 自适应卡片尺寸（跟着窗口宽度走）——
+    private double _cardWidth = 148;
+
+    /// <summary>海报宽度。列数变化时重算。</summary>
+    public double CardWidth => _cardWidth;
+
+    /// <summary>海报高度，保持 2:3。</summary>
+    public double CardHeight => Math.Round(_cardWidth * 1.5);
+
+    /// <summary>一个格子的宽度（卡片 + 右侧间距）。WrapPanel 用它保证一行正好铺满。</summary>
+    public double CardSlot => Math.Round(_cardWidth + CardGap, 2);
 
     private string? _libraryId;
     private string _libraryTitle = "";
@@ -877,6 +896,35 @@ public partial class LibrariesPage : Page
 
     /// <summary>截图巡检用：滚到指定位置，看横幅下面几块。</summary>
     public void ScrollOverview(double offset) => OverviewRoot.ScrollToVerticalOffset(offset);
+
+    /// <summary>
+    /// 按可用宽度算列数与卡片宽度：卡片在 160–215 之间缩放，
+    /// 宽度再涨到能塞下一列时，卡片缩回去、列数 +1。
+    /// </summary>
+    private void UpdateCardSize(double available)
+    {
+        if (available < MinCardWidth + CardGap)
+        {
+            return;
+        }
+
+        var columns = Math.Max(1, (int)Math.Floor(available / (MinCardWidth + CardGap)));
+        var slot = Math.Floor(available / columns * 100) / 100;
+        var width = Math.Max(1, slot - CardGap);
+
+        if (Math.Abs(width - _cardWidth) < 0.5)
+        {
+            return;
+        }
+
+        _cardWidth = width;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CardWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CardHeight)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CardSlot)));
+    }
+
+    private void OnBrowseSizeChanged(object sender, SizeChangedEventArgs e) =>
+        UpdateCardSize(e.NewSize.Width);
 
     /// <summary>截图巡检用：把库内网格往下滚，触发自动加载。</summary>
     public void ScrollBrowse(double offset) => BrowseScroll.ScrollToVerticalOffset(offset);
