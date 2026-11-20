@@ -144,6 +144,14 @@ public partial class MainWindow : FluentWindow
             await Task.Delay((tag == "search" ? 15000 : tag == "libraries" ? 9000 : 5000)
                              + extraDelay * 1000);
 
+            // --favorites：截图时停在「收藏」分段，检查空态和顶栏。
+            if (Environment.GetCommandLineArgs().Contains("--favorites") &&
+                ContentFrame.Content is LibrariesPage favPage)
+            {
+                favPage.ShowFavoritesForShot();
+                await Task.Delay(600);
+            }
+
             if (previewHover && ContentFrame.Content is LibrariesPage hoverPage)
             {
                 hoverPage.PreviewHeroArrows();
@@ -308,9 +316,10 @@ public partial class MainWindow : FluentWindow
     {
         var settings = AppServices.Instance.Settings;
 
-        // 已经在看这个源了，不用重建页面。
-        if (settings.LastSourceId == id && ContentFrame.Content is LibrariesPage)
+        // 已经在看这个源了：也许停在「收藏」或库内网格，回到媒体首页就行。
+        if (settings.LastSourceId == id && ContentFrame.Content is LibrariesPage page)
         {
+            page.SelectMediaTab();
             return;
         }
 

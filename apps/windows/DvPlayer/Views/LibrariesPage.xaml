@@ -323,45 +323,6 @@
         </StackPanel>
       </ScrollViewer>
 
-      <!-- 顶栏浮层：源名 / 分段 / 刷新 -->
-      <Border x:Name="TopBarScrim" Height="108" VerticalAlignment="Top" IsHitTestVisible="False">
-        <Border.Background>
-          <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#99000000" Offset="0" />
-            <GradientStop Color="#00000000" Offset="1" />
-          </LinearGradientBrush>
-        </Border.Background>
-      </Border>
-
-      <Border x:Name="TopBarEdge" Height="1" VerticalAlignment="Top" Margin="0,72,0,0"
-              Background="{StaticResource LineBrush}" Visibility="Collapsed"
-              IsHitTestVisible="False" />
-
-      <Grid Height="72" x:Name="TopBar" Margin="32,0,32,0" VerticalAlignment="Top">
-        <TextBlock x:Name="SourceTitle" Text="媒体库" FontSize="17" FontWeight="SemiBold"
-                   Foreground="#F2FFFFFF" VerticalAlignment="Center" />
-
-        <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Center"
-                VerticalAlignment="Center">
-          <StackPanel Orientation="Horizontal">
-            <RadioButton x:Name="MediaSegment" Content="媒体" GroupName="LibraryTab"
-                         Style="{StaticResource SegmentItem}" IsChecked="True"
-                         Checked="OnTabChanged" />
-            <RadioButton x:Name="SearchSegment" Content="搜索" GroupName="LibraryTab"
-                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
-                         Checked="OnTabChanged" />
-            <RadioButton x:Name="FavoriteSegment" Content="收藏" GroupName="LibraryTab"
-                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
-                         Checked="OnTabChanged" />
-          </StackPanel>
-        </Border>
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-          <Button Style="{StaticResource ToolButton}" Click="OnRefreshClick" ToolTip="刷新">
-            <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="15" />
-          </Button>
-        </StackPanel>
-      </Grid>
     </Grid>
 
     <!-- 收藏（空态） -->
@@ -492,5 +453,45 @@
         </StackPanel>
       </ScrollViewer>
     </Grid>
+
+      <!-- 顶栏浮层：源名 / 分段 / 刷新 -->
+      <Border x:Name="TopBarScrim" Height="108" VerticalAlignment="Top" IsHitTestVisible="False">
+        <Border.Background>
+          <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#99000000" Offset="0" />
+            <GradientStop Color="#00000000" Offset="1" />
+          </LinearGradientBrush>
+        </Border.Background>
+      </Border>
+
+      <Border x:Name="TopBarEdge" Height="1" VerticalAlignment="Top" Margin="0,72,0,0"
+              Background="{StaticResource LineBrush}" Visibility="Collapsed"
+              IsHitTestVisible="False" />
+
+      <Grid Height="72" x:Name="TopBar" Margin="32,0,32,0" VerticalAlignment="Top">
+        <TextBlock x:Name="SourceTitle" Text="媒体库" FontSize="17" FontWeight="SemiBold"
+                   Foreground="#F2FFFFFF" VerticalAlignment="Center" />
+
+        <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal">
+            <RadioButton x:Name="MediaSegment" Content="媒体" GroupName="LibraryTab"
+                         Style="{StaticResource SegmentItem}" IsChecked="True"
+                         Checked="OnTabChanged" />
+            <RadioButton x:Name="SearchSegment" Content="搜索" GroupName="LibraryTab"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnTabChanged" />
+            <RadioButton x:Name="FavoriteSegment" Content="收藏" GroupName="LibraryTab"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnTabChanged" />
+          </StackPanel>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Button Style="{StaticResource ToolButton}" Click="OnRefreshClick" ToolTip="刷新">
+            <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="15" />
+          </Button>
+        </StackPanel>
+      </Grid>
   </Grid>
 </Page>

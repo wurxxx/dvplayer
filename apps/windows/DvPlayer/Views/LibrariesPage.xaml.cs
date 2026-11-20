@@ -828,6 +828,9 @@ public partial class LibrariesPage : Page
             .ToList();
     }
 
+    /// <summary>截图巡检用：切到「收藏」分段。</summary>
+    public void ShowFavoritesForShot() => FavoriteSegment.IsChecked = true;
+
     /// <summary>截图巡检用：把 Hero 左右箭头显示出来，确认位置和样式。</summary>
     public void PreviewHeroArrows() => FadeArrows(1);
 
@@ -890,15 +893,47 @@ public partial class LibrariesPage : Page
         await PlayWindow.OpenAsync(Window.GetWindow(this), hero.Id);
     }
 
-    /// <summary>往下滚以后顶栏压到内容上，给它一个实底，别让字浮在海报上。</summary>
-    private void OnOverviewScroll(object sender, ScrollChangedEventArgs e)
+    /// <summary>
+    /// 顶栏的三个状态：媒体首页（透明浮在 Hero 上，滚动后变实底）、
+    /// 收藏空态（实底）、库内网格（不显示，网格自己有面包屑）。
+    /// </summary>
+    private void UpdateTopBar()
     {
-        var scrolled = OverviewRoot.VerticalOffset > 24;
-        TopBar.Background = scrolled
+        if (BrowseRoot.Visibility == Visibility.Visible)
+        {
+            TopBar.Visibility = Visibility.Collapsed;
+            TopBarScrim.Visibility = Visibility.Collapsed;
+            TopBarEdge.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        TopBar.Visibility = Visibility.Visible;
+
+        var favorites = FavoriteEmpty.Visibility == Visibility.Visible;
+        var solid = favorites || OverviewRoot.VerticalOffset > 24;
+
+        TopBar.Background = solid
             ? (Brush)FindResource("BgBrush")
             : Brushes.Transparent;
-        TopBarScrim.Visibility = scrolled ? Visibility.Collapsed : Visibility.Visible;
-        TopBarEdge.Visibility = scrolled ? Visibility.Visible : Visibility.Collapsed;
+        TopBarScrim.Visibility = solid ? Visibility.Collapsed : Visibility.Visible;
+        TopBarEdge.Visibility = solid ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnOverviewScroll(object sender, ScrollChangedEventArgs e) => UpdateTopBar();
+
+    /// <summary>回到媒体首页（点侧栏的服务器项时用）。</summary>
+    public void SelectMediaTab()
+    {
+        BrowseRoot.Visibility = Visibility.Collapsed;
+        OverviewPanel.Visibility = Visibility.Visible;
+        FavoriteEmpty.Visibility = Visibility.Collapsed;
+        MediaSegment.IsChecked = true;
+        UpdateTopBar();
+
+        if (_heroPool.Count > 1)
+        {
+            _heroTimer.Start();
+        }
     }
 
     private void OnTabChanged(object sender, RoutedEventArgs e)
@@ -921,6 +956,7 @@ public partial class LibrariesPage : Page
         OverviewPanel.Visibility = favorites ? Visibility.Collapsed : Visibility.Visible;
         FavoriteEmpty.Visibility = favorites ? Visibility.Visible : Visibility.Collapsed;
         BrowseRoot.Visibility = Visibility.Collapsed;
+        UpdateTopBar();
 
         if (favorites)
         {
@@ -936,7 +972,9 @@ public partial class LibrariesPage : Page
     {
         BrowseRoot.Visibility = Visibility.Collapsed;
         OverviewPanel.Visibility = Visibility.Visible;
+        FavoriteEmpty.Visibility = Visibility.Collapsed;
         MediaSegment.IsChecked = true;
+        UpdateTopBar();
         _heroTimer.Stop();
         await LoadOverviewAsync().ConfigureAwait(true);
     }
@@ -961,6 +999,7 @@ public partial class LibrariesPage : Page
     {
         BrowseRoot.Visibility = Visibility.Collapsed;
         OverviewPanel.Visibility = Visibility.Visible;
+        UpdateTopBar();
 
         if (_heroPool.Count > 1)
         {
@@ -986,6 +1025,7 @@ public partial class LibrariesPage : Page
         OverviewPanel.Visibility = Visibility.Collapsed;
         FavoriteEmpty.Visibility = Visibility.Collapsed;
         BrowseRoot.Visibility = Visibility.Visible;
+        UpdateTopBar();
 
         _libraryId = library.Id;
         _libraryTitle = library.Title;
