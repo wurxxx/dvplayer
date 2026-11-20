@@ -34,7 +34,7 @@ public partial class HomePage : Page
 
         if (!services.IsConnected)
         {
-            StatusText.Text = "未连接媒体源，先在「设置」里添加。";
+            StatusText.Text = "未连接服务器，先在「服务器」里添加。";
             RecentStatus.Text = string.Empty;
             return;
         }

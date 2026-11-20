@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -24,8 +25,13 @@ public partial class LibrariesPage : Page
     private List<LibraryCardItem> _libraryCards = new();
     private Task? _overviewTask;
 
-    private string? _heroItemId;
-    private string _heroKind = "";
+    /// <summary>Hero 轮播的候选（有横版图的条目，最多 8 个）。</summary>
+    private readonly List<HeroItem> _heroPool = new();
+    private readonly List<string> _heroCandidates = new();
+    private int _heroIndex;
+    private int _heroVersion;
+
+    private readonly DispatcherTimer _heroTimer = new() { Interval = TimeSpan.FromSeconds(7) };
 
     private string? _libraryId;
     private string _libraryTitle = "";
@@ -46,12 +52,14 @@ public partial class LibrariesPage : Page
     public LibrariesPage()
     {
         InitializeComponent();
+        _heroTimer.Tick += (_, _) => _ = ShowHeroAsync(_heroIndex + 1);
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _heroTimer.Stop();
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
     }
 
@@ -96,8 +104,26 @@ public partial class LibrariesPage : Page
         }
 
         var core = services.Core!;
-        SourceTitle.Text = services.Connections.FirstOrDefault(c => c.Ok)?.Name ?? "媒体库";
+        var sourceId = services.Settings.LastSourceId;
+        var sourceOk = sourceId is not null &&
+                       services.Connections.Any(c => c.Id == sourceId && c.Ok);
+
+        var sourceName = services.Connections.FirstOrDefault(c => c.Id == sourceId)?.Name
+                         ?? services.Settings.Sources.FirstOrDefault(s => s.Id == sourceId)?.Name;
+        SourceTitle.Text = sourceName
+                           ?? services.Connections.FirstOrDefault(c => c.Ok)?.Name
+                           ?? "媒体库";
         StatusText.Text = "正在读取…";
+
+        if (sourceName is not null && !sourceOk)
+        {
+            StatusText.Text = "这个服务器没有连上，去「服务器」检查地址或账号。";
+            return;
+        }
+
+        _heroTimer.Stop();
+        _heroPool.Clear();
+        _heroCandidates.Clear();
 
         var librariesResult = await Task.Run(core.Libraries).ConfigureAwait(true);
         if (!librariesResult.Ok || librariesResult.Data is null)
@@ -107,6 +133,15 @@ public partial class LibrariesPage : Page
         }
 
         _libraries = librariesResult.Data;
+        if (sourceOk)
+        {
+            var mine = _libraries.Where(l => l.SourceId == sourceId).ToList();
+            if (mine.Count > 0)
+            {
+                _libraries = mine;
+            }
+        }
+
         LibrariesCount.Text = $"{_libraries.Count} 个";
 
         _libraryCards = _libraries
@@ -145,6 +180,14 @@ public partial class LibrariesPage : Page
                 Items = page.Data.Items.Select(ToCard).ToList(),
             });
 
+            // Hero 候选：列表项里没有横版图，先记 id，后面统一取详情。
+            if (_heroCandidates.Count < 8)
+            {
+                _heroCandidates.AddRange(page.Data.Items
+                    .Take(8 - _heroCandidates.Count)
+                    .Select(item => item.Id));
+            }
+
             // 库自己没有封面时，借这个库第一张有图的海报当封面。
             var card = _libraryCards.FirstOrDefault(c => c.Id == id);
             if (card is not null && string.IsNullOrWhiteSpace(card.PosterPath))
@@ -157,11 +200,72 @@ public partial class LibrariesPage : Page
         Sections.ItemsSource = sections;
         StatusText.Text = "";
 
+        // 详情里才有横版图和简介；并发 4 个，8 条大约一秒。
+        if (_heroCandidates.Count > 0)
+        {
+            using var gate = new SemaphoreSlim(4);
+            var details = await Task.WhenAll(_heroCandidates.Select(async id =>
+            {
+                await gate.WaitAsync().ConfigureAwait(true);
+                try
+                {
+                    return await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(true);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            })).ConfigureAwait(true);
+
+            _heroPool.AddRange(details
+                .Where(d => d.Ok && d.Data is not null)
+                .Select(d => d.Data!)
+                .Where(d => !string.IsNullOrWhiteSpace(d.BackdropPath) ||
+                            !string.IsNullOrWhiteSpace(d.PosterPath))
+                .Take(8)
+                .Select(ToHero));
+        }
+
+        // 一个横版图都没有时，退回第一张海报，至少不空着。
+        if (_heroPool.Count == 0)
+        {
+            var first = sections.SelectMany(s2 => s2.Items).FirstOrDefault();
+            var library = _libraries.FirstOrDefault();
+            if (first is not null)
+            {
+                _heroPool.Add(new HeroItem
+                {
+                    Id = first.Id,
+                    Kind = first.Kind,
+                    Title = first.Title,
+                    Meta = first.Sub,
+                    Overview = "",
+                    BackdropPath = first.PosterPath,
+                });
+            }
+            else if (library is not null)
+            {
+                HeroTitle.Text = library.Title;
+                HeroMeta.Text = "";
+                HeroOverview.Text = "这个库里还没有条目。";
+            }
+        }
+
+        if (_heroPool.Count > 0)
+        {
+            await ShowHeroAsync(0).ConfigureAwait(true);
+            if (_heroPool.Count > 1)
+            {
+                _heroTimer.Start();
+            }
+        }
+
         // 继续观看（当前源的全部记录，取前 12 条未看完的）
         var recordsResult = await Task.Run(core.Records).ConfigureAwait(true);
         if (recordsResult.Ok && recordsResult.Data is not null)
         {
             var continuing = recordsResult.Data
+                .Where(r => !sourceOk || r.SourceId == sourceId)
                 .Where(r => r.DurationSeconds <= 0 || r.PositionSeconds < r.DurationSeconds * 0.98)
                 .OrderByDescending(r => r.LastPlayed ?? 0)
                 .Take(12)
@@ -175,18 +279,6 @@ public partial class LibrariesPage : Page
             _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
         }
 
-        // Hero：第一个库的第一条；没有库时退回「我的媒体」第一张卡。
-        var featured = sections.FirstOrDefault()?.Items.FirstOrDefault();
-        if (featured is not null)
-        {
-            await LoadHeroAsync(featured.Id).ConfigureAwait(true);
-        }
-        else
-        {
-            HeroTitle.Text = _libraries.Count > 0 ? _libraries[0].Title : "这个源里没有媒体库";
-            HeroMeta.Text = "";
-            HeroOverview.Text = "";
-        }
 
         // 库卡片与分组里的海报最后补，先把结构画出来。
         var all = sections.SelectMany(s => s.Items).ToList();
@@ -194,81 +286,157 @@ public partial class LibrariesPage : Page
         await Task.WhenAll(_libraryCards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
-    private async Task LoadHeroAsync(string itemId)
+    // —— Hero 轮播 ——
+
+    private static HeroItem ToHero(MediaDetailDto item) => new()
     {
-        var core = AppServices.Instance.Core;
-        if (core is null)
-        {
-            return;
-        }
+        Id = item.Id,
+        Kind = item.Kind,
+        Title = MediaText.Clean(item.Title),
+        Meta = BuildMeta(item.Rating, item.ReleaseDate, null, item.Kind),
+        Overview = item.Overview ?? "",
+        BackdropPath = item.BackdropPath ?? item.PosterPath,
+    };
 
-        var detail = await Task.Run(() => core.ItemDetail(itemId)).ConfigureAwait(true);
-        if (!detail.Ok || detail.Data is null)
-        {
-            return;
-        }
-
-        var item = detail.Data;
-        _heroItemId = item.Id;
-        _heroKind = item.Kind;
-
-        HeroTitle.Text = MediaText.Clean(item.Title);
-
+    private static string BuildMeta(double? rating, string? releaseDate, int? year, string kind)
+    {
         var parts = new List<string>();
-        if (item.Rating is > 0)
+        if (rating is > 0)
         {
-            parts.Add($"★ {item.Rating:0.0}");
+            parts.Add($"★ {rating:0.0}");
         }
 
-        if (!string.IsNullOrWhiteSpace(item.ReleaseDate) && item.ReleaseDate.Length >= 4)
+        var y = !string.IsNullOrWhiteSpace(releaseDate) && releaseDate.Length >= 4
+            ? releaseDate[..4]
+            : year?.ToString();
+        if (!string.IsNullOrWhiteSpace(y))
         {
-            parts.Add(item.ReleaseDate[..4]);
+            parts.Add(y);
         }
 
-        parts.Add(MediaText.KindLabel(item.Kind));
-        HeroMeta.Text = string.Join(" · ", parts);
-        HeroOverview.Text = item.Overview ?? "";
-
-        await ApplyBackgroundAsync(HeroBackdrop, item.BackdropPath ?? item.PosterPath).ConfigureAwait(true);
+        parts.Add(MediaText.KindLabel(kind));
+        return string.Join(" · ", parts);
     }
 
-    private static async Task ApplyBackgroundAsync(Border border, string? path)
+    /// <summary>切到第 index 条（循环）。背景做一次交叉淡入，文字立即换。</summary>
+    private async Task ShowHeroAsync(int index)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (_heroPool.Count == 0)
         {
             return;
         }
 
-        var bitmap = await PosterLoader.LoadAsync(path, 1280).ConfigureAwait(true);
-        if (bitmap is null)
+        var version = ++_heroVersion;
+        var count = _heroPool.Count;
+        _heroIndex = ((index % count) + count) % count;
+
+        var hero = _heroPool[_heroIndex];
+        HeroTitle.Text = hero.Title;
+        HeroMeta.Text = hero.Meta;
+        HeroOverview.Text = hero.Overview;
+        UpdateDots();
+
+        HeroPrev.IsEnabled = count > 1;
+        HeroNext.IsEnabled = count > 1;
+
+        var bitmap = await PosterLoader.LoadAsync(hero.BackdropPath, 1280).ConfigureAwait(true);
+        if (version != _heroVersion || bitmap is null)
         {
             return;
         }
 
         var brush = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
         brush.Freeze();
-        border.Background = brush;
+
+        HeroFade.Background = brush;
+        HeroFade.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(320))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            });
+
+        await Task.Delay(340).ConfigureAwait(true);
+        if (version != _heroVersion)
+        {
+            return;
+        }
+
+        // 动画结束把图落到下层，下一次还能从 0 淡入。
+        HeroBackdrop.Background = brush;
+        HeroFade.BeginAnimation(OpacityProperty, null);
+        HeroFade.Opacity = 0;
+    }
+
+    private void UpdateDots()
+    {
+        HeroDots.ItemsSource = _heroPool
+            .Select((_, i) => new HeroDot(i == _heroIndex))
+            .ToList();
+    }
+
+    /// <summary>截图巡检用：把 Hero 左右箭头显示出来，确认位置和样式。</summary>
+    public void PreviewHeroArrows() => FadeArrows(1);
+
+    private void StepHero(int delta)
+    {
+        _ = ShowHeroAsync(_heroIndex + delta);
+
+        // 手动翻页后重新计时，别刚看完就自动跳走。
+        if (_heroPool.Count > 1)
+        {
+            _heroTimer.Stop();
+            _heroTimer.Start();
+        }
+    }
+
+    private void OnHeroPrev(object sender, RoutedEventArgs e) => StepHero(-1);
+
+    private void OnHeroNext(object sender, RoutedEventArgs e) => StepHero(1);
+
+    private void OnHeroEnter(object sender, MouseEventArgs e)
+    {
+        _heroTimer.Stop();
+        FadeArrows(1);
+    }
+
+    private void OnHeroLeave(object sender, MouseEventArgs e)
+    {
+        FadeArrows(0);
+
+        if (_heroPool.Count > 1)
+        {
+            _heroTimer.Start();
+        }
+    }
+
+    private void FadeArrows(double to)
+    {
+        var animation = new DoubleAnimation(to, TimeSpan.FromMilliseconds(180));
+        HeroPrev.BeginAnimation(OpacityProperty, animation);
+        HeroNext.BeginAnimation(OpacityProperty, animation);
     }
 
     private async void OnHeroClick(object sender, MouseButtonEventArgs e)
     {
-        if (_heroItemId is null)
+        if (_heroPool.Count == 0)
         {
             return;
         }
 
-        if (!MediaText.IsPlayable(_heroKind))
+        var hero = _heroPool[_heroIndex];
+        if (!MediaText.IsPlayable(hero.Kind))
         {
-            NavigationService?.Navigate(new SeriesPage(_heroItemId));
+            NavigationService?.Navigate(new SeriesPage(hero.Id));
             return;
         }
 
-        await PlayWindow.OpenAsync(Window.GetWindow(this), _heroItemId);
+        await PlayWindow.OpenAsync(Window.GetWindow(this), hero.Id);
     }
 
     private void OnTabChanged(object sender, RoutedEventArgs e)
     {
-        if (OverviewRoot is null)
+        // XAML 解析时 MediaSegment 的 IsChecked 先触发，后面的控件字段还没赋值。
+        if (SearchSegment is null || FavoriteSegment is null || BrowseRoot is null)
         {
             return;
         }
@@ -282,16 +450,26 @@ public partial class LibrariesPage : Page
         }
 
         var favorites = FavoriteSegment.IsChecked == true;
-        OverviewRoot.Visibility = favorites ? Visibility.Collapsed : Visibility.Visible;
+        OverviewPanel.Visibility = favorites ? Visibility.Collapsed : Visibility.Visible;
         FavoriteEmpty.Visibility = favorites ? Visibility.Visible : Visibility.Collapsed;
         BrowseRoot.Visibility = Visibility.Collapsed;
+
+        if (favorites)
+        {
+            _heroTimer.Stop();
+        }
+        else if (_heroPool.Count > 1)
+        {
+            _heroTimer.Start();
+        }
     }
 
     private async void OnRefreshClick(object sender, RoutedEventArgs e)
     {
         BrowseRoot.Visibility = Visibility.Collapsed;
-        OverviewRoot.Visibility = Visibility.Visible;
+        OverviewPanel.Visibility = Visibility.Visible;
         MediaSegment.IsChecked = true;
+        _heroTimer.Stop();
         await LoadOverviewAsync().ConfigureAwait(true);
     }
 
@@ -314,7 +492,12 @@ public partial class LibrariesPage : Page
     private void OnBackToOverview(object sender, RoutedEventArgs e)
     {
         BrowseRoot.Visibility = Visibility.Collapsed;
-        OverviewRoot.Visibility = Visibility.Visible;
+        OverviewPanel.Visibility = Visibility.Visible;
+
+        if (_heroPool.Count > 1)
+        {
+            _heroTimer.Start();
+        }
     }
 
     // —— 库内网格（原视图） ——
@@ -331,7 +514,8 @@ public partial class LibrariesPage : Page
             .Select(l => new LibraryChip(l.Id, l.Title, l.Id == libraryId))
             .ToList();
 
-        OverviewRoot.Visibility = Visibility.Collapsed;
+        _heroTimer.Stop();
+        OverviewPanel.Visibility = Visibility.Collapsed;
         FavoriteEmpty.Visibility = Visibility.Collapsed;
         BrowseRoot.Visibility = Visibility.Visible;
 
@@ -767,6 +951,25 @@ public partial class LibrariesPage : Page
         public string Title { get; init; } = "";
         public string Initial { get; init; } = "";
         public string? PosterPath { get; set; }
+    }
+
+    private sealed class HeroItem
+    {
+        public string Id { get; init; } = "";
+        public string Kind { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Meta { get; init; } = "";
+        public string Overview { get; init; } = "";
+        public string? BackdropPath { get; init; }
+    }
+
+    private sealed class HeroDot
+    {
+        public HeroDot(bool active) => Fill = active
+            ? new SolidColorBrush(Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF))
+            : new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
+
+        public Brush Fill { get; }
     }
 
     private sealed class LibrarySection

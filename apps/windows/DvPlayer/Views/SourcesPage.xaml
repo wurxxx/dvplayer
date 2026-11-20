@@ -11,14 +11,14 @@
 
     <!-- 统一工具条：标题 + 刷新 + 添加 -->
     <Grid Height="52" Margin="0,0,0,14">
-      <TextBlock Text="媒体源" Style="{StaticResource PageTitle}" VerticalAlignment="Center" />
+      <TextBlock Text="服务器" Style="{StaticResource PageTitle}" VerticalAlignment="Center" />
 
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
         <Button x:Name="ReconnectButton" Style="{StaticResource ToolButton}"
                 Click="OnReconnectClick" ToolTip="重新连接全部">
           <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="15" />
         </Button>
-        <Button Content="添加媒体源" Style="{StaticResource AccentButton}"
+        <Button Content="添加服务器" Style="{StaticResource AccentButton}"
                 Click="OnAddToggleClick" Margin="8,0,0,0" Padding="14,7" FontSize="12.5" />
       </StackPanel>
     </Grid>
@@ -88,7 +88,7 @@
         <!-- 空态：没有源时给一个明确的入口 -->
         <StackPanel x:Name="EmptyState" Margin="0,60,0,0" Visibility="Collapsed">
           <TextBlock Text="&#xE774;" Style="{StaticResource EmptyIcon}" />
-          <TextBlock Text="还没有媒体源" Style="{StaticResource EmptyText}" />
+          <TextBlock Text="还没有服务器" Style="{StaticResource EmptyText}" />
           <TextBlock Text="支持飞牛影视、Emby 与 Jellyfin" Style="{StaticResource EmptyText}"
                      FontSize="11.5" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
         </StackPanel>
@@ -97,7 +97,7 @@
         <Border x:Name="AddPanel" Style="{StaticResource PanelCard}" Width="480"
                 HorizontalAlignment="Left" Visibility="Collapsed" Margin="0,4,0,0">
           <StackPanel>
-            <TextBlock Text="添加媒体源" Style="{StaticResource SectionTitle}" />
+            <TextBlock Text="添加服务器" Style="{StaticResource SectionTitle}" />
             <TextBlock Text="Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。"
                        Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap" />
 

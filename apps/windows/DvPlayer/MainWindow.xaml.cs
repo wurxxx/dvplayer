@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using DvPlayer.Services;
 using DvPlayer.Views;
 using Wpf.Ui.Controls;
@@ -18,7 +19,19 @@ public partial class MainWindow : FluentWindow
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         var shotDir = ScreenshotDir();
-        SelectNav(StartTag());
+        var start = StartTag();
+
+        // 「媒体库」已经没有菜单项了，启动页是它时直接开，别去选中一个不存在的项。
+        if (start == "libraries")
+        {
+            Navigate("libraries");
+        }
+        else
+        {
+            SelectNav(start);
+        }
+
+        RefreshSourceNav();
 
         // 截图巡检时不受「启动时自动连接」开关影响，否则回归会拍到空页面。
         if (AppServices.Instance.Settings.AutoConnect || shotDir is not null)
@@ -60,6 +73,8 @@ public partial class MainWindow : FluentWindow
             ? page
             : "home";
     }
+
+    private bool _syncingSources;
 
     private static string? ScreenshotDir() => ArgumentAfter("--screenshot");
 
@@ -106,18 +121,33 @@ public partial class MainWindow : FluentWindow
             }
         }
 
+        // --delay N：每页再多等 N 秒，用来验证 Hero 自动轮播这类定时行为。
+        var extraDelay = int.TryParse(ArgumentAfter("--delay"), out var extra) ? extra : 0;
+
+        // --hover：媒体库页把 Hero 箭头亮出来，检查位置（模拟不了真实鼠标悬停）。
+        var previewHover = Environment.GetCommandLineArgs().Contains("--hover");
+
         foreach (var tag in ScreenshotPages())
         {
             SelectNav(tag);
 
-            // 搜索页第一次要跨库拉索引，比其它页慢。
-            await Task.Delay(tag == "search" ? 15000 : 5000);
+            // 搜索页第一次要跨库拉索引，媒体库首页要等 Hero 大图，都比别的页慢。
+            await Task.Delay((tag == "search" ? 15000 : tag == "libraries" ? 9000 : 5000)
+                             + extraDelay * 1000);
+
+            if (previewHover && ContentFrame.Content is LibrariesPage hoverPage)
+            {
+                hoverPage.PreviewHeroArrows();
+                await Task.Delay(400);
+            }
+
             UiCapture.Save(this, Path.Combine(dir, tag + ".png"));
         }
 
         // --browse：再进第一个库的网格，验证库内列表 / 过滤器。
         if (Environment.GetCommandLineArgs().Contains("--browse"))
         {
+            Nav.SelectedItem = null;
             ContentFrame.Navigate(new LibrariesPage());
             await Task.Delay(6000);
 
@@ -141,9 +171,25 @@ public partial class MainWindow : FluentWindow
         {
             if ((item.Tag as string) == tag)
             {
-                Nav.SelectedItem = item;
+                // 选中项没变时 SelectionChanged 不触发，得手动导航。
+                if (ReferenceEquals(Nav.SelectedItem, item))
+                {
+                    Navigate(tag);
+                }
+                else
+                {
+                    Nav.SelectedItem = item;
+                }
+
                 return;
             }
+        }
+
+        // 源首页没有菜单项，截图巡检直接开页面。
+        if (tag == "libraries")
+        {
+            Nav.SelectedItem = null;
+            Navigate("libraries");
         }
     }
 
@@ -169,6 +215,84 @@ public partial class MainWindow : FluentWindow
 
         StatusDot.Fill = (System.Windows.Media.Brush)FindResource(
             services.IsConnected ? "AccentBrush" : services.Connections.Count > 0 ? "DangerBrush" : "FaintBrush");
+
+        RefreshSourceNav();
+    }
+
+    /// <summary>侧栏的源列表：配置过的都列出来，连上的点亮一点。</summary>
+    private void RefreshSourceNav()
+    {
+        if (SourceNav is null)
+        {
+            return;
+        }
+
+        var services = AppServices.Instance;
+        var settings = services.Settings;
+
+        var items = settings.Sources
+            .Select(source => new SourceNavItem(
+                source.Id,
+                source.Name,
+                services.Connections.Any(c => c.Id == source.Id && c.Ok)))
+            .ToList();
+
+        var selected = settings.LastSourceId;
+        if (items.All(i => i.Id != selected))
+        {
+            // 记的源被删了或从没选过：退到第一个连上的。
+            selected = (items.FirstOrDefault(i => i.Ok) ?? items.FirstOrDefault())?.Id;
+            if (selected is not null)
+            {
+                settings.LastSourceId = selected;
+                settings.Save();
+            }
+        }
+
+        _syncingSources = true;
+        SourceNav.ItemsSource = items;
+        SourceNav.SelectedItem = items.FirstOrDefault(i => i.Id == selected);
+        _syncingSources = false;
+    }
+
+    private void OnSourceSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingSources || SourceNav.SelectedItem is not SourceNavItem item)
+        {
+            return;
+        }
+
+        var settings = AppServices.Instance.Settings;
+        if (settings.LastSourceId == item.Id && ContentFrame.Content is LibrariesPage)
+        {
+            return;
+        }
+
+        settings.LastSourceId = item.Id;
+        settings.Save();
+
+        // 源首页不是导航项，清掉菜单高亮，只留源列表这一项。
+        Nav.SelectedItem = null;
+        ContentFrame.Navigate(new LibrariesPage());
+    }
+
+    private sealed class SourceNavItem
+    {
+        public SourceNavItem(string id, string name, bool ok)
+        {
+            Id = id;
+            Name = name;
+            Ok = ok;
+            DotBrush = (Brush)Application.Current.FindResource(ok ? "AccentBrush" : "DangerBrush");
+        }
+
+        public string Id { get; }
+
+        public string Name { get; }
+
+        public bool Ok { get; }
+
+        public Brush DotBrush { get; }
     }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)

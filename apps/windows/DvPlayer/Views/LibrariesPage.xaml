@@ -5,6 +5,31 @@
 
   <Page.Resources>
 
+    <!-- Hero 左右箭头：悬停整张横幅才淡入 -->
+    <Style x:Key="HeroArrow" TargetType="Button">
+      <Setter Property="Width" Value="46" />
+      <Setter Property="Height" Value="46" />
+      <Setter Property="Opacity" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" CornerRadius="23" Background="#66000000">
+              <TextBlock Text="{TemplateBinding Content}" FontFamily="{StaticResource IconFont}"
+                         FontSize="15" Foreground="#F2FFFFFF"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#B3000000" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- 媒体库卡片（「我的媒体」） -->
     <DataTemplate x:Key="LibraryTemplate">
       <StackPanel Width="220" Margin="0,0,14,14" Cursor="Hand">
@@ -124,125 +149,158 @@
     </DataTemplate>
   </Page.Resources>
 
-  <Grid Margin="32,24,32,0">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-    </Grid.RowDefinitions>
+  <Grid x:Name="PageRoot">
 
-    <!-- 统一工具条：源名 / 分段 / 刷新 -->
-    <Grid Height="52" x:Name="TopBar">
-      <TextBlock x:Name="SourceTitle" Text="媒体库" Style="{StaticResource PageTitle}"
-                 VerticalAlignment="Center" />
+    <!-- 源首页：Hero 贴边铺满，顶栏浮在它上面 -->
+    <Grid x:Name="OverviewPanel">
+      <ScrollViewer x:Name="OverviewRoot" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
 
-      <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Center"
-              VerticalAlignment="Center">
-        <StackPanel Orientation="Horizontal">
-          <RadioButton x:Name="MediaSegment" Content="媒体" GroupName="LibraryTab"
-                       Style="{StaticResource SegmentItem}" IsChecked="True"
-                       Checked="OnTabChanged" />
-          <RadioButton x:Name="SearchSegment" Content="搜索" GroupName="LibraryTab"
-                       Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
-                       Checked="OnTabChanged" />
-          <RadioButton x:Name="FavoriteSegment" Content="收藏" GroupName="LibraryTab"
-                       Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
-                       Checked="OnTabChanged" />
-        </StackPanel>
-      </Border>
-
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-        <Button Style="{StaticResource ToolButton}" Click="OnRefreshClick" ToolTip="刷新">
-          <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="15" />
-        </Button>
-      </StackPanel>
-    </Grid>
-
-    <!-- 源首页 -->
-    <ScrollViewer x:Name="OverviewRoot" Grid.Row="1" VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="0,6,0,32">
-
-        <!-- Hero 横幅 -->
-        <Border x:Name="HeroCard" Height="240" CornerRadius="14" Margin="0,0,0,22"
-                Cursor="Hand" MouseLeftButtonUp="OnHeroClick">
-          <Grid ClipToBounds="True">
+          <!-- Hero 轮播 -->
+          <Grid x:Name="HeroCard" Height="560" Cursor="Hand"
+                MouseLeftButtonUp="OnHeroClick"
+                MouseEnter="OnHeroEnter" MouseLeave="OnHeroLeave">
             <Border x:Name="HeroBackdrop" Background="{StaticResource SurfaceBrush}" />
-            <Border VerticalAlignment="Bottom" Height="220">
+            <Border x:Name="HeroFade" Opacity="0" />
+
+            <Border VerticalAlignment="Bottom" Height="320">
               <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                   <GradientStop Color="#00000000" Offset="0" />
-                  <GradientStop Color="#E6000000" Offset="0.72" />
+                  <GradientStop Color="#B3000000" Offset="0.55" />
                   <GradientStop Color="#F2000000" Offset="1" />
                 </LinearGradientBrush>
               </Border.Background>
             </Border>
 
-            <StackPanel VerticalAlignment="Bottom" Margin="34,0,34,22"
-                        HorizontalAlignment="Center" Width="720">
-              <TextBlock x:Name="HeroTitle" Text="正在读取…" FontSize="28"
+            <StackPanel VerticalAlignment="Bottom" Margin="60,0,60,54"
+                        HorizontalAlignment="Center" Width="800">
+              <TextBlock x:Name="HeroTitle" Text="正在读取…" FontSize="34"
                          FontFamily="{StaticResource DisplayFont}" FontWeight="SemiBold"
-                         Foreground="#F5FFFFFF" TextTrimming="CharacterEllipsis"
+                         Foreground="#FAFFFFFF" TextTrimming="CharacterEllipsis"
                          HorizontalAlignment="Center" TextAlignment="Center" />
-              <TextBlock x:Name="HeroMeta" FontSize="12.5" Foreground="#CCFFFFFF"
-                         Margin="0,7,0,0" HorizontalAlignment="Center" />
+              <TextBlock x:Name="HeroMeta" FontSize="12.5" Foreground="#D9FFFFFF"
+                         Margin="0,10,0,0" HorizontalAlignment="Center" />
               <TextBlock x:Name="HeroOverview" FontSize="12.5" Foreground="#B8FFFFFF"
-                         Margin="0,8,0,0" MaxHeight="38" TextTrimming="CharacterEllipsis"
+                         Margin="0,12,0,0" MaxHeight="57" TextTrimming="CharacterEllipsis"
                          TextWrapping="Wrap" LineHeight="19" TextAlignment="Center" />
             </StackPanel>
-          </Grid>
-        </Border>
 
-        <!-- 我的媒体 -->
-        <Grid Margin="0,0,0,11">
-          <TextBlock Text="我的媒体" Style="{StaticResource SectionTitle}" FontSize="16" />
-          <TextBlock x:Name="LibrariesCount" Style="{StaticResource Caption}"
-                     HorizontalAlignment="Right" VerticalAlignment="Bottom" />
-        </Grid>
-        <ItemsControl x:Name="LibraryCards" ItemTemplate="{StaticResource LibraryTemplate}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <WrapPanel />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-        </ItemsControl>
+            <Button x:Name="HeroPrev" Style="{StaticResource HeroArrow}" Content="&#xE76B;"
+                    HorizontalAlignment="Left" VerticalAlignment="Center" Margin="28,0,0,0"
+                    Click="OnHeroPrev" />
+            <Button x:Name="HeroNext" Style="{StaticResource HeroArrow}" Content="&#xE76C;"
+                    HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,28,0"
+                    Click="OnHeroNext" />
 
-        <!-- 继续观看 -->
-        <Grid Margin="0,10,0,11">
-          <TextBlock Text="继续观看" Style="{StaticResource SectionTitle}" FontSize="16" />
-          <TextBlock x:Name="ContinueCount" Style="{StaticResource Caption}"
-                     HorizontalAlignment="Right" VerticalAlignment="Bottom" />
-        </Grid>
-        <Grid>
-          <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
-                        PreviewMouseWheel="OnRowWheel">
-            <ItemsControl x:Name="ContinueRow" ItemTemplate="{StaticResource ContinueTemplate}">
+            <ItemsControl x:Name="HeroDots" HorizontalAlignment="Center"
+                          VerticalAlignment="Bottom" Margin="0,0,0,20">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                   <StackPanel Orientation="Horizontal" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Ellipse Width="6" Height="6" Margin="3,0" Fill="{Binding Fill}" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
             </ItemsControl>
-          </ScrollViewer>
-          <Button Style="{StaticResource ScrollArrow}" Content="&#xE76B;"
-                  HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,53,0,0"
-                  Click="OnScrollLeft" />
-          <Button Style="{StaticResource ScrollArrow}" Content="&#xE76C;"
-                  HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,53,2,0"
-                  Click="OnScrollRight" />
-        </Grid>
-        <TextBlock x:Name="ContinueEmpty" Text="还没有看到一半的内容。"
-                   Style="{StaticResource Caption}" Margin="0,10,0,0" Visibility="Collapsed" />
+          </Grid>
 
-        <!-- 每个媒体库一行 -->
-        <ItemsControl x:Name="Sections" ItemTemplate="{StaticResource SectionTemplate}"
-                      Margin="0,26,0,0" />
+          <!-- 内容区 -->
+          <StackPanel Margin="32,26,32,44">
 
-        <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
-                   Margin="0,16,0,0" TextWrapping="Wrap" />
-      </StackPanel>
-    </ScrollViewer>
+            <!-- 我的媒体 -->
+            <Grid Margin="0,0,0,11">
+              <TextBlock Text="我的媒体" Style="{StaticResource SectionTitle}" FontSize="16" />
+              <TextBlock x:Name="LibrariesCount" Style="{StaticResource Caption}"
+                         HorizontalAlignment="Right" VerticalAlignment="Bottom" />
+            </Grid>
+            <ItemsControl x:Name="LibraryCards" ItemTemplate="{StaticResource LibraryTemplate}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+
+            <!-- 继续观看 -->
+            <Grid Margin="0,10,0,11">
+              <TextBlock Text="继续观看" Style="{StaticResource SectionTitle}" FontSize="16" />
+              <TextBlock x:Name="ContinueCount" Style="{StaticResource Caption}"
+                         HorizontalAlignment="Right" VerticalAlignment="Bottom" />
+            </Grid>
+            <Grid>
+              <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                            PreviewMouseWheel="OnRowWheel">
+                <ItemsControl x:Name="ContinueRow" ItemTemplate="{StaticResource ContinueTemplate}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                </ItemsControl>
+              </ScrollViewer>
+              <Button Style="{StaticResource ScrollArrow}" Content="&#xE76B;"
+                      HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,53,0,0"
+                      Click="OnScrollLeft" />
+              <Button Style="{StaticResource ScrollArrow}" Content="&#xE76C;"
+                      HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,53,2,0"
+                      Click="OnScrollRight" />
+            </Grid>
+            <TextBlock x:Name="ContinueEmpty" Text="还没有看到一半的内容。"
+                       Style="{StaticResource Caption}" Margin="0,10,0,0" Visibility="Collapsed" />
+
+            <!-- 每个媒体库一行 -->
+            <ItemsControl x:Name="Sections" ItemTemplate="{StaticResource SectionTemplate}"
+                          Margin="0,26,0,0" />
+
+            <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
+                       Margin="0,16,0,0" TextWrapping="Wrap" />
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 顶栏浮层：源名 / 分段 / 刷新 -->
+      <Border Height="108" VerticalAlignment="Top" IsHitTestVisible="False">
+        <Border.Background>
+          <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#99000000" Offset="0" />
+            <GradientStop Color="#00000000" Offset="1" />
+          </LinearGradientBrush>
+        </Border.Background>
+      </Border>
+
+      <Grid Height="72" x:Name="TopBar" Margin="32,0,32,0" VerticalAlignment="Top">
+        <TextBlock x:Name="SourceTitle" Text="媒体库" FontSize="17" FontWeight="SemiBold"
+                   Foreground="#F2FFFFFF" VerticalAlignment="Center" />
+
+        <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal">
+            <RadioButton x:Name="MediaSegment" Content="媒体" GroupName="LibraryTab"
+                         Style="{StaticResource SegmentItem}" IsChecked="True"
+                         Checked="OnTabChanged" />
+            <RadioButton x:Name="SearchSegment" Content="搜索" GroupName="LibraryTab"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnTabChanged" />
+            <RadioButton x:Name="FavoriteSegment" Content="收藏" GroupName="LibraryTab"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnTabChanged" />
+          </StackPanel>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Button Style="{StaticResource ToolButton}" Click="OnRefreshClick" ToolTip="刷新">
+            <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="15" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Grid>
 
     <!-- 收藏（空态） -->
-    <StackPanel x:Name="FavoriteEmpty" Grid.Row="1" HorizontalAlignment="Center"
+    <StackPanel x:Name="FavoriteEmpty" HorizontalAlignment="Center"
                 VerticalAlignment="Center" Margin="0,0,0,80" Visibility="Collapsed">
       <TextBlock Text="&#xE734;" Style="{StaticResource EmptyIcon}" />
       <TextBlock Text="还没有收藏" Style="{StaticResource EmptyText}" FontSize="13.5" />
@@ -251,7 +309,7 @@
     </StackPanel>
 
     <!-- 媒体库内容（原网格视图） -->
-    <Grid x:Name="BrowseRoot" Grid.Row="1" Visibility="Collapsed">
+    <Grid x:Name="BrowseRoot" Margin="32,24,32,0" Visibility="Collapsed">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />

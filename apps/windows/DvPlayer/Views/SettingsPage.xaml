@@ -54,7 +54,7 @@
                 <StackPanel>
                   <TextBlock Text="启动时自动连接" FontSize="13.5"
                              Foreground="{StaticResource TextBrush}" />
-                  <TextBlock Text="打开 DV Player 后连接所有已配置的媒体源"
+                  <TextBlock Text="打开 DV Player 后连接所有已配置的服务器"
                              FontSize="11.5" Foreground="{StaticResource FaintBrush}"
                              Margin="0,4,0,0" />
                 </StackPanel>
@@ -96,11 +96,11 @@
                 <ColumnDefinition Width="Auto" />
               </Grid.ColumnDefinitions>
               <StackPanel>
-                <TextBlock Text="媒体源" Style="{StaticResource SectionTitle}" FontSize="14" />
+                <TextBlock Text="服务器" Style="{StaticResource SectionTitle}" FontSize="14" />
                 <TextBlock x:Name="SourceSummaryText" FontSize="11.5"
                            Foreground="{StaticResource FaintBrush}" Margin="0,5,0,0" />
               </StackPanel>
-              <Button Content="管理媒体源" Grid.Column="1" Style="{StaticResource GhostButton}"
+              <Button Content="管理服务器" Grid.Column="1" Style="{StaticResource GhostButton}"
                       Padding="14,7" FontSize="12" VerticalAlignment="Center"
                       Click="OnManageSourcesClick" />
             </Grid>

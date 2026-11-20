@@ -98,8 +98,8 @@ public partial class SourcesPage : Page
         StatusText.Text = sources.Count == 0
             ? ""
             : ok == sources.Count
-                ? $"{sources.Count} 个媒体源 · 全部已连接"
-                : $"{sources.Count} 个媒体源 · {ok} 个已连接";
+                ? $"{sources.Count} 个服务器 · 全部已连接"
+                : $"{sources.Count} 个服务器 · {ok} 个已连接";
     }
 
     private void OnAddToggleClick(object sender, RoutedEventArgs e)
@@ -117,7 +117,7 @@ public partial class SourcesPage : Page
 
     private async void OnReconnectClick(object sender, RoutedEventArgs e)
     {
-        await ReconnectAsync("已重新连接全部媒体源。");
+        await ReconnectAsync("已重新连接全部服务器。");
     }
 
     private async void OnRemoveClick(object sender, RoutedEventArgs e)
@@ -136,8 +136,8 @@ public partial class SourcesPage : Page
 
         // 删除要重连整库，误触代价不小，先确认。
         var answer = MessageBox.Show(Window.GetWindow(this)!,
-            $"删除媒体源「{source.Name}」？\n播放记录与已收藏的进度都还在，重新添加这个源就能接上。",
-            "删除媒体源", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            $"删除服务器「{source.Name}」？\n播放记录与已收藏的进度都还在，重新添加这个源就能接上。",
+            "删除服务器", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
         if (answer != MessageBoxResult.OK)
         {
             return;
@@ -156,7 +156,7 @@ public partial class SourcesPage : Page
             AppServices.Instance.Disconnect();
             RefreshSources();
             (Window.GetWindow(this) as MainWindow)?.RefreshSourceStatus();
-            StatusText.Text = "已删除所有媒体源。";
+            StatusText.Text = "已删除所有服务器。";
             return;
         }
 
