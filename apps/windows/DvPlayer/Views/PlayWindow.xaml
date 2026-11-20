@@ -217,9 +217,9 @@
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <Button Style="{StaticResource PlayerButton}" Click="OnBack10Click"
-                    ToolTip="后退 10 秒（←）" VerticalAlignment="Center">
-              <TextBlock Text="&#xE7A7;" FontFamily="{StaticResource IconFont}" FontSize="17"
+            <Button x:Name="PrevButton" Style="{StaticResource PlayerButton}"
+                    Click="OnPrevEpisodeClick" ToolTip="上一集（PageUp）" VerticalAlignment="Center">
+              <TextBlock Text="&#xE892;" FontFamily="{StaticResource IconFont}" FontSize="17"
                          Foreground="#F2FFFFFF" />
             </Button>
 
@@ -229,9 +229,9 @@
                          FontSize="20" Foreground="#F2FFFFFF" />
             </Button>
 
-            <Button Grid.Column="2" Style="{StaticResource PlayerButton}" Click="OnForward10Click"
-                    ToolTip="前进 10 秒（→）" VerticalAlignment="Center">
-              <TextBlock Text="&#xE7A8;" FontFamily="{StaticResource IconFont}" FontSize="17"
+            <Button x:Name="NextButton" Grid.Column="2" Style="{StaticResource PlayerButton}"
+                    Click="OnNextEpisodeClick" ToolTip="下一集（PageDown）" VerticalAlignment="Center">
+              <TextBlock Text="&#xE893;" FontFamily="{StaticResource IconFont}" FontSize="17"
                          Foreground="#F2FFFFFF" />
             </Button>
 

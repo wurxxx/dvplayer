@@ -193,6 +193,13 @@ public partial class PlayWindow : Window
             return;
         }
 
+        // 视频层也挂在主窗口名下：否则点了主窗口之后，视频会沉到它后面，
+        // 只剩浮层（透明窗口）孤零零地压在库页面上。
+        if (Owner is { IsVisible: true } owner && !ReferenceEquals(_surface.Owner, owner))
+        {
+            _surface.Owner = owner;
+        }
+
         // 先把视频层摆到同一个矩形再显示，避免它先在 (-10000,-10000) 冒一下。
         SyncSurface();
         if (!_surface.IsVisible)
@@ -231,7 +238,7 @@ public partial class PlayWindow : Window
     private void PlaceInitialWindow()
     {
         var area = MonitorBounds();
-        var width = Math.Min(1280, area.Width * 0.88);
+        var width = Math.Min(1600, area.Width * 0.8);
         var height = width * 9 / 16;
 
         if (height > area.Height * 0.9)
@@ -741,6 +748,9 @@ public partial class PlayWindow : Window
 
     private void OnTick(object? sender, EventArgs e)
     {
+        // 两个窗口必须一直贴在一起：谁被激活、桌面怎么切，都靠这一下兜底。
+        PushSurfaceBelow();
+
         if (++_sinceReport < ReportEverySeconds || _position <= 0)
         {
             return;
@@ -929,9 +939,40 @@ public partial class PlayWindow : Window
         PlayPauseGlyph.Text = _paused ? "\uE768" : "\uE769";
     }
 
-    private void OnBack10Click(object sender, RoutedEventArgs e) => SeekBy(-10);
+    private void OnPrevEpisodeClick(object sender, RoutedEventArgs e) => JumpEpisode(-1);
 
-    private void OnForward10Click(object sender, RoutedEventArgs e) => SeekBy(10);
+    private void OnNextEpisodeClick(object sender, RoutedEventArgs e) => JumpEpisode(1);
+
+    /// <summary>选集里前后跳一集；到头了就给个提示，不做静默失败。</summary>
+    private void JumpEpisode(int delta)
+    {
+        if (_playlist.Count == 0)
+        {
+            ShowToast("这条没有选集");
+            return;
+        }
+
+        var index = _playlist.FindIndex(episode => episode.Id == _itemId);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var target = index + delta;
+        if (target < 0)
+        {
+            ShowToast("已经是第一集");
+            return;
+        }
+
+        if (target >= _playlist.Count)
+        {
+            ShowToast("已经是最后一集");
+            return;
+        }
+
+        _ = SwitchToAsync(_playlist[target].Id);
+    }
 
     private void SeekBy(double delta)
     {
@@ -1398,6 +1439,14 @@ public partial class PlayWindow : Window
                 SeekBy(10);
                 break;
 
+            case Key.PageUp:
+                JumpEpisode(-1);
+                break;
+
+            case Key.PageDown:
+                JumpEpisode(1);
+                break;
+
             case Key.Up:
                 ChangeVolume(5);
                 break;
@@ -1516,6 +1565,15 @@ public partial class PlayWindow : Window
 
     /// <summary>截图巡检用：把浮层强制显示出来。</summary>
     public void ShowChromeForShot() => ShowChrome();
+
+    /// <summary>截图巡检用：打一行几何信息，排查两个窗口没对齐。</summary>
+    public string DescribeBounds()
+    {
+        var play = new WindowInteropHelper(this).Handle;
+        var surface = _surface is null ? IntPtr.Zero : new WindowInteropHelper(_surface).Handle;
+        return $"play={Left:0},{Top:0},{ActualWidth:0}x{ActualHeight:0} hwnd={play} " +
+               $"surface={_surface?.Left:0},{_surface?.Top:0},{_surface?.ActualWidth:0}x{_surface?.ActualHeight:0} hwnd={surface}";
+    }
 
     /// <summary>截图巡检用：跳到片尾前几秒，验证自动接下一集。</summary>
     public void SkipToEndForShot(double secondsBefore = 4)

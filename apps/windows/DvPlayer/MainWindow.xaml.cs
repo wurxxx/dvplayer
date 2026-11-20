@@ -115,6 +115,10 @@ public partial class MainWindow : FluentWindow
         // 网络流要一会儿才出画面。
         await Task.Delay(10000);
 
+        // 回归：把主窗口点回前台，视频层不能沉到它后面。
+        Activate();
+        await Task.Delay(1200);
+
         // --play-end：跳到片尾，验证播完自动接下一集。
         if (ArgumentAfter("--play-end") is not null)
         {
@@ -129,8 +133,10 @@ public partial class MainWindow : FluentWindow
 
         player.ShowChromeForShot();
         await Task.Delay(700);
+        Trace.Write("player bounds " + player.DescribeBounds());
 
         // 真实画面：从桌面抓，才能同时看到视频和浮层（RTB 只有浮层）。
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop.png"));
         UiCapture.SaveScreen(player, Path.Combine(dir, "play-screen.png"));
         player.SetShotBackground(true);
         UiCapture.Save(player, Path.Combine(dir, "play.png"));

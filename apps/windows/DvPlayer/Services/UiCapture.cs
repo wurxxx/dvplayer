@@ -48,6 +48,38 @@ public static class UiCapture
         Write(bitmap, path);
     }
 
+    /// <summary>整块桌面（多显示器只抓主屏），排查窗口位置用。</summary>
+    public static void SaveDesktop(string path)
+    {
+        var width = GetSystemMetrics(0);
+        var height = GetSystemMetrics(1);
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var screen = GetDC(IntPtr.Zero);
+        var memory = CreateCompatibleDC(screen);
+        var bitmap = CreateCompatibleBitmap(screen, width, height);
+        var previous = SelectObject(memory, bitmap);
+
+        try
+        {
+            BitBlt(memory, 0, 0, width, height, screen, 0, 0, SRCCOPY);
+
+            var source = Imaging.CreateBitmapSourceFromHBitmap(
+                bitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            Write(source, path);
+        }
+        finally
+        {
+            SelectObject(memory, previous);
+            DeleteObject(bitmap);
+            DeleteDC(memory);
+            ReleaseDC(IntPtr.Zero, screen);
+        }
+    }
+
     /// <summary>从桌面抓这块窗口的真实画面（包含下面那层视频）。</summary>
     public static void SaveScreen(Window window, string path)
     {
@@ -95,6 +127,9 @@ public static class UiCapture
     }
 
     private const int SRCCOPY = 0x00CC0020;
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetDC(IntPtr hwnd);
