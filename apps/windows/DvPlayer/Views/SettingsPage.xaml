@@ -80,8 +80,7 @@
                           Foreground="{StaticResource TextBrush}"
                           BorderBrush="{StaticResource LineBrush}"
                           SelectionChanged="OnSettingChanged">
-                  <ComboBoxItem Content="首页" Tag="home" />
-                  <ComboBoxItem Content="媒体库" Tag="libraries" />
+                  <ComboBoxItem Content="服务器首页" Tag="libraries" />
                   <ComboBoxItem Content="记录" Tag="records" />
                   <ComboBoxItem Content="搜索" Tag="search" />
                 </ComboBox>

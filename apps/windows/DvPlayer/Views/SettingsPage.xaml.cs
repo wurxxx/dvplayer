@@ -124,7 +124,7 @@ public partial class SettingsPage : Page
         settings.AutoConnect = AutoConnectSwitch.IsChecked == true;
         settings.ShowResolution = ResolutionSwitch.IsChecked == true;
         settings.ResumePlayback = ResumeSwitch.IsChecked == true;
-        settings.StartPage = (StartPageBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "home";
+        settings.StartPage = (StartPageBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "libraries";
 
         if (PageSizeBox.SelectedItem is ComboBoxItem { Content: string size } && int.TryParse(size, out var pageSize))
         {

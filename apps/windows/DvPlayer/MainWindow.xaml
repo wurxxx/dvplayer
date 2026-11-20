@@ -64,14 +64,6 @@
                    ItemContainerStyle="{StaticResource NavItem}"
                    SelectionChanged="OnNavSelectionChanged">
 
-            <ListBoxItem Tag="home">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="&#xE80F;" FontFamily="{StaticResource IconFont}" FontSize="15"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="首页" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
-              </StackPanel>
-            </ListBoxItem>
-
             <ListBoxItem Tag="sources">
               <StackPanel Orientation="Horizontal">
                 <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="15"
@@ -116,7 +108,7 @@
                    SelectionChanged="OnSourceSelectionChanged">
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Grid>
+                <Grid Tag="{Binding Id}" MouseLeftButtonUp="OnSourceItemClick" Cursor="Hand">
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="14"
                                VerticalAlignment="Center" />

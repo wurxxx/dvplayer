@@ -21,7 +21,7 @@ public sealed class AppSettings
     public bool AutoConnect { get; set; } = true;
 
     /// <summary>启动后先打开哪一页：home / libraries / records。</summary>
-    public string StartPage { get; set; } = "home";
+    public string StartPage { get; set; } = "libraries";
 
     /// <summary>列表每页条数（媒体库与搜索共用）。</summary>
     public int PageSize { get; set; } = 60;

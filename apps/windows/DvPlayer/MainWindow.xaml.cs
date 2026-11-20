@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using DvPlayer.Services;
 using DvPlayer.Views;
@@ -21,17 +22,25 @@ public partial class MainWindow : FluentWindow
         var shotDir = ScreenshotDir();
         var start = StartTag();
 
-        // 「媒体库」已经没有菜单项了，启动页是它时直接开，别去选中一个不存在的项。
+        // 先定当前源，服务器首页才知道该拉哪个源。
+        RefreshSourceNav();
+
+        // 没有源时直接去「服务器」页添加，服务器首页没什么可看的。
+        if (start == "libraries" && AppServices.Instance.Settings.Sources.Count == 0)
+        {
+            start = "sources";
+        }
+
+        // 服务器首页不是菜单项，直接开页面。
         if (start == "libraries")
         {
+            Nav.SelectedItem = null;
             Navigate("libraries");
         }
         else
         {
             SelectNav(start);
         }
-
-        RefreshSourceNav();
 
         // 截图巡检时不受「启动时自动连接」开关影响，否则回归会拍到空页面。
         if (AppServices.Instance.Settings.AutoConnect || shotDir is not null)
@@ -69,9 +78,9 @@ public partial class MainWindow : FluentWindow
     private static string StartTag()
     {
         var page = AppServices.Instance.Settings.StartPage;
-        return page is "libraries" or "sources" or "records" or "search" or "settings"
+        return page is "sources" or "records" or "search" or "settings"
             ? page
-            : "home";
+            : "libraries";
     }
 
     private bool _syncingSources;
@@ -90,14 +99,14 @@ public partial class MainWindow : FluentWindow
     {
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, "--screenshot");
-        var known = new[] { "home", "libraries", "sources", "records", "search", "settings" };
+        var known = new[] { "libraries", "sources", "records", "search", "settings" };
         if (index < 0 || index + 2 >= args.Length)
         {
             return known;
         }
 
         var pages = args.Skip(index + 2).Where(known.Contains).ToArray();
-        return pages.Length == 0 ? new[] { "home" } : pages;
+        return pages.Length == 0 ? new[] { "libraries" } : pages;
     }
 
     /// <summary>依次打开每个页面并保存一张 PNG，然后退出。用于无桌面环境的回归。</summary>
@@ -262,13 +271,29 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        OpenSource(item.Id);
+    }
+
+    // 点的是已经选中的源时 SelectionChanged 不触发，所以点击也单独接一下。
+    private void OnSourceItemClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string id })
+        {
+            OpenSource(id);
+        }
+    }
+
+    private void OpenSource(string id)
+    {
         var settings = AppServices.Instance.Settings;
-        if (settings.LastSourceId == item.Id && ContentFrame.Content is LibrariesPage)
+
+        // 已经在看这个源了，不用重建页面。
+        if (settings.LastSourceId == id && ContentFrame.Content is LibrariesPage)
         {
             return;
         }
 
-        settings.LastSourceId = item.Id;
+        settings.LastSourceId = id;
         settings.Save();
 
         // 源首页不是导航项，清掉菜单高亮，只留源列表这一项。
@@ -318,7 +343,7 @@ public partial class MainWindow : FluentWindow
             "records" => new RecordsPage(),
             "search" => new SearchPage(),
             "settings" => new SettingsPage(),
-            _ => new HomePage(),
+            _ => new LibrariesPage(),
         };
 
         ContentFrame.Navigate(page);
