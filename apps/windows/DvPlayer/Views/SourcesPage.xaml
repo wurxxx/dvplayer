@@ -23,7 +23,7 @@
       </StackPanel>
     </Grid>
 
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
       <StackPanel Margin="0,0,0,28">
         <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
 

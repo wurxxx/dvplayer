@@ -34,7 +34,7 @@
                Margin="0,4,0,10" TextWrapping="Wrap" />
 
     <!-- 通用：继续观看 + 收藏入口 -->
-    <ScrollViewer x:Name="GeneralPanel" Grid.Row="2" VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="GeneralPanel" Grid.Row="2" VerticalScrollBarVisibility="Hidden">
       <StackPanel Margin="0,8,0,28">
         <!-- 按媒体源分栏：每源一行，左右箭头滚动 -->
         <ItemsControl x:Name="ContinueGroups" Margin="0,14,0,0">
@@ -128,7 +128,7 @@
     </ScrollViewer>
 
     <!-- 观看：全部记录，横向卡片行 -->
-    <ScrollViewer x:Name="WatchPanel" Grid.Row="2" VerticalScrollBarVisibility="Auto"
+    <ScrollViewer x:Name="WatchPanel" Grid.Row="2" VerticalScrollBarVisibility="Hidden"
                   Visibility="Collapsed">
       <ItemsControl x:Name="WatchList" Margin="0,8,0,28">
         <ItemsControl.ItemsPanel>

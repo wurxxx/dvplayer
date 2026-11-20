@@ -170,7 +170,7 @@
 
     <!-- 源首页：Hero 贴边铺满，顶栏浮在它上面 -->
     <Grid x:Name="OverviewPanel">
-      <ScrollViewer x:Name="OverviewRoot" VerticalScrollBarVisibility="Auto"
+      <ScrollViewer x:Name="OverviewRoot" VerticalScrollBarVisibility="Hidden"
                     ScrollChanged="OnOverviewScroll">
         <StackPanel>
 
@@ -425,7 +425,7 @@
                    Margin="0,10,0,0" TextWrapping="Wrap" />
       </StackPanel>
 
-      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
+      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden" Margin="0,14,0,0">
         <StackPanel>
           <ItemsControl x:Name="ItemGrid">
             <ItemsControl.ItemsPanel>
