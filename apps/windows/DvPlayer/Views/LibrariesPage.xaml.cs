@@ -838,6 +838,41 @@ public partial class LibrariesPage : Page
 
     private void OnScrollRight(object sender, RoutedEventArgs e) => ScrollRow(sender, ScrollStep);
 
+    /// <summary>
+    /// 横向行自己会吞掉滚轮（纵向滚动被禁用），鼠标停在封面上时整页就滚不动了。
+    /// 这里把滚轮转交给外层纵向 ScrollViewer，横向只用箭头。
+    /// </summary>
+    private void OnRowWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not DependencyObject node)
+        {
+            return;
+        }
+
+        var vertical = FindVerticalScroll(node);
+        if (vertical is null)
+        {
+            return;
+        }
+
+        vertical.ScrollToVerticalOffset(vertical.VerticalOffset - e.Delta * 0.5);
+        e.Handled = true;
+    }
+
+    private static ScrollViewer? FindVerticalScroll(DependencyObject node)
+    {
+        for (var parent = VisualTreeHelper.GetParent(node); parent is not null;
+             parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (parent is ScrollViewer { VerticalScrollBarVisibility: not ScrollBarVisibility.Disabled } scroll)
+            {
+                return scroll;
+            }
+        }
+
+        return null;
+    }
+
     private static void ScrollRow(object sender, double delta)
     {
         if (FindRow(sender) is { } row)
