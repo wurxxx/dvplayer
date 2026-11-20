@@ -33,6 +33,7 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 | --- | --- | --- |
 | 媒体库 | `GET /Users/{uid}/Views` | `Id`、`Name`、`CollectionType`、`ImageTags` |
 | 条目列表 | `GET /Users/{uid}/Items?ParentId=…&StartIndex=…&Limit=…` | `Items[]`、`TotalRecordCount` |
+| 搜索 | `GET /Users/{uid}/Items?SearchTerm=…&Recursive=true&IncludeItemTypes=Movie,Series,Episode` | 同条目列表，按父级归并成剧 |
 | 条目详情 | `GET /Users/{uid}/Items/{id}?Fields=…` | 单条 `ItemDto` |
 | 继续观看 | `GET /Users/{uid}/Items/Resume?MediaTypes=Video` | 按 `DatePlayed` 倒序 |
 | 播放信息 | `POST /Items/{id}/PlaybackInfo`，body `{UserId}` | `MediaSources[0]` |

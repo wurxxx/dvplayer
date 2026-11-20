@@ -100,8 +100,10 @@ C ABI 多一组 `dv_hub_*`；界面（`AppServices`）只持有一个 hub，设�
 - **失败隔离**：`collect` 逐个源跑，失败只记最后一个错误；全失败才报错。
   同一个源里某次请求失败不会影响其它源。
 
-搜索还没实现——飞牛没有条目搜索接口，需要在客户端建索引（见 PLAN §1.1），
-等 Emby 接入后一起做。
+**搜索**走各源自己的接口：飞牛是 `GET /v/api/v1/search/list?q=`（见
+[FNOS-API §4.2.1](FNOS-API.md)），Emby / Jellyfin 是
+`/Users/{uid}/Items?SearchTerm=`。`Hub::search` 逐源合并并加源前缀，
+界面只认一份结果；命中的是集时按父级归并成剧。
 
 ## 2. 播放内核接入（现状）
 

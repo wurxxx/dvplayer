@@ -126,6 +126,30 @@ POST /v/api/v1/item/list
 - `ancestor_guid` 列**全部子孙**（实测 63094 条），适合搜索与统计；
 - `type` 是树形的：`Directory` 表示文件夹，`Video` 是文件，`Movie` / `TV` 是刮削后的条目。
 
+### 4.2.1 搜索（全文）
+
+```http
+GET /v/api/v1/search/list?q=<关键词>
+```
+
+```json
+{"code":0,"data":[
+  {"guid":"...","title":"末哥超凡公路 S03 - S03E05.mp4",
+   "parent_guid":"...","parent_title":"末哥超凡公路 S03（65集） - SKIT",
+   "type":"Video","poster":"/6f/18/poster-....webp",
+   "media_stream":{"resolutions":["1080p"],...},
+   "ancestor_guid":"...","ancestor_name":"影视","ancestor_category":"Mix"}
+]}
+```
+
+- 返回**平铺的文件级条目**（命中的可能是某一集），要按 `parent_guid` 归并成剧；
+- 实测 `8005` 和 `15666` 两个端口都可用，走影视应用自己的接口；
+- `q` 为空时不要调用，直接返回空列表；
+- GET 的 `authx` 签名哈希的是 **query string**（见 §3），不是 body。
+
+`item/list` 的 `keyword` / `search` / `name` / `title` 等参数实测都无效（返回全量），
+`/item/search`、`/search` 一类路径返回 501，所以搜索只走这一个端点。
+
 ### 4.3 详情
 
 ```http
@@ -312,7 +336,7 @@ GET /v/api/v1/play/list
 | `GET /v/api/v1/movie/<guid>` | 影片详情 |
 | `POST /v/api/v1/person/list/<guid>` | 影片演员 |
 
-搜索本身没有单独的全文接口，`item/list` 带 `ancestor_guid` + 关键词参数（未完全验证）。
+搜索用 `GET /v/api/v1/search/list?q=`（见 §4.2.1），`item/list` 的关键词参数无效。
 
 ## 8. 客户端实现要点
 
