@@ -21,7 +21,7 @@
 
 - 共享核心绑定：`Sources/DvCore/Core.swift`（串行队列 + `async/await`，JSON 解成强类型）
 - 配置：`~/Library/Application Support/DvPlayer/settings.json`
-- 侧栏：服务器 / 记录 / 搜索 / 设置 + 服务器列表 + 连接状态（「媒体库」不单列菜单）
+- 侧栏：服务器 / 记录 / 搜索 / 设置 + 服务器列表（连上绿点 / 未连红点）+ 左下角只显示版本（「媒体库」不单列菜单）
 - 服务器页：添加 / 编辑 / 删除源（删除走深色确认卡片，和 Windows 同一套视觉），
   连接状态与媒体库数量
 - 源首页：和 Windows 一样三个页签——媒体（Hero 轮播 7 秒自动翻、悬停出箭头、

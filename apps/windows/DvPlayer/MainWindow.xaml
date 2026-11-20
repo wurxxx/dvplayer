@@ -38,19 +38,10 @@
           </StackPanel>
         </StackPanel>
 
-        <!-- 底部：连接状态 -->
-        <StackPanel DockPanel.Dock="Bottom" Margin="20,0,18,18">
-          <StackPanel Orientation="Horizontal">
-            <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{StaticResource FaintBrush}"
-                     VerticalAlignment="Center" />
-            <TextBlock x:Name="SourceStatus" Text="未连接"
-                       FontSize="12.5" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"
-                       TextTrimming="CharacterEllipsis" />
-          </StackPanel>
-          <TextBlock x:Name="SourceHint" Text="在「媒体源」里添加" FontSize="11.5"
-                     Foreground="{StaticResource FaintBrush}" Margin="14,3,0,0"
-                     TextTrimming="CharacterEllipsis" />
-        </StackPanel>
+        <!-- 底部只留版本：连接状态看服务器列表前面的状态点 -->
+        <TextBlock x:Name="VersionText" DockPanel.Dock="Bottom" Text="版本"
+                   FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                   Margin="20,0,18,18" TextTrimming="CharacterEllipsis" />
 
         <StackPanel>
           <ListBox x:Name="Nav"
@@ -109,8 +100,23 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                   </Grid.ColumnDefinitions>
-                  <TextBlock Grid.Column="0" Text="&#xE774;" FontFamily="{StaticResource IconFont}"
-                             FontSize="14" VerticalAlignment="Center" />
+
+                  <!-- 和 macOS 一样：连上用绿点，没连上用红点（状态一眼能看出来） -->
+                  <Grid Grid.Column="0" Width="16">
+                    <Ellipse Width="6" Height="6" HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                          <Setter Property="Fill" Value="{StaticResource DangerBrush}" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding Ok}" Value="True">
+                              <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Ellipse.Style>
+                    </Ellipse>
+                  </Grid>
+
                   <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13.5" Margin="12,0,0,0"
                              VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </Grid>

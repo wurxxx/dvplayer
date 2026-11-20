@@ -34,15 +34,6 @@ final class AppState: ObservableObject {
 
     var isConnected: Bool { core != nil }
 
-    var sourceSummary: String {
-        let ok = connections.filter(\.ok)
-        switch ok.count {
-        case 0: return "未连接"
-        case 1: return ok[0].name
-        default: return "\(ok.count) 个源"
-        }
-    }
-
     var hasSources: Bool { !settings.sources.isEmpty }
 
     func libraries(of sourceId: String) -> [MediaLibrary] {

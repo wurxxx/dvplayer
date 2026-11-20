@@ -105,8 +105,8 @@ public partial class MainWindow : FluentWindow
         var shotDir = ScreenshotDir();
         var start = StartTag();
 
-        // 先定当前源，服务器首页才知道该拉哪个源。
-        RefreshSourceNav();
+        // 先定当前源，服务器首页才知道该拉哪个源；顺便把左下角版本显示出来。
+        RefreshSourceStatus();
 
         // 没有源时直接去「服务器」页添加，服务器首页没什么可看的。
         if (start == "libraries" && AppServices.Instance.Settings.Sources.Count == 0)
@@ -826,23 +826,21 @@ public partial class MainWindow : FluentWindow
         var (ok, error) = await AppServices.Instance.ConnectSavedAsync();
         RefreshSourceStatus();
 
-        // 全部连不上时才把原因挂出来；部分失败在设置页看。
+        // 左下角只放版本；连不上的原因在「服务器」页看，这里只记一条日志。
         if (!ok && error is not null)
         {
-            SourceHint.Text = error;
-            SourceHint.ToolTip = error;
+            Trace.Write("auto connect failed: " + error);
         }
     }
 
-    /// <summary>连接状态变化后刷新左下角。</summary>
+    /// <summary>连接状态变化后刷新左下角版本和服务器列表的状态点。</summary>
     public void RefreshSourceStatus()
     {
         var services = AppServices.Instance;
-        SourceStatus.Text = services.SourceSummary;
-        SourceHint.Text = services.IsConnected ? "媒体库已连接" : "在「媒体源」里添加";
-
-        StatusDot.Fill = (System.Windows.Media.Brush)FindResource(
-            services.IsConnected ? "AccentBrush" : services.Connections.Count > 0 ? "DangerBrush" : "FaintBrush");
+        VersionText.Text = "版本 " + (services.CoreVersion ?? "未加载");
+        VersionText.ToolTip = services.Connections.Count > 0 && !services.IsConnected
+            ? "所有服务器都没有连上"
+            : null;
 
         RefreshSourceNav();
     }

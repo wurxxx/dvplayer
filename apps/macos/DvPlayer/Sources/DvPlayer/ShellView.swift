@@ -169,24 +169,12 @@ private struct SidebarView: View {
         }
     }
 
+    /// 左下角只留版本；连没连上看服务器列表前面的状态点。
     private var status: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(state.connections.contains(where: \.ok) ? Theme.success : Theme.faint)
-                    .frame(width: 6, height: 6)
-                Text(state.sourceSummary)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.muted)
-                    .lineLimit(1)
-            }
-
-            Text(state.connections.isEmpty ? "在「服务器」里添加" : "版本 \(state.coreVersion)")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.faint)
-                .lineLimit(1)
-                .padding(.leading, 14)
-        }
+        Text("版本 \(state.coreVersion)")
+            .font(.system(size: 11.5))
+            .foregroundStyle(Theme.faint)
+            .lineLimit(1)
     }
 }
 
