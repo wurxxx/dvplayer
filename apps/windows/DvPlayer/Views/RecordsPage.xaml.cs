@@ -27,8 +27,231 @@ public partial class RecordsPage : Page
         Unloaded += OnUnloaded;
     }
 
+    /// <summary>截图巡检用：停在「观看」分段。</summary>
+    public void ShowWatchForShot() => WatchSegment.IsChecked = true;
+
     /// <summary>截图巡检用：停在「收藏」分段。</summary>
     public void ShowFavoritesForShot() => FavoriteSegment.IsChecked = true;
+
+    /// <summary>截图巡检用：打开「观看」第一张卡片的右键菜单。</summary>
+    public ContextMenu? OpenFirstWatchMenuForShot() => OpenFirstMenu(WatchList);
+
+    /// <summary>截图巡检用：临时收藏一条记录，验证完再取消。</summary>
+    public async Task<string?> FavoriteFirstForShotAsync()
+    {
+        if (AppServices.Instance.Core is not { } core || _records.FirstOrDefault() is not { } record)
+        {
+            return null;
+        }
+
+        var result = await Task.Run(() => core.SetFavorite(record.ItemId, true)).ConfigureAwait(true);
+        if (!result.Ok)
+        {
+            return null;
+        }
+
+        _favoritesLoaded = false;
+        await LoadFavoritesAsync().ConfigureAwait(true);
+        FillFavorites();
+        return record.ItemId;
+    }
+
+    /// <summary>截图巡检用：截图结束把临时收藏撤掉。</summary>
+    public async Task UnfavoriteForShotAsync(string id)
+    {
+        if (AppServices.Instance.Core is not { } core)
+        {
+            return;
+        }
+
+        await Task.Run(() => core.SetFavorite(id, false)).ConfigureAwait(true);
+        _favorites.RemoveAll(f => f.Id == id);
+        _favoritesLoaded = true;
+        FillFavorites();
+    }
+
+    /// <summary>截图巡检用：打开「收藏」第一张卡片的右键菜单。</summary>
+    public ContextMenu? OpenFirstFavoriteMenuForShot() => OpenFirstMenu(FavoriteList);
+
+    private static ContextMenu? OpenFirstMenu(ItemsControl list)
+    {
+        if (list.ItemContainerGenerator.ContainerFromIndex(0) is not DependencyObject container ||
+            FindCard(container) is not { ContextMenu: { } menu } border)
+        {
+            return null;
+        }
+
+        menu.PlacementTarget = border;
+        menu.IsOpen = true;
+        return menu;
+    }
+
+    private static Border? FindCard(DependencyObject root)
+    {
+        if (root is Border { ContextMenu: not null } border)
+        {
+            return border;
+        }
+
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            if (FindCard(VisualTreeHelper.GetChild(root, i)) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    // —— 卡片右键菜单（和媒体库页的菜单一致）——
+
+    private static string? MenuItemId(object? sender)
+    {
+        if (sender is not MenuItem item)
+        {
+            return null;
+        }
+
+        var menu = item.Parent as ContextMenu
+            ?? ItemsControl.ItemsControlFromItemContainer(item) as ContextMenu;
+        return (menu?.PlacementTarget as FrameworkElement)?.Tag as string;
+    }
+
+    private async Task<bool> RunWriteAsync(Func<MediaCore, ApiResult<bool>> action)
+    {
+        if (AppServices.Instance.Core is not { } core)
+        {
+            return false;
+        }
+
+        var result = await Task.Run(() => action(core)).ConfigureAwait(true);
+        if (result.Ok)
+        {
+            return true;
+        }
+
+        FlashStatus(result.Error ?? "操作失败");
+        return false;
+    }
+
+    private async void OnMenuPlay(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+    }
+
+    private async void OnMenuFavorite(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (await RunWriteAsync(core => core.SetFavorite(id, true)).ConfigureAwait(true))
+        {
+            // 下次切到「收藏」时重新拉，刚收藏的会出现在最前面。
+            _favoritesLoaded = false;
+            FlashStatus("已添加到收藏夹");
+        }
+    }
+
+    private async void OnMenuUnfavorite(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (!await RunWriteAsync(core => core.SetFavorite(id, false)).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        _favorites.RemoveAll(f => f.Id == id);
+        _favoritesLoaded = true;
+        FillFavorites();
+        FlashStatus("已取消收藏");
+    }
+
+    private async void OnMenuWatched(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (!await RunWriteAsync(core => core.SetWatched(id, true)).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        // 本地把进度推到片尾，「继续观看」就不再显示它。
+        var index = _records.FindIndex(r => r.ItemId == id);
+        if (index >= 0)
+        {
+            _records[index] = _records[index] with
+            {
+                PositionSeconds = _records[index].DurationSeconds,
+            };
+            FillLists();
+        }
+
+        FlashStatus("已标记为已观看");
+    }
+
+    private async void OnMenuUnwatched(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (!await RunWriteAsync(core => core.SetWatched(id, false)).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        var index = _records.FindIndex(r => r.ItemId == id);
+        if (index >= 0)
+        {
+            _records[index] = _records[index] with { PositionSeconds = 0 };
+            FillLists();
+        }
+
+        FlashStatus("已标记为未观看");
+    }
+
+    private async void OnMenuRemoveRecord(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (!await RunWriteAsync(core => core.RemovePlayRecord(id)).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        _records.RemoveAll(r => r.ItemId == id);
+        FillLists();
+        FlashStatus("已移除观看记录");
+    }
+
+    private async void FlashStatus(string message)
+    {
+        StatusText.Text = message;
+        await Task.Delay(4000).ConfigureAwait(true);
+        if (StatusText.Text == message)
+        {
+            UpdateStatusText();
+        }
+    }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
@@ -113,6 +336,13 @@ public partial class RecordsPage : Page
         FavoriteList.ItemsSource = cards;
         FavoriteScroll.Visibility = cards.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         FavoritePanel.Visibility = cards.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+
+        // 取消收藏后列表会变空，标题上的「共 N 个收藏」也得跟着改。
+        if (FavoriteSegment.IsChecked == true)
+        {
+            UpdateStatusText();
+        }
+
         _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 

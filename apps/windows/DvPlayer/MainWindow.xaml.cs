@@ -189,6 +189,43 @@ public partial class MainWindow : FluentWindow
                 }
             }
 
+            // --menu-records：记录页「观看」第一张卡片的右键菜单单独渲染。
+            if (Environment.GetCommandLineArgs().Contains("--menu-records") &&
+                ContentFrame.Content is RecordsPage menuRecords)
+            {
+                menuRecords.ShowWatchForShot();
+                await Task.Delay(2500);
+                if (menuRecords.OpenFirstWatchMenuForShot() is { } watchMenu)
+                {
+                    await Task.Delay(700);
+                    UiCapture.Save(watchMenu, Path.Combine(dir, "records-watch-menu.png"));
+                    watchMenu.IsOpen = false;
+                    await Task.Delay(300);
+                }
+            }
+
+            // --menu-fav：临时收藏一条，截「收藏」页和它的卡片菜单，再撤回。
+            if (Environment.GetCommandLineArgs().Contains("--menu-fav") &&
+                ContentFrame.Content is RecordsPage favShot)
+            {
+                favShot.ShowFavoritesForShot();
+                await Task.Delay(1500);
+                if (await favShot.FavoriteFirstForShotAsync() is { Length: > 0 } favId)
+                {
+                    await Task.Delay(1500);
+                    UiCapture.Save(this, Path.Combine(dir, "records-favorites.png"));
+                    if (favShot.OpenFirstFavoriteMenuForShot() is { } favMenu)
+                    {
+                        await Task.Delay(700);
+                        UiCapture.Save(favMenu, Path.Combine(dir, "records-favorite-menu.png"));
+                        favMenu.IsOpen = false;
+                        await Task.Delay(300);
+                    }
+
+                    await favShot.UnfavoriteForShotAsync(favId);
+                }
+            }
+
             if (previewHover && ContentFrame.Content is LibrariesPage hoverPage)
             {
                 hoverPage.PreviewHeroArrows();

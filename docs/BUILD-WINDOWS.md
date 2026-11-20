@@ -121,6 +121,8 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--browse-scroll <像素>` | 把网格滚到接近底部，验证自动续页（状态行会显示「已加载 N」） |
 | `--menu` | 打开网格第一张卡片的右键菜单，单独渲染 `card-menu.png`（Popup 抓不到整窗） |
 | `--menu-continue` | 打开「继续观看」第一张卡片的右键菜单，单独渲染 `continue-menu.png` |
+| `--menu-records` | 记录页切到「观看」并打开第一张卡片的右键菜单，单独渲染 `records-watch-menu.png` |
+| `--menu-fav` | 记录页临时收藏一条，渲染 `records-favorites.png` 与 `records-favorite-menu.png`，截完自动取消收藏 |
 | `--menu-click` | 配合 `--menu`：点一下菜单第一项（收藏）验证 Click 链路，会临时收藏该条目再取消 |
 | `--window <宽>x<高>` | 换窗口尺寸（受会话屏幕限制），验证自适应网格 |
 | `--delay <秒>` | 每页再多等几秒（媒体库页默认 9 秒等 Hero 大图） |

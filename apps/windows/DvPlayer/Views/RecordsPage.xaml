@@ -66,6 +66,47 @@
                             <Border Height="140" CornerRadius="10" Background="{Binding Background}"
                                     SnapsToDevicePixels="True" Tag="{Binding ItemId}"
                                     Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+                            <Border.ContextMenu>
+                              <ContextMenu Style="{StaticResource DarkContextMenu}">
+                                <MenuItem Style="{StaticResource DarkMenuItem}" Header="播放"
+                                          Click="OnMenuPlay">
+                                  <MenuItem.Icon>
+                                    <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                                               FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                                  </MenuItem.Icon>
+                                </MenuItem>
+                                <Separator Style="{StaticResource DarkMenuSeparator}" />
+                                <MenuItem Style="{StaticResource DarkMenuItem}" Header="添加到收藏夹"
+                                          Click="OnMenuFavorite">
+                                  <MenuItem.Icon>
+                                    <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
+                                               FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                                  </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                                          Click="OnMenuWatched">
+                                  <MenuItem.Icon>
+                                    <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                                               FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                                  </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为未观看"
+                                          Click="OnMenuUnwatched">
+                                  <MenuItem.Icon>
+                                    <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}"
+                                               FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                                  </MenuItem.Icon>
+                                </MenuItem>
+                                <Separator Style="{StaticResource DarkMenuSeparator}" />
+                                <MenuItem Style="{StaticResource DarkMenuItem}" Header="移除观看记录"
+                                          Click="OnMenuRemoveRecord">
+                                  <MenuItem.Icon>
+                                    <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                                               FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                                  </MenuItem.Icon>
+                                </MenuItem>
+                              </ContextMenu>
+                            </Border.ContextMenu>
                               <Grid ClipToBounds="True">
                                 <TextBlock Text="{Binding Initial}" FontSize="42" FontWeight="SemiBold"
                                            Foreground="#2AFFFFFF" HorizontalAlignment="Center"
@@ -142,6 +183,47 @@
               <Border Height="140" CornerRadius="10" Background="{Binding Background}"
                       SnapsToDevicePixels="True" Tag="{Binding ItemId}"
                       Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+              <Border.ContextMenu>
+                <ContextMenu Style="{StaticResource DarkContextMenu}">
+                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="播放"
+                            Click="OnMenuPlay">
+                    <MenuItem.Icon>
+                      <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <Separator Style="{StaticResource DarkMenuSeparator}" />
+                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="添加到收藏夹"
+                            Click="OnMenuFavorite">
+                    <MenuItem.Icon>
+                      <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
+                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                            Click="OnMenuWatched">
+                    <MenuItem.Icon>
+                      <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为未观看"
+                            Click="OnMenuUnwatched">
+                    <MenuItem.Icon>
+                      <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}"
+                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <Separator Style="{StaticResource DarkMenuSeparator}" />
+                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="移除观看记录"
+                            Click="OnMenuRemoveRecord">
+                    <MenuItem.Icon>
+                      <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                    </MenuItem.Icon>
+                  </MenuItem>
+                </ContextMenu>
+              </Border.ContextMenu>
                 <Grid ClipToBounds="True">
                   <TextBlock Text="{Binding Initial}" FontSize="42" FontWeight="SemiBold"
                              Foreground="#2AFFFFFF" HorizontalAlignment="Center"
@@ -194,6 +276,24 @@
               <Border Height="222" CornerRadius="10" Background="{Binding Background}"
                       SnapsToDevicePixels="True" Tag="{Binding Id}"
                       Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+              <Border.ContextMenu>
+                <ContextMenu Style="{StaticResource DarkContextMenu}">
+                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="取消收藏"
+                            Click="OnMenuUnfavorite">
+                    <MenuItem.Icon>
+                      <TextBlock Text="&#xE735;" FontFamily="{StaticResource IconFont}"
+                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                            Click="OnMenuWatched">
+                    <MenuItem.Icon>
+                      <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                    </MenuItem.Icon>
+                  </MenuItem>
+                </ContextMenu>
+              </Border.ContextMenu>
                 <Grid>
                   <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
                              Foreground="#2AFFFFFF" HorizontalAlignment="Center"
