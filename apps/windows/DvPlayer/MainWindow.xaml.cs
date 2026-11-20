@@ -150,6 +150,14 @@ public partial class MainWindow : FluentWindow
                 await Task.Delay(400);
             }
 
+            // --scroll <像素>：把服务器首页往下滚，检查横幅下面的分组行。
+            if (int.TryParse(ArgumentAfter("--scroll"), out var offset) && offset > 0 &&
+                ContentFrame.Content is LibrariesPage scrollPage)
+            {
+                scrollPage.ScrollOverview(offset);
+                await Task.Delay(800);
+            }
+
             UiCapture.Save(this, Path.Combine(dir, tag + ".png"));
         }
 

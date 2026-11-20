@@ -110,24 +110,40 @@
       </StackPanel>
     </DataTemplate>
 
-    <!-- 每个媒体库一行：标题 + 计数 + 横向海报 + 箭头 -->
+    <!-- 每个媒体库一行：标题 + 右侧数量 + 横向海报 + 箭头 -->
     <DataTemplate x:Key="SectionTemplate">
       <StackPanel Margin="0,0,0,24">
         <Grid Margin="0,0,0,11">
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitle}" FontSize="16" />
-            <TextBlock Text="{Binding CountText}" Style="{StaticResource Caption}"
-                       Margin="10,0,0,0" VerticalAlignment="Bottom" />
-          </StackPanel>
-          <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
-                  Tag="{Binding Id}" Click="OnSectionMoreClick" ToolTip="查看全部">
-            <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="12" />
+          <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitle}" FontSize="16"
+                     VerticalAlignment="Center" />
+
+          <Button Tag="{Binding Id}" Click="OnSectionMoreClick" Cursor="Hand"
+                  HorizontalAlignment="Right" VerticalAlignment="Center" ToolTip="查看全部">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="8,4">
+                  <ContentPresenter />
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource NavHoverBrush}" />
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="{Binding CountLabel}" FontSize="14"
+                         Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+              <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                         Foreground="{StaticResource FaintBrush}" Margin="5,0,0,0"
+                         VerticalAlignment="Center" />
+            </StackPanel>
           </Button>
         </Grid>
 
         <Grid>
           <ScrollViewer HorizontalScrollBarVisibility="Hidden"
-                        VerticalScrollBarVisibility="Disabled" PreviewMouseWheel="OnRowWheel">
+                        VerticalScrollBarVisibility="Disabled">
             <ItemsControl ItemsSource="{Binding Items}"
                           ItemTemplate="{StaticResource PosterTemplate}">
               <ItemsControl.ItemsPanel>
@@ -153,7 +169,8 @@
 
     <!-- 源首页：Hero 贴边铺满，顶栏浮在它上面 -->
     <Grid x:Name="OverviewPanel">
-      <ScrollViewer x:Name="OverviewRoot" VerticalScrollBarVisibility="Auto">
+      <ScrollViewer x:Name="OverviewRoot" VerticalScrollBarVisibility="Auto"
+                    ScrollChanged="OnOverviewScroll">
         <StackPanel>
 
           <!-- Hero 轮播 -->
@@ -248,8 +265,7 @@
                          HorizontalAlignment="Right" VerticalAlignment="Bottom" />
             </Grid>
             <Grid>
-              <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
-                            PreviewMouseWheel="OnRowWheel">
+              <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
                 <ItemsControl x:Name="ContinueRow" ItemTemplate="{StaticResource ContinueTemplate}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -279,7 +295,7 @@
       </ScrollViewer>
 
       <!-- 顶栏浮层：源名 / 分段 / 刷新 -->
-      <Border Height="108" VerticalAlignment="Top" IsHitTestVisible="False">
+      <Border x:Name="TopBarScrim" Height="108" VerticalAlignment="Top" IsHitTestVisible="False">
         <Border.Background>
           <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
             <GradientStop Color="#99000000" Offset="0" />
@@ -287,6 +303,10 @@
           </LinearGradientBrush>
         </Border.Background>
       </Border>
+
+      <Border x:Name="TopBarEdge" Height="1" VerticalAlignment="Top" Margin="0,72,0,0"
+              Background="{StaticResource LineBrush}" Visibility="Collapsed"
+              IsHitTestVisible="False" />
 
       <Grid Height="72" x:Name="TopBar" Margin="32,0,32,0" VerticalAlignment="Top">
         <TextBlock x:Name="SourceTitle" Text="媒体库" FontSize="17" FontWeight="SemiBold"

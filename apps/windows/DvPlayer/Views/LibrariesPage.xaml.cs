@@ -176,15 +176,31 @@ public partial class LibrariesPage : Page
             {
                 Id = id,
                 Title = title,
-                CountText = $"{page.Data.Total} ›",
+                CountLabel = $"{page.Data.Total}",
                 Items = page.Data.Items.Select(ToCard).ToList(),
             });
 
-            // Hero 候选：列表项里没有横版图，先记 id，后面统一取详情。
+            // Hero 随机推荐：随机翻一页再打乱，避免总是最新入库的那几条。
             if (_heroCandidates.Count < 8)
             {
-                _heroCandidates.AddRange(page.Data.Items
-                    .Take(8 - _heroCandidates.Count)
+                var take = 8 - _heroCandidates.Count;
+                var total = page.Data.Total;
+                var pages = Math.Max(1, (total + 99) / 100);
+                var randomPage = pages > 1 ? Random.Shared.Next(2, pages + 1) : 1;
+                var pool = page.Data.Items;
+
+                if (randomPage > 1)
+                {
+                    var picked = await Task.Run(() => core.Items(id, randomPage, 100)).ConfigureAwait(true);
+                    if (picked.Ok && picked.Data is not null)
+                    {
+                        pool = picked.Data.Items;
+                    }
+                }
+
+                _heroCandidates.AddRange(pool
+                    .OrderBy(_ => Random.Shared.Next())
+                    .Take(take)
                     .Select(item => item.Id));
             }
 
@@ -395,6 +411,9 @@ public partial class LibrariesPage : Page
     /// <summary>截图巡检用：把 Hero 左右箭头显示出来，确认位置和样式。</summary>
     public void PreviewHeroArrows() => FadeArrows(1);
 
+    /// <summary>截图巡检用：滚到指定位置，看横幅下面几块。</summary>
+    public void ScrollOverview(double offset) => OverviewRoot.ScrollToVerticalOffset(offset);
+
     private void StepHero(int delta)
     {
         _ = ShowHeroAsync(_heroIndex + delta);
@@ -449,6 +468,17 @@ public partial class LibrariesPage : Page
         }
 
         await PlayWindow.OpenAsync(Window.GetWindow(this), hero.Id);
+    }
+
+    /// <summary>往下滚以后顶栏压到内容上，给它一个实底，别让字浮在海报上。</summary>
+    private void OnOverviewScroll(object sender, ScrollChangedEventArgs e)
+    {
+        var scrolled = OverviewRoot.VerticalOffset > 24;
+        TopBar.Background = scrolled
+            ? (Brush)FindResource("BgBrush")
+            : Brushes.Transparent;
+        TopBarScrim.Visibility = scrolled ? Visibility.Collapsed : Visibility.Visible;
+        TopBarEdge.Visibility = scrolled ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnTabChanged(object sender, RoutedEventArgs e)
@@ -862,15 +892,6 @@ public partial class LibrariesPage : Page
         return null;
     }
 
-    private void OnRowWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (sender is ScrollViewer row)
-        {
-            Animate(row, row.HorizontalOffset - e.Delta * 1.2);
-            e.Handled = true;
-        }
-    }
-
     // —— 数据装配 ——
 
     private static ItemCard ToCard(MediaItemDto item)
@@ -995,7 +1016,7 @@ public partial class LibrariesPage : Page
     {
         public string Id { get; init; } = "";
         public string Title { get; init; } = "";
-        public string CountText { get; init; } = "";
+        public string CountLabel { get; init; } = "";
         public List<ItemCard> Items { get; init; } = new();
     }
 }

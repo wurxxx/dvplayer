@@ -118,6 +118,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--browse` | 巡检完再进第一个媒体库的网格，多截一张 `library-browse.png` |
 | `--delay <秒>` | 每页再多等几秒（媒体库页默认 9 秒等 Hero 大图） |
 | `--hover` | 媒体库页把 Hero 左右箭头显示出来，检查位置与样式 |
+| `--scroll <像素>` | 把服务器首页往下滚再截，检查分组标题与横向海报行 |
 | `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`） |
 | `--series-season <n>` | 详情页默认展开第 n 季（验证季切换） |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
