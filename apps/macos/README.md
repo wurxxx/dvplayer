@@ -54,7 +54,7 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 
 | 环境变量 | 说明 |
 | --- | --- |
-| `DVPLAYER_SHOT` | 截图输出路径 |
+| `DVPLAYER_SHOT` | 截图输出路径；以 `.jpg` 结尾出 JPEG（1x，约 160KB，手机上也秒开） |
 | `DVPLAYER_SHOT_DELAY` | 打开后等几秒再截（网络慢就给大一点），默认 2.8 |
 | `DVPLAYER_EXIT` | `1` = 截完退出，方便脚本跑 |
 | `DVPLAYER_PAGE` | 直接落在某页：`sources` / `records` / `search` / `settings` |
@@ -62,6 +62,7 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_LIBRARY` | 直接打开某个媒体库的网格 |
 | `DVPLAYER_SCROLL` | `end` = 先把页面滚到底再截（长页面下半截） |
 | `DVPLAYER_ARROWS` | `1` = 强制显示横向行的左右箭头（截图用，正常是悬停才出） |
+| `DVPLAYER_SHOT_SCALE` | 渲染倍数；JPEG 默认 1x，PNG 默认屏幕倍数（Retina 是 2x） |
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

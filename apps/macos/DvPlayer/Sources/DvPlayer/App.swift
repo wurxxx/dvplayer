@@ -86,11 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    /// 把主窗口内容画进 PNG。走 CALayer 渲染，绕开屏幕录制权限。
+    /// 把主窗口内容画成图片。走 CALayer 渲染，绕开屏幕录制权限。
     ///
     /// 注意：SwiftUI 的视图是 layer-backed，`cacheDisplay` / `dataWithPDF` 拿不到
     /// 内容（整块透明），必须让 layer 自己重新渲染一遍。渲染结果上下是反的，
     /// 翻一次再存。
+    ///
+    /// 路径以 `.jpg` / `.jpeg` 结尾就出 JPEG（按 1x 渲染，约 200KB）——
+    /// 手机上看截图时 PNG（2x，2–5MB）经常加载不完。要原尺寸就设
+    /// `DVPLAYER_SHOT_SCALE=2`。
     @MainActor
     static func capture(to path: String) {
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
@@ -102,7 +106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let size = view.bounds.size
         guard size.width > 0, size.height > 0 else { return }
 
-        let scale = window.backingScaleFactor
+        let env = ProcessInfo.processInfo.environment
+        let lowered = path.lowercased()
+        let jpeg = lowered.hasSuffix(".jpg") || lowered.hasSuffix(".jpeg")
+        let scale = Double(env["DVPLAYER_SHOT_SCALE"] ?? "") ?? (jpeg ? 1 : window.backingScaleFactor)
+
         guard let canvas = NSBitmapImageRep(bitmapDataPlanes: nil,
                                             pixelsWide: Int(size.width * scale),
                                             pixelsHigh: Int(size.height * scale),
@@ -131,7 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSGraphicsContext.restoreGraphicsState()
 
-        guard let data = canvas.representation(using: .png, properties: [:]) else { return }
+        let data = jpeg
+            ? canvas.representation(using: .jpeg, properties: [.compressionFactor: 0.7])
+            : canvas.representation(using: .png, properties: [:])
+        guard let data else { return }
         try? data.write(to: URL(fileURLWithPath: path))
         NSLog("[DvPlayer] 截图：\(path)")
     }

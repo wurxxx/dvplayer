@@ -47,6 +47,8 @@
 - **截图**：没有屏幕录制权限，`screencapture` 拿不到画面；`cacheDisplay` / `dataWithPDF`
   对 SwiftUI 的 layer-backed 视图是空的。只有 `CALayer.render` 能截出内容
   （记得把坐标系翻回来）。长页面用 `DVPLAYER_SCROLL=end` 先滚到底再截。
+  路径给 `.jpg` 就按 1x 出 JPEG（约 160KB）——2x PNG 常有 2–5MB，
+  手机上加载容易超时看不到。
 - **集号会漏**：飞牛这一季就丢了第 6 集的 `episodeNumber`。直接按「顺序补号」会和
   第 1 集撞成两个 E01，现在用「没被占用的最小号码」补。
 
