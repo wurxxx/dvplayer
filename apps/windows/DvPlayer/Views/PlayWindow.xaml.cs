@@ -37,8 +37,7 @@ public partial class PlayWindow : Window
     /// <summary>每隔几秒回写一次进度。</summary>
     private const int ReportEverySeconds = 10;
 
-    private readonly PlaySourceDto _source;
-    private readonly double? _startSeconds;
+    private double? _startSeconds;
     private readonly MpvProcess _mpv = new();
 
     private readonly DispatcherTimer _ticker = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -51,10 +50,11 @@ public partial class PlayWindow : Window
     private readonly DispatcherTimer _dragTimer = new() { Interval = TimeSpan.FromMilliseconds(15) };
 
     private readonly List<PlayEpisode> _playlist;
-    private readonly string? _seriesTitle;
+    private string? _seriesTitle;
 
     private IntPtr _hwnd;
     private bool _started;
+    private bool _closed;
     private MpvIpc? _ipc;
     private int _session;
 
@@ -125,7 +125,6 @@ public partial class PlayWindow : Window
         List<PlayEpisode>? playlist = null,
         string? seriesTitle = null)
     {
-        _source = source;
         _current = source;
         _startSeconds = startSeconds;
         _playlist = playlist ?? new List<PlayEpisode>();
@@ -157,29 +156,155 @@ public partial class PlayWindow : Window
         RenderPlaylist();
     }
 
+    /// <summary>开窗闸门：同一时刻只允许一次。</summary>
+    private static int _openGate;
+
+    /// <summary>上一次开窗成功的时刻，用来吞掉连点里的后几下。</summary>
+    private static DateTime _lastOpenAt = DateTime.MinValue;
+
     /// <summary>
-    /// 解析播放源并打开窗口。失败时在主窗口提示，不抛异常。
+    /// 打开播放窗口。窗口先出来（带「正在打开…」），再去解析播放源：
+    /// 取地址慢的时候用户也能马上看到反馈，不会以为没点上而连点开出一堆播放器。
+    /// 失败时关掉窗口，在主窗口提示，不抛异常。
     /// </summary>
     /// <param name="startSeconds">0 = 重头看；null = 按服务器给的续播点。</param>
-    /// <param name="playlist">剧集的选集列表；电影传 null。</param>
+    /// <param name="playlist">剧集的选集列表；电影传 null（可以之后再补）。</param>
+    /// <param name="hintTitle">播放源还没解析出来时，加载页先显示的名字。</param>
     public static async Task<PlayWindow?> OpenAsync(
         Window? owner,
         string itemId,
         double? startSeconds = null,
         List<PlayEpisode>? playlist = null,
-        string? seriesTitle = null)
+        string? seriesTitle = null,
+        string? hintTitle = null)
     {
-        var (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
-        if (source is null)
+        // 连点保护：正在开的时候只接一次；刚开完的 800ms 也当连点。
+        if (Interlocked.CompareExchange(ref _openGate, 1, 0) != 0 ||
+            DateTime.UtcNow - _lastOpenAt < TimeSpan.FromMilliseconds(800))
         {
-            ConfirmDialog.Alert(owner, "无法播放", error ?? "取播放地址失败");
+            Trace.Write($"play open ignored item={itemId}");
             return null;
         }
 
-        var window = new PlayWindow(source, startSeconds, playlist, seriesTitle);
-        window.AttachSurface(owner);
-        window.Show();
-        return window;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Trace.Write($"play open start item={itemId}");
+
+        PlayWindow? window = null;
+        try
+        {
+            window = new PlayWindow(Placeholder(itemId), startSeconds, playlist, seriesTitle);
+            window._started = true; // 还是占位源，OnLoaded 先别启 mpv
+
+            var hint = hintTitle ?? window.DisplayTitle(window._current);
+            if (IsRealTitle(hint))
+            {
+                window.LoadingTitle.Text = hint;
+            }
+
+            window.AttachSurface(owner);
+            window.Show();
+            Trace.Write($"play open shown item={itemId} ms={clock.ElapsedMilliseconds}");
+
+            var (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
+            Trace.Write($"play open resolved item={itemId} ok={source is not null} " +
+                        $"ms={clock.ElapsedMilliseconds}");
+            if (source is null)
+            {
+                var failed = window;
+                window = null;
+                failed.Close();
+                ConfirmDialog.Alert(owner, "无法播放", error ?? "取播放地址失败");
+                return null;
+            }
+
+            // 等地址的这几秒里用户可能已经把窗口关了，别对着死 hwnd 起 mpv。
+            if (window._closed)
+            {
+                return null;
+            }
+
+            window.BeginPlayback(source, startSeconds);
+            return window;
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("play open failed: " + ex.Message);
+            window?.Close();
+            ConfirmDialog.Alert(owner, "无法播放", ex.Message);
+            return null;
+        }
+        finally
+        {
+            _lastOpenAt = DateTime.UtcNow;
+            Interlocked.Exchange(ref _openGate, 0);
+        }
+    }
+
+    /// <summary>占位播放源：窗口先出来，真实地址解析出来后由 <see cref="BeginPlayback"/> 换掉。</summary>
+    private static PlaySourceDto Placeholder(string itemId) => new(
+        itemId,
+        string.Empty,
+        string.Empty,
+        new List<HttpHeaderDto>(),
+        false,
+        string.Empty,
+        null,
+        null,
+        null,
+        0,
+        0,
+        null,
+        null,
+        null,
+        null,
+        false,
+        null,
+        null,
+        new List<AudioTrackDto>(),
+        new List<SubtitleTrackDto>());
+
+    /// <summary>真实播放源到了：换掉占位数据并真正起播。</summary>
+    public void BeginPlayback(PlaySourceDto source, double? startSeconds)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        _current = source;
+        _itemId = source.ItemId;
+        _startSeconds = startSeconds;
+        _eof = false;
+        _started = false;
+
+        ApplySourceToUi(source);
+        DurationText.Text = Format(source.DurationSeconds);
+        Seek.Maximum = Math.Max(1, source.DurationSeconds);
+        UpdatePlaylistSelection();
+
+        LoadingStatus.Text = "正在打开…";
+        LoadingPanel.Visibility = Visibility.Visible;
+        StartMpv();
+    }
+
+    /// <summary>窗口还开着吗：后台补选集时先看一眼，别往已关的窗口里塞控件。</summary>
+    public bool IsAlive => !_closed;
+
+    /// <summary>选集晚一点才拼好时补进来（续播入口不再为了列集而卡住开窗）。</summary>
+    public void SetPlaylist(List<PlayEpisode> playlist, string? seriesTitle)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        _playlist.Clear();
+        _playlist.AddRange(playlist);
+        _seriesTitle = seriesTitle;
+
+        RenderPlaylist();
+        UpdatePlaylistSelection();
+        ApplySourceToUi(_current);
     }
 
     private void ApplySourceToUi(PlaySourceDto source)
@@ -1840,6 +1965,8 @@ public partial class PlayWindow : Window
             ScrollPlaylistToCurrent();
         }
 
+        Trace.Write($"episodes panel={EpisodePanel.Visibility} n={_playlist.Count} " +
+                    $"rows={EpisodeList.Items.Count}");
         ShowChrome();
     }
 
@@ -1923,6 +2050,7 @@ public partial class PlayWindow : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _closed = true;
         _ticker.Stop();
         _hideTimer.Stop();
         _dragTimer.Stop();
@@ -2295,6 +2423,11 @@ public partial class PlayWindow : Window
 
     /// <summary>截图巡检用：打开右侧选集面板。</summary>
     public void ShowEpisodesForShot() => OnEpisodesClick(this, new RoutedEventArgs());
+
+    /// <summary>截图巡检用：选集面板的可见性和尺寸。</summary>
+    public string DescribeEpisodesPanel() =>
+        $"{EpisodePanel.Visibility} {EpisodePanel.ActualWidth:0}x{EpisodePanel.ActualHeight:0} " +
+        $"rows={EpisodeList.Items.Count}";
 
     /// <summary>截图巡检用：像点选集面板那样切到第 index 集（0 起）。</summary>
     public void PickEpisodeForShot(int index)

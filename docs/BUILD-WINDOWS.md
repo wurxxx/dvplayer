@@ -151,7 +151,9 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--play-end` | 配合 `--play-shot`：跳到片尾前 4 秒，20 秒后截 `play-next.png`，验证播完自动接下一集 |
 | `--play-input` | 配合 `--play-shot`：用真实鼠标事件验证点画面暂停 / 拖顶栏移动 / 拖右边缘改大小，结果写进 `player.log`，最后截 `desktop-input.png` |
 | `--play-pick N` | 配合 `--play-shot` / `--play-series`：打开后像点右侧选集面板那样切到第 N 集（0 起），日志里 `mpv start ... start=0 resume=N` 说明切集是从头开始，`pick state ...` 给出切完的位置（应该是几秒，不是片尾） |
-| `--play-record N` | 配合 `--play-shot`：拿观看记录第 N 条（默认第一条）走「继续观看」的真实路径，日志里 `record play ... episodes=N` 说明选集拼出来了，最后截 `desktop-record.png` / `play-record.png`；再加 `--play-end` 会跳到片尾，验证续播的剧集也能自动接下一集 |
+| `--play-record N` | 配合 `--play-shot`：拿观看记录第 N 条（默认第一条）走「继续观看」的真实路径。窗口先出来再解析播放源，日志里 `play open shown ... ms=` 应在一百多毫秒、`play open resolved` 之后紧接着 `mpv start`；选集是后台补的，`playlist attached ... n=N` 说明侧栏补进来了（`--play-wait <秒>` 可以多等一会儿再截图）。最后截 `desktop-record.png` / `play-record.png` / `play-record-episodes.png`；再加 `--play-end` 会跳到片尾，验证续播的剧集也能自动接下一集 |
+| `--play-spam` | 配合 `--play-record`：同时触发两次续播，验证防重闸门只开一个窗口（日志 `play spam opened=1`，且只有一次 `playlist page=1`） |
+| `--playlist <容器 id>` | 只量选集加载耗时、不起播放器：日志里 `playlist page=1 ... ms=` 是服务端 `/item/list` 的真实耗时（不占带宽时约 2–3 秒，边播边取会被拉流挤到十几秒，所以播放器把选集放在后台补） |
 | `--play-min` | 配合 `--play-shot`：播放窗最小化 → 还原 → 最大化 → 还原 → 主窗口最小化 → 还原，每步从桌面截一张（`desktop-min.png` / `desktop-restore.png` / `desktop-max.png` / `desktop-main-min.png` / `desktop-main-restore.png`），验证浮层不会飘在桌面上 |
 | `--play first` | 配合 `--play-series`：直接播这个剧的第一集，不用先查集 id |
 | `--play-series <剧 id>` | 给播放页的「选集」拼列表（剧 → 第一个季 → 集），片名也用它拼 |

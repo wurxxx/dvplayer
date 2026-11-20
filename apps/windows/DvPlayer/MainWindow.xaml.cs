@@ -135,6 +135,17 @@ public partial class MainWindow : FluentWindow
             RefreshSourceStatus();
         }
 
+        // --playlist <容器 id>：只量选集加载耗时（不起播放器、不占带宽），
+        // 用来对比「边播边拼选集」时服务端响应慢多少。
+        if (ArgumentAfter("--playlist") is { Length: > 0 } playlistOnly &&
+            AppServices.Instance.Core is { } playlistCore)
+        {
+            var loaded = await Playlists.LoadAsync(playlistCore, playlistOnly);
+            Trace.Write($"--playlist items={loaded.Items.Count} title={loaded.Title}");
+            Close();
+            return;
+        }
+
         // --play-record [序号]：从观看记录续播，验证选集列表真的拼出来了。
         if (ArgumentAfter("--play-record") is { Length: > 0 } recordArg &&
             ArgumentAfter("--play-shot") is { Length: > 0 } recordDir)
@@ -352,13 +363,33 @@ public partial class MainWindow : FluentWindow
         Trace.Write($"--play-record item={record.ItemId} parent={record.ParentId} " +
                     $"series={record.SeriesTitle} s={record.SeasonNumber} e={record.EpisodeNumber}");
 
-        var player = await Playlists.PlayRecordAsync(this, record);
+        PlayWindow? player;
+
+        if (Environment.GetCommandLineArgs().Contains("--play-spam"))
+        {
+            // 连点自检：同时点两次，第二次应该被闸门挡掉，只留一个窗口。
+            var first = Playlists.PlayRecordAsync(this, record);
+            var second = Playlists.PlayRecordAsync(this, record);
+            var opened = await Task.WhenAll(first, second);
+            Trace.Write("play spam opened=" +
+                        $"{(opened[0] is not null ? 1 : 0) + (opened[1] is not null ? 1 : 0)}");
+            player = opened[0] ?? opened[1];
+        }
+        else
+        {
+            player = await Playlists.PlayRecordAsync(this, record);
+        }
+
         if (player is null)
         {
             return;
         }
 
-        await Task.Delay(9000);
+        // 选集是后台补的：--play-wait 秒之后才截，等它到货再验侧栏。
+        var waitMs = int.TryParse(ArgumentAfter("--play-wait"), out var waitSeconds) && waitSeconds > 0
+            ? waitSeconds * 1000
+            : 9000;
+        await Task.Delay(waitMs);
 
         // --play-end：从续播放到片尾，验证真的接上了下一集。
         if (ArgumentAfter("--play-end") is not null)
@@ -375,6 +406,14 @@ public partial class MainWindow : FluentWindow
         Trace.Write($"record player bounds {player.DescribeBounds()}");
         UiCapture.SaveDesktop(Path.Combine(dir, "desktop-record.png"));
         UiCapture.SaveScreen(player, Path.Combine(dir, "play-record.png"));
+
+        // 选集是后台补的，这里渲染一张浮层截图验证侧栏真的补进来了。
+        player.ShowEpisodesForShot();
+        await Task.Delay(800);
+        Trace.Write($"record episodes panel {player.DescribeEpisodesPanel()}");
+        player.SetShotBackground(true);
+        await Task.Delay(300);
+        UiCapture.Save(player, Path.Combine(dir, "play-record-episodes.png"));
         player.Close();
     }
 
