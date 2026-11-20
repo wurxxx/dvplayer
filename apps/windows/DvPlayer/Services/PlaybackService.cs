@@ -31,7 +31,8 @@ public static class Playback
     /// <summary>把统一的播放源翻译成 mpv 的启动参数。</summary>
     public static MpvLaunch ToLaunch(PlaySourceDto source)
     {
-        var start = source.PositionSeconds >= ResumeThresholdSeconds
+        var resume = AppServices.Instance.Settings.ResumePlayback;
+        var start = resume && source.PositionSeconds >= ResumeThresholdSeconds
             ? source.PositionSeconds
             : 0;
 

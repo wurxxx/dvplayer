@@ -4,9 +4,15 @@ using DvPlayer.Services;
 
 namespace DvPlayer.Views;
 
+/// <summary>
+/// 记录页。顶栏右边是「通用 / 观看 / 收藏」分段，
+/// 主体是横向的观看卡片（缩略图右下角 ▶ 时长、底部进度条、标题 + S01 · E74）。
+/// </summary>
 public partial class RecordsPage : Page
 {
-    private const double BarMax = 320;
+    private const double BarMax = 248;
+
+    private List<PlayRecordDto> _records = new();
 
     public RecordsPage()
     {
@@ -33,7 +39,7 @@ public partial class RecordsPage : Page
         var services = AppServices.Instance;
         if (!services.IsConnected)
         {
-            StatusText.Text = "未连接媒体源，先去「设置」添加。";
+            StatusText.Text = "未连接媒体源，先去「媒体源」添加。";
             return;
         }
 
@@ -48,40 +54,100 @@ public partial class RecordsPage : Page
             return;
         }
 
-        var records = (result.Data ?? new List<PlayRecordDto>())
+        _records = (result.Data ?? new List<PlayRecordDto>())
             .OrderByDescending(r => r.LastPlayed ?? 0)
-            .Select(r =>
-            {
-                var progress = r.DurationSeconds <= 0
-                    ? 0
-                    : Math.Clamp((double)r.PositionSeconds / r.DurationSeconds, 0, 1);
-
-                var remaining = Math.Max(0, r.DurationSeconds - r.PositionSeconds);
-
-                var title = MediaText.RecordTitle(r);
-
-                var row = new RecordRow
-                {
-                    ItemId = r.ItemId,
-                    Title = title,
-                    Progress = $"{Format(r.PositionSeconds)} / {Format(r.DurationSeconds)}  ·  {progress:P0}",
-                    Remaining = r.DurationSeconds <= 0 ? "" : $"还剩 {Format(remaining)}",
-                    LastPlayed = r.LastPlayed is null
-                        ? ""
-                        : DateTimeOffset.FromUnixTimeSeconds(r.LastPlayed.Value).LocalDateTime.ToString("MM-dd HH:mm"),
-                    BarWidth = Math.Max(0, BarMax * progress),
-                    PosterPath = r.PosterPath,
-                    Initial = Palette.InitialOf(title),
-                };
-                row.UseGradient(r.ItemId + title);
-                return row;
-            })
             .ToList();
 
-        RecordList.ItemsSource = records;
-        StatusText.Text = records.Count == 0 ? "还没有播放记录。" : $"{records.Count} 条，继续上次看到的位置";
+        FillLists();
+    }
 
-        await Task.WhenAll(records.Select(r => r.ApplyPosterAsync(r.PosterPath)));
+    private void FillLists()
+    {
+        var all = _records
+            .Select(r => (Record: r, Card: ToCard(r)))
+            .ToList();
+
+        var cards = all.Select(x => x.Card).ToList();
+        var continuing = all
+            .Where(x => x.Record.DurationSeconds <= 0 ||
+                        x.Record.PositionSeconds < x.Record.DurationSeconds * 0.98)
+            .Select(x => x.Card)
+            .ToList();
+
+        ContinueList.ItemsSource = continuing;
+        WatchList.ItemsSource = cards;
+
+        ContinueEmpty.Visibility = continuing.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        StatusText.Text = _records.Count == 0
+            ? "还没有播放记录。"
+            : $"{_records.Count} 条记录 · 继续上次看到的位置";
+
+        _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    private static RecordCard ToCard(PlayRecordDto record)
+    {
+        var progress = record.DurationSeconds <= 0
+            ? 0
+            : Math.Clamp((double)record.PositionSeconds / record.DurationSeconds, 0, 1);
+
+        var title = MediaText.RecordTitle(record);
+
+        var card = new RecordCard
+        {
+            ItemId = record.ItemId,
+            Title = title,
+            Sub = EpisodeLabel(record, progress),
+            Time = Format(record.DurationSeconds),
+            BarWidth = Math.Max(0, BarMax * progress),
+            PosterPath = record.PosterPath,
+            Initial = Palette.InitialOf(title),
+        };
+        card.UseGradient(record.ItemId + title);
+        return card;
+    }
+
+    /// <summary>「S01 · E74」；没有季集号时退回剩余时间。</summary>
+    private static string EpisodeLabel(PlayRecordDto record, double progress)
+    {
+        var parts = new List<string>();
+        if (record.SeasonNumber is > 0)
+        {
+            parts.Add($"S{record.SeasonNumber:00}");
+        }
+
+        if (record.EpisodeNumber is > 0)
+        {
+            parts.Add($"E{record.EpisodeNumber}");
+        }
+
+        if (parts.Count > 0)
+        {
+            return string.Join(" · ", parts);
+        }
+
+        var remaining = Math.Max(0, record.DurationSeconds - record.PositionSeconds);
+        return progress >= 0.98 || record.DurationSeconds <= 0
+            ? "已看完"
+            : $"还剩 {Format(remaining)}";
+    }
+
+    private void OnTabChanged(object sender, RoutedEventArgs e)
+    {
+        if (GeneralPanel is null)
+        {
+            return;
+        }
+
+        GeneralPanel.Visibility = GeneralSegment.IsChecked == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        WatchPanel.Visibility = WatchSegment.IsChecked == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        FavoritePanel.Visibility = FavoriteSegment.IsChecked == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -102,13 +168,12 @@ public partial class RecordsPage : Page
             : $"{t.Minutes:00}:{t.Seconds:00}";
     }
 
-    private sealed class RecordRow : CardVisual
+    private sealed class RecordCard : CardVisual
     {
         public string ItemId { get; init; } = "";
         public string Title { get; init; } = "";
-        public string Progress { get; init; } = "";
-        public string Remaining { get; init; } = "";
-        public string LastPlayed { get; init; } = "";
+        public string Sub { get; init; } = "";
+        public string Time { get; init; } = "";
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
         public double BarWidth { get; init; }

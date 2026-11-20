@@ -90,25 +90,47 @@ public partial class HomePage : Page
             return;
         }
 
-        var library = librariesResult.Data[0];
-        var itemsResult = await Task.Run(() => core.Items(library.Id, 1, 18)).ConfigureAwait(true);
-        if (!itemsResult.Ok || itemsResult.Data is null)
+        // 每个库各取几条再合并，否则多源时「最近添加」只有第一个库的内容。
+        var recent = new List<MediaItemDto>();
+        foreach (var library in librariesResult.Data)
         {
-            RecentStatus.Text = "读取条目失败：" + (itemsResult.Error ?? "未知错误");
+            var id = library.Id;
+            var page = await Task.Run(() => core.Items(id, 1, 6)).ConfigureAwait(true);
+            if (page.Ok && page.Data is not null)
+            {
+                recent.AddRange(page.Data.Items);
+            }
+        }
+
+        var items = recent
+            .GroupBy(i => i.Id)
+            .Select(g => g.First())
+            .Take(18)
+            .ToList();
+
+        if (items.Count == 0)
+        {
+            RecentStatus.Text = "读取条目失败。";
             return;
         }
 
-        RecentStatus.Text = $"{library.Title} · 共 {itemsResult.Data.Total} 条";
+        RecentStatus.Text = librariesResult.Data.Count > 1
+            ? $"{librariesResult.Data.Count} 个媒体库 · {items.Count} 条最近添加"
+            : $"{librariesResult.Data[0].Title} · 共 {items.Count} 条";
 
-        var posters = itemsResult.Data.Items.Select(item =>
+        var showBadge = AppServices.Instance.Settings.ShowResolution;
+
+        var posters = items.Select(item =>
         {
+            var hasResolution = showBadge && !string.IsNullOrEmpty(item.Resolution);
             var card = new PosterCard
             {
                 ItemId = item.Id,
                 Kind = item.Kind,
                 Title = MediaText.Clean(item.Title),
                 Sub = MediaText.Describe(item),
-                Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
+                Badge = hasResolution ? item.Resolution! : "",
+                BadgeVisibility = hasResolution ? Visibility.Visible : Visibility.Collapsed,
                 PosterPath = item.PosterPath,
                 Initial = Palette.InitialOf(item.Title),
             };
@@ -138,6 +160,9 @@ public partial class HomePage : Page
         await PlayWindow.OpenAsync(Window.GetWindow(this), id);
     }
 
+    private void OnAllRecordsClick(object sender, System.Windows.Input.MouseButtonEventArgs e) =>
+        (Window.GetWindow(this) as MainWindow)?.NavigateTo("records");
+
     private static string Format(long seconds)
     {
         var time = TimeSpan.FromSeconds(Math.Max(0, seconds));
@@ -164,6 +189,7 @@ public partial class HomePage : Page
         public string Title { get; init; } = "";
         public string Sub { get; init; } = "";
         public string Badge { get; init; } = "";
+        public Visibility BadgeVisibility { get; init; } = Visibility.Collapsed;
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
     }

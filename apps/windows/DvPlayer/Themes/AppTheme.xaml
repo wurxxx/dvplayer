@@ -12,6 +12,7 @@
   <Color x:Key="FaintColor">#64646F</Color>
   <Color x:Key="AccentColor">#FFB020</Color>
   <Color x:Key="DangerColor">#FF6B6B</Color>
+  <Color x:Key="SuccessColor">#4ADE80</Color>
 
   <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}" />
   <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource SidebarColor}" />
@@ -23,6 +24,7 @@
   <SolidColorBrush x:Key="FaintBrush" Color="{StaticResource FaintColor}" />
   <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
   <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
+  <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
   <SolidColorBrush x:Key="NavSelectedBrush" Color="#1FFFFFFF" />
   <SolidColorBrush x:Key="NavHoverBrush" Color="#0FFFFFFF" />
 
@@ -48,6 +50,19 @@
   <Style x:Key="Caption" TargetType="TextBlock">
     <Setter Property="FontSize" Value="12" />
     <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+  </Style>
+
+  <!-- 侧栏分组标题（不可点） -->
+  <Style x:Key="NavGroupLabel" TargetType="ListBoxItem">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListBoxItem">
+          <ContentPresenter Margin="22,15,0,5" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 
   <!-- 侧栏导航项 -->
@@ -264,6 +279,160 @@
         </ControlTemplate>
       </Setter.Value>
     </Setter>
+  </Style>
+
+<!-- 顶栏里的图标按钮：加号 / 刷新 / 更多 -->
+  <Style x:Key="ToolButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="9">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource NavHoverBrush}" />
+              <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 分段选择（媒体库 / 记录 / 媒体库 / 网盘 这类） -->
+  <Style x:Key="SegmentGroup" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="3" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </Style>
+
+  <Style x:Key="SegmentItem" TargetType="RadioButton">
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Padding" Value="15,6" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RadioButton">
+          <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource NavHoverBrush}" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#26FFFFFF" />
+              <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+              <Setter Property="FontWeight" Value="SemiBold" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 设置页的分组卡片 -->
+  <Style x:Key="PanelCard" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="18,16" />
+    <Setter Property="Margin" Value="0,0,0,12" />
+  </Style>
+
+  <!-- 开关 -->
+  <Style x:Key="Switch" TargetType="ToggleButton">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToggleButton">
+          <Grid>
+            <Border x:Name="Track" CornerRadius="13" Background="#2A2A33" />
+            <Ellipse x:Name="Knob" Width="20" Height="20" Fill="#8A8A96"
+                     HorizontalAlignment="Left" Margin="3,0,0,0" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Track" Property="Background" Value="{StaticResource AccentBrush}" />
+              <Setter TargetName="Knob" Property="Fill" Value="#1A1200" />
+              <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
+              <Setter TargetName="Knob" Property="Margin" Value="0,0,3,0" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 带图标的搜索框：Grid 里放图标 + TextBox + 占位文字 -->
+  <Style x:Key="SearchBoxBorder" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Width" Value="300" />
+  </Style>
+
+  <Style x:Key="SearchBoxIcon" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{StaticResource FaintBrush}" />
+    <Setter Property="Margin" Value="12,0,0,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
+
+  <Style x:Key="SearchBoxInput" TargetType="TextBox">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="34,8,10,8" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="SearchBoxPlaceholder" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource FaintBrush}" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Margin" Value="34,0,0,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
+
+  <!-- 空态（搜索 / 收藏 / IPTV 那种居中提示） -->
+  <Style x:Key="EmptyIcon" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+    <Setter Property="FontSize" Value="44" />
+    <Setter Property="Foreground" Value="{StaticResource LineBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
+
+  <Style x:Key="EmptyText" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="0,14,0,0" />
+    <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
 
 </ResourceDictionary>

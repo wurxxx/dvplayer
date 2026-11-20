@@ -10,15 +10,16 @@
 
   <Grid>
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="236" />
+      <ColumnDefinition Width="216" />
       <ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
 
-    <!-- 侧栏 -->
-    <Border Grid.Column="0" Background="{StaticResource SidebarBrush}">
+    <!-- 侧栏：品牌 / 导航 / 连接状态，入口平铺 -->
+    <Border Grid.Column="0" Background="{StaticResource SidebarBrush}"
+            BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
       <DockPanel>
 
-        <StackPanel DockPanel.Dock="Top" Margin="20,22,20,18">
+        <StackPanel DockPanel.Dock="Top" Margin="18,20,18,16">
           <StackPanel Orientation="Horizontal">
             <Border Width="32" Height="32" CornerRadius="9" Background="{StaticResource AccentBrush}">
               <TextBlock Text="&#xE786;" FontFamily="{StaticResource IconFont}" FontSize="15"
@@ -33,21 +34,23 @@
         </StackPanel>
 
         <!-- 底部：连接状态 -->
-        <Border DockPanel.Dock="Bottom" Margin="14,0,14,14" Padding="12,10"
-                CornerRadius="10" Background="{StaticResource SurfaceBrush}">
-          <StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Margin="20,0,18,18">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{StaticResource FaintBrush}"
+                     VerticalAlignment="Center" />
             <TextBlock x:Name="SourceStatus" Text="未连接"
-                       FontSize="12" Foreground="{StaticResource MutedBrush}"
+                       FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"
                        TextTrimming="CharacterEllipsis" />
-            <TextBlock x:Name="SourceHint" Text="在设置里添加媒体源" FontSize="11"
-                       Foreground="{StaticResource FaintBrush}" Margin="0,3,0,0" />
           </StackPanel>
-        </Border>
+          <TextBlock x:Name="SourceHint" Text="在「媒体源」里添加" FontSize="10.5"
+                     Foreground="{StaticResource FaintBrush}" Margin="14,3,0,0"
+                     TextTrimming="CharacterEllipsis" />
+        </StackPanel>
 
         <ListBox x:Name="Nav"
                  Background="Transparent"
                  BorderThickness="0"
-                 Margin="0,4,0,0"
+                 Margin="0,2,0,0"
                  ItemContainerStyle="{StaticResource NavItem}"
                  SelectionChanged="OnNavSelectionChanged">
 
@@ -67,12 +70,32 @@
             </StackPanel>
           </ListBoxItem>
 
+          <ListBoxItem Tag="sources">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="媒体源" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </ListBoxItem>
+
           <ListBoxItem Tag="records">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="15"
                          VerticalAlignment="Center" />
-              <TextBlock Text="播放记录" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+              <TextBlock Text="记录" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
             </StackPanel>
+          </ListBoxItem>
+
+          <ListBoxItem Tag="search">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="搜索" FontSize="13.5" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </ListBoxItem>
+
+          <ListBoxItem Style="{StaticResource NavGroupLabel}">
+            <TextBlock Text="其他" FontSize="10.5" Foreground="{StaticResource FaintBrush}" />
           </ListBoxItem>
 
           <ListBoxItem Tag="settings">

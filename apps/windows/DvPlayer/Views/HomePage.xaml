@@ -4,20 +4,26 @@
       Background="{StaticResource BgBrush}">
 
   <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0">
-    <StackPanel Margin="36,30,36,40">
+    <StackPanel Margin="32,24,32,40">
+
+      <!-- 统一工具条 -->
+      <Grid Height="52">
+        <TextBlock Text="首页" Style="{StaticResource PageTitle}" VerticalAlignment="Center" />
+        <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
+                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+      </Grid>
 
       <!-- 继续观看 -->
-      <Grid>
-        <StackPanel>
-          <TextBlock Text="继续观看" Style="{StaticResource PageTitle}" />
-          <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" Margin="0,6,0,0" />
-        </StackPanel>
-        <TextBlock Text="全部记录" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                   FontSize="12.5" Foreground="{StaticResource FaintBrush}" Margin="0,0,2,2" />
+      <Grid Margin="0,6,0,0">
+        <TextBlock Text="继续观看" Style="{StaticResource SectionTitle}" FontSize="15"
+                   VerticalAlignment="Center" />
+        <TextBlock Text="全部记录" HorizontalAlignment="Right" VerticalAlignment="Center"
+                   FontSize="12" Foreground="{StaticResource FaintBrush}" Cursor="Hand"
+                   MouseLeftButtonUp="OnAllRecordsClick" />
       </Grid>
 
       <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
-                    Margin="0,18,0,0">
+                    Margin="0,14,0,0">
         <ItemsControl x:Name="ContinueList">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -61,11 +67,12 @@
       </ScrollViewer>
 
       <!-- 最近添加 -->
-      <TextBlock Text="最近添加" Style="{StaticResource PageTitle}" FontSize="20" Margin="0,26,0,0" />
+      <TextBlock Text="最近添加" Style="{StaticResource SectionTitle}" FontSize="15"
+                 Margin="0,26,0,0" />
       <TextBlock x:Name="RecentStatus" Style="{StaticResource Caption}" Margin="0,6,0,0" />
 
       <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
-                    Margin="0,16,0,0">
+                    Margin="0,14,0,0">
         <ItemsControl x:Name="RecentList">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -82,7 +89,8 @@
                                Foreground="#2AFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"
                                Visibility="{Binding PlaceholderVisibility}" />
                     <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8"
-                            Background="#59000000" CornerRadius="5" Padding="6,2">
+                            Background="#59000000" CornerRadius="5" Padding="6,2"
+                            Visibility="{Binding BadgeVisibility}">
                       <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#CCFFFFFF" />
                     </Border>
                   </Grid>

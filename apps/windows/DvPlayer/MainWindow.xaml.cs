@@ -17,8 +17,18 @@ public partial class MainWindow : FluentWindow
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        SelectNav("home");
-        await TryAutoConnectAsync();
+        var shotDir = ScreenshotDir();
+        SelectNav(StartTag());
+
+        // 截图巡检时不受「启动时自动连接」开关影响，否则回归会拍到空页面。
+        if (AppServices.Instance.Settings.AutoConnect || shotDir is not null)
+        {
+            await TryAutoConnectAsync();
+        }
+        else
+        {
+            RefreshSourceStatus();
+        }
 
         // 脚本化验证用：--play <itemId>，可再加 --play-seconds N 自动退出。
         var playId = ArgumentAfter("--play");
@@ -36,11 +46,19 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        var shotDir = ScreenshotDir();
         if (shotDir is not null)
         {
             await CaptureTourAsync(shotDir);
         }
+    }
+
+    /// <summary>启动页来自设置；只接受导航里真实存在的项。</summary>
+    private static string StartTag()
+    {
+        var page = AppServices.Instance.Settings.StartPage;
+        return page is "libraries" or "sources" or "records" or "search" or "settings"
+            ? page
+            : "home";
     }
 
     private static string? ScreenshotDir() => ArgumentAfter("--screenshot");
@@ -57,12 +75,12 @@ public partial class MainWindow : FluentWindow
     {
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, "--screenshot");
+        var known = new[] { "home", "libraries", "sources", "records", "search", "settings" };
         if (index < 0 || index + 2 >= args.Length)
         {
-            return new[] { "home", "libraries", "records", "settings", "home" };
+            return known;
         }
 
-        var known = new[] { "home", "libraries", "records", "settings" };
         var pages = args.Skip(index + 2).Where(known.Contains).ToArray();
         return pages.Length == 0 ? new[] { "home" } : pages;
     }
@@ -98,6 +116,9 @@ public partial class MainWindow : FluentWindow
         Application.Current.Shutdown();
     }
 
+    /// <summary>从页面里跳到侧栏的某一项，并同步高亮。</summary>
+    public void NavigateTo(string tag) => SelectNav(tag);
+
     private void SelectNav(string tag)
     {
         foreach (var item in Nav.Items.OfType<ListBoxItem>())
@@ -128,7 +149,10 @@ public partial class MainWindow : FluentWindow
     {
         var services = AppServices.Instance;
         SourceStatus.Text = services.SourceSummary;
-        SourceHint.Text = services.IsConnected ? "媒体库已连接" : "在设置里添加媒体源";
+        SourceHint.Text = services.IsConnected ? "媒体库已连接" : "在「媒体源」里添加";
+
+        StatusDot.Fill = (System.Windows.Media.Brush)FindResource(
+            services.IsConnected ? "AccentBrush" : services.Connections.Count > 0 ? "DangerBrush" : "FaintBrush");
     }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -150,7 +174,9 @@ public partial class MainWindow : FluentWindow
         Page page = tag switch
         {
             "libraries" => new LibrariesPage(),
+            "sources" => new SourcesPage(),
             "records" => new RecordsPage(),
+            "search" => new SearchPage(),
             "settings" => new SettingsPage(),
             _ => new HomePage(),
         };

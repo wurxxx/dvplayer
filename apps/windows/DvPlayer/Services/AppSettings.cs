@@ -17,6 +17,21 @@ public sealed class AppSettings
 
     public string? LastSourceId { get; set; }
 
+    /// <summary>启动时自动连接所有源。</summary>
+    public bool AutoConnect { get; set; } = true;
+
+    /// <summary>启动后先打开哪一页：home / libraries / records。</summary>
+    public string StartPage { get; set; } = "home";
+
+    /// <summary>列表每页条数（媒体库与搜索共用）。</summary>
+    public int PageSize { get; set; } = 60;
+
+    /// <summary>列表卡片上是否显示分辨率角标。</summary>
+    public bool ShowResolution { get; set; } = true;
+
+    /// <summary>打开播放时是否从上次停下的位置继续。</summary>
+    public bool ResumePlayback { get; set; } = true;
+
     public static string FilePath
     {
         get

@@ -6,7 +6,7 @@ namespace DvPlayer.Views;
 
 public partial class LibrariesPage : Page
 {
-    private const int PageSize = 60;
+    private static int PageSize => Math.Max(10, AppServices.Instance.Settings.PageSize);
 
     private string? _libraryId;
     private string _libraryTitle = "";
@@ -17,6 +17,10 @@ public partial class LibrariesPage : Page
 
     /// <summary>目录路径，用于面包屑和「返回上层」。</summary>
     private readonly List<(string Id, string Title)> _stack = new();
+
+    /// <summary>已经取到的全部卡片；顶栏搜索只过滤这一份，不再打服务器。</summary>
+    private List<ItemCard> _allCards = new();
+    private int _total;
 
     private int _page;
 
@@ -159,6 +163,8 @@ public partial class LibrariesPage : Page
         _page = 1;
         StatusText.Text = "正在加载…";
         ItemGrid.ItemsSource = null;
+        _allCards = new List<ItemCard>();
+        _total = 0;
         MoreButton.Visibility = Visibility.Collapsed;
         UpdateBreadcrumb();
 
@@ -174,11 +180,9 @@ public partial class LibrariesPage : Page
         }
 
         var cards = result.Data.Items.Select(ToCard).ToList();
-        ItemGrid.ItemsSource = cards;
-        StatusText.Text = $"{title} · 共 {result.Data.Total} 条";
-        MoreButton.Visibility = result.Data.Items.Count < result.Data.Total
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        _allCards = cards;
+        _total = result.Data.Total;
+        ApplyFilter();
 
         await FillMissingPostersAsync(cards);
     }
@@ -247,17 +251,48 @@ public partial class LibrariesPage : Page
             return;
         }
 
-        var existing = (ItemGrid.ItemsSource as List<ItemCard>) ?? new List<ItemCard>();
         var added = result.Data.Items.Select(ToCard).ToList();
-        existing.AddRange(added);
-        ItemGrid.ItemsSource = null;
-        ItemGrid.ItemsSource = existing;
-
-        MoreButton.Visibility = existing.Count < result.Data.Total
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        _allCards.AddRange(added);
+        _total = result.Data.Total;
+        ApplyFilter();
 
         await FillMissingPostersAsync(added);
+    }
+
+    /// <summary>顶栏搜索：只在已取到的条目里过滤，不打断分页。</summary>
+    private void ApplyFilter()
+    {
+        var query = FilterBox?.Text?.Trim() ?? "";
+        var cards = string.IsNullOrEmpty(query)
+            ? _allCards
+            : _allCards
+                .Where(c => c.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            c.Sub.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+        ItemGrid.ItemsSource = null;
+        ItemGrid.ItemsSource = cards;
+
+        StatusText.Text = string.IsNullOrEmpty(query)
+            ? $"{_libraryTitle} · 共 {_total} 条"
+            : $"{_libraryTitle} · 筛出 {cards.Count} 条（已加载 {_allCards.Count} 条）";
+
+        // 过滤状态下不再提供「加载更多」：那一页还没拉下来，命中率没法保证。
+        MoreButton.Visibility = string.IsNullOrEmpty(query) && _allCards.Count < _total
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void OnFilterChanged(object sender, TextChangedEventArgs e)
+    {
+        if (FilterPlaceholder is not null)
+        {
+            FilterPlaceholder.Visibility = string.IsNullOrEmpty(FilterBox.Text)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        ApplyFilter();
     }
 
     private void UpdateBreadcrumb()
@@ -274,16 +309,17 @@ public partial class LibrariesPage : Page
 
     private static ItemCard ToCard(MediaItemDto item)
     {
+        var showBadge = AppServices.Instance.Settings.ShowResolution &&
+                        !string.IsNullOrEmpty(item.Resolution);
+
         var card = new ItemCard
         {
             Id = item.Id,
             Kind = item.Kind,
             Title = MediaText.Clean(item.Title),
             Sub = MediaText.Describe(item),
-            Badge = string.IsNullOrEmpty(item.Resolution) ? "" : item.Resolution!,
-            BadgeVisibility = string.IsNullOrEmpty(item.Resolution)
-                ? Visibility.Collapsed
-                : Visibility.Visible,
+            Badge = showBadge ? item.Resolution! : "",
+            BadgeVisibility = showBadge ? Visibility.Visible : Visibility.Collapsed,
             PosterPath = item.PosterPath,
             Initial = Palette.InitialOf(item.Title),
         };
