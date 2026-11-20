@@ -64,6 +64,10 @@
   （记得把坐标系翻回来）。长页面用 `DVPLAYER_SCROLL=end` 先滚到底再截。
   路径给 `.jpg` 就按 1x 出 JPEG（约 160KB）——2x PNG 常有 2–5MB，
   手机上加载容易超时看不到。
+- **`DVPLAYER_CLICKTEST` 只能测 AppKit 控件**：合成 `NSEvent` 能让 `NSSearchField`
+  拿到焦点，但点不动 SwiftUI 的 Button / `onTapGesture`（收藏按钮也点不动），
+  所以「卡片可点」这类自检改成 `DVPLAYER_PICK_TRACK="subtitle:1"`：等详情读完，
+  按点击的同一条逻辑切轨，再截图核对勾选和顶部文案。
 - **集号会漏**：飞牛这一季就丢了第 6 集的 `episodeNumber`。直接按「顺序补号」会和
   第 1 集撞成两个 E01，现在用「没被占用的最小号码」补。分页补集时要把已经用掉的
   集号传进 `makeRows(_:used:)`，否则第二页会再从 1 补出一个 E01。

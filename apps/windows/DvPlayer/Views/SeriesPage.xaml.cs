@@ -32,6 +32,9 @@ public partial class SeriesPage : Page
     private readonly HashSet<string> _episodeIds = new();
     private MediaDetailDto? _detail;
 
+    /// <summary>媒体信息里可点的轨道卡（音频 / 字幕），自检时按真实点击路由触发。</summary>
+    private readonly List<(bool IsSubtitle, int Index, Border Card)> _trackCards = new();
+
     /// <summary>当前集列表的原始条目（缓存、补页都靠它）。</summary>
     private List<MediaItemDto> _episodeItems = new();
 
@@ -771,11 +774,7 @@ public partial class SeriesPage : Page
                 Value: i))
             .ToList();
 
-        ShowChoiceMenu(AudioButton, choices, value =>
-        {
-            TrackPrefs.SetAudio(_playTargetId ?? _itemId, value);
-            UpdateTrackButtons(_tracks);
-        });
+        ShowChoiceMenu(AudioButton, choices, value => SelectAudioTrack(value));
     }
 
     private void OnSubtitleClick(object sender, RoutedEventArgs e)
@@ -808,12 +807,7 @@ public partial class SeriesPage : Page
             Selected: i == selected,
             Value: i)));
 
-        ShowChoiceMenu(SubtitleButton, choices, value =>
-        {
-            TrackPrefs.SetSubtitle(key, value);
-            UpdateTrackButtons(_tracks);
-            RenderMediaInfo(_tracks);
-        });
+        ShowChoiceMenu(SubtitleButton, choices, value => SelectSubtitleTrack(value));
     }
 
     private void ShowChoiceMenu(
@@ -1139,6 +1133,7 @@ public partial class SeriesPage : Page
     private void RenderMediaInfo(MediaInfoDto? info)
     {
         MediaInfoPanel.Children.Clear();
+        _trackCards.Clear();
 
         if (info?.Video is { } video)
         {
@@ -1163,9 +1158,12 @@ public partial class SeriesPage : Page
             MediaInfoPanel.Children.Add(BuildInfoCard("\uE714", "视频", rows));
         }
 
-        // 每条音轨一张卡，当前音轨（默认轨）打勾。
-        foreach (var audio in info?.Audios ?? new List<AudioInfoDto>())
+        // 每条音轨一张卡：当前轨打勾，点卡片直接切过去（同时联动顶部的音轨按钮）。
+        var audios = info?.Audios ?? new List<AudioInfoDto>();
+
+        for (var i = 0; i < audios.Count; i++)
         {
+            var audio = audios[i];
             var rows = new List<(string Key, string Value)>
             {
                 ("标题", audio.Title ?? ""),
@@ -1180,7 +1178,15 @@ public partial class SeriesPage : Page
                 ("外部", audio.IsExternal ? "是" : "否"),
             };
 
-            MediaInfoPanel.Children.Add(BuildInfoCard("\uE8D6", "音频", rows, audio.IsDefault));
+            var index = i;
+            var card = BuildInfoCard(
+                "\uE8D6",
+                "音频",
+                rows,
+                index == AudioIndex(audios),
+                onPick: () => SelectAudioTrack(index));
+            MediaInfoPanel.Children.Add(card);
+            _trackCards.Add((false, index, card));
         }
 
         // 每条字幕一张卡，当前选中的打勾（和详情页字幕按钮同一套解析规则）。
@@ -1203,12 +1209,16 @@ public partial class SeriesPage : Page
                     ("默认", subtitle.IsDefault ? "是" : "否"),
                 };
 
-                MediaInfoPanel.Children.Add(BuildInfoCard(
+                var index = i;
+                var card = BuildInfoCard(
                     string.Empty,
                     TrackPrefs.SubtitleName(subtitle),
                     rows,
-                    i == current,
-                    SubtitleGlyph()));
+                    index == current,
+                    SubtitleGlyph(),
+                    () => SelectSubtitleTrack(index));
+                MediaInfoPanel.Children.Add(card);
+                _trackCards.Add((true, index, card));
             }
         }
 
@@ -1219,6 +1229,82 @@ public partial class SeriesPage : Page
         MediaInfoSection.Visibility = MediaInfoPanel.Children.Count > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+    }
+
+    /// <summary>切音轨：卡片点击和顶部菜单都走这里，勾选与按钮文案一起更新。</summary>
+    private void SelectAudioTrack(int index)
+    {
+        if (_tracks is not { } info || index < 0 || index >= info.Audios.Count)
+        {
+            return;
+        }
+
+        TrackPrefs.SetAudio(_playTargetId ?? _itemId, index);
+        UpdateTrackButtons(info);
+        RenderMediaInfo(info);
+    }
+
+    /// <summary>切字幕：单选，点哪条就只勾哪条。</summary>
+    private void SelectSubtitleTrack(int index)
+    {
+        if (_tracks is not { } info || index < 0 || index >= info.Subtitles.Count)
+        {
+            return;
+        }
+
+        TrackPrefs.SetSubtitle(_playTargetId ?? _itemId, index);
+        UpdateTrackButtons(info);
+        RenderMediaInfo(info);
+    }
+
+    /// <summary>
+    /// 截图巡检用：对轨道卡发一次真实的 `MouseLeftButtonUp`（走点击绑定的那条路），
+    /// 验证卡片确实可点、单选、以及和顶部按钮联动。
+    /// </summary>
+    public bool PickTrackForShot(string kind, int index)
+    {
+        var isSubtitle = kind != "audio";
+        var entry = _trackCards.FirstOrDefault(t => t.IsSubtitle == isSubtitle && t.Index == index);
+        if (entry.Card is not { } card)
+        {
+            return false;
+        }
+
+        try
+        {
+            card.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount,
+                MouseButton.Left)
+            {
+                RoutedEvent = UIElement.MouseLeftButtonUpEvent,
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.Write($"pick track raise failed {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>截图巡检用：把媒体信息横向行滚一段，好让右边的卡片进画面。</summary>
+    public void ScrollMediaInfoForShot(double offset) => SmoothScroll.ScrollBy(MediaInfoScroller, offset);
+
+    /// <summary>当前音轨下标：手动选过听手动，否则服务器默认轨，再不行第一条。</summary>
+    private int AudioIndex(List<AudioInfoDto> audios)
+    {
+        if (audios.Count == 0)
+        {
+            return -1;
+        }
+
+        if (TrackPrefs.Audio(_playTargetId ?? _itemId) is { } chosen
+            && chosen >= 0 && chosen < audios.Count)
+        {
+            return chosen;
+        }
+
+        var standard = audios.FindIndex(a => a.IsDefault);
+        return standard >= 0 ? standard : 0;
     }
 
     /// <summary>字幕卡的小图标：和动作按钮一样画「方框 + 两条字幕条」。</summary>
@@ -1270,7 +1356,8 @@ public partial class SeriesPage : Page
         string title,
         IEnumerable<(string Key, string Value)> rows,
         bool active = false,
-        FrameworkElement? iconVisual = null)
+        FrameworkElement? iconVisual = null,
+        Action? onPick = null)
     {
         var body = new StackPanel();
 
@@ -1357,7 +1444,7 @@ public partial class SeriesPage : Page
             body.Children.Add(line);
         }
 
-        return new Border
+        var card = new Border
         {
             Background = (Brush)FindResource("SurfaceBrush"),
             CornerRadius = new CornerRadius(12),
@@ -1367,6 +1454,21 @@ public partial class SeriesPage : Page
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = body,
         };
+
+        if (onPick is not null)
+        {
+            // 整张卡都能点：改一下背景告诉用户这是可选中的。
+            card.Cursor = Cursors.Hand;
+            card.MouseLeftButtonUp += (_, e) =>
+            {
+                onPick();
+                e.Handled = true;
+            };
+            card.MouseEnter += (_, _) => card.Background = (Brush)FindResource("SurfaceHoverBrush");
+            card.MouseLeave += (_, _) => card.Background = (Brush)FindResource("SurfaceBrush");
+        }
+
+        return card;
     }
 
     private static string FormatBitRate(long? bits) => bits is > 0

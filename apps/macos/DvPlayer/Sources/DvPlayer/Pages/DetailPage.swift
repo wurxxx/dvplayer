@@ -126,6 +126,20 @@ struct DetailPage: View {
             .padding(.top, 20)
         }
         .task(id: itemId) { await load() }
+        // 自检：`DVPLAYER_PICK_TRACK="subtitle:1"`，等详情读完按卡片点击的同一条路切轨，
+        // 验证卡片打勾与顶部按钮联动（合成点击在手动滚动的 ScrollView 里不可靠）。
+        .task {
+            guard let spec = ProcessInfo.processInfo.environment["DVPLAYER_PICK_TRACK"] else { return }
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            let parts = spec.split(separator: ":")
+            guard parts.count == 2, let index = Int(parts[1]) else { return }
+            if parts[0] == "subtitle" {
+                TrackPrefs.setSubtitle(trackKey, index)
+            } else {
+                TrackPrefs.setAudio(trackKey, index)
+            }
+            trackRevision += 1
+        }
         .overlay {
             if loading && detail == nil {
                 ProgressView().controlSize(.large)
@@ -417,7 +431,11 @@ struct DetailPage: View {
                                    icon: "waveform",
                                    title: audio.title ?? "音频 \(index + 1)",
                                    rows: rows,
-                                   active: audio.isDefault ?? false))
+                                   active: effectiveAudioIndex(info) == index,
+                                   onPick: {
+                                       TrackPrefs.setAudio(trackKey, index)
+                                       trackRevision += 1
+                                   }))
         }
 
         for (index, subtitle) in info.subtitles.enumerated() {
@@ -434,7 +452,11 @@ struct DetailPage: View {
                                    icon: "captions.bubble",
                                    title: subtitleName(subtitle),
                                    rows: rows,
-                                   active: effectiveSubtitleIndex(info) == index))
+                                   active: effectiveSubtitleIndex(info) == index,
+                                   onPick: {
+                                       TrackPrefs.setSubtitle(trackKey, index)
+                                       trackRevision += 1
+                                   }))
         }
 
         return cards
@@ -933,12 +955,34 @@ private struct TrackCard: Identifiable {
     let title: String
     let rows: [(String, String)]
     let active: Bool
+    /// 音频 / 字幕卡可点：点了就切到这条轨；视频卡没有。
+    var onPick: (() -> Void)?
 }
 
 private struct MediaInfoCard: View {
     let card: TrackCard
 
+    @State private var hovering = false
+
+    private var clickable: Bool { card.onPick != nil }
+
     var body: some View {
+        Button {
+            card.onPick?()
+        } label: {
+            cardBody
+                .padding(16)
+                .frame(width: 326, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: Theme.radiusCard))
+        }
+        .buttonStyle(.plain)
+        .background(hovering && clickable ? Theme.surfaceHover : Theme.surface,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusCard))
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+
+    private var cardBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: card.icon)
@@ -980,9 +1024,6 @@ private struct MediaInfoCard: View {
                 }
             }
         }
-        .padding(16)
-        .frame(width: 326, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusCard))
     }
 }
 

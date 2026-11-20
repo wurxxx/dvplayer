@@ -65,7 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 自检：`DVPLAYER_CLICKTEST="x,y"`（左上角原点）在窗口上合成一次点击，
         // 看 firstResponder 有没有变成输入框——排查「搜索框点不进去」用。
-        if let spec = ProcessInfo.processInfo.environment["DVPLAYER_CLICKTEST"] {
+        // 配了 `DVPLAYER_SCROLL=end` 时改成「滚到底再点」（坐标按滚动后的位置给），
+        // 用来验证详情页底部的媒体信息卡能不能点。
+        if let spec = ProcessInfo.processInfo.environment["DVPLAYER_CLICKTEST"],
+           ProcessInfo.processInfo.environment["DVPLAYER_SCROLL"] != "end" {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 Self.runClickTest(spec)
@@ -91,6 +94,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if env["DVPLAYER_SCROLL"] == "end" {
                 Self.scrollToEnd()
                 try? await Task.sleep(nanoseconds: 900_000_000)
+
+                if let spec = env["DVPLAYER_CLICKTEST"] {
+                    Self.runClickTest(spec)
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                }
             }
 
             Self.capture(to: shot)

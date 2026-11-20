@@ -528,6 +528,31 @@ public partial class MainWindow : FluentWindow
                     await Task.Delay(1200);
                 }
 
+                // --pick-track subtitle:1[,audio:0]：像点媒体信息卡那样切轨，
+                // 验证卡片可点、单选、以及和顶部按钮的联动。
+                if (ArgumentAfter("--pick-track") is { Length: > 0 } pickTrack &&
+                    ContentFrame.Content is SeriesPage pickPage)
+                {
+                    foreach (var part in pickTrack.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var pair = part.Split(':');
+                        if (pair.Length == 2 && int.TryParse(pair[1], out var trackIndex))
+                        {
+                            pickPage.PickTrackForShot(pair[0].Trim().ToLowerInvariant(), trackIndex);
+                        }
+                    }
+                    await Task.Delay(500);
+                }
+
+                // --media-scroll <像素>：把媒体信息横向行滚一段，让右边的卡片进画面。
+                if (ArgumentAfter("--media-scroll") is { Length: > 0 } mediaScroll &&
+                    double.TryParse(mediaScroll, out var mediaOffset) &&
+                    ContentFrame.Content is SeriesPage mediaPage)
+                {
+                    mediaPage.ScrollMediaInfoForShot(mediaOffset);
+                    await Task.Delay(700);
+                }
+
                 var name = seriesIds.Length == 1 ? "series.png" : $"series-{i + 1}.png";
                 UiCapture.Save(this, Path.Combine(dir, name));
 
