@@ -364,7 +364,8 @@ GET /v/api/v1/play/list
 | `GET /v/api/v1/movie/<guid>` | 影片详情 |
 | `POST /v/api/v1/person/list/<guid>` | 影片演员；本机库实测返回 `{"list":[],"total":0}`，刮削没存人 |
 | `GET /v/api/v1/person/<guid>` | 人物详情（姓名 / 简介 / 头像 `profile`），**不含作品列表** |
-| `POST /v/api/v1/item/list` body `{"person_guid":"<guid>"}` | 这个人的全部作品（GET + query 会 404） |
+| `POST /v/api/v1/person/item/list` body `{"person_guid":"<guid>","page":1,"page_size":200,"job":"Actor","sort_column":"update_time","sort_type":"desc"}` | 这个人的作品。`job` 可换 `Director` / `Writer`，不带就是全部职业；按 `update_time` 倒序 |
+| `POST /v/api/v1/item/list` body `{"person_guid":"<guid>"}` | **不能用**：`person_guid` 会被忽略，返回整库的前 N 条（看起来像「每个人都有 500 个作品」） |
 | `GET /v/api/v1/stream/list/<media_guid>` | 文件媒体信息（界面「文件媒体信息」弹窗的数据源）：`video_stream` / `audio_streams`，字段是 ffprobe 那套，码率叫 `bps`、帧率是 `"30 fps"` 字符串 |
 
 搜索用 `GET /v/api/v1/search/list?q=`（见 §4.2.1），`item/list` 的关键词参数无效。

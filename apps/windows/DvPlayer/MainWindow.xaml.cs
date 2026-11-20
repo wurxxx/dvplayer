@@ -216,9 +216,10 @@ public partial class MainWindow : FluentWindow
                 UiCapture.Save(this, Path.Combine(dir, name));
 
                 // --person-first：点第一个演员进作品页。
+                var personIndex = int.TryParse(ArgumentAfter("--person-index"), out var pi) ? pi : 0;
                 if (Environment.GetCommandLineArgs().Contains("--person-first") &&
                     ContentFrame.Content is SeriesPage castPage &&
-                    castPage.FirstPersonForShot() is { } person)
+                    castPage.FirstPersonForShot(personIndex) is { } person)
                 {
                     ContentFrame.Navigate(new PersonPage(person.Id, person.Name));
                     await Task.Delay(9000);

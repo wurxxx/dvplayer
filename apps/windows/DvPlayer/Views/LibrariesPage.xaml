@@ -231,9 +231,7 @@
         </Grid>
 
         <Grid>
-          <ScrollViewer HorizontalScrollBarVisibility="Hidden"
-                        VerticalScrollBarVisibility="Disabled"
-                        PreviewMouseWheel="OnRowWheel">
+          <controls:HorizontalRow>
             <ItemsControl ItemsSource="{Binding Items}"
                           ItemTemplate="{StaticResource PosterTemplate}">
               <ItemsControl.ItemsPanel>
@@ -242,7 +240,7 @@
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
             </ItemsControl>
-          </ScrollViewer>
+          </controls:HorizontalRow>
 
           <Button Style="{StaticResource ScrollArrow}" Content="&#xE76B;"
                   HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,94,0,0"
@@ -357,8 +355,7 @@
                          HorizontalAlignment="Right" VerticalAlignment="Bottom" />
             </Grid>
             <Grid>
-              <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
-                            PreviewMouseWheel="OnRowWheel">
+              <controls:HorizontalRow>
                 <ItemsControl x:Name="ContinueRow" ItemTemplate="{StaticResource ContinueTemplate}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -366,7 +363,7 @@
                     </ItemsPanelTemplate>
                   </ItemsControl.ItemsPanel>
                 </ItemsControl>
-              </ScrollViewer>
+              </controls:HorizontalRow>
               <Button Style="{StaticResource ScrollArrow}" Content="&#xE76B;"
                       HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,53,0,0"
                       Click="OnScrollLeft" />
@@ -555,8 +552,7 @@
                      VerticalAlignment="Center" Margin="12,0,0,0" />
         </StackPanel>
 
-        <ScrollViewer x:Name="LibraryScroll" HorizontalScrollBarVisibility="Hidden"
-                      VerticalScrollBarVisibility="Disabled">
+        <controls:HorizontalRow x:Name="LibraryScroll">
           <ItemsControl x:Name="LibraryBar">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
@@ -584,7 +580,7 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-        </ScrollViewer>
+        </controls:HorizontalRow>
 
         <TextBlock x:Name="BrowseStatus" Style="{StaticResource Caption}"
                    Margin="0,6,0,4" TextWrapping="Wrap" />

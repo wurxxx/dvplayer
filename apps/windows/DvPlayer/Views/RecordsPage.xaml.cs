@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -419,26 +418,8 @@ public partial class RecordsPage : Page
     {
         if (FindRow(sender) is { } row)
         {
-            Animate(row, row.HorizontalOffset + delta);
+            SmoothScroll.ScrollBy(row, delta);
         }
-    }
-
-    /// <summary>用缓动动画滚过去，比一次跳一张卡柔和。</summary>
-    private static void Animate(ScrollViewer row, double target)
-    {
-        var clamped = Math.Clamp(target, 0, row.ScrollableWidth);
-
-        // 先停掉上一次动画，否则新的 From 会从上一次的目标值开始。
-        row.BeginAnimation(SmoothScroll.OffsetProperty, null);
-        SmoothScroll.SetOffset(row, row.HorizontalOffset);
-
-        var animation = new DoubleAnimation(row.HorizontalOffset, clamped,
-            TimeSpan.FromMilliseconds(260))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-        };
-
-        row.BeginAnimation(SmoothScroll.OffsetProperty, animation);
     }
 
     /// <summary>按钮的父级 Grid 里就装着这一行的 ScrollViewer；不依赖 Tag 绑定。</summary>
@@ -470,17 +451,6 @@ public partial class RecordsPage : Page
         }
 
         return null;
-    }
-
-    /// <summary>横向列表上用滚轮也能左右滚，不用去够箭头。</summary>
-    private void OnRowWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (sender is ScrollViewer row)
-        {
-            // 一个滚轮刻度大约 120，系数 1.2 让一格滚得比半张卡多一点。
-            Animate(row, row.HorizontalOffset - e.Delta * 1.2);
-            e.Handled = true;
-        }
     }
 
     private static FavoriteCard ToFavoriteCard(MediaItemDto item)

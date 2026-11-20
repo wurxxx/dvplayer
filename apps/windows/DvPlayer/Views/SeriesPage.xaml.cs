@@ -54,16 +54,16 @@ public partial class SeriesPage : Page
     /// <summary>截图巡检用：往下滚一段，把集行露出来。</summary>
     public void ScrollByForShot(double offset) => PageScroll.ScrollToVerticalOffset(offset);
 
-    /// <summary>截图巡检用：取第一个有 id 的演职人员。</summary>
-    public (string Id, string Name)? FirstPersonForShot()
+    /// <summary>截图巡检用：取第 N 个有 id 的演职人员（默认第一个）。</summary>
+    public (string Id, string Name)? FirstPersonForShot(int index = 0)
     {
         if (CastList.ItemsSource is not List<CastCard> cards)
         {
             return null;
         }
 
-        var card = cards.FirstOrDefault(c => !string.IsNullOrEmpty(c.PersonId));
-        return card is null ? null : (card.PersonId, card.Name);
+        var withId = cards.Where(c => !string.IsNullOrEmpty(c.PersonId)).ToList();
+        return index >= 0 && index < withId.Count ? (withId[index].PersonId, withId[index].Name) : null;
     }
 
     /// <summary>截图巡检用：点一下集行的右箭头（验证平滑滚动动画）。</summary>
@@ -250,7 +250,6 @@ public partial class SeriesPage : Page
         var title = MediaText.Clean(_detail?.Title);
 
         TitleText.Text = title;
-        PosterInitial.Text = Palette.InitialOf(title);
 
         var original = MediaText.Clean(_detail?.OriginalTitle);
         if (original != title && original != "(未命名)")
@@ -288,12 +287,7 @@ public partial class SeriesPage : Page
 
         BuildTags();
 
-        // 海报 / 背景图走同一套鉴权下载。
-        if (!string.IsNullOrWhiteSpace(_detail?.PosterPath))
-        {
-            _ = ApplyPosterAsync(_detail.PosterPath);
-        }
-
+        // 背景图走同一套鉴权下载；没有横版图时用海报放大模糊兜底。
         if (!string.IsNullOrWhiteSpace(_detail?.BackdropPath))
         {
             _ = ApplyBackdropAsync(_detail.BackdropPath);
@@ -305,18 +299,6 @@ public partial class SeriesPage : Page
         }
     }
 
-    private async Task ApplyPosterAsync(string path)
-    {
-        var bitmap = await PosterLoader.LoadAsync(path).ConfigureAwait(true);
-        if (bitmap is null)
-        {
-            return;
-        }
-
-        PosterBorder.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
-        PosterInitial.Visibility = Visibility.Collapsed;
-    }
-
     private async Task ApplyBlurAsync(string path)
     {
         var bitmap = await PosterLoader.LoadAsync(path, 1280).ConfigureAwait(true);
@@ -325,12 +307,13 @@ public partial class SeriesPage : Page
             return;
         }
 
-        BackdropBlur.Source = bitmap;
+        BackdropBlur.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
+        BackdropBlur.Visibility = Visibility.Visible;
     }
 
     private async Task ApplyBackdropAsync(string path)
     {
-        var bitmap = await PosterLoader.LoadAsync(path, 1280).ConfigureAwait(true);
+        var bitmap = await PosterLoader.LoadAsync(path, 1920).ConfigureAwait(true);
         if (bitmap is null)
         {
             return;
@@ -344,10 +327,17 @@ public partial class SeriesPage : Page
     {
         var parts = new List<string>();
 
+        if (_detail?.RuntimeSeconds is { } seconds && seconds > 0)
+        {
+            parts.Add(FormatRuntime(seconds));
+        }
+
         if (_detail?.ReleaseDate is { Length: >= 4 } date)
         {
-            parts.Add(date[..4]);
+            parts.Add(date);
         }
+
+        parts.Add(_detail?.Kind == "series" ? "剧集" : "电影");
 
         // 只报本地有的季：显示 10 季却只能点开 1 季会让人以为数据丢了。
         var seasons = _localSeasonCount > 0 ? _localSeasonCount : _detail?.LocalSeasonCount ?? 0;
@@ -553,22 +543,6 @@ public partial class SeriesPage : Page
 
     private void OnMediaInfoScrollRight(object sender, RoutedEventArgs e) =>
         SmoothScroll.ScrollBy(MediaInfoScroller, 720);
-
-    /// <summary>横向行不抢滚轮：转给外层纵向滚动，横向只能用箭头。</summary>
-    private void OnEpisodeWheel(object sender, MouseWheelEventArgs e)
-    {
-        for (var parent = VisualTreeHelper.GetParent(this); parent is not null;
-             parent = VisualTreeHelper.GetParent(parent))
-        {
-            if (parent is ScrollViewer { VerticalScrollBarVisibility: not ScrollBarVisibility.Disabled }
-                scroll)
-            {
-                scroll.ScrollToVerticalOffset(scroll.VerticalOffset - e.Delta * 0.5);
-                e.Handled = true;
-                return;
-            }
-        }
-    }
 
     // —— 链接 ——
 
@@ -847,6 +821,18 @@ public partial class SeriesPage : Page
         }
 
         return MediaText.LooksLikeFileName(raw) ? $"第 {number} 集" : MediaText.TrimExtension(raw);
+    }
+
+    /// <summary>「1小时38分钟」这种长时长，详情页顶部用。</summary>
+    private static string FormatRuntime(long seconds)
+    {
+        var span = TimeSpan.FromSeconds(seconds);
+        if (span.TotalHours >= 1)
+        {
+            return $"{(int)span.TotalHours} 小时 {span.Minutes} 分钟";
+        }
+
+        return $"{Math.Max(1, span.Minutes)} 分钟";
     }
 
     private static string FormatDuration(long? seconds) => seconds is > 0

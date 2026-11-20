@@ -53,8 +53,7 @@
                 </StackPanel>
 
                 <Grid>
-                  <ScrollViewer x:Name="RowScroll" HorizontalScrollBarVisibility="Hidden"
-                                VerticalScrollBarVisibility="Disabled" PreviewMouseWheel="OnRowWheel">
+                  <controls:HorizontalRow x:Name="RowScroll">
                     <ItemsControl ItemsSource="{Binding Items}">
                       <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -143,7 +142,7 @@
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                  </ScrollViewer>
+                  </controls:HorizontalRow>
 
                   <Button Style="{StaticResource ScrollArrow}" Content="&#xE76B;"
                           HorizontalAlignment="Left" VerticalAlignment="Top"

@@ -139,6 +139,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--row-arrows` | 把横向行两侧的翻页箭头强制显示（截不到鼠标悬停） |
 | `--season-menu` | 单独渲染季下拉菜单 `series-season-menu.png` |
 | `--person-first` | 从详情页点第一个演员进作品页，额外截 `person.png` |
+| `--person-index <n>` | 配合 `--person-first`：取第 n 个有 id 的演职人员（0 起） |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
 
 ## 需要出画面的验证（mpv / D3D11）

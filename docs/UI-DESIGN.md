@@ -70,6 +70,13 @@
   （`RowArrowButton`）；滚轮始终交给页面纵向滚动，横向只能拖或点箭头；
   点箭头走 `SmoothScroll.ScrollBy`（260ms 缓出），所有页面共用这一个入口，
   不要各自直接调 `ScrollToHorizontalOffset`；
+- **横向行容器**：一律用 `Controls/HorizontalRow`（`ScrollViewer` 派生），别手写
+  `<ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">`。
+  它在 Preview 阶段把滚轮转给最近的纵向 `ScrollViewer` 并标记已处理——自己写
+  经常漏掉、或者从错的节点往上找，结果鼠标停在封面上整页就滚不动了；
+- **详情页顶部**：整块横版图铺满（没有横版图就用海报放大模糊），信息压在图的下半部
+  （左：标题 + 播放，右：评分 / 时长 / 简介），**不要**再叠一张竖版海报卡；
+  上下各压一层渐变，保证白字压在亮图上也能读；
 - **点卡片的默认动作**：一律进详情页，**不要**按条目类型直接起播；
   唯一例外是「继续观看」这类带播放进度的卡片，点进去续播。搜索、网格、
   收藏、库分组海报都走详情；

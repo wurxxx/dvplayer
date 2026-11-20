@@ -1129,6 +1129,11 @@ impl FnOsSource {
 
     /// 演员作品：`GET /item/list?person_guid=<guid>`（和库列表同一个端点，
     /// 只是多带一个 person_guid 过滤）。
+    /// 某个人的作品：`POST /person/item/list`。
+    ///
+    /// 飞牛网页的人物页（`/v/person/<guid>`）就是调这个：body 带 `person_guid`、
+    /// 分页和 `job` 过滤。之前用的 `POST /item/list` + person_guid 会把过滤条件
+    /// 忽略掉——随便点谁都返回整库的前 500 条。
     pub fn person_works(&self, person_id: &str) -> Result<Vec<MediaItem>> {
         #[derive(Deserialize, Default)]
         struct ListDto {
@@ -1136,23 +1141,40 @@ impl FnOsSource {
             list: Option<Vec<ItemDto>>,
         }
 
-        // 端点仍是 `POST /item/list`，只是把过滤条件换成 person_guid
-        // （GET + query 会返回 404 Not Found）。
-        let body = compact_json(&serde_json::json!({ "person_guid": person_id }))?;
-        let env: ApiEnvelope<ListDto> =
-            self.send(Method::POST, "/item/list", &BTreeMap::new(), Some(&body))?;
+        // 演职人员卡上可能是演员 / 导演 / 编剧，按顺序试，最后不带过滤兜一次。
+        for job in [Some("Actor"), Some("Director"), Some("Writer"), None] {
+            let mut body = serde_json::json!({
+                "person_guid": person_id,
+                "page": 1,
+                "page_size": 200,
+                "sort_column": "update_time",
+                "sort_type": "desc",
+            });
 
-        let data = env.data.ok_or_else(|| MediaError::Api {
-            code: env.code,
-            msg: env.msg.unwrap_or_else(|| "no data".into()),
-        })?;
+            if let Some(job) = job {
+                body["job"] = serde_json::Value::from(job);
+            }
 
-        Ok(data
-            .list
-            .unwrap_or_default()
-            .into_iter()
-            .map(|d| self.map_item(d))
-            .collect())
+            let body = compact_json(&body)?;
+            let env: ApiEnvelope<serde_json::Value> =
+                self.send(Method::POST, "/person/item/list", &BTreeMap::new(), Some(&body))?;
+
+            let raw = env.data.unwrap_or(serde_json::Value::Null);
+
+            let data: ListDto = serde_json::from_value(raw).unwrap_or_default();
+            let items: Vec<MediaItem> = data
+                .list
+                .unwrap_or_default()
+                .into_iter()
+                .map(|d| self.map_item(d))
+                .collect();
+
+            if !items.is_empty() {
+                return Ok(items);
+            }
+        }
+
+        Ok(Vec::new())
     }
 
     /// 海报地址：图片接口只认 Authorization 头，调用方要带着头去取字节。
