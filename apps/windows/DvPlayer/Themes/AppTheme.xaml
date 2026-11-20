@@ -315,32 +315,17 @@
   </Style>
 
   <!-- 详情页大图上的圆形动作按钮：白底、深色图标，一组播放按钮 -->
-  <Style x:Key="HeroCircleButton" TargetType="Button">
-    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-    <Setter Property="Width" Value="40" />
-    <Setter Property="Height" Value="40" />
-    <Setter Property="Margin" Value="0,0,12,0" />
-    <Setter Property="Cursor" Value="Hand" />
-    <Setter Property="Template">
-      <Setter.Value>
-        <ControlTemplate TargetType="Button">
-          <Border x:Name="Bd" CornerRadius="20" Background="#E8FFFFFF">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-          </Border>
-          <ControlTemplate.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-              <Setter TargetName="Bd" Property="Background" Value="#FFFFFFFF" />
-            </Trigger>
-            <Trigger Property="IsPressed" Value="True">
-              <Setter TargetName="Bd" Property="Background" Value="#CCFFFFFF" />
-            </Trigger>
-            <Trigger Property="IsEnabled" Value="False">
-              <Setter Property="Opacity" Value="0.4" />
-            </Trigger>
-          </ControlTemplate.Triggers>
-        </ControlTemplate>
-      </Setter.Value>
-    </Setter>
+  <!-- 详情页顶部的动作按钮：图标 + 文字（和 macOS 的胶囊按钮一致） -->
+  <Style x:Key="HeroActionButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+    <Setter Property="Margin" Value="0,0,10,8" />
+    <Setter Property="Padding" Value="15,10" />
+    <Setter Property="Background" Value="#CC1F1F27" />
+  </Style>
+
+  <Style x:Key="HeroPlayButton" TargetType="Button" BasedOn="{StaticResource AccentButton}">
+    <Setter Property="Margin" Value="0,0,10,8" />
+    <Setter Property="Padding" Value="20,10" />
+    <Setter Property="Foreground" Value="#1A1200" />
   </Style>
 
   <!-- 横向行两端的翻页箭头：平时藏起来，鼠标移到这一行才浮出来 -->

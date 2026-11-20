@@ -645,9 +645,7 @@ public partial class SeriesPage : Page
     {
         PlayButton.IsEnabled = !string.IsNullOrEmpty(_playTargetId);
 
-        // 没看过就别摆「重头看」，跟播放键重复。
         RestartButton.IsEnabled = !string.IsNullOrEmpty(_playTargetId);
-        RestartButton.Visibility = _resumeSeconds >= 5 ? Visibility.Visible : Visibility.Collapsed;
 
         var text = _resumeEpisode > 0
             ? $"继续观看 第 {_resumeEpisode} 集"
@@ -668,15 +666,18 @@ public partial class SeriesPage : Page
     /// <summary>已观看 / 收藏的图标状态：亮起 = 已标记。</summary>
     private void UpdateStateButtons()
     {
-        WatchedGlyph.Foreground = new SolidColorBrush(_watched ? Accent : DarkIcon);
-        WatchedButton.ToolTip = _watched ? "标记为未观看" : "标记为已观看";
+        // 图标亮起 = 已标记；文字跟着变，按钮含义一眼能看懂。
+        WatchedGlyph.Foreground = new SolidColorBrush(_watched ? Accent : IconIdle);
+        WatchedLabel.Text = _watched ? "标记为未观看" : "标记为已观看";
+        WatchedButton.ToolTip = WatchedLabel.Text;
 
-        FavoriteGlyph.Foreground = new SolidColorBrush(_favorite ? Accent : DarkIcon);
+        FavoriteGlyph.Foreground = new SolidColorBrush(_favorite ? Accent : IconIdle);
+        FavoriteLabel.Text = _favorite ? "已收藏" : "加入收藏";
         FavoriteButton.ToolTip = _favorite ? "取消收藏" : "加入收藏";
     }
 
     private static readonly Color Accent = Color.FromRgb(0xFF, 0xB0, 0x20);
-    private static readonly Color DarkIcon = Color.FromRgb(0x14, 0x14, 0x19);
+    private static readonly Color IconIdle = Color.FromRgb(0xF5, 0xF5, 0xF8);
 
     private static string Clock(double seconds)
     {
@@ -869,15 +870,20 @@ public partial class SeriesPage : Page
             var index = TrackPrefs.Audio(_playTargetId ?? _itemId)
                 ?? Math.Max(0, audios.FindIndex(a => a.IsDefault));
             var audio = audios[Math.Min(index, audios.Count - 1)];
-            AudioButton.ToolTip = "音轨：" + (audio.Language ?? audio.Title ?? audio.Codec ?? "默认");
+            var name = audio.Language ?? audio.Title ?? audio.Codec ?? "默认";
+            AudioLabel.Text = "音轨：" + name;
+            AudioButton.ToolTip = AudioLabel.Text;
         }
 
         if (subs.Count > 0)
         {
             var index = TrackPrefs.Subtitle(_playTargetId ?? _itemId);
+            SubtitleLabel.Text = index is null or TrackPrefs.SubtitleOff
+                ? "字幕"
+                : "字幕：" + (subs.ElementAtOrDefault((int)index)?.Language ?? "已选");
             SubtitleButton.ToolTip = index is null or TrackPrefs.SubtitleOff
                 ? "选择字幕"
-                : "字幕：" + (subs.ElementAtOrDefault((int)index)?.Language ?? "已选");
+                : "更换字幕";
         }
     }
 

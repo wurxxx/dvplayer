@@ -67,94 +67,110 @@
                      FontSize="16" Foreground="#E6FFFFFF" />
         </Button>
 
-        <StackPanel VerticalAlignment="Bottom" Margin="40,180,40,24">
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="380" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+        <!--
+          信息压在横版图下半部：标题 / 原名 / 年份评分 / 标签 / 简介 / 动作按钮，
+          竖着排一列（和 macOS 详情页一致）。按钮统一「图标 + 文字」，
+          不再用一排看不出含义的圆形图标。
+        -->
+        <StackPanel VerticalAlignment="Bottom" Margin="40,140,40,26">
+          <StackPanel MaxWidth="860" HorizontalAlignment="Left">
+            <TextBlock x:Name="TitleText" FontFamily="{StaticResource DisplayFont}"
+                       FontSize="31" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="OriginalTitleText" FontSize="13" Foreground="{StaticResource FaintBrush}"
+                       Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
 
-            <!-- 左：标题 + 播放 -->
-            <StackPanel VerticalAlignment="Bottom">
-              <TextBlock x:Name="TitleText" FontFamily="{StaticResource DisplayFont}"
-                         FontSize="31" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
-                         TextWrapping="Wrap" />
-              <TextBlock x:Name="OriginalTitleText" FontSize="13" Foreground="{StaticResource FaintBrush}"
-                         Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+              <TextBlock x:Name="RatingText" FontSize="14.5" FontWeight="SemiBold"
+                         Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"
+                         Margin="0,0,16,0" Visibility="Collapsed" />
+              <TextBlock x:Name="MetaText" FontSize="13.5" Foreground="{StaticResource MutedBrush}"
+                         VerticalAlignment="Center" />
+            </StackPanel>
 
-              <!-- 播放按钮旁边的一组动作：重头看 / 已观看 / 收藏 / 音轨 / 字幕 -->
-              <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
-                <Button x:Name="RestartButton" Style="{StaticResource HeroCircleButton}"
-                        Click="OnRestartClick" ToolTip="重头看" Visibility="Collapsed">
-                  <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}"
-                             FontSize="16" Foreground="#141419" />
-                </Button>
+            <StackPanel x:Name="TagBar" Orientation="Horizontal" Margin="0,11,0,0" />
 
-                <Button x:Name="WatchedButton" Style="{StaticResource HeroCircleButton}"
-                        Click="OnWatchedClick" ToolTip="标记已观看">
-                  <TextBlock x:Name="WatchedGlyph" Text="&#xE73E;"
-                             FontFamily="{StaticResource IconFont}"
-                             FontSize="16" Foreground="#141419" />
-                </Button>
+            <TextBlock x:Name="OverviewText" FontSize="13.5" Foreground="#B8B8C2"
+                       TextWrapping="Wrap" Margin="0,14,0,0" LineHeight="22"
+                       MaxHeight="88" TextTrimming="CharacterEllipsis" Visibility="Collapsed" />
 
-                <Button x:Name="FavoriteButton" Style="{StaticResource HeroCircleButton}"
-                        Click="OnFavoriteClick" ToolTip="加入收藏">
-                  <TextBlock x:Name="FavoriteGlyph" Text="&#xE734;"
-                             FontFamily="{StaticResource IconFont}"
-                             FontSize="16" Foreground="#141419" />
-                </Button>
-
-                <!-- 只有多音轨 / 有字幕时才出现 -->
-                <Button x:Name="AudioButton" Style="{StaticResource HeroCircleButton}"
-                        Click="OnAudioClick" Visibility="Collapsed" ToolTip="选择音轨">
-                  <TextBlock Text="&#xE8D6;" FontFamily="{StaticResource IconFont}"
-                             FontSize="16" Foreground="#141419" />
-                </Button>
-
-                <Button x:Name="SubtitleButton" Style="{StaticResource HeroCircleButton}"
-                        Click="OnSubtitleClick" Visibility="Collapsed" ToolTip="选择字幕">
-                  <Viewbox Width="19" Height="17">
-                    <Canvas Width="20" Height="18">
-                      <Rectangle Canvas.Left="1" Canvas.Top="2" Width="18" Height="14"
-                                 RadiusX="3.5" RadiusY="3.5" Stroke="#141419" StrokeThickness="1.6" />
-                      <Rectangle Canvas.Left="4.2" Canvas.Top="10" Width="6.4" Height="3.2"
-                                 RadiusX="1.2" RadiusY="1.2" Fill="#141419" />
-                      <Rectangle Canvas.Left="12.4" Canvas.Top="10" Width="3.4" Height="3.2"
-                                 RadiusX="1.2" RadiusY="1.2" Fill="#141419" />
-                    </Canvas>
-                  </Viewbox>
-                </Button>
-              </StackPanel>
-
-              <Button x:Name="PlayButton" Style="{StaticResource AccentButton}"
-                      Click="OnPlayClick" Padding="26,11" Margin="0,16,0,0"
-                      HorizontalAlignment="Left">
+            <!-- 动作按钮：顺序和 macOS 一致（播放 / 重头看 / 收藏 / 已观看 / 音轨 / 字幕） -->
+            <WrapPanel Margin="0,20,0,0">
+              <Button x:Name="PlayButton" Style="{StaticResource HeroPlayButton}"
+                      Click="OnPlayClick">
                 <StackPanel Orientation="Horizontal">
                   <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" FontSize="14"
                              VerticalAlignment="Center" />
-                  <TextBlock x:Name="PlayButtonText" Text="播放" FontSize="14.5" FontWeight="SemiBold"
-                             Margin="9,0,0,0" VerticalAlignment="Center" />
+                  <TextBlock x:Name="PlayButtonText" Text="播放" FontSize="14" FontWeight="SemiBold"
+                             Margin="8,0,0,0" VerticalAlignment="Center" />
                 </StackPanel>
               </Button>
-            </StackPanel>
 
-            <!-- 右：评分 / 时长 / 简介 -->
-            <StackPanel Grid.Column="1" Margin="44,0,0,0" VerticalAlignment="Bottom">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock x:Name="RatingText" FontSize="14.5" FontWeight="SemiBold"
-                           Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"
-                           Margin="0,0,16,0" Visibility="Collapsed" />
-                <TextBlock x:Name="MetaText" FontSize="13.5" Foreground="{StaticResource MutedBrush}"
-                           VerticalAlignment="Center" />
-              </StackPanel>
+              <Button x:Name="RestartButton" Style="{StaticResource HeroActionButton}"
+                      Click="OnRestartClick" ToolTip="重头看">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                             VerticalAlignment="Center" />
+                  <TextBlock Text="重头看" FontSize="13.5"
+                             Margin="8,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
 
-              <StackPanel x:Name="TagBar" Orientation="Horizontal" Margin="0,11,0,0" />
+              <Button x:Name="FavoriteButton" Style="{StaticResource HeroActionButton}"
+                      Click="OnFavoriteClick">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock x:Name="FavoriteGlyph" Text="&#xE734;"
+                             FontFamily="{StaticResource IconFont}" FontSize="14"
+                             Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                  <TextBlock x:Name="FavoriteLabel" Text="加入收藏" FontSize="13.5"
+                             Margin="8,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
 
-              <TextBlock x:Name="OverviewText" FontSize="13.5" Foreground="#B8B8C2"
-                         TextWrapping="Wrap" Margin="0,14,0,0" LineHeight="22"
-                         MaxHeight="88" TextTrimming="CharacterEllipsis" Visibility="Collapsed" />
-            </StackPanel>
-          </Grid>
+              <Button x:Name="WatchedButton" Style="{StaticResource HeroActionButton}"
+                      Click="OnWatchedClick">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock x:Name="WatchedGlyph" Text="&#xE73E;"
+                             FontFamily="{StaticResource IconFont}" FontSize="14"
+                             Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                  <TextBlock x:Name="WatchedLabel" Text="标记为已观看" FontSize="13.5"
+                             Margin="8,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+
+              <!-- 只有多音轨 / 有字幕时才出现 -->
+              <Button x:Name="AudioButton" Style="{StaticResource HeroActionButton}"
+                      Click="OnAudioClick" Visibility="Collapsed" ToolTip="选择音轨">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE8D6;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                             VerticalAlignment="Center" />
+                  <TextBlock x:Name="AudioLabel" Text="音轨" FontSize="13.5"
+                             Margin="8,0,0,0" VerticalAlignment="Center"
+                             MaxWidth="120" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </Button>
+
+              <Button x:Name="SubtitleButton" Style="{StaticResource HeroActionButton}"
+                      Click="OnSubtitleClick" Visibility="Collapsed" ToolTip="选择字幕">
+                <StackPanel Orientation="Horizontal">
+                  <Viewbox Width="17" Height="15" VerticalAlignment="Center">
+                    <Canvas Width="20" Height="18">
+                      <Rectangle Canvas.Left="1" Canvas.Top="2" Width="18" Height="14"
+                                 RadiusX="3.5" RadiusY="3.5"
+                                 Stroke="{StaticResource TextBrush}" StrokeThickness="1.6" />
+                      <Rectangle Canvas.Left="4.2" Canvas.Top="10" Width="6.4" Height="3.2"
+                                 RadiusX="1.2" RadiusY="1.2" Fill="{StaticResource TextBrush}" />
+                      <Rectangle Canvas.Left="12.4" Canvas.Top="10" Width="3.4" Height="3.2"
+                                 RadiusX="1.2" RadiusY="1.2" Fill="{StaticResource TextBrush}" />
+                    </Canvas>
+                  </Viewbox>
+                  <TextBlock x:Name="SubtitleLabel" Text="字幕" FontSize="13.5"
+                             Margin="8,0,0,0" VerticalAlignment="Center"
+                             MaxWidth="120" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </Button>
+            </WrapPanel>
+          </StackPanel>
         </StackPanel>
       </Grid>
 
