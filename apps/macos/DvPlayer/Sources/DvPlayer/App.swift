@@ -12,7 +12,6 @@ struct DvPlayerApp: App {
                 .frame(minWidth: 1080, minHeight: 680)
                 .task { await AppState.shared.start() }
         }
-        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1440, height: 900)
         .commands {
             // 单窗口应用，不需要「新建窗口」。
@@ -27,15 +26,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // 起窗就抢焦点，红绿灯才是彩色的（非活动窗口是灰点，深色侧栏上看不清）。
+        DispatchQueue.main.async {
+            NSApp.windows.first(where: { $0.contentView != nil })?.makeKeyAndOrderFront(nil)
+        }
+
         // 窗口底色统一成页面底色，别让系统在标题栏 / 圆角处漏出浅色。
         DispatchQueue.main.async {
             for window in NSApp.windows {
-                window.backgroundColor = NSColor(srgbRed: 0x14 / 255.0,
-                                                 green: 0x14 / 255.0,
-                                                 blue: 0x19 / 255.0,
-                                                 alpha: 1)
-                window.titlebarAppearsTransparent = true
-                window.isMovableByWindowBackground = true
             }
         }
 
@@ -103,10 +101,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let size = view.bounds.size
+        let env = ProcessInfo.processInfo.environment
+
+        // `DVPLAYER_SHOT_FRAME=1`：连标题栏一起截（红绿灯在这里），
+        // 平时只截内容区，省得顶部多一条。
+        let target: NSView = env["DVPLAYER_SHOT_FRAME"] == "1"
+            ? (view.superview ?? view)
+            : view
+
+        let size = target.bounds.size
         guard size.width > 0, size.height > 0 else { return }
 
-        let env = ProcessInfo.processInfo.environment
         let lowered = path.lowercased()
         let jpeg = lowered.hasSuffix(".jpg") || lowered.hasSuffix(".jpeg")
         let scale = Double(env["DVPLAYER_SHOT_SCALE"] ?? "") ?? (jpeg ? 1 : window.backingScaleFactor)
@@ -128,13 +133,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSColor(srgbRed: 0x14 / 255.0, green: 0x14 / 255.0, blue: 0x19 / 255.0, alpha: 1)
             .setFill()
-        NSBezierPath(rect: view.bounds).fill()
+        NSBezierPath(rect: target.bounds).fill()
 
         let cg = context.cgContext
         cg.saveGState()
-        cg.translateBy(x: 0, y: size.height)
-        cg.scaleBy(x: 1, y: -1)
-        view.layer?.render(in: cg)
+        // 内容视图的图层是「上下颠倒」的，翻一次；整个窗口（含标题栏）不用翻。
+        if target === view {
+            cg.translateBy(x: 0, y: size.height)
+            cg.scaleBy(x: 1, y: -1)
+        }
+        target.layer?.render(in: cg)
         cg.restoreGState()
 
         // 弹层（popover / 菜单）是独立窗口，单独渲染会丢，顺手叠上去。
@@ -151,6 +159,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             extra.contentView?.layer?.render(in: cg)
             cg.restoreGState()
+        }
+
+        // 标题栏（红绿灯）是另一个子视图，layer.render 画不到它的按钮，
+        // 用 cacheDisplay 单独画一份，再叠到内容顶部——截图才和窗口一致。
+        if let bar = window.contentView?.superview?.subviews.first(where: {
+            String(describing: type(of: $0)).contains("TitlebarContainer")
+        }), let barRep = bar.bitmapImageRepForCachingDisplay(in: bar.bounds) {
+            bar.cacheDisplay(in: bar.bounds, to: barRep)
+            let barImage = NSImage(size: bar.bounds.size)
+            barImage.addRepresentation(barRep)
+            barImage.draw(in: NSRect(x: 0, y: size.height - bar.bounds.height,
+                                     width: size.width, height: bar.bounds.height),
+                          from: .zero, operation: .sourceOver, fraction: 1)
         }
 
         NSGraphicsContext.restoreGraphicsState()

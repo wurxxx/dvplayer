@@ -12,7 +12,7 @@
 | UI | SwiftUI + AppKit | 视觉规范沿用 [UI-DESIGN.md](UI-DESIGN.md)，色板 / 字号 / 组件一致 |
 | 业务 | 共享核心 `core/media` | C ABI + JSON，和 Windows 是同一份 Rust 库 |
 | 视频 | libmpv render API + `NSOpenGLView` | 见 [m0-render](../apps/macos/m0-render/)；v1 只做 HDR10，无 DV |
-| 窗口 | 单窗口 + 隐藏标题栏 | 侧栏 216 + 内容区，和 Windows 同一个骨架 |
+| 窗口 | 单窗口 + 标准标题栏 | 侧栏 216 + 内容区，和 Windows 同一个骨架；红绿灯始终可见 |
 
 `--wid` 在 macOS 上不可靠（ADR-0009），所以播放页走 render API：壳画出视频帧，
 控件直接叠在 SwiftUI 层上，不像 Windows 那样需要两个窗口。
@@ -58,6 +58,9 @@
 - **横向行会吃掉纵向滚轮**：`NSScrollView` 收到滚轮就不再往外传，鼠标停在海报行上
   整页就滚不动（Windows 版的老毛病）。`WheelBridge.swift` 用本地事件监听把纵向的
   转给外层页面滚动，横向的照旧交给行自己。
+- **别用 `.hiddenTitleBar` + fullSizeContentView**：红绿灯贴在内容上，macOS 26 里
+  窗口不在前台时会淡成灰点，深色侧栏上基本看不见。现在换成标准标题栏
+  （`titlebarAppearsTransparent` 保留，标题栏呈现页面底色），红绿灯始终在。
 - **截图拍不到弹层**：popover / 菜单是独立窗口。截图时把其它可见窗口的图层
   叠上去（内容视图是翻转坐标系，要再翻一次）。
 

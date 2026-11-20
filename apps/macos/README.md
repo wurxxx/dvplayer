@@ -28,6 +28,7 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 
 ## 现在能做什么
 
+- 标准窗口：标题栏（红绿灯 + DV Player）+ 内容区，和 Windows 的标题栏一致
 - 「服务器」页添加 / 编辑 / 删除源（飞牛影视、Emby、Jellyfin），连上后自动跳该源的首页
 - 首页：Hero 轮播、我的媒体、继续观看、每库一行
 - 库 / 季 / 目录网格：类别、排序、风格、页内搜索、分页
@@ -65,6 +66,7 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_ARROWS` | `1` = 强制显示横向行的左右箭头（截图用，正常是悬停才出） |
 | `DVPLAYER_SHOT_SCALE` | 渲染倍数；JPEG 默认 1x，PNG 默认屏幕倍数（Retina 是 2x） |
 | `DVPLAYER_MENU` | `audio` / `subtitle` = 打开详情页后自动展开音轨 / 字幕弹层（截图用） |
+| `DVPLAYER_SHOT_FRAME` | `1` = 连标题栏一起截，用来检查红绿灯 / 窗口 chrome |
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

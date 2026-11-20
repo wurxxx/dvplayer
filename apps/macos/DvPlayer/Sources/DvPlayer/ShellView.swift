@@ -23,7 +23,6 @@ struct ShellView: View {
             .background(Theme.bg)
         }
         .background(Theme.bg)
-        .ignoresSafeArea(.container, edges: .top)
         .overlay(alignment: .bottom) {
             if let toast = state.toast {
                 Text(toast)
@@ -64,7 +63,7 @@ private struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             brand
                 .padding(.horizontal, 18)
-                .padding(.top, 42)
+                .padding(.top, 18)
                 .padding(.bottom, 16)
 
             nav
