@@ -132,6 +132,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--window-test` | 单独自检窗口按钮：依次点最小化 / 最大化 / 关闭，结果写 `%TEMP%\dvplayer\window-test.log` |
 | `--dialog-shot <dir>` | 把深色确认框渲染成 `confirm.png`，检查它和页面是不是一套 |
 | `--dialog-test` | 自动点一次「删除」和一次「取消」，验证 `Ask` 的返回值写进 `%TEMP%\dvplayer\dialog-test.log` |
+| `--ui-test <dir>` | 把「搜索框 + 深色滚动条」单独渲染到 `ui-test.png`，并写 `ui-test.log`（`search focus=` / `scroll visible=`），验证点整块能聚焦、滚动条不是系统浅色条 |
 | `--favorites` | 媒体库页 / 记录页切到「收藏」分段再截，检查空态与海报网格 |
 | `--inline-search <关键词>` | 媒体库页切到页内搜索并填好关键词 |
 | `--edit-source` | 服务器页打开第一个源的编辑表单 |

@@ -400,7 +400,8 @@
         <RowDefinition Height="*" />
       </Grid.RowDefinitions>
 
-      <Border Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="16,11">
+      <Border Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="16,11"
+              controls:SearchBoxFocus.Enabled="True">
         <Grid>
           <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="14"
                      Foreground="{StaticResource FaintBrush}" VerticalAlignment="Center" />
@@ -465,7 +466,7 @@
         </StackPanel>
 
         <Border Style="{StaticResource SearchBoxBorder}" Width="280" HorizontalAlignment="Right"
-                VerticalAlignment="Center">
+                VerticalAlignment="Center" controls:SearchBoxFocus.Enabled="True">
           <Grid>
             <TextBlock Text="&#xE721;" Style="{StaticResource SearchBoxIcon}" />
             <TextBox x:Name="FilterBox" Style="{StaticResource SearchBoxInput}"
@@ -593,7 +594,7 @@
                    Margin="0,6,0,4" TextWrapping="Wrap" />
       </StackPanel>
 
-      <ScrollViewer x:Name="BrowseScroll" Grid.Row="4" VerticalScrollBarVisibility="Hidden"
+      <ScrollViewer x:Name="BrowseScroll" Grid.Row="4" VerticalScrollBarVisibility="Auto"
                     Margin="0,8,0,0" ScrollChanged="OnBrowseScroll">
         <StackPanel>
           <controls:PosterGrid x:Name="ItemGrid">

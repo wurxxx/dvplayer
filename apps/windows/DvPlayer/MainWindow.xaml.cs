@@ -8,6 +8,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shell;
 using System.Windows.Threading;
+using DvPlayer.Controls;
 using DvPlayer.Dialogs;
 using DvPlayer.Services;
 using DvPlayer.Views;
@@ -90,6 +91,14 @@ public partial class MainWindow : FluentWindow
             UiCapture.Save(dialog, Path.Combine(dialogDir, "confirm.png"));
             dialog.Close();
             Application.Current.Shutdown();
+            return;
+        }
+
+        // --ui-test <目录>：单独渲染「搜索框 + 深色滚动条」，验证点整块能聚焦、
+        // 滚动条不再是系统浅色条。没人能远程点界面，只能靠这个核对。
+        if (ArgumentAfter("--ui-test") is { Length: > 0 } uiDir)
+        {
+            await RunUiTestAsync(uiDir);
             return;
         }
 
@@ -1047,6 +1056,89 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
+    /// UI 自检：搜索框整块聚焦 + 深色滚动条，截图和日志写到指定目录。
+    private async Task RunUiTestAsync(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        var logPath = Path.Combine(dir, "ui-test.log");
+        File.WriteAllText(logPath, "");
+        void Log(string line) => File.AppendAllText(logPath, line + Environment.NewLine);
+
+        var window = new Window
+        {
+            Width = 760,
+            Height = 560,
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            ShowInTaskbar = false,
+            Background = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x19)),
+        };
+
+        var searchBorder = new Border
+        {
+            Style = (Style)FindResource("SearchBoxBorder"),
+            Width = 300,
+            Height = 36,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        SearchBoxFocus.SetEnabled(searchBorder, true);
+
+        var grid = new Grid();
+        grid.Children.Add(new System.Windows.Controls.TextBlock
+        {
+            Text = "\uE721",
+            Style = (Style)FindResource("SearchBoxIcon"),
+        });
+        var input = new System.Windows.Controls.TextBox
+        {
+            Style = (Style)FindResource("SearchBoxInput"),
+        };
+        grid.Children.Add(input);
+        grid.Children.Add(new System.Windows.Controls.TextBlock
+        {
+            Text = "搜索",
+            Style = (Style)FindResource("SearchBoxPlaceholder"),
+        });
+        searchBorder.Child = grid;
+
+        var scroll = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Height = 300,
+            Margin = new Thickness(0, 18, 0, 0),
+        };
+        scroll.Content = new Border
+        {
+            Height = 1200,
+            Background = new SolidColorBrush(Color.FromRgb(0x1F, 0x1F, 0x27)),
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(24) };
+        panel.Children.Add(searchBorder);
+        panel.Children.Add(scroll);
+        window.Content = panel;
+
+        window.Show();
+        await Task.Delay(600);
+
+        // 点在搜索框的图标 / 内边距位置（事件直接发给 Border，等价于点空白处）。
+        searchBorder.RaiseEvent(new MouseButtonEventArgs(
+            Mouse.PrimaryDevice, 0, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+        });
+        await Task.Delay(200);
+
+        Log($"search focus={input.IsFocused}");
+        Log($"scroll visible={scroll.ComputedVerticalScrollBarVisibility}");
+        UiCapture.Save(window, Path.Combine(dir, "ui-test.png"));
+
+        window.Close();
+        Application.Current.Shutdown();
+    }
+
     /// 依次点三个窗口按钮，把状态写进 `%TEMP%\dvplayer\window-test.log`。
     /// 走的是真实的 Click 事件，验证 XAML 里的接线和 WindowState 行为；
     /// 最后点关闭，进程应该直接退出（日志停在「点关闭」）。
