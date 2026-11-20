@@ -1414,7 +1414,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
     // —— 卡片右键菜单 ——
 
     /// <summary>菜单项挂在卡片 Border 上，卡片的 Tag 就是条目 id。</summary>
-    private static string? MenuItemId(object sender)
+    private static string? MenuItemId(object? sender)
     {
         if (sender is not MenuItem item)
         {
@@ -1533,7 +1533,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
         if (BrowseRoot.Visibility == Visibility.Visible)
         {
             BrowseStatus.Text = message;
-            await Task.Delay(2400).ConfigureAwait(true);
+            await Task.Delay(4000).ConfigureAwait(true);
             if (BrowseStatus.Text == message)
             {
                 UpdateBrowseStatus();
@@ -1544,7 +1544,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
         if (OverviewPanel.Visibility == Visibility.Visible)
         {
             StatusText.Text = message;
-            await Task.Delay(2400).ConfigureAwait(true);
+            await Task.Delay(4000).ConfigureAwait(true);
             if (StatusText.Text == message)
             {
                 StatusText.Text = "";

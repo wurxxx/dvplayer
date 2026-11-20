@@ -242,6 +242,23 @@ public partial class MainWindow : FluentWindow
                     {
                         await Task.Delay(700);
                         UiCapture.Save(menu, Path.Combine(dir, "card-menu.png"));
+
+                        // --menu-click：点第一项（添加到收藏夹），验证 Click 能拿到卡片 id，
+                        // 截完整窗口让状态行的提示入镜，然后把收藏恢复。
+                        if (Environment.GetCommandLineArgs().Contains("--menu-click") &&
+                            menu.Items.OfType<System.Windows.Controls.MenuItem>().FirstOrDefault() is { } first)
+                        {
+                            var id = (menu.PlacementTarget as FrameworkElement)?.Tag as string;
+                            first.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+                            await Task.Delay(3200);
+                            UiCapture.Save(this, Path.Combine(dir, "menu-click.png"));
+
+                            if (id is not null && AppServices.Instance.Core is { } core)
+                            {
+                                await Task.Run(() => core.SetFavorite(id, false));
+                            }
+                        }
+
                         menu.IsOpen = false;
                         await Task.Delay(300);
                     }
