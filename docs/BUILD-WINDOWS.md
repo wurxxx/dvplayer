@@ -106,14 +106,15 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\build-core.ps1
 DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 ```
 
-程序依次打开首页 / 媒体库 / 播放记录 / 设置，各渲染一张 PNG 后退出。
+程序依次打开首页 / 媒体库 / 媒体源 / 记录 / 搜索 / 设置，各渲染一张 PNG 后退出。
 走 `RenderTargetBitmap`，不依赖桌面合成，锁屏或 SSH 会话里也能用。
 
 常用参数：
 
 | 参数 | 作用 |
 | --- | --- |
-| `--screenshot <dir> [页面...]` | 只截指定页（`home` / `libraries` / `records` / `settings`） |
+| `--screenshot <dir> [页面...]` | 只截指定页（`home` / `libraries` / `sources` / `records` / `search` / `settings`） |
+| `--search-text <关键词>` | 搜索页带一个查询启动，用来截结果网格 |
 | `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`） |
 | `--series-season <n>` | 详情页默认展开第 n 季（验证季切换） |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
