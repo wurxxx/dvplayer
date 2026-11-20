@@ -346,7 +346,7 @@ struct DetailPage: View {
     }
 
     private func hasTracks(_ info: MediaInfo) -> Bool {
-        info.video != nil || !info.audios.isEmpty
+        info.video != nil || !info.audios.isEmpty || !info.subtitles.isEmpty
     }
 
     private func trackCards(_ info: MediaInfo) -> [TrackCard] {
@@ -405,6 +405,23 @@ struct DetailPage: View {
                                    title: audio.title ?? "音频 \(index + 1)",
                                    rows: rows,
                                    active: audio.isDefault ?? false))
+        }
+
+        for (index, subtitle) in info.subtitles.enumerated() {
+            var rows: [(String, String)] = []
+            rows.append(("语言", subtitle.language ?? "--"))
+            rows.append(("标题", subtitle.title ?? ""))
+            rows.append(("编码", subtitle.codec ?? ""))
+            rows.append(("格式", subtitle.format ?? ""))
+            rows.append(("图形字幕", subtitle.isBitmap == true ? "是" : "否"))
+            rows.append(("外部", subtitle.isExternal == true ? "是" : "否"))
+            rows.append(("默认", (subtitle.isDefault ?? false) ? "是" : "否"))
+
+            cards.append(TrackCard(id: "subtitle-\(index)",
+                                   icon: "captions.bubble",
+                                   title: subtitle.title ?? subtitle.language ?? "字幕 \(index + 1)",
+                                   rows: rows,
+                                   active: subtitle.isDefault ?? false))
         }
 
         return cards

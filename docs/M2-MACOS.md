@@ -12,7 +12,7 @@
 | UI | SwiftUI + AppKit | 视觉规范沿用 [UI-DESIGN.md](UI-DESIGN.md)，色板 / 字号 / 组件一致 |
 | 业务 | 共享核心 `core/media` | C ABI + JSON，和 Windows 是同一份 Rust 库 |
 | 视频 | libmpv render API + `NSOpenGLView` | 见 [m0-render](../apps/macos/m0-render/)；v1 只做 HDR10，无 DV |
-| 窗口 | 单窗口 + 标准标题栏 | 侧栏 216 + 内容区，和 Windows 同一个骨架；红绿灯始终可见 |
+| 窗口 | 单窗口 + 无标题栏 | 侧栏 216 + 内容区，和 Windows 同骨架；窗口按钮自己画 |
 
 `--wid` 在 macOS 上不可靠（ADR-0009），所以播放页走 render API：壳画出视频帧，
 控件直接叠在 SwiftUI 层上，不像 Windows 那样需要两个窗口。
@@ -30,7 +30,7 @@
 - 详情页：整块横版图铺满、渐变淡到页面底色、动作按钮（播放 / 重头看 / 收藏 /
   标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条）、
   演职人员（96 宽头像卡，点开看作品，可继续往下钻详情）、豆瓣链接、
-  媒体信息（视频一张卡 + 每条音轨一张卡，横向排开）
+  媒体信息（视频、每条音轨、每条字幕各一张卡，横向排开）
 - 音轨 / 字幕：播放旁按 Windows 的规则出现（音轨 > 1 条、字幕 > 0 条），
   点开是深色弹层，选完记进 `TrackPrefs`（和 Windows 一样只在内存里，
   键是这一集的 id），播放页照这份选 `aid` / `sid`
@@ -58,9 +58,11 @@
 - **横向行会吃掉纵向滚轮**：`NSScrollView` 收到滚轮就不再往外传，鼠标停在海报行上
   整页就滚不动（Windows 版的老毛病）。`WheelBridge.swift` 用本地事件监听把纵向的
   转给外层页面滚动，横向的照旧交给行自己。
-- **别用 `.hiddenTitleBar` + fullSizeContentView**：红绿灯贴在内容上，macOS 26 里
-  窗口不在前台时会淡成灰点，深色侧栏上基本看不见。现在换成标准标题栏
-  （`titlebarAppearsTransparent` 保留，标题栏呈现页面底色），红绿灯始终在。
+- **`.hiddenTitleBar` + fullSizeContentView 的系统红绿灯靠不住**：macOS 26 里窗口不在
+  前台时会淡成灰点，深色侧栏上基本看不见；换成标准标题栏又会多出一条窗口边，
+  不是满窗效果。最后的做法：保留满窗、把系统红绿灯藏掉，
+  由 `ShellView` 的 `WindowControls` 自己画三个圆点（关闭 / 最小化 / 缩放），
+  始终有颜色，悬停浮出符号。
 - **截图拍不到弹层**：popover / 菜单是独立窗口。截图时把其它可见窗口的图层
   叠上去（内容视图是翻转坐标系，要再翻一次）。
 

@@ -23,6 +23,7 @@ struct ShellView: View {
             .background(Theme.bg)
         }
         .background(Theme.bg)
+        .ignoresSafeArea(.container, edges: .top)
         .overlay(alignment: .bottom) {
             if let toast = state.toast {
                 Text(toast)
@@ -61,9 +62,14 @@ private struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 没有标题栏，三个窗口按钮自己画（系统红绿灯在这种窗型下会淡掉）。
+            WindowControls()
+                .padding(.leading, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 14)
+
             brand
                 .padding(.horizontal, 18)
-                .padding(.top, 18)
                 .padding(.bottom, 16)
 
             nav
@@ -212,5 +218,48 @@ private struct SidebarItem: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+}
+
+/// 侧栏左上角的三个窗口按钮（关闭 / 最小化 / 最大化）。
+///
+/// macOS 26 里 `.hiddenTitleBar` + 内容满窗的系统红绿灯在窗口不在前台时
+/// 会淡成灰点，深色侧栏上基本看不见，所以藏掉系统按钮，自己画一组同样的圆点：
+/// 始终有颜色，鼠标移上去浮出符号，行为和系统一致。
+struct WindowControls: View {
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            dot(color: 0xFF5F57, glyph: "xmark") { window?.performClose(nil) }
+            dot(color: 0xFEBC2E, glyph: "minus") { window?.performMiniaturize(nil) }
+            dot(color: 0x28C840, glyph: "plus") { window?.performZoom(nil) }
+        }
+        .onHover { hovering = $0 }
+    }
+
+    private var window: NSWindow? {
+        NSApp.windows.first {
+            $0.isVisible && $0.level == .normal && $0.contentView != nil
+        }
+    }
+
+    private func dot(color: UInt32, glyph: String,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Circle()
+                .fill(Color(hex: color))
+                .frame(width: 12, height: 12)
+                .overlay {
+                    if hovering {
+                        Image(systemName: glyph)
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(Color.black.opacity(0.6))
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(glyph == "xmark" ? "关闭" : (glyph == "minus" ? "最小化" : "缩放"))
     }
 }

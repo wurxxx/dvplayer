@@ -12,6 +12,7 @@ struct DvPlayerApp: App {
                 .frame(minWidth: 1080, minHeight: 680)
                 .task { await AppState.shared.start() }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1440, height: 900)
         .commands {
             // 单窗口应用，不需要「新建窗口」。
@@ -27,14 +28,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         // 起窗就抢焦点，红绿灯才是彩色的（非活动窗口是灰点，深色侧栏上看不清）。
-        DispatchQueue.main.async {
-            NSApp.windows.first(where: { $0.contentView != nil })?.makeKeyAndOrderFront(nil)
-        }
-
-        // 窗口底色统一成页面底色，别让系统在标题栏 / 圆角处漏出浅色。
+        // 窗口 chrome：没有标题栏，三个按钮浮在侧栏左上角。
+        // 系统自带的红绿灯在「没有标题栏 + 内容满窗」时靠不住（非前台会淡成灰点），
+        // 所以藏掉它们，由界面里的 WindowControls 画三个同样的圆点（见 ShellView）。
         DispatchQueue.main.async {
             for window in NSApp.windows {
+                window.backgroundColor = NSColor(srgbRed: 0x14 / 255.0,
+                                                 green: 0x14 / 255.0,
+                                                 blue: 0x19 / 255.0,
+                                                 alpha: 1)
+                window.title = "DV Player"
+                window.titlebarAppearsTransparent = true
+                window.titleVisibility = .hidden
+                window.styleMask.insert(.fullSizeContentView)
+                window.isMovableByWindowBackground = true
+
+                window.standardWindowButton(.closeButton)?.isHidden = true
+                window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+                window.standardWindowButton(.zoomButton)?.isHidden = true
             }
+
+            NSApp.windows.first(where: { $0.contentView != nil })?.makeKeyAndOrderFront(nil)
         }
 
         // 截图巡检：`DVPLAYER_SHOT=/路径/xx.png` 打开后截一张壳自己（不需要屏幕录制权限），
@@ -45,6 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let delay = Double(env["DVPLAYER_SHOT_DELAY"] ?? "") ?? 2.8
 
         Task { @MainActor in
+            // 截图时先把自己拉到前台：窗口不在前台时系统会把红绿灯画成灰点，
+            // 截出来看不出颜色。
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first(where: { $0.contentView != nil })?.makeKeyAndOrderFront(nil)
+
             try? await Task.sleep(nanoseconds: UInt64(max(0.2, delay) * 1_000_000_000))
 
             // `DVPLAYER_SCROLL=end`：截长页面底部（详情页的媒体信息在那里）。
