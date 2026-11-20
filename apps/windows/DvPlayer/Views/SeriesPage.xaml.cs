@@ -54,6 +54,9 @@ public partial class SeriesPage : Page
     /// <summary>截图巡检用：往下滚一段，把集行露出来。</summary>
     public void ScrollByForShot(double offset) => PageScroll.ScrollToVerticalOffset(offset);
 
+    /// <summary>截图巡检用：点一下集行的右箭头（验证平滑滚动动画）。</summary>
+    public void ScrollEpisodeRowForShot() => SmoothScroll.ScrollBy(EpisodeScroller, 640);
+
     /// <summary>截图巡检用：把横向行两侧的箭头强制显示（截不到鼠标悬停）。</summary>
     public void ShowRowArrowsForShot()
     {
@@ -520,23 +523,24 @@ public partial class SeriesPage : Page
 
     // —— 集横向行 ——
 
+    // 都走 SmoothScroll：和媒体库页的横向行用同一段缓出动画。
     private void OnEpisodeScrollLeft(object sender, RoutedEventArgs e) =>
-        EpisodeScroller.ScrollToHorizontalOffset(EpisodeScroller.HorizontalOffset - 640);
+        SmoothScroll.ScrollBy(EpisodeScroller, -640);
 
     private void OnEpisodeScrollRight(object sender, RoutedEventArgs e) =>
-        EpisodeScroller.ScrollToHorizontalOffset(EpisodeScroller.HorizontalOffset + 640);
+        SmoothScroll.ScrollBy(EpisodeScroller, 640);
 
     private void OnCastScrollLeft(object sender, RoutedEventArgs e) =>
-        CastScroller.ScrollToHorizontalOffset(CastScroller.HorizontalOffset - 640);
+        SmoothScroll.ScrollBy(CastScroller, -640);
 
     private void OnCastScrollRight(object sender, RoutedEventArgs e) =>
-        CastScroller.ScrollToHorizontalOffset(CastScroller.HorizontalOffset + 640);
+        SmoothScroll.ScrollBy(CastScroller, 640);
 
     private void OnMediaInfoScrollLeft(object sender, RoutedEventArgs e) =>
-        MediaInfoScroller.ScrollToHorizontalOffset(MediaInfoScroller.HorizontalOffset - 720);
+        SmoothScroll.ScrollBy(MediaInfoScroller, -720);
 
     private void OnMediaInfoScrollRight(object sender, RoutedEventArgs e) =>
-        MediaInfoScroller.ScrollToHorizontalOffset(MediaInfoScroller.HorizontalOffset + 720);
+        SmoothScroll.ScrollBy(MediaInfoScroller, 720);
 
     /// <summary>横向行不抢滚轮：转给外层纵向滚动，横向只能用箭头。</summary>
     private void OnEpisodeWheel(object sender, MouseWheelEventArgs e)

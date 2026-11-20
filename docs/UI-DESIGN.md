@@ -68,6 +68,8 @@
   颜色 `Muted`，文字 `Text`；
 - **横向行**：行内不放常驻箭头，鼠标移到这一行才在左右两侧浮出半透明圆钮
   （`RowArrowButton`）；滚轮始终交给页面纵向滚动，横向只能拖或点箭头；
+  点箭头走 `SmoothScroll.ScrollBy`（260ms 缓出），所有页面共用这一个入口，
+  不要各自直接调 `ScrollToHorizontalOffset`；
 - **图片**：海报按容器解码，不放大低分辨率图；Hero 优先横版图。
 
 ## 4. 回归

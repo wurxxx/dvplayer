@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Animation;
 
 namespace DvPlayer.Services;
 
@@ -23,6 +24,28 @@ public static class SmoothScroll
 
     public static double GetOffset(DependencyObject element) =>
         (double)element.GetValue(OffsetProperty);
+
+    /// <summary>
+    /// 按像素横向滚动一段，带缓出动画（260ms）。
+    /// 各个页面的行都用这一个入口，别各自 copy 一份。
+    /// </summary>
+    public static void ScrollBy(ScrollViewer viewer, double delta)
+    {
+        var target = Math.Clamp(viewer.HorizontalOffset + delta, 0, viewer.ScrollableWidth);
+
+        viewer.BeginAnimation(OffsetProperty, null);
+        SetOffset(viewer, viewer.HorizontalOffset);
+
+        var animation = new DoubleAnimation(
+            viewer.HorizontalOffset,
+            target,
+            TimeSpan.FromMilliseconds(260))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        viewer.BeginAnimation(OffsetProperty, animation);
+    }
 
     private static void OnOffsetChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {

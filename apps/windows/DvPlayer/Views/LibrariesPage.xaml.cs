@@ -2009,21 +2009,9 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
         }
     }
 
-    private static void Animate(ScrollViewer row, double target)
-    {
-        var clamped = Math.Clamp(target, 0, row.ScrollableWidth);
-
-        row.BeginAnimation(SmoothScroll.OffsetProperty, null);
-        SmoothScroll.SetOffset(row, row.HorizontalOffset);
-
-        var animation = new DoubleAnimation(row.HorizontalOffset, clamped,
-            TimeSpan.FromMilliseconds(260))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-        };
-
-        row.BeginAnimation(SmoothScroll.OffsetProperty, animation);
-    }
+    /// <summary>横向行统一用平滑滚动，动画实现见 <see cref="SmoothScroll"/>。</summary>
+    private static void Animate(ScrollViewer row, double target) =>
+        SmoothScroll.ScrollBy(row, target - row.HorizontalOffset);
 
     private static ScrollViewer? FindRow(object sender)
     {

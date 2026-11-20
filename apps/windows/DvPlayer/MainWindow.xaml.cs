@@ -181,6 +181,13 @@ public partial class MainWindow : FluentWindow
                     await Task.Delay(600);
                 }
 
+                if (Environment.GetCommandLineArgs().Contains("--arrow-click") &&
+                    ContentFrame.Content is SeriesPage arrowShot)
+                {
+                    arrowShot.ScrollEpisodeRowForShot();
+                    await Task.Delay(600);
+                }
+
                 if (ContentFrame.Content is SeriesPage arrowsPage &&
                     Environment.GetCommandLineArgs().Contains("--row-arrows"))
                 {
