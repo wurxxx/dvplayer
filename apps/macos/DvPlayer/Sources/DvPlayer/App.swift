@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.titlebarAppearsTransparent = true
                 window.titleVisibility = .hidden
                 window.styleMask.insert(.fullSizeContentView)
+                // 无标题栏，整窗背景可拖（系统原生拖动，双击缩放）。
+                // 搜索框是 AppKit 的 NSSearchField，整块会自己吃掉点击，
+                // 不会被当成拖窗口——点放大镜 / 内边距也能直接输入。
                 window.isMovableByWindowBackground = true
 
                 window.standardWindowButton(.closeButton)?.isHidden = true
@@ -57,6 +60,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 Self.runWindowTest()
+            }
+        }
+
+        // 自检：`DVPLAYER_CLICKTEST="x,y"`（左上角原点）在窗口上合成一次点击，
+        // 看 firstResponder 有没有变成输入框——排查「搜索框点不进去」用。
+        if let spec = ProcessInfo.processInfo.environment["DVPLAYER_CLICKTEST"] {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                Self.runClickTest(spec)
             }
         }
 
@@ -83,6 +95,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             Self.capture(to: shot)
             if env["DVPLAYER_EXIT"] == "1" {
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    /// 合成一次鼠标点击 + 几个字符，验证控件真的能拿到焦点。
+    @MainActor
+    static func runClickTest(_ spec: String) {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+              let view = window.contentView else {
+            NSLog("[ClickTest] 找不到窗口")
+            NSApp.terminate(nil)
+            return
+        }
+
+        let parts = spec.split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 2 else {
+            NSLog("[ClickTest] 坐标格式应为 x,y")
+            NSApp.terminate(nil)
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        // 参数按「左上角原点」给，AppKit 用的是左下角原点。
+        let point = NSPoint(x: parts[0], y: view.bounds.height - parts[1])
+        NSLog("[ClickTest] point=\(point) before=\(String(describing: window.firstResponder))")
+
+        // 走 app 的事件队列：直接 sendEvent 会在「拖动窗口」这种追踪循环里卡住。
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseUp ? 0 : 1) else { continue }
+            NSApp.postEvent(event, atStart: false)
+            usleep(120_000)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            NSLog("[ClickTest] after=\(String(describing: window.firstResponder))")
+
+            for char in Array("abc") {
+                guard let key = NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil,
+                    characters: String(char), charactersIgnoringModifiers: String(char),
+                    isARepeat: false, keyCode: 0) else { continue }
+                window.sendEvent(key)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let editor = window.firstResponder as? NSTextView
+                NSLog("[ClickTest] text=\(String(describing: editor?.string))")
                 NSApp.terminate(nil)
             }
         }

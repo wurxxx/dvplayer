@@ -62,7 +62,8 @@ struct BrowseView: View {
                 .padding(.horizontal, 32)
                 .padding(.top, 14)
 
-            PageScroll {
+            // 网格页要能看出「还能往下滚」，这里把纵向滚动条常显出来。
+            PageScroll(showsScroller: true) {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
                     ForEach(visible) { item in
                         PosterCard(item: item, width: 168) { onOpen(item.id) }

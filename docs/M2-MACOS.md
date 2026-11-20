@@ -28,7 +28,7 @@
   没有横版图时海报放大模糊 + 我的媒体 + 继续观看 + 每库一行）/ 搜索（只搜当前源）/
   收藏（这个源收藏的视频）
 - 网格：类别（全部 / 剧集 / 电影 / 风格 / 文件夹）、排序 + 升降序、风格标签、
-  页内搜索、分页
+  页内搜索、分页；右侧常显一条自绘滚动条（可点可拖，见下面的坑）
 - 详情页：整块横版图铺满、渐变淡到页面底色、动作按钮（播放 / 重头看 / 收藏 /
   标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条）、
   演职人员（96 宽头像卡，点开看作品，可继续往下钻详情）、豆瓣链接、
@@ -46,8 +46,17 @@
 
 - **`ScrollView` 会画一层白底**：`NSScrollView` 自己画的背景在深色主题下也不受控。
   `ScrollStyle.swift` 用一个探针 NSView 向上找到它，改 `drawsBackground = false`、
-  并隐藏滚动条。**在 `layout()` 里无条件改会触发布局死循环**（页面直接画不出来），
+  并隐藏系统滚动条。**在 `layout()` 里无条件改会触发布局死循环**（页面直接画不出来），
   只在值真的不同时写，并靠 `viewDidMoveToWindow` + 两拍延迟重试。
+- **系统滚动条不出现，不怪样式**：SwiftUI `ScrollView` 里 `documentView.bounds.height`
+  不是内容真实高度（实测 1224×38，而网格有一千多高），所以 `NSScrollView` 一直认为
+  不用滚，`hasVerticalScroller = true` / `autohidesScrollers = false` 也没用。
+  网格页的滚动条改成自绘：内容高度 / 偏移用 `GeometryReader` + `PreferenceKey` 量，
+  右侧画一条圆角滑块，点击 / 拖动时直接改 `clipView` 的滚动位置。
+- **SwiftUI `TextField` 只认自己那一小块**：搜索框的放大镜图标和左右内边距
+  （`padding` / `frame` 多出来的部分）点了没反应，`onTapGesture` 挂在背景上
+  对合成点击也不生效。搜索框统一换成 `NSSearchField`（`SearchField`），
+  整块都能点进去；子类覆写 `acceptsFirstMouse` 让窗口失焦时第一下点击也能直接输入。
 - **核心 dylib 的 install name 是 cargo 的构建目录**，运行期不存在。
   `build.sh` 打进 `.app/Contents/Frameworks` 并改成 `@rpath/...`。
 - **截图**：没有屏幕录制权限，`screencapture` 拿不到画面；`cacheDisplay` / `dataWithPDF`

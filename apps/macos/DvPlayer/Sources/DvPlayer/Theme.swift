@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // 色板与字号照 docs/UI-DESIGN.md（和 Windows 的 AppTheme.xaml 同一套）。
 enum Theme {
@@ -184,36 +185,69 @@ struct InputField: View {
 }
 
 /// 顶部搜索框（圆角深底 + 放大镜）。
+///
+/// 用 `NSSearchField` 而不是 SwiftUI 的 `TextField`：它整块（含放大镜）
+/// 都能点进去输入，而 `TextField` 只认自己那一小块，点图标 / 内边距没反应。
+/// 背景、圆角、描边还是 SwiftUI 画，视觉和别的控件一致。
 struct SearchField: View {
     let placeholder: String
     @Binding var text: String
     var width: CGFloat? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.faint)
-
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13.5))
-                .foregroundStyle(Theme.text)
-
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.faint)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .frame(width: width)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusControl))
+        SearchFieldControl(placeholder: placeholder, text: $text)
+            .frame(width: width, height: 34)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusControl))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radiusControl)
+                    .stroke(Theme.line, lineWidth: 1)
+            )
     }
+}
+
+private struct SearchFieldControl: NSViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = SearchTextField()
+        field.font = .systemFont(ofSize: 13.5)
+        field.textColor = NSColor(Theme.text)
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [
+                .foregroundColor: NSColor(Theme.faint),
+                .font: NSFont.systemFont(ofSize: 13.5),
+            ]
+        )
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.delegate = context.coordinator
+        field.stringValue = text
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.parent = self
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: SearchFieldControl
+
+        init(_ parent: SearchFieldControl) { self.parent = parent }
+
+        func controlTextDidChange(_ note: Notification) {
+            guard let field = note.object as? NSSearchField else { return }
+            parent.text = field.stringValue
+        }
+    }
+}
+
+/// 窗口不在前台时，第一次点击就直接进输入框（否则那一下只会激活窗口）。
+private final class SearchTextField: NSSearchField {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
