@@ -1,6 +1,6 @@
 # DVPlayer 项目计划
 
-> 状态：M0 完成（仅 A6 待真机）；M1（Windows Alpha）进行中。最后更新：2026-11-19。
+> 状态：M0 完成（仅 A6 待真机）；M1（Windows Alpha）收尾；M2（macOS 壳）浏览链路已通，播放页未开始。最后更新：2026-11-20。
 
 ## 1. 目标
 
@@ -38,7 +38,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 平台 | UI | 视频面 | 播放内核 | 格式能力 |
 | --- | --- | --- | --- | --- |
 | Windows | .NET 10 + WPF + WPF-UI | mpv 子 HWND（`wid`），mpv 自管 swapchain | 官方 `mpv.exe` 子进程 + JSON IPC（ADR-0009，`vo=gpu-next`） | DV P7 FEL 完整；HDR10 / HDR10+ / HLG；硬解看 GPU（已验 4K120 / 8K60） |
-| macOS | SwiftUI + AppKit | libmpv render API + NSOpenGLView | libmpv（legacy `gpu`） | v1 只做 HDR10，无 DV（render API 拿不到 gpu-next） |
+| macOS | SwiftUI + AppKit | libmpv render API + NSOpenGLView | libmpv（legacy `gpu`） | v1 只做 HDR10，无 DV（render API 拿不到 gpu-next）；进度见 [M2-MACOS.md](M2-MACOS.md) |
 | Android / TV | Kotlin + Compose for TV | SurfaceView / SurfaceTexture | Media3 (ExoPlayer) | 取决于设备解码器；DV 按机型，P7 回退 BL 并标注 |
 
 关键结论（详见 ADR）：

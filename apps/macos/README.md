@@ -1,5 +1,65 @@
 # macOS 壳
 
-计划：SwiftUI + AppKit，libmpv render API + `NSOpenGLView`，v1 只做 HDR10。
+SwiftUI + AppKit，业务逻辑全部来自共享核心 `core/media`（Rust，C ABI）。
+界面规范与 Windows 共用一套（[docs/UI-DESIGN.md](../../docs/UI-DESIGN.md)）。
 
-M0 阶段先看 [m0-render](m0-render/) —— 一个最小可运行的 Objective-C++ 验证程序。
+| 目录 | 说明 |
+| --- | --- |
+| [DvPlayer](DvPlayer/) | 正式客户端（Swift Package，`./build.sh` 打成 `.app`） |
+| [m0-render](m0-render/) | M0 的 libmpv render API 验证程序（Objective-C++），播放页落地时抄它的骨架 |
+
+## 构建与运行
+
+```bash
+# 1) 共享核心（Rust）
+cd core && ~/.cargo/bin/cargo build -p dvplayer-media --release && cd ..
+
+# 2) 客户端
+cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
+```
+
+`build.sh` 会把 `libdvplayer_media.dylib` 一起打进 `DvPlayer.app/Contents/Frameworks`，
+并把它的 install name 改成 `@rpath`（cargo 产物里记的是构建目录，运行期不存在）。
+
+依赖里现成的东西：
+
+- `core/target/release/libdvplayer_media.dylib`：媒体源适配 + 聚合 + 进度
+- `prefix/lib/libmpv.2.dylib`：M0 编的 libmpv（下一步播放页用 render API）
+
+## 现在能做什么
+
+- 「服务器」页添加 / 编辑 / 删除源（飞牛影视、Emby、Jellyfin），连上后自动跳该源的首页
+- 首页：Hero 轮播、我的媒体、继续观看、每库一行
+- 库 / 季 / 目录网格：类别、排序、风格、页内搜索、分页
+- 详情页：整块横版图 + 信息叠加、播放 / 重头看 / 收藏 / 标记看过、分季选集
+- 记录页：通用（继续观看分组 + 视频收藏）/ 观看 / 收藏
+- 搜索页：跨源搜索
+- 设置：续播、分辨率角标、自动连接；显示核心版本
+
+## 还没做
+
+- 播放页（libmpv render API + `NSOpenGLView`，浮层控件照 Windows 的风格）
+- 演职人员、媒体信息面板、音轨 / 字幕选择
+- 横向行的悬停箭头（触控板横向滑动已经可用）
+
+## 截图巡检
+
+没有屏幕录制权限也能截自己的窗口（走 CALayer 渲染）：
+
+```bash
+DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
+  ./build/DvPlayer.app/Contents/MacOS/DvPlayer
+```
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `DVPLAYER_SHOT` | 截图输出路径 |
+| `DVPLAYER_SHOT_DELAY` | 打开后等几秒再截（网络慢就给大一点），默认 2.8 |
+| `DVPLAYER_EXIT` | `1` = 截完退出，方便脚本跑 |
+| `DVPLAYER_PAGE` | 直接落在某页：`sources` / `records` / `search` / `settings` |
+| `DVPLAYER_DETAIL` | 直接打开某个条目（`<sourceId>:<itemId>`） |
+| `DVPLAYER_LIBRARY` | 直接打开某个媒体库的网格 |
+
+配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
+`scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，
+正常使用直接在「服务器」页里填。

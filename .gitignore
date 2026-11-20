@@ -23,6 +23,9 @@ apps/windows/**/obj/
 core/target/
 apps/windows/packages/
 
+# Swift
+apps/macos/DvPlayer/.build/
+
 # Python
 __pycache__/
 *.pyc
