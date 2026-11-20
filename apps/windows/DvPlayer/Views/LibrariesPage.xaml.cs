@@ -222,6 +222,9 @@ public partial class LibrariesPage : Page
                 .Select(d => d.Data!)
                 .Where(d => !string.IsNullOrWhiteSpace(d.BackdropPath) ||
                             !string.IsNullOrWhiteSpace(d.PosterPath))
+                // 有简介的排前面，横幅上的信息才不空。
+                .OrderBy(d => string.IsNullOrWhiteSpace(d.Overview) ? 1 : 0)
+                .ThenByDescending(d => d.Rating ?? 0)
                 .Take(8)
                 .Select(ToHero));
         }
@@ -240,6 +243,7 @@ public partial class LibrariesPage : Page
                     Title = first.Title,
                     Meta = first.Sub,
                     Overview = "",
+                    Chips = new List<string>(),
                     BackdropPath = first.PosterPath,
                 });
             }
@@ -293,28 +297,40 @@ public partial class LibrariesPage : Page
         Id = item.Id,
         Kind = item.Kind,
         Title = MediaText.Clean(item.Title),
-        Meta = BuildMeta(item.Rating, item.ReleaseDate, null, item.Kind),
-        Overview = item.Overview ?? "",
+        Meta = BuildMeta(item),
+        Overview = (item.Overview ?? "").Trim(),
+        Chips = new[] { item.Resolution, item.ColorRange, item.AudioType }
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v!.Trim())
+            .Distinct()
+            .ToList(),
         BackdropPath = item.BackdropPath ?? item.PosterPath,
     };
 
-    private static string BuildMeta(double? rating, string? releaseDate, int? year, string kind)
+    private static string BuildMeta(MediaDetailDto item)
     {
         var parts = new List<string>();
-        if (rating is > 0)
+        if (item.Rating is > 0)
         {
-            parts.Add($"★ {rating:0.0}");
+            parts.Add($"★ {item.Rating:0.0}");
         }
 
-        var y = !string.IsNullOrWhiteSpace(releaseDate) && releaseDate.Length >= 4
-            ? releaseDate[..4]
-            : year?.ToString();
-        if (!string.IsNullOrWhiteSpace(y))
+        var year = !string.IsNullOrWhiteSpace(item.ReleaseDate) && item.ReleaseDate.Length >= 4
+            ? item.ReleaseDate[..4]
+            : null;
+        if (!string.IsNullOrWhiteSpace(year))
         {
-            parts.Add(y);
+            parts.Add(year);
         }
 
-        parts.Add(MediaText.KindLabel(kind));
+        parts.Add(MediaText.KindLabel(item.Kind));
+
+        var episodes = item.LocalEpisodeCount is > 1 ? item.LocalEpisodeCount : item.EpisodeCount;
+        if (episodes is > 1)
+        {
+            parts.Add($"{episodes} 集");
+        }
+
         return string.Join(" · ", parts);
     }
 
@@ -334,6 +350,8 @@ public partial class LibrariesPage : Page
         HeroTitle.Text = hero.Title;
         HeroMeta.Text = hero.Meta;
         HeroOverview.Text = hero.Overview;
+        HeroChips.ItemsSource = hero.Chips;
+        HeroChips.Visibility = hero.Chips.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateDots();
 
         HeroPrev.IsEnabled = count > 1;
@@ -960,6 +978,7 @@ public partial class LibrariesPage : Page
         public string Title { get; init; } = "";
         public string Meta { get; init; } = "";
         public string Overview { get; init; } = "";
+        public List<string> Chips { get; init; } = new();
         public string? BackdropPath { get; init; }
     }
 

@@ -173,17 +173,33 @@
               </Border.Background>
             </Border>
 
-            <StackPanel VerticalAlignment="Bottom" Margin="60,0,60,54"
+            <StackPanel VerticalAlignment="Bottom" Margin="24,0,24,56"
                         HorizontalAlignment="Center" Width="800">
-              <TextBlock x:Name="HeroTitle" Text="正在读取…" FontSize="34"
+              <TextBlock x:Name="HeroTitle" Text="正在读取…" FontSize="36"
                          FontFamily="{StaticResource DisplayFont}" FontWeight="SemiBold"
                          Foreground="#FAFFFFFF" TextTrimming="CharacterEllipsis"
                          HorizontalAlignment="Center" TextAlignment="Center" />
-              <TextBlock x:Name="HeroMeta" FontSize="12.5" Foreground="#D9FFFFFF"
-                         Margin="0,10,0,0" HorizontalAlignment="Center" />
-              <TextBlock x:Name="HeroOverview" FontSize="12.5" Foreground="#B8FFFFFF"
-                         Margin="0,12,0,0" MaxHeight="57" TextTrimming="CharacterEllipsis"
-                         TextWrapping="Wrap" LineHeight="19" TextAlignment="Center" />
+              <TextBlock x:Name="HeroMeta" FontSize="13" Foreground="#D9FFFFFF"
+                         Margin="0,11,0,0" HorizontalAlignment="Center" />
+              <ItemsControl x:Name="HeroChips" Margin="0,12,0,0" HorizontalAlignment="Center"
+                            Visibility="Collapsed">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel HorizontalAlignment="Center" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Background="#2EFFFFFF" CornerRadius="5" Padding="8,3" Margin="4,0">
+                      <TextBlock Text="{Binding}" FontSize="11" Foreground="#E6FFFFFF" />
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <TextBlock x:Name="HeroOverview" FontSize="13.5" Foreground="#C2FFFFFF"
+                         Margin="0,13,0,0" MaxHeight="66" TextTrimming="CharacterEllipsis"
+                         TextWrapping="Wrap" LineHeight="22" TextAlignment="Center" />
             </StackPanel>
 
             <Button x:Name="HeroPrev" Style="{StaticResource HeroArrow}" Content="&#xE76B;"
