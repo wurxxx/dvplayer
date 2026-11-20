@@ -474,8 +474,11 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Slider">
-          <Grid VerticalAlignment="Center">
-            <Border Height="4" CornerRadius="2" Background="#33FFFFFF" />
+          <!-- Background=Transparent 让整条 18px 都能命中：只画 4px 的线的话，
+               点在线外就落到下面的浮层上，看起来像「点了没反应」 -->
+          <Grid VerticalAlignment="Stretch" Background="Transparent">
+            <Border Height="4" CornerRadius="2" Background="#33FFFFFF"
+                    VerticalAlignment="Center" />
             <Track x:Name="PART_Track">
               <Track.DecreaseRepeatButton>
                 <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">

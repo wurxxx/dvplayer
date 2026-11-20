@@ -358,6 +358,7 @@ impl EmbySource {
                     title: item.title,
                     source_id: self.id.clone(),
                     series_title: d.series_name.clone().filter(|s| !s.is_empty()),
+                    parent_id: d.parent_id.clone().filter(|s| !s.is_empty()),
                     season_number: d.parent_index_number.filter(|v| *v > 0),
                     episode_number: d.index_number.filter(|v| *v > 0),
                     poster_path: item.poster_path,

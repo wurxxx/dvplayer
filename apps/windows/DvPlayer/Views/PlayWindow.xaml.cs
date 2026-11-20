@@ -135,6 +135,12 @@ public partial class PlayWindow : Window
         Loaded += OnLoaded;
         Closing += OnClosing;
 
+        // 进度条 / 音量条的点按只能挂在根节点上：点在滑块的模板 Border 上时，
+        // 挂在 Slider 自己身上的预览事件收不到（MouseLeftButtonDown 是按元素重抛的）。
+        Root.PreviewMouseDown += OnSliderPreviewMouseDown;
+        Root.PreviewMouseMove += OnSliderPreviewMouseMove;
+        Root.PreviewMouseUp += OnSliderPreviewMouseUp;
+
         _ticker.Tick += OnTick;
         _hideTimer.Tick += OnHideTick;
         _dragTimer.Tick += OnDragTick;
@@ -1036,9 +1042,8 @@ public partial class PlayWindow : Window
         if (!_seeking)
         {
             Seek.Value = Math.Clamp(_position, 0, Seek.Maximum);
+            PositionText.Text = Format(_position);
         }
-
-        PositionText.Text = Format(_position);
     }
 
     /// <summary>
@@ -1294,11 +1299,166 @@ public partial class PlayWindow : Window
 
     private void OnSeekDragCompleted(object sender, RoutedEventArgs e)
     {
+        CommitSeek();
+    }
+
+    private void CommitSeek()
+    {
         _seeking = false;
+        _position = Seek.Value;
         if (_ipc is not null)
         {
             _ipc.Command("set_property", "time-pos", Seek.Value);
         }
+
+        UpdatePositionUi();
+    }
+
+    // —— 进度条 / 音量条：点在轨道上直接跳过去，不用非得抓住那个小圆点 ——
+
+    /// <summary>正在按着轨道拖的那个滑块（null = 没有）。</summary>
+    private Slider? _clickSlider;
+
+    private void OnSliderPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left ||
+            SliderAt(e) is not { } slider ||
+            IsThumbHit(e.OriginalSource as DependencyObject))
+        {
+            // 不在滑块上，或者点在圆点上（交给 Slider 自己的拖动）
+            return;
+        }
+
+        if (ReferenceEquals(slider, Seek) && Seek.Maximum <= 0)
+        {
+            return;
+        }
+
+        _clickSlider = slider;
+        if (ReferenceEquals(slider, Seek))
+        {
+            _seeking = true;
+        }
+
+        slider.CaptureMouse();
+        ApplySliderPoint(slider, e.GetPosition(slider).X);
+        e.Handled = true;
+    }
+
+    private void OnSliderPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_clickSlider is null)
+        {
+            return;
+        }
+
+        ApplySliderPoint(_clickSlider, e.GetPosition(_clickSlider).X);
+        e.Handled = true;
+    }
+
+    private void OnSliderPreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || _clickSlider is null)
+        {
+            return;
+        }
+
+        var slider = _clickSlider;
+        _clickSlider = null;
+        slider.ReleaseMouseCapture();
+
+        if (ReferenceEquals(slider, Seek))
+        {
+            CommitSeek();
+        }
+        else if (ReferenceEquals(slider, Volume))
+        {
+            _volumeDragging = false;
+            if (_ipc is not null)
+            {
+                _ipc.Command("set_property", "volume", (int)Math.Round(Volume.Value));
+            }
+        }
+
+        e.Handled = true;
+    }
+
+    /// <summary>把点击位置换算成滑块值；进度条拖动时只动 UI，松手才 seek。</summary>
+    private void ApplySliderPoint(Slider slider, double x)
+    {
+        var width = slider.ActualWidth;
+        if (width <= 0)
+        {
+            return;
+        }
+
+        var ratio = Math.Clamp(x / width, 0, 1);
+        slider.Value = slider.Minimum + ratio * (slider.Maximum - slider.Minimum);
+
+        if (ReferenceEquals(slider, Seek))
+        {
+            PositionText.Text = Format(slider.Value);
+        }
+        else if (ReferenceEquals(slider, Volume) && _ipc is not null)
+        {
+            // 音量便宜，按住拖也实时跟手
+            _ipc.Command("set_property", "volume", (int)Math.Round(slider.Value));
+        }
+    }
+
+    /// <summary>
+    /// 这次点击落在哪个滑块上。先看点击源（点在滑块模板里），
+    /// 再按坐标兜底：分层窗口上偶尔拿到的源是底下的浮层，这时只靠源会漏。
+    /// </summary>
+    private Slider? SliderAt(MouseEventArgs e)
+    {
+        if (FindSlider(e.OriginalSource as DependencyObject) is { } fromSource)
+        {
+            return fromSource;
+        }
+
+        foreach (var slider in new[] { Seek, Volume })
+        {
+            var point = e.GetPosition(slider);
+            if (point.X >= 0 && point.Y >= 0 &&
+                point.X <= slider.ActualWidth && point.Y <= slider.ActualHeight)
+            {
+                return slider;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>从点击源往上找滑块；不在滑块里就返回 null。</summary>
+    private static Slider? FindSlider(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is Slider slider)
+            {
+                return slider;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return null;
+    }
+
+    private static bool IsThumbHit(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is Thumb)
+            {
+                return true;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return false;
     }
 
     private void OnVolumeDragStarted(object sender, RoutedEventArgs e)
@@ -1868,7 +2028,7 @@ public partial class PlayWindow : Window
         _hideTimer.Stop();
 
         // 鼠标停在控制条上、正在拖动、或者面板开着，就别隐藏。
-        if (_drag != DragKind.None || _pressInTopBar ||
+        if (_drag != DragKind.None || _pressInTopBar || _clickSlider is not null ||
             Chrome.IsMouseOver || TopBar.IsMouseOver || RightActions.IsMouseOver ||
             _seeking || _volumeDragging ||
             EpisodePanel.Visibility == Visibility.Visible ||
@@ -1952,6 +2112,18 @@ public partial class PlayWindow : Window
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
         await Task.Delay(400);
         Trace.Write($"input test resize {width:0} -> {ActualWidth:0}");
+
+        // 4) 点进度条 70% 处：应该直接跳过去（不用抓圆点）
+        ShowChrome();
+        await Task.Delay(400);
+        var seekFrom = _position;
+        var pick = Seek.TranslatePoint(
+            new Point(Seek.ActualWidth * 0.7, Seek.ActualHeight / 2), this);
+        var spot = PointToScreen(pick);
+        SetCursorPos((int)spot.X, (int)spot.Y);
+        await Task.Delay(300);
+        Trace.Write($"input test seek {seekFrom:0} -> {_position:0} " +
+                    $"(target {Seek.Maximum * 0.7:0})");
     }
 
     private void MoveCursor(double x, double y)

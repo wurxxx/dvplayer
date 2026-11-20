@@ -574,6 +574,7 @@ public sealed record PlayRecordDto(
     string Title,
     string SourceId,
     string? SeriesTitle,
+    string? ParentId,
     int? SeasonNumber,
     int? EpisodeNumber,
     string? PosterPath,

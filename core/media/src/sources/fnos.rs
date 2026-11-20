@@ -378,6 +378,7 @@ impl FnOsSource {
                             None
                         }
                     }),
+                    parent_id: d.parent_guid.filter(|s| !s.is_empty()),
                     season_number: d.season_number.filter(|v| *v > 0),
                     episode_number: d
                         .episode_number

@@ -141,6 +141,13 @@ public partial class RecordsPage : Page
             return;
         }
 
+        // 单集记录要带上它那一季的选集，不然播放页没有「选集 / 上一集 / 下一集」。
+        if (_records.FirstOrDefault(record => record.ItemId == id) is { } record)
+        {
+            await Playlists.PlayRecordAsync(Window.GetWindow(this), record);
+            return;
+        }
+
         await PlayWindow.OpenAsync(Window.GetWindow(this), id);
     }
 
@@ -556,6 +563,13 @@ public partial class RecordsPage : Page
         if (_favorites.Any(f => f.Id == id))
         {
             NavigationService?.Navigate(new SeriesPage(id));
+            return;
+        }
+
+        // 续播：单集记录带上它所在那一季的选集。
+        if (_records.FirstOrDefault(record => record.ItemId == id) is { } record)
+        {
+            await Playlists.PlayRecordAsync(Window.GetWindow(this), record);
             return;
         }
 

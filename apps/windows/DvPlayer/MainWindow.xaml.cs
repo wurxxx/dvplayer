@@ -52,6 +52,15 @@ public partial class MainWindow : FluentWindow
             RefreshSourceStatus();
         }
 
+        // --play-record [序号]：从观看记录续播，验证选集列表真的拼出来了。
+        if (ArgumentAfter("--play-record") is { Length: > 0 } recordArg &&
+            ArgumentAfter("--play-shot") is { Length: > 0 } recordDir)
+        {
+            await CaptureRecordAsync(recordArg, recordDir);
+            Close();
+            return;
+        }
+
         // 脚本化验证用：--play <itemId>，可再加 --play-seconds N 自动退出。
         var playId = ArgumentAfter("--play");
         if (playId is not null)
@@ -216,6 +225,48 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>--play-series <剧 id>：拼一份选集列表 + 剧名，给播放页截图用。</summary>
+    /// <summary>
+    /// 续播巡检：拿观看记录里的第 N 条（默认第一条），走和「继续观看」一样的
+    /// <see cref="Playlists.PlayRecordAsync"/>，再截整屏。
+    /// </summary>
+    private async Task CaptureRecordAsync(string arg, string dir)
+    {
+        Directory.CreateDirectory(dir);
+
+        if (AppServices.Instance.Core is not { } core)
+        {
+            Trace.Write("--play-record 没有可用的源");
+            return;
+        }
+
+        var result = await Task.Run(() => core.Records()).ConfigureAwait(true);
+        var records = result.Data ?? new List<PlayRecordDto>();
+        var index = int.TryParse(arg, out var picked) && picked > 0 ? picked - 1 : 0;
+        if (index >= records.Count)
+        {
+            Trace.Write($"--play-record 记录不足 index={index} count={records.Count}");
+            return;
+        }
+
+        var record = records[index];
+        Trace.Write($"--play-record item={record.ItemId} parent={record.ParentId} " +
+                    $"series={record.SeriesTitle} s={record.SeasonNumber} e={record.EpisodeNumber}");
+
+        var player = await Playlists.PlayRecordAsync(this, record);
+        if (player is null)
+        {
+            return;
+        }
+
+        await Task.Delay(9000);
+        player.ShowChromeForShot();
+        await Task.Delay(600);
+        Trace.Write($"record player bounds {player.DescribeBounds()}");
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop-record.png"));
+        UiCapture.SaveScreen(player, Path.Combine(dir, "play-record.png"));
+        player.Close();
+    }
+
     private static async Task<(List<PlayEpisode> Items, string? Title)?> BuildShotPlaylistAsync()
     {
         var seriesId = ArgumentAfter("--play-series");
@@ -224,38 +275,8 @@ public partial class MainWindow : FluentWindow
             return null;
         }
 
-        var result = await Task.Run(() => core.Children(seriesId, 1, 200)).ConfigureAwait(true);
-        var items = (result.Data?.Items ?? new List<MediaItemDto>()).ToList();
-
-        // 剧集的直接子项是「季」，要再下一层才是集。
-        if (items.Count > 0 &&
-            (items[0].Kind is "season" or "Season" || items[0].SeasonNumber is not null))
-        {
-            var season = items.FirstOrDefault(item => item.SeasonNumber is > 0) ?? items[0];
-            var episodes = await Task.Run(() => core.Children(season.Id, 1, 500)).ConfigureAwait(true);
-            items = episodes.Data?.Items ?? new List<MediaItemDto>();
-        }
-
-        items = items.OrderBy(item => item.EpisodeNumber ?? 0).ToList();
-
-        var detail = await Task.Run(() => core.ItemDetail(seriesId)).ConfigureAwait(true);
-        var seriesTitle = detail.Ok ? MediaText.Clean(detail.Data?.Title) : null;
-
-        var rows = items
-            .Select((item, index) => new PlayEpisode(
-                item.Id,
-                item.EpisodeNumber is { } number ? $"S01E{number:00}" : $"E{index + 1:00}",
-                string.Join(" · ", new[]
-                    {
-                        item.Resolution,
-                        item.RuntimeSeconds is { } runtime ? $"{runtime / 60}:{runtime % 60:00}" : null,
-                    }
-                    .Where(part => !string.IsNullOrWhiteSpace(part))),
-                item.PosterPath,
-                MediaText.Clean(item.Title)))
-            .ToList();
-
-        return (rows, seriesTitle);
+        var loaded = await Playlists.LoadAsync(core, seriesId).ConfigureAwait(true);
+        return loaded.Items.Count == 0 ? null : loaded;
     }
 
     /// <summary>启动页来自设置；只接受导航里真实存在的项。</summary>

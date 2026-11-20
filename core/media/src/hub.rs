@@ -499,6 +499,7 @@ mod tests {
                 title: format!("{}-9", self.tag),
                 source_id: self.tag.to_string(),
                 series_title: None,
+                parent_id: None,
                 season_number: None,
                 episode_number: None,
                 poster_path: Some("/p.webp".into()),

@@ -117,6 +117,9 @@ pub struct PlayRecord {
     /// 所属剧名，单集记录用来补出「剧名 · 第 N 集」。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub series_title: Option<String>,
+    /// 单集所属那一季的 id：续播时拿它一次请求就能拼出选集列表。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub season_number: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
