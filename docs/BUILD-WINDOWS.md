@@ -107,6 +107,8 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 ```
 
 程序依次打开服务器首页 / 服务器 / 记录 / 搜索 / 设置，各渲染一张 PNG 后退出。
+详情页各阶段耗时写进 `%LOCALAPPDATA%\dvplayer\player.log`：`detailMs`（详情）、
+`childrenMs`（季列表）、`episodes first`（第一页集）、`episodes append`（后台补页）。
 走 `RenderTargetBitmap`，不依赖桌面合成，锁屏或 SSH 会话里也能用。
 
 常用参数：
@@ -136,7 +138,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--favorites` | 媒体库页 / 记录页切到「收藏」分段再截，检查空态与海报网格 |
 | `--inline-search <关键词>` | 媒体库页切到页内搜索并填好关键词 |
 | `--edit-source` | 服务器页打开第一个源的编辑表单 |
-| `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`）；传 `first` 自动挑一个有集的条目 |
+| `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`）；传 `first` 自动挑一个有集的条目。同一个 id 写两遍可以验证详情缓存（日志出现 `detail cache hit`，且不再有第二次 `episodes first`） |
 | `--series-season <n>` | 详情页默认展开第 n 季（验证季切换） |
 | `--series-scroll <像素>` | 详情页往下滚 N 像素（集行在首屏下沿之外时用） |
 | `--detail-bottom` | 详情页滚到底，看「链接 / 媒体信息」两块 |

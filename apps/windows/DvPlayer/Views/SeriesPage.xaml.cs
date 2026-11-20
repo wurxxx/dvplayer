@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -18,9 +22,29 @@ public partial class SeriesPage : Page
 {
     private const double TileWidth = 296;
 
+    /// <summary>集列表一页取多少集。飞牛 `/item/list` 基本随 page_size 线性变慢。</summary>
+    private const int EpisodePageSize = 80;
+
     private readonly string _itemId;
     private readonly int _initialSeason;
+    private readonly ObservableCollection<EpisodeTile> _episodeTiles = new();
+    private readonly HashSet<int> _episodeNumbers = new();
+    private readonly HashSet<string> _episodeIds = new();
     private MediaDetailDto? _detail;
+
+    /// <summary>当前集列表的原始条目（缓存、补页都靠它）。</summary>
+    private List<MediaItemDto> _episodeItems = new();
+
+    /// <summary>季列表的原始条目；缓存命中时用它重建季按钮。</summary>
+    private List<MediaItemDto> _seasonItems = new();
+
+    private List<PersonDto> _people = new();
+
+    /// <summary>集列表属于谁（季 id，未刮削目录就是条目自己）；切季时靠它停掉补页。</summary>
+    private string? _episodesParentId;
+
+    /// <summary>这一季服务器说有多少集（首屏可能只拿到一页）。</summary>
+    private int _episodeTotal;
 
     private string? _playTargetId;
     private int _resumeEpisode;
@@ -105,20 +129,40 @@ public partial class SeriesPage : Page
             return;
         }
 
+        // 两分钟内回到同一部片：上次的结果直接用，不再等 /item/list。
+        if (DetailCache.Get(_itemId) is { } cached)
+        {
+            Trace.Write($"detail cache hit id={_itemId}");
+            await ApplySnapshotAsync(cached).ConfigureAwait(true);
+            return;
+        }
+
         StatusText.Text = "正在读取…";
 
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         var detail = await Task.Run(() => core.ItemDetail(_itemId)).ConfigureAwait(true);
+        var detailMs = clock.ElapsedMilliseconds;
         if (detail.Ok)
         {
             _detail = detail.Data;
         }
 
-        var children = await Task.Run(() => core.Children(_itemId, 1, 500)).ConfigureAwait(true);
-        var kids = children.Ok ? children.Data?.Items ?? new List<MediaItemDto>() : new List<MediaItemDto>();
+        // 详情一到就先铺头部：背景图、标题、按钮不用等下面那两次 /item/list。
+        RenderHeader();
+        _ = LoadPeopleAsync();
+
+        clock.Restart();
+        var children = await Task.Run(() => core.Children(_itemId, 1, EpisodePageSize))
+            .ConfigureAwait(true);
+        var kids = children.Ok
+            ? children.Data?.Items ?? new List<MediaItemDto>()
+            : new List<MediaItemDto>();
+        var childTotal = children.Ok ? children.Data?.Total ?? kids.Count : kids.Count;
 
         Trace.Write($"detail id={_itemId} ok={detail.Ok} title={_detail?.Title} " +
                     $"backdrop={_detail?.BackdropPath is not null} poster={_detail?.PosterPath is not null} " +
-                    $"seasons={_detail?.SeasonCount} eps={_detail?.LocalEpisodeCount} children={kids.Count}" +
+                    $"seasons={_detail?.SeasonCount} eps={_detail?.LocalEpisodeCount} " +
+                    $"children={kids.Count}/{childTotal} detailMs={detailMs} childrenMs={clock.ElapsedMilliseconds}" +
                     (detail.Ok ? "" : $" err={detail.Error}"));
 
         var seasons = kids.Where(k => k.Kind == "season").OrderBy(k => k.SeasonNumber ?? 0).ToList();
@@ -127,16 +171,14 @@ public partial class SeriesPage : Page
         // 未刮削目录：子项就是每一集，文件数才是真实集数。
         if (seasons.Count == 0 && kids.Count > 0)
         {
-            _localEpisodeCount = kids.Count;
+            _localEpisodeCount = childTotal;
         }
-
-        RenderHeader();
-        _ = LoadPeopleAsync();
 
         if (seasons.Count > 0)
         {
             // 剧集：先季，再集。
             var start = Math.Min(_initialSeason, seasons.Count - 1);
+            _seasonItems = seasons;
 
             _seasons = seasons
                 .Select((s, i) => new SeasonChip(
@@ -152,7 +194,46 @@ public partial class SeriesPage : Page
 
         // 电影 / 未刮削目录 / 单集：子项直接就是可播的条目。
         _episodesAreFlat = true;
-        await RenderEpisodesAsync(kids).ConfigureAwait(true);
+        await RenderEpisodesAsync(kids, childTotal).ConfigureAwait(true);
+
+        if (kids.Count < childTotal)
+        {
+            _ = FillEpisodesAsync(_itemId, 2);
+        }
+    }
+
+    /// <summary>缓存命中：把上次的详情、演职、季、集直接铺回去。</summary>
+    private async Task ApplySnapshotAsync(DetailSnapshot snapshot)
+    {
+        _detail = snapshot.Detail;
+        _localSeasonCount = snapshot.LocalSeasonCount;
+        _localEpisodeCount = snapshot.LocalEpisodeCount;
+        _episodesAreFlat = snapshot.Seasons.Count == 0;
+        _episodesParentId = snapshot.SeasonId ?? _itemId;
+
+        if (snapshot.Seasons.Count > 0)
+        {
+            var start = Math.Max(0, snapshot.Seasons.FindIndex(s => s.Id == snapshot.SeasonId));
+            _seasonItems = snapshot.Seasons;
+            _seasons = snapshot.Seasons
+                .Select((s, i) => new SeasonChip(
+                    s.Id,
+                    string.IsNullOrWhiteSpace(s.Title) ? $"第 {s.SeasonNumber ?? i + 1} 季" : s.Title,
+                    i == start))
+                .ToList();
+            UpdateSeasonPicker();
+        }
+
+        RenderHeader();
+        ApplyPeople(snapshot.People);
+        await RenderEpisodesAsync(snapshot.Episodes, snapshot.EpisodesTotal).ConfigureAwait(true);
+
+        // 上次可能只补到一半（用户提前离开），接着往下补。
+        if (snapshot.Episodes.Count < snapshot.EpisodesTotal)
+        {
+            _ = FillEpisodesAsync(_episodesParentId ?? _itemId,
+                Math.Max(2, snapshot.Episodes.Count / EpisodePageSize + 1));
+        }
     }
 
     private async Task LoadSeasonAsync(string seasonId)
@@ -165,18 +246,84 @@ public partial class SeriesPage : Page
 
         _currentSeasonId = seasonId;
         StatusText.Text = "正在读取…";
-
-        var result = await Task.Run(() => core.Children(seasonId, 1, 1000)).ConfigureAwait(true);
-        var items = result.Ok ? result.Data?.Items ?? new List<MediaItemDto>() : new List<MediaItemDto>();
-
-        await RenderEpisodesAsync(items).ConfigureAwait(true);
+        await LoadEpisodesAsync(seasonId).ConfigureAwait(true);
     }
 
-    private async Task RenderEpisodesAsync(List<MediaItemDto> items)
+    /// <summary>
+    /// 集列表先取一页铺出来，剩下的后台补。
+    /// 一季七十几集时整表要等 2–3 秒，首屏只等一页。
+    /// </summary>
+    private async Task LoadEpisodesAsync(string parentId)
+    {
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        _episodesParentId = parentId;
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var result = await Task.Run(() => core.Children(parentId, 1, EpisodePageSize))
+            .ConfigureAwait(true);
+        var items = result.Ok
+            ? result.Data?.Items ?? new List<MediaItemDto>()
+            : new List<MediaItemDto>();
+        var total = result.Ok ? result.Data?.Total ?? items.Count : items.Count;
+
+        Trace.Write($"episodes first parent={parentId} ok={result.Ok} n={items.Count}/{total} " +
+                    $"ms={clock.ElapsedMilliseconds}");
+
+        await RenderEpisodesAsync(items, total).ConfigureAwait(true);
+
+        if (result.Ok && items.Count < total)
+        {
+            _ = FillEpisodesAsync(parentId, 2);
+        }
+    }
+
+    /// <summary>后台按页把剩下的集补进来；切了季就停。</summary>
+    private async Task FillEpisodesAsync(string parentId, int page)
+    {
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        for (var next = page; _episodesParentId == parentId; next++)
+        {
+            var result = await Task.Run(() => core.Children(parentId, next, EpisodePageSize))
+                .ConfigureAwait(true);
+            var items = result.Ok
+                ? result.Data?.Items ?? new List<MediaItemDto>()
+                : new List<MediaItemDto>();
+
+            if (_episodesParentId != parentId || items.Count == 0)
+            {
+                return;
+            }
+
+            if (result.Ok && result.Data is { } data && data.Total > _episodeTotal)
+            {
+                _episodeTotal = data.Total;
+            }
+
+            await AppendEpisodesAsync(items).ConfigureAwait(true);
+            SaveCache();
+
+            if (items.Count < EpisodePageSize || _episodeItems.Count >= _episodeTotal)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task RenderEpisodesAsync(List<MediaItemDto> items, int total)
     {
         try
         {
-            await RenderEpisodesCoreAsync(items).ConfigureAwait(true);
+            await RenderEpisodesCoreAsync(items, total).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -185,46 +332,28 @@ public partial class SeriesPage : Page
         }
     }
 
-    private async Task RenderEpisodesCoreAsync(List<MediaItemDto> items)
+    private async Task RenderEpisodesCoreAsync(List<MediaItemDto> items, int total)
     {
-        var ordered = items
-            .Select((item, index) => (item, number: EpisodeNumberOf(item) ?? index + 1))
-            .OrderBy(pair => pair.number)
-            .ToList();
+        _episodeItems = items.ToList();
+        _episodeTotal = Math.Max(total, _episodeItems.Count);
+        _episodeTiles.Clear();
+        _episodeNumbers.Clear();
+        _episodeIds.Clear();
+
+        var fresh = AddEpisodeTiles(_episodeItems);
+        EpisodeList.ItemsSource = _episodeTiles;
+        EpisodeList.Visibility = _episodeTiles.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         // 有看到一半的集就接着看，否则从第 1 集开始。
-        var resume = ordered.FirstOrDefault(pair => pair.item.Progress is > 0.01 and < 0.99);
+        var resume = _episodeTiles.FirstOrDefault(t => t.Progress is > 0.01 and < 0.99);
 
-        var tiles = ordered.Select(pair => new EpisodeTile
+        if (_episodeTiles.Count > 0)
         {
-            Id = pair.item.Id,
-            Title = EpisodeTitle(pair.item, pair.number),
-            Badge = $"E{pair.number:00}",
-            Duration = FormatDuration(pair.item.RuntimeSeconds),
-            Resolution = pair.item.Resolution,
-            PosterPath = pair.item.PosterPath,
-            Initial = Palette.InitialOf(pair.item.Title ?? ""),
-            ProgressWidth = Math.Max(0, TileWidth * Math.Clamp(pair.item.Progress, 0, 1)),
-            ProgressVisibility = pair.item.Progress > 0.01
-                ? Visibility.Visible
-                : Visibility.Collapsed,
-        }).ToList();
-
-        foreach (var tile in tiles)
-        {
-            tile.UseGradient(tile.Id + tile.Title);
-        }
-
-        EpisodeList.ItemsSource = tiles;
-        EpisodeList.Visibility = tiles.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-
-        if (tiles.Count > 0)
-        {
-            _playTargetId = resume.item?.Id ?? tiles[0].Id;
-            _resumeEpisode = resume.item is null ? 0 : EpisodeNumberOf(resume.item) ?? 1;
+            _playTargetId = resume?.Id ?? _episodeTiles[0].Id;
+            _resumeEpisode = resume?.Number ?? 0;
 
             EpisodeSection.Visibility = Visibility.Visible;
-            EpisodeCountText.Text = $"{tiles.Count} 集";
+            EpisodeCountText.Text = $"{_episodeTotal} 集";
 
             // 未刮削目录没有季，按钮就退化成一行静态标题。
             if (_seasons.Count == 0)
@@ -250,8 +379,105 @@ public partial class SeriesPage : Page
 
         LinksSection.Visibility = Visibility.Visible;
 
-        await Task.WhenAll(tiles.Select(t => t.ApplyPosterAsync(t.PosterPath)));
+        await Task.WhenAll(fresh.Select(t => t.ApplyPosterAsync(t.PosterPath)));
         _ = LoadMediaInfoAsync();
+        SaveCache();
+    }
+
+    /// <summary>按集号插到正确位置；服务器漏集号时用没被占用的最小号码补。</summary>
+    private List<EpisodeTile> AddEpisodeTiles(List<MediaItemDto> items)
+    {
+        var fresh = new List<EpisodeTile>();
+
+        foreach (var item in items)
+        {
+            if (!_episodeIds.Add(item.Id))
+            {
+                continue;
+            }
+
+            var number = EpisodeNumberOf(item);
+            if (number is not > 0)
+            {
+                var candidate = 1;
+                while (_episodeNumbers.Contains(candidate))
+                {
+                    candidate++;
+                }
+                number = candidate;
+            }
+
+            var value = number.Value;
+            _episodeNumbers.Add(value);
+
+            var tile = new EpisodeTile
+            {
+                Number = value,
+                Id = item.Id,
+                Title = EpisodeTitle(item, value),
+                Badge = $"E{value:00}",
+                Duration = FormatDuration(item.RuntimeSeconds),
+                Resolution = item.Resolution,
+                PosterPath = item.PosterPath,
+                Initial = Palette.InitialOf(item.Title ?? ""),
+                Progress = item.Progress,
+                ProgressWidth = Math.Max(0, TileWidth * Math.Clamp(item.Progress, 0, 1)),
+                ProgressVisibility = item.Progress > 0.01 ? Visibility.Visible : Visibility.Collapsed,
+            };
+            tile.UseGradient(tile.Id + tile.Title);
+
+            var index = _episodeTiles.Count;
+            while (index > 0 && _episodeTiles[index - 1].Number > value)
+            {
+                index--;
+            }
+            _episodeTiles.Insert(index, tile);
+            fresh.Add(tile);
+        }
+
+        return fresh;
+    }
+
+    /// <summary>后台补的一页：只加新卡片，不整表重建。</summary>
+    private async Task AppendEpisodesAsync(List<MediaItemDto> items)
+    {
+        _episodeItems.AddRange(items);
+        _episodeTotal = Math.Max(_episodeTotal, _episodeItems.Count);
+
+        var fresh = AddEpisodeTiles(items);
+        EpisodeCountText.Text = $"{_episodeTotal} 集";
+        Trace.Write($"episodes append n={fresh.Count} rows={_episodeTiles.Count}/{_episodeTotal}");
+
+        // 续播点可能正好落在后面这页里。
+        var resume = _episodeTiles.FirstOrDefault(t => t.Progress is > 0.01 and < 0.99);
+        if (resume is not null)
+        {
+            _playTargetId = resume.Id;
+            _resumeEpisode = resume.Number;
+            UpdatePlayButton();
+        }
+
+        await Task.WhenAll(fresh.Select(t => t.ApplyPosterAsync(t.PosterPath)));
+    }
+
+    /// <summary>把当前状态写回缓存；收藏 / 标记看过会主动 drop。</summary>
+    private void SaveCache()
+    {
+        if (_detail is null)
+        {
+            return;
+        }
+
+        DetailCache.Put(_itemId, new DetailSnapshot(
+            _detail,
+            _people.ToList(),
+            _seasonItems.ToList(),
+            _currentSeasonId,
+            _episodeItems.ToList(),
+            _episodeTotal,
+            _localSeasonCount,
+            _localEpisodeCount,
+            DateTime.UtcNow));
     }
 
     private void RenderHeader()
@@ -463,7 +689,7 @@ public partial class SeriesPage : Page
     /// <summary>当前这集的播放列表，播放页右侧的「选集」用它。</summary>
     private List<PlayEpisode> BuildPlaylist()
     {
-        if (EpisodeList.ItemsSource is not List<EpisodeTile> tiles || tiles.Count == 0)
+        if (EpisodeList.ItemsSource is not IList<EpisodeTile> tiles || tiles.Count == 0)
         {
             return new List<PlayEpisode>();
         }
@@ -497,6 +723,7 @@ public partial class SeriesPage : Page
     {
         _watched = !_watched;
         UpdateStateButtons();
+        DetailCache.Drop(_itemId);
 
         if (AppServices.Instance.Core is { } core)
         {
@@ -508,6 +735,7 @@ public partial class SeriesPage : Page
     {
         _favorite = !_favorite;
         UpdateStateButtons();
+        DetailCache.Drop(_itemId);
 
         if (AppServices.Instance.Core is { } core)
         {
@@ -817,6 +1045,14 @@ public partial class SeriesPage : Page
         var people = result.Ok ? result.Data ?? new List<PersonDto>() : new List<PersonDto>();
         Trace.Write($"people id={_itemId} ok={result.Ok} n={people.Count} err={result.Error}");
 
+        ApplyPeople(people);
+    }
+
+    /// <summary>演职人员上屏；缓存命中时也走这里，网络请求只在上面的方法里。</summary>
+    private void ApplyPeople(List<PersonDto> people)
+    {
+        _people = people;
+
         if (people.Count == 0)
         {
             CastSection.Visibility = Visibility.Collapsed;
@@ -841,7 +1077,7 @@ public partial class SeriesPage : Page
         CastList.ItemsSource = cards;
         CastSection.Visibility = Visibility.Visible;
 
-        await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+        _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
     // —— 媒体信息 ——
@@ -862,14 +1098,19 @@ public partial class SeriesPage : Page
             {
                 // 媒体信息（轨道清单）和播放源（续播点）一起取：详情页的按钮
                 // 既要列出音轨 / 字幕，也要在播放键上显示「上次看到哪」。
-                var bundle = await Task.Run(() => (Info: core.MediaInfo(id), Play: core.PlaySource(id)))
-                    .ConfigureAwait(true);
+                // 两个请求互不依赖，并发发出去，不用等前一个回来再发后一个。
+                var infoTask = Task.Run(() => core.MediaInfo(id));
+                var playTask = Task.Run(() => core.PlaySource(id));
+                await Task.WhenAll(infoTask, playTask).ConfigureAwait(true);
 
-                info = bundle.Info.Ok ? bundle.Info.Data : null;
+                var infoResult = infoTask.Result;
+                var playResult = playTask.Result;
+
+                info = infoResult.Ok ? infoResult.Data : null;
                 _mediaInfoCache[id] = info;
-                _resumeCache[id] = bundle.Play.Ok ? bundle.Play.Data?.PositionSeconds ?? 0 : 0;
+                _resumeCache[id] = playResult.Ok ? playResult.Data?.PositionSeconds ?? 0 : 0;
 
-                Trace.Write($"media info id={id} ok={bundle.Info.Ok} err={bundle.Info.Error} " +
+                Trace.Write($"media info id={id} ok={infoResult.Ok} err={infoResult.Error} " +
                             $"video={info?.Video is not null} audios={info?.Audios.Count} " +
                             $"subs={info?.Subtitles.Count} resume={_resumeCache[id]}");
             }
@@ -1142,6 +1383,7 @@ public partial class SeriesPage : Page
 
     private sealed class EpisodeTile : CardVisual
     {
+        public int Number { get; init; }
         public string Id { get; init; } = "";
         public string Title { get; init; } = "";
         public string Badge { get; init; } = "";
@@ -1149,6 +1391,7 @@ public partial class SeriesPage : Page
         public string? Resolution { get; init; }
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
+        public double Progress { get; init; }
         public double ProgressWidth { get; init; }
         public Visibility ProgressVisibility { get; init; } = Visibility.Collapsed;
     }
