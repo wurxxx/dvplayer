@@ -34,34 +34,44 @@
     <!-- 播放器浮层：跟着鼠标显隐 -->
     <Grid x:Name="Overlay" Background="Transparent">
 
-      <!-- 顶部：片名居中，右上角是缓存速度和静音状态 -->
-      <Grid x:Name="TopBar" VerticalAlignment="Top" Height="64" Opacity="1">
-        <Border Height="130" VerticalAlignment="Top" IsHitTestVisible="False">
+      <!-- 顶部：片名居中，右边是缓存速度 / 静音 / 窗口按钮。整条压在画面上，不要实底 -->
+      <Grid x:Name="TopBar" VerticalAlignment="Top" Height="48" Opacity="1">
+        <Border Height="100" VerticalAlignment="Top" IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-              <GradientStop Color="#B3000000" Offset="0" />
+              <GradientStop Color="#99000000" Offset="0" />
               <GradientStop Color="#00000000" Offset="1" />
             </LinearGradientBrush>
           </Border.Background>
         </Border>
 
-        <TextBlock x:Name="TopTitle" HorizontalAlignment="Center" VerticalAlignment="Top"
-                   Margin="0,18,0,0" FontSize="15" FontWeight="SemiBold"
-                   Foreground="#F2FFFFFF" TextTrimming="CharacterEllipsis" MaxWidth="620" />
+        <TextBlock x:Name="TopTitle" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Margin="0,0,0,1" FontSize="14" FontWeight="SemiBold"
+                   Foreground="#F2FFFFFF" TextTrimming="CharacterEllipsis" MaxWidth="560" />
 
-        <Button x:Name="BackButton" Style="{StaticResource PlayerCircleButton}"
-                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="22,16,0,0"
-                Width="38" Height="38" Click="OnCloseClick" ToolTip="返回（Esc）">
-          <TextBlock Text="&#xE72B;" FontFamily="{StaticResource IconFont}" FontSize="15"
-                     Foreground="#E6FFFFFF" />
-        </Button>
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
-                    Margin="0,16,22,0">
-          <TextBlock x:Name="SpeedText" FontSize="12.5" Foreground="#E6FFFFFF"
-                     VerticalAlignment="Center" Margin="0,0,14,0" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Margin="0,0,12,0">
+          <TextBlock x:Name="SpeedText" FontSize="12" Foreground="#D9FFFFFF"
+                     VerticalAlignment="Center" Margin="0,0,12,0" />
           <TextBlock x:Name="TopMuteGlyph" Text="&#xE74F;" FontFamily="{StaticResource IconFont}"
-                     FontSize="15" Foreground="#E6FFFFFF" Visibility="Collapsed" />
+                     FontSize="14" Foreground="#E6FFFFFF" VerticalAlignment="Center"
+                     Margin="0,0,10,0" Visibility="Collapsed" />
+
+          <Button x:Name="MinimizeButton" Style="{StaticResource PlayerCaptionButton}"
+                  Click="OnMinimizeClick" ToolTip="最小化">
+            <TextBlock Text="&#xE921;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                       Foreground="#F2FFFFFF" />
+          </Button>
+          <Button x:Name="MaximizeButton" Style="{StaticResource PlayerCaptionButton}"
+                  Click="OnMaximizeClick" ToolTip="最大化">
+            <TextBlock x:Name="MaximizeGlyph" Text="&#xE922;" FontFamily="{StaticResource IconFont}"
+                       FontSize="12" Foreground="#F2FFFFFF" />
+          </Button>
+          <Button x:Name="CloseCaptionButton" Style="{StaticResource PlayerCloseButton}"
+                  Click="OnCloseClick" ToolTip="关闭（Esc）">
+            <TextBlock Text="&#xE8BB;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                       Foreground="#F2FFFFFF" />
+          </Button>
         </StackPanel>
       </Grid>
 

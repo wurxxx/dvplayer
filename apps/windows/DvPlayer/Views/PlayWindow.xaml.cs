@@ -79,7 +79,10 @@ public partial class PlayWindow : Window
     private PlayerSurfaceWindow? _surface;
 
     private bool _fullscreen;
+    private bool _maximized;
     private Rect _windowedBounds;
+    private Rect _maximizedFrom;
+    private Window? _ownerWindow;
     private bool _windowPlaced;
 
     private Point _pressPoint;
@@ -90,7 +93,7 @@ public partial class PlayWindow : Window
     private DragKind _drag = DragKind.None;
     private Point _dragOrigin;
     private Rect _dragBounds;
-    private const double TopBarHeight = 64;
+    private const double TopBarHeight = 48;
 
     private enum DragKind
     {
@@ -242,19 +245,61 @@ public partial class PlayWindow : Window
         _surface.Title = Title;
         _surface.Show();
         _surface.Activated += OnSurfaceActivated;
+        _surface.StateChanged += OnSurfaceStateChanged;
         Owner = _surface;
+
+        // 主窗口最小化时，视频层会被系统一起收起，但分层浮层不会 —— 得自己盯着。
+        _ownerWindow = _surface.Owner;
+        if (_ownerWindow is not null)
+        {
+            _ownerWindow.StateChanged += OnSurfaceStateChanged;
+        }
+
+        HealWindowPair();
+    }
+
+    private void OnSurfaceStateChanged(object? sender, EventArgs e) => HealWindowPair();
+
+    /// <summary>
+    /// 视频层和浮层必须同进同出：视频层收进任务栏时浮层也要藏起来，
+    /// 视频层回来时浮层再跟着显示。否则最小化后桌面上只剩一条控制条。
+    /// </summary>
+    private void HealWindowPair()
+    {
+        if (_surface is null)
+        {
+            return;
+        }
+
+        var ownerMinimized = _ownerWindow is { WindowState: WindowState.Minimized };
+        var surfaceGone = _surface.WindowState == WindowState.Minimized || !_surface.IsVisible;
+
+        if (ownerMinimized || surfaceGone)
+        {
+            if (IsVisible)
+            {
+                Hide();
+            }
+
+            return;
+        }
+
+        if (!IsVisible)
+        {
+            Show();
+            SyncSurface();
+            Activate();
+            ShowChrome();
+        }
     }
 
     /// <summary>从任务栏点回来时激活的是视频窗，把键盘焦点还给浮层。</summary>
     private void OnSurfaceActivated(object? sender, EventArgs e)
     {
-        if (IsActive)
-        {
-            return;
-        }
-
         Dispatcher.BeginInvoke(() =>
         {
+            HealWindowPair();
+
             if (IsVisible && !IsActive)
             {
                 Activate();
@@ -385,6 +430,76 @@ public partial class PlayWindow : Window
         ShowChrome();
     }
 
+    private void OnMinimizeClick(object sender, RoutedEventArgs e)
+    {
+        if (_surface is null)
+        {
+            WindowState = WindowState.Minimized;
+            return;
+        }
+
+        // 两层一起收：只收视频层的话，透明浮层会留在桌面上飘着。
+        Hide();
+        _surface.WindowState = WindowState.Minimized;
+    }
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e) => ToggleMaximize();
+
+    /// <summary>最大化 = 铺满工作区（不含任务栏），和全屏不是一回事。</summary>
+    private void ToggleMaximize()
+    {
+        if (_fullscreen)
+        {
+            ExitFullscreen();
+            return;
+        }
+
+        if (_maximized)
+        {
+            _maximized = false;
+            ApplyBounds(_maximizedFrom.Width > 320 ? _maximizedFrom : MonitorLessRect());
+        }
+        else
+        {
+            _maximizedFrom = new Rect(Left, Top, Width, Height);
+            _maximized = true;
+            ApplyBounds(WorkAreaBounds());
+        }
+
+        UpdateMaximizeGlyph();
+        ShowChrome();
+    }
+
+    private void UpdateMaximizeGlyph()
+    {
+        // E922 = 最大化，E923 = 还原。
+        MaximizeGlyph.Text = _maximized || _fullscreen ? "\uE923" : "\uE922";
+        MaximizeButton.ToolTip = _maximized || _fullscreen ? "还原窗口" : "最大化";
+    }
+
+    /// <summary>当前显示器的工作区（去掉任务栏），换算成 DIP。</summary>
+    private Rect WorkAreaBounds()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        var monitor = MonitorFromWindow(handle == IntPtr.Zero ? IntPtr.Zero : handle, 2);
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+        {
+            return new Rect(0, 0, SystemParameters.WorkArea.Width, SystemParameters.WorkArea.Height);
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX <= 0 ? 1 : dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY <= 0 ? 1 : dpi.DpiScaleY;
+
+        return new Rect(
+            info.rcWork.Left / scaleX,
+            info.rcWork.Top / scaleY,
+            (info.rcWork.Right - info.rcWork.Left) / scaleX,
+            (info.rcWork.Bottom - info.rcWork.Top) / scaleY);
+    }
+
     private void UpdateFullscreenGlyph()
     {
         // E740 = 进全屏，E73F = 退出全屏。
@@ -392,6 +507,8 @@ public partial class PlayWindow : Window
         FullscreenButton.ToolTip = _fullscreen
             ? "退出全屏（F11 / 双击画面 / Esc）"
             : "全屏（F11 / 双击画面）";
+
+        UpdateMaximizeGlyph();
     }
 
     private Rect MonitorLessRect()
@@ -932,6 +1049,8 @@ public partial class PlayWindow : Window
 
     private void OnTick(object? sender, EventArgs e)
     {
+        HealWindowPair();
+
         if (++_sinceReport < ReportEverySeconds || _position <= 0)
         {
             return;
@@ -1601,9 +1720,16 @@ public partial class PlayWindow : Window
         _ipc?.Dispose();
         _mpv.Dispose();
 
+        if (_ownerWindow is not null)
+        {
+            _ownerWindow.StateChanged -= OnSurfaceStateChanged;
+            _ownerWindow = null;
+        }
+
         if (_surface is not null)
         {
             _surface.Activated -= OnSurfaceActivated;
+            _surface.StateChanged -= OnSurfaceStateChanged;
             _surface.Close();
             _surface = null;
         }
@@ -1855,6 +1981,56 @@ public partial class PlayWindow : Window
 
     [DllImport("user32.dll")]
     private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, int extra);
+
+    /// <summary>
+    /// 巡检用：最小化再还原，确认浮层不会留在桌面上；顺带验证主窗口最小化时也一样。
+    /// 每一步都从桌面抓图，只有 Session 2 里才有真实画面。
+    /// </summary>
+    public async Task RunMinimizeTestAsync(string dir)
+    {
+        // 1) 真点一下右上角的最小化按钮（验证它没被顶栏拖动吃掉）
+        ShowChrome();
+        await Task.Delay(500);
+        var button = MinimizeButton.TranslatePoint(
+            new Point(MinimizeButton.ActualWidth / 2, MinimizeButton.ActualHeight / 2), this);
+        var target = PointToScreen(button);
+        SetCursorPos((int)target.X, (int)target.Y);
+        await Task.Delay(250);
+        Click();
+        await Task.Delay(1800);
+        Trace.Write($"min test after player minimize visible={IsVisible} " + DescribeBounds());
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop-min.png"));
+
+        // 2) 从任务栏还原
+        if (_surface is not null)
+        {
+            _surface.WindowState = WindowState.Normal;
+        }
+
+        await Task.Delay(1800);
+        Trace.Write("min test after restore " + DescribeBounds());
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop-restore.png"));
+
+        // 3) 最大化铺满工作区，再还原
+        ToggleMaximize();
+        await Task.Delay(1200);
+        Trace.Write("min test after maximize " + DescribeBounds());
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop-max.png"));
+        ToggleMaximize();
+        await Task.Delay(1200);
+
+        // 4) 主窗口最小化（用户实际遇到的那种）：视频层会被系统收起，
+        //    分层浮层不会，得靠自愈把它藏掉。
+        if (_ownerWindow is not null)
+        {
+            _ownerWindow.WindowState = WindowState.Minimized;
+            await Task.Delay(1800);
+            UiCapture.SaveDesktop(Path.Combine(dir, "desktop-main-min.png"));
+            _ownerWindow.WindowState = WindowState.Normal;
+            await Task.Delay(1800);
+            UiCapture.SaveDesktop(Path.Combine(dir, "desktop-main-restore.png"));
+        }
+    }
 
     /// <summary>截图巡检用：打一行几何信息，排查两个窗口没对齐。</summary>
     public string DescribeBounds()

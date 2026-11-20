@@ -373,6 +373,55 @@
     </Setter>
   </Style>
 
+  <!-- 播放页右上角的窗口按钮（最小化 / 最大化 / 关闭）：比圆按钮紧凑，关闭悬停红底 -->
+  <Style x:Key="PlayerCaptionButton" TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Width" Value="30" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Margin" Value="0,0,4,0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Foreground" Value="#F2FFFFFF" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Bd" CornerRadius="5" Background="Transparent">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#2EFFFFFF" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#44FFFFFF" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 关闭按钮：悬停是 Windows 的红色 -->
+  <Style x:Key="PlayerCloseButton" TargetType="Button" BasedOn="{StaticResource PlayerCaptionButton}">
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Bd" CornerRadius="5" Background="Transparent">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#E81123" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#B30D19" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <!-- 音量条：比进度条细，拇指也小一点，免得抢视线 -->
   <Style x:Key="VolumeBar" TargetType="Slider">
     <Setter Property="FocusVisualStyle" Value="{x:Null}" />

@@ -123,6 +123,15 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // --play-min：最小化 / 还原，验证浮层不会飘在桌面上。
+        if (ArgumentAfter("--play-min") is not null)
+        {
+            await Task.Delay(9000);
+            await player.RunMinimizeTestAsync(dir);
+            player.Close();
+            return;
+        }
+
         // 打开后先看一眼：控制条应该立即出现（3 秒无操作才会自动隐藏）。
         await Task.Delay(1500);
         UiCapture.SaveDesktop(Path.Combine(dir, "desktop-open.png"));
