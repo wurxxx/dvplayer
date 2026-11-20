@@ -812,6 +812,7 @@ public partial class SeriesPage : Page
         {
             TrackPrefs.SetSubtitle(key, value);
             UpdateTrackButtons(_tracks);
+            RenderMediaInfo(_tracks);
         });
     }
 
@@ -1182,9 +1183,85 @@ public partial class SeriesPage : Page
             MediaInfoPanel.Children.Add(BuildInfoCard("\uE8D6", "音频", rows, audio.IsDefault));
         }
 
+        // 每条字幕一张卡，当前选中的打勾（和详情页字幕按钮同一套解析规则）。
+        var subtitles = info?.Subtitles ?? new List<SubtitleInfoDto>();
+        if (subtitles.Count > 0)
+        {
+            var current = TrackPrefs.ResolveSubtitle(_playTargetId ?? _itemId, subtitles);
+
+            for (var i = 0; i < subtitles.Count; i++)
+            {
+                var subtitle = subtitles[i];
+                var rows = new List<(string Key, string Value)>
+                {
+                    ("语言", subtitle.Language ?? "--"),
+                    ("标题", subtitle.Title ?? ""),
+                    ("编码", subtitle.Codec ?? ""),
+                    ("格式", subtitle.Format ?? ""),
+                    ("图形字幕", subtitle.IsBitmap ? "是" : "否"),
+                    ("外部", subtitle.IsExternal ? "是" : "否"),
+                    ("默认", subtitle.IsDefault ? "是" : "否"),
+                };
+
+                MediaInfoPanel.Children.Add(BuildInfoCard(
+                    string.Empty,
+                    TrackPrefs.SubtitleName(subtitle),
+                    rows,
+                    i == current,
+                    SubtitleGlyph()));
+            }
+        }
+
+        MediaInfoTitle.Text = MediaInfoPanel.Children.Count > 0
+            ? $"媒体信息 · {MediaInfoPanel.Children.Count} 条轨道"
+            : "媒体信息";
+
         MediaInfoSection.Visibility = MediaInfoPanel.Children.Count > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+    }
+
+    /// <summary>字幕卡的小图标：和动作按钮一样画「方框 + 两条字幕条」。</summary>
+    private FrameworkElement SubtitleGlyph()
+    {
+        var stroke = (Brush)FindResource("MutedBrush");
+        var canvas = new Canvas { Width = 20, Height = 18 };
+
+        var frame = new System.Windows.Shapes.Rectangle
+        {
+            Width = 18,
+            Height = 14,
+            RadiusX = 3.5,
+            RadiusY = 3.5,
+            Stroke = stroke,
+            StrokeThickness = 1.6,
+        };
+        Canvas.SetLeft(frame, 1);
+        Canvas.SetTop(frame, 2);
+        canvas.Children.Add(frame);
+
+        for (var i = 0; i < 2; i++)
+        {
+            var bar = new System.Windows.Shapes.Rectangle
+            {
+                Width = i == 0 ? 6.4 : 3.4,
+                Height = 3.2,
+                RadiusX = 1.2,
+                RadiusY = 1.2,
+                Fill = stroke,
+            };
+            Canvas.SetLeft(bar, i == 0 ? 4.2 : 12.4);
+            Canvas.SetTop(bar, 10);
+            canvas.Children.Add(bar);
+        }
+
+        return new Viewbox
+        {
+            Width = 17,
+            Height = 15,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = canvas,
+        };
     }
 
     /// <summary>一张「视频 / 音频」卡：标题 + 键值行，空值整行跳过。</summary>
@@ -1192,20 +1269,30 @@ public partial class SeriesPage : Page
         string icon,
         string title,
         IEnumerable<(string Key, string Value)> rows,
-        bool active = false)
+        bool active = false,
+        FrameworkElement? iconVisual = null)
     {
         var body = new StackPanel();
 
         var header = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
-        header.Children.Add(new TextBlock
+
+        if (iconVisual is not null)
         {
-            Text = icon,
-            FontFamily = (FontFamily)FindResource("IconFont"),
-            FontSize = 14,
-            Foreground = (Brush)FindResource("MutedBrush"),
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0),
-        });
+            iconVisual.Margin = new Thickness(0, 0, 10, 0);
+            header.Children.Add(iconVisual);
+        }
+        else
+        {
+            header.Children.Add(new TextBlock
+            {
+                Text = icon,
+                FontFamily = (FontFamily)FindResource("IconFont"),
+                FontSize = 14,
+                Foreground = (Brush)FindResource("MutedBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0),
+            });
+        }
         header.Children.Add(new TextBlock
         {
             Text = title,

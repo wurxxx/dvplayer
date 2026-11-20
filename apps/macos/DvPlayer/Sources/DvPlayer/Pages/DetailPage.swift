@@ -432,9 +432,9 @@ struct DetailPage: View {
 
             cards.append(TrackCard(id: "subtitle-\(index)",
                                    icon: "captions.bubble",
-                                   title: subtitle.title ?? subtitle.language ?? "字幕 \(index + 1)",
+                                   title: subtitleName(subtitle),
                                    rows: rows,
-                                   active: subtitle.isDefault ?? false))
+                                   active: effectiveSubtitleIndex(info) == index))
         }
 
         return cards

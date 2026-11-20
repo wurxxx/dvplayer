@@ -355,7 +355,7 @@
 
       <!-- 媒体信息：视频、音频各一张卡，横向排开 -->
       <StackPanel x:Name="MediaInfoSection" Margin="40,32,40,40" Visibility="Collapsed">
-        <TextBlock Text="媒体信息" Style="{StaticResource SectionTitle}" />
+        <TextBlock x:Name="MediaInfoTitle" Text="媒体信息" Style="{StaticResource SectionTitle}" />
 
         <Grid Margin="0,14,0,0">
           <controls:HorizontalRow x:Name="MediaInfoScroller">
