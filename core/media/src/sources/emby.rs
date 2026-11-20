@@ -700,6 +700,48 @@ impl EmbySource {
     fn post_empty(&self, path: &str, body: &serde_json::Value) -> Result<()> {
         self.send(Method::POST, path, &[], Some(body)).map(|_| ())
     }
+
+    /// 收藏 / 取消收藏。
+    pub fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
+        let user = self.user_id()?;
+        let method = if favorite { Method::POST } else { Method::DELETE };
+        self.send(
+            method,
+            &format!("/Users/{user}/FavoriteItems/{item_id}"),
+            &[],
+            None,
+        )
+        .map(|_| ())
+    }
+
+    /// 标记已观看 / 未观看。
+    pub fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {
+        let user = self.user_id()?;
+        let method = if watched { Method::POST } else { Method::DELETE };
+        self.send(
+            method,
+            &format!("/Users/{user}/PlayedItems/{item_id}"),
+            &[],
+            None,
+        )
+        .map(|_| ())
+    }
+
+    /// 移除观看记录：只清续播点，不动已看标记。
+    pub fn remove_play_record(&self, item_id: &str) -> Result<()> {
+        let user = self.user_id()?;
+        let body = serde_json::json!({
+            "PlaybackPositionTicks": 0,
+            "Played": false,
+        });
+        self.send(
+            Method::POST,
+            &format!("/Users/{user}/Items/{item_id}/UserData"),
+            &[],
+            Some(&body),
+        )
+        .map(|_| ())
+    }
 }
 
 impl MediaSource for EmbySource {
@@ -757,6 +799,18 @@ impl MediaSource for EmbySource {
 
     fn report_progress(&self, item_id: &str, position: i64, duration: i64) -> Result<()> {
         EmbySource::report_progress(self, item_id, position, duration)
+    }
+
+    fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
+        EmbySource::set_favorite(self, item_id, favorite)
+    }
+
+    fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {
+        EmbySource::set_watched(self, item_id, watched)
+    }
+
+    fn remove_play_record(&self, item_id: &str) -> Result<()> {
+        EmbySource::remove_play_record(self, item_id)
     }
 
     fn play_source(&self, item_id: &str) -> Result<PlaySource> {

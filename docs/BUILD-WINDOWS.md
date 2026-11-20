@@ -119,6 +119,8 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--browse-cat <all\|tv\|movie\|genre\|folder>` | 网格切到某个类别再截图（风格会带风格标签行） |
 | `--browse-sort <added\|name\|release\|rating>` | 网格换一种排序 |
 | `--browse-scroll <像素>` | 把网格滚到接近底部，验证自动续页（状态行会显示「已加载 N」） |
+| `--menu` | 打开网格第一张卡片的右键菜单，单独渲染 `card-menu.png`（Popup 抓不到整窗） |
+| `--menu-continue` | 打开「继续观看」第一张卡片的右键菜单，单独渲染 `continue-menu.png` |
 | `--window <宽>x<高>` | 换窗口尺寸（受会话屏幕限制），验证自适应网格 |
 | `--delay <秒>` | 每页再多等几秒（媒体库页默认 9 秒等 Hero 大图） |
 | `--hover` | 媒体库页把 Hero 左右箭头显示出来，检查位置与样式 |

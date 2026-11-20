@@ -388,6 +388,38 @@ impl FnOsSource {
     ///
     /// `duration` 目前用不上（服务端自己知道片长），保留参数是为了让 C ABI
     /// 对 Emby / Jellyfin 也够用——它们上报要带 `RunTimeTicks`。
+    /// 收藏 / 取消收藏。飞牛的 body 固定是 `{"item_guid": ...}`。
+    pub fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
+        let method = if favorite { Method::PUT } else { Method::DELETE };
+        self.write_ok(method, "/item/favorite", item_id)
+    }
+
+    /// 标记已观看 / 未观看。走 `/item/watched`，不碰播放进度。
+    pub fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {
+        let method = if watched { Method::POST } else { Method::DELETE };
+        self.write_ok(method, "/item/watched", item_id)
+    }
+
+    /// 移除观看记录：`DELETE /play/record`，继续观看里就不再出现。
+    pub fn remove_play_record(&self, item_id: &str) -> Result<()> {
+        self.write_ok(Method::DELETE, "/play/record", item_id)
+    }
+
+    /// 只关心 `code == 0` 的写接口。
+    fn write_ok(&self, method: Method, path: &str, item_id: &str) -> Result<()> {
+        let body = compact_json(&serde_json::json!({ "item_guid": item_id }))?;
+        let env: ApiEnvelope<serde_json::Value> =
+            self.send(method, path, &BTreeMap::new(), Some(&body))?;
+
+        if env.code != 0 {
+            return Err(MediaError::Api {
+                code: env.code,
+                msg: env.msg.unwrap_or_default(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn report_progress(&self, item_id: &str, position: i64, _duration: i64) -> Result<()> {
         let media_guid = self.media_guid_for(item_id)?;
 
@@ -1212,6 +1244,18 @@ impl MediaSource for FnOsSource {
 
     fn report_progress(&self, item_id: &str, position: i64, duration: i64) -> Result<()> {
         FnOsSource::report_progress(self, item_id, position, duration)
+    }
+
+    fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
+        FnOsSource::set_favorite(self, item_id, favorite)
+    }
+
+    fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {
+        FnOsSource::set_watched(self, item_id, watched)
+    }
+
+    fn remove_play_record(&self, item_id: &str) -> Result<()> {
+        FnOsSource::remove_play_record(self, item_id)
     }
 
     fn play_source(&self, item_id: &str) -> Result<PlaySource> {

@@ -194,6 +194,24 @@ impl MediaHub {
         entry.source.report_progress(raw, position, duration)
     }
 
+    /// 收藏 / 取消收藏。
+    pub fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
+        let (entry, raw) = self.route(item_id)?;
+        entry.source.set_favorite(raw, favorite)
+    }
+
+    /// 标记已观看 / 未观看。
+    pub fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {
+        let (entry, raw) = self.route(item_id)?;
+        entry.source.set_watched(raw, watched)
+    }
+
+    /// 移除观看记录。
+    pub fn remove_play_record(&self, item_id: &str) -> Result<()> {
+        let (entry, raw) = self.route(item_id)?;
+        entry.source.remove_play_record(raw)
+    }
+
     /// 合并所有源的播放记录，按最近播放倒序。
     pub fn records(&self) -> Result<Vec<PlayRecord>> {
         let mut merged = self.collect(

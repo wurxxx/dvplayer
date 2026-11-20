@@ -455,6 +455,56 @@ pub extern "C" fn dv_hub_report_progress(
 }
 
 #[no_mangle]
+pub extern "C" fn dv_hub_set_favorite(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+    favorite: i32,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<()>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<()>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.set_favorite(&id, favorite != 0))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_set_watched(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+    watched: i32,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<()>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<()>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.set_watched(&id, watched != 0))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_remove_record(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<()>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<()>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.remove_play_record(&id))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn dv_hub_records(handle: *const HubHandle) -> *mut c_char {
     guard(|| {
         let Some(h) = (unsafe { handle.as_ref() }) else {

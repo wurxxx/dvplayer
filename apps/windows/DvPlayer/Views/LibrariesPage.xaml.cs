@@ -99,6 +99,9 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
     /// <summary>当前显示的卡片。滚到底自动续页，往这里追加而不是整份重设。</summary>
     private readonly ObservableCollection<ItemCard> _visible = new();
 
+    /// <summary>「继续观看」行。移除观看记录时直接从这里删一张。</summary>
+    private readonly ObservableCollection<RecordCard> _continueCards = new();
+
     private int _total;
     private bool _loadingPage;
     private bool _hasMore;
@@ -118,6 +121,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
     public LibrariesPage()
     {
         InitializeComponent();
+        ContinueRow.ItemsSource = _continueCards;
         SortBox.SelectedIndex = 0;
         UpdateSortIcon();
         _heroTimer.Tick += (_, _) => _ = ShowHeroAsync(_heroIndex + 1);
@@ -445,7 +449,12 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
             .ToList();
 
         var cards = continuing.Select(ToRecordCard).ToList();
-        ContinueRow.ItemsSource = cards;
+        _continueCards.Clear();
+        foreach (var card in cards)
+        {
+            _continueCards.Add(card);
+        }
+
         ContinueEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ContinueCount.Text = cards.Count == 0 ? "" : $"{cards.Count} ›";
 
@@ -929,6 +938,62 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
     /// <summary>截图巡检用：把库内网格往下滚，触发自动加载。</summary>
     public void ScrollBrowse(double offset) => BrowseScroll.ScrollToVerticalOffset(offset);
 
+    /// <summary>截图巡检用：打开网格第一张卡片的右键菜单（Popup 截图单独渲染）。</summary>
+    public ContextMenu? OpenFirstCardMenu()
+    {
+        if (ItemGrid.ItemContainerGenerator.ContainerFromIndex(0) is not DependencyObject container)
+        {
+            return null;
+        }
+
+        var border = FindCard(container);
+        if (border?.ContextMenu is null)
+        {
+            return null;
+        }
+
+        border.ContextMenu.PlacementTarget = border;
+        border.ContextMenu.IsOpen = true;
+        return border.ContextMenu;
+    }
+
+    /// <summary>截图巡检用：打开「继续观看」第一张卡片的右键菜单。</summary>
+    public ContextMenu? OpenFirstContinueMenu()
+    {
+        if (ContinueRow.ItemContainerGenerator.ContainerFromIndex(0) is not DependencyObject container)
+        {
+            return null;
+        }
+
+        var border = FindCard(container);
+        if (border?.ContextMenu is null)
+        {
+            return null;
+        }
+
+        border.ContextMenu.PlacementTarget = border;
+        border.ContextMenu.IsOpen = true;
+        return border.ContextMenu;
+    }
+
+    private static Border? FindCard(DependencyObject root)
+    {
+        if (root is Border { ContextMenu: not null } border)
+        {
+            return border;
+        }
+
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            if (FindCard(VisualTreeHelper.GetChild(root, i)) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>截图巡检用：切到某个类别（all / tv / movie / genre / folder）。</summary>
     public void SelectCategoryForShot(string key)
     {
@@ -1311,8 +1376,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
         // 网格里的卡片、横向海报行、继续观看卡片共用这个处理器；
         // 只有网格卡片带 Kind，其它卡片都按可播放处理是不对的，
         // 所以这里先查网格数据，找不到再看行卡片。
-        var cards = ItemGrid.ItemsSource as List<ItemCard>;
-        var card = cards?.FirstOrDefault(c => c.Id == id);
+        var card = _visible.FirstOrDefault(c => c.Id == id);
         if (card is not null)
         {
             if (card.IsPlayable)
@@ -1325,7 +1389,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
             return;
         }
 
-        var record = (ContinueRow.ItemsSource as List<RecordCard>)?.FirstOrDefault(c => c.ItemId == id);
+        var record = _continueCards.FirstOrDefault(c => c.ItemId == id);
         if (record is not null)
         {
             await PlayWindow.OpenAsync(Window.GetWindow(this), id);
@@ -1345,6 +1409,147 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
         }
 
         NavigationService?.Navigate(new SeriesPage(id));
+    }
+
+    // —— 卡片右键菜单 ——
+
+    /// <summary>菜单项挂在卡片 Border 上，卡片的 Tag 就是条目 id。</summary>
+    private static string? MenuItemId(object sender)
+    {
+        if (sender is not MenuItem item)
+        {
+            return null;
+        }
+
+        var menu = item.Parent as ContextMenu
+            ?? ItemsControl.ItemsControlFromItemContainer(item) as ContextMenu;
+        return (menu?.PlacementTarget as FrameworkElement)?.Tag as string;
+    }
+
+    /// <summary>收藏 / 观看状态都是网络写操作，放后台线程，失败在状态行说。</summary>
+    private async Task<bool> RunWriteAsync(Func<MediaCore, ApiResult<bool>> action)
+    {
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return false;
+        }
+
+        var result = await Task.Run(() => action(core)).ConfigureAwait(true);
+        if (result.Ok)
+        {
+            return true;
+        }
+
+        FlashStatus(result.Error ?? "操作失败");
+        return false;
+    }
+
+    private async void OnMenuFavorite(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (await RunWriteAsync(core => core.SetFavorite(id, true)).ConfigureAwait(true))
+        {
+            FlashStatus("已添加到收藏夹");
+        }
+    }
+
+    private async void OnMenuWatched(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (!await RunWriteAsync(core => core.SetWatched(id, true)).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        // 看完了就不再出现在「继续观看」。
+        RemoveContinueCard(id);
+        FlashStatus("已标记为已观看");
+    }
+
+    private async void OnMenuUnwatched(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (await RunWriteAsync(core => core.SetWatched(id, false)).ConfigureAwait(true))
+        {
+            FlashStatus("已标记为未观看");
+        }
+    }
+
+    private async void OnMenuRemoveRecord(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        if (!await RunWriteAsync(core => core.RemovePlayRecord(id)).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        RemoveContinueCard(id);
+        FlashStatus("已移除观看记录");
+    }
+
+    private async void OnMenuPlay(object sender, RoutedEventArgs e)
+    {
+        if (MenuItemId(sender) is not { Length: > 0 } id)
+        {
+            return;
+        }
+
+        await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+    }
+
+    private void RemoveContinueCard(string id)
+    {
+        var card = _continueCards.FirstOrDefault(c => c.ItemId == id);
+        if (card is null)
+        {
+            return;
+        }
+
+        _continueCards.Remove(card);
+        ContinueEmpty.Visibility = _continueCards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ContinueCount.Text = _continueCards.Count == 0 ? "" : $"{_continueCards.Count} ›";
+    }
+
+    /// <summary>操作结果只在状态行闪一下，不打断列表和滚动位置。</summary>
+    private async void FlashStatus(string message)
+    {
+        if (BrowseRoot.Visibility == Visibility.Visible)
+        {
+            BrowseStatus.Text = message;
+            await Task.Delay(2400).ConfigureAwait(true);
+            if (BrowseStatus.Text == message)
+            {
+                UpdateBrowseStatus();
+            }
+            return;
+        }
+
+        if (OverviewPanel.Visibility == Visibility.Visible)
+        {
+            StatusText.Text = message;
+            await Task.Delay(2400).ConfigureAwait(true);
+            if (StatusText.Text == message)
+            {
+                StatusText.Text = "";
+            }
+        }
     }
 
     private async void OnBackClick(object sender, MouseButtonEventArgs e)

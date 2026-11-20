@@ -12,7 +12,7 @@ pub use fnos::FnOsSource;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::error::{MediaError, Result};
 use crate::models::{
     Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord,
     PlaySource,
@@ -78,6 +78,21 @@ pub trait MediaSource: Send + Sync {
 
     /// 关键词搜索。返回的是平铺的条目（可能是集/文件），由上层按父级归并。
     fn search(&self, query: &str) -> Result<Vec<MediaItem>>;
+
+    /// 收藏 / 取消收藏。不支持这个概念的源返回错误。
+    fn set_favorite(&self, _item_id: &str, _favorite: bool) -> Result<()> {
+        Err(MediaError::Other("这个服务器不支持收藏".into()))
+    }
+
+    /// 标记已观看 / 未观看。
+    fn set_watched(&self, _item_id: &str, _watched: bool) -> Result<()> {
+        Err(MediaError::Other("这个服务器不支持标记观看状态".into()))
+    }
+
+    /// 移除观看记录（从「继续观看」里清掉，不影响已看标记）。
+    fn remove_play_record(&self, _item_id: &str) -> Result<()> {
+        Err(MediaError::Other("这个服务器不支持移除观看记录".into()))
+    }
 
     /// 条目详情：背景图、简介、季集数等列表接口没有的信息。
     fn detail(&self, item_id: &str) -> Result<MediaDetail>;

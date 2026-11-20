@@ -208,6 +208,16 @@ public partial class MainWindow : FluentWindow
 
             if (ContentFrame.Content is LibrariesPage page)
             {
+                // --menu-continue：首页「继续观看」卡片的右键菜单。
+                if (Environment.GetCommandLineArgs().Contains("--menu-continue") &&
+                    page.OpenFirstContinueMenu() is { } continueMenu)
+                {
+                    await Task.Delay(700);
+                    UiCapture.Save(continueMenu, Path.Combine(dir, "continue-menu.png"));
+                    continueMenu.IsOpen = false;
+                    await Task.Delay(300);
+                }
+
                 await page.ShowFirstLibraryAsync();
                 await Task.Delay(8000);
 
@@ -223,6 +233,18 @@ public partial class MainWindow : FluentWindow
                 {
                     page.SelectSortForShot(sortField);
                     await Task.Delay(2500);
+                }
+
+                // --menu：把第一张卡片的右键菜单单独渲染成 PNG。
+                if (Environment.GetCommandLineArgs().Contains("--menu"))
+                {
+                    if (page.OpenFirstCardMenu() is { } menu)
+                    {
+                        await Task.Delay(700);
+                        UiCapture.Save(menu, Path.Combine(dir, "card-menu.png"));
+                        menu.IsOpen = false;
+                        await Task.Delay(300);
+                    }
                 }
 
                 // --browse-scroll <像素>：滚到接近底部，验证「自动加载更多」。

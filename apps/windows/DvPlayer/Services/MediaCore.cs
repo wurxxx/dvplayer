@@ -129,6 +129,27 @@ public sealed class MediaCore : IDisposable
         return ReadOk(ptr);
     }
 
+    /// <summary>收藏 / 取消收藏。</summary>
+    public ApiResult<bool> SetFavorite(string itemId, bool favorite)
+    {
+        var ptr = dv_hub_set_favorite(_handle, itemId, favorite ? 1 : 0);
+        return ReadOk(ptr);
+    }
+
+    /// <summary>标记已观看 / 未观看。</summary>
+    public ApiResult<bool> SetWatched(string itemId, bool watched)
+    {
+        var ptr = dv_hub_set_watched(_handle, itemId, watched ? 1 : 0);
+        return ReadOk(ptr);
+    }
+
+    /// <summary>移除观看记录（从「继续观看」里清掉）。</summary>
+    public ApiResult<bool> RemovePlayRecord(string itemId)
+    {
+        var ptr = dv_hub_remove_record(_handle, itemId);
+        return ReadOk(ptr);
+    }
+
     /// <summary>条目详情：背景图、简介、季集数、播放入口。</summary>
     public ApiResult<MediaDetailDto> ItemDetail(string itemId)
     {
@@ -321,6 +342,23 @@ public sealed class MediaCore : IDisposable
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
         long position,
         long duration);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_set_favorite", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_set_favorite(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
+        int favorite);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_set_watched", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_set_watched(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
+        int watched);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_remove_record", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_remove_record(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
     [DllImport(Lib, EntryPoint = "dv_version", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_version();

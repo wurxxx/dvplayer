@@ -81,6 +81,24 @@
         <Border Height="222" CornerRadius="10" Background="{Binding Background}"
                 SnapsToDevicePixels="True" Tag="{Binding Id}"
                 Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+          <Border.ContextMenu>
+            <ContextMenu Style="{StaticResource DarkContextMenu}">
+              <MenuItem Style="{StaticResource DarkMenuItem}" Header="添加到收藏夹"
+                        Click="OnMenuFavorite">
+                <MenuItem.Icon>
+                  <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
+                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                </MenuItem.Icon>
+              </MenuItem>
+              <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                        Click="OnMenuWatched">
+                <MenuItem.Icon>
+                  <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                </MenuItem.Icon>
+              </MenuItem>
+            </ContextMenu>
+          </Border.ContextMenu>
           <Grid>
             <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
                        Foreground="#2AFFFFFF" HorizontalAlignment="Center"
@@ -107,6 +125,47 @@
         <Border Height="140" CornerRadius="10" Background="{Binding Background}"
                 SnapsToDevicePixels="True" Tag="{Binding ItemId}"
                 Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+          <Border.ContextMenu>
+            <ContextMenu Style="{StaticResource DarkContextMenu}">
+              <MenuItem Style="{StaticResource DarkMenuItem}" Header="播放"
+                        Click="OnMenuPlay">
+                <MenuItem.Icon>
+                  <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                </MenuItem.Icon>
+              </MenuItem>
+              <Separator Style="{StaticResource DarkMenuSeparator}" />
+              <MenuItem Style="{StaticResource DarkMenuItem}" Header="添加到收藏夹"
+                        Click="OnMenuFavorite">
+                <MenuItem.Icon>
+                  <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
+                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                </MenuItem.Icon>
+              </MenuItem>
+              <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                        Click="OnMenuWatched">
+                <MenuItem.Icon>
+                  <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                </MenuItem.Icon>
+              </MenuItem>
+              <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为未观看"
+                        Click="OnMenuUnwatched">
+                <MenuItem.Icon>
+                  <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}"
+                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                </MenuItem.Icon>
+              </MenuItem>
+              <Separator Style="{StaticResource DarkMenuSeparator}" />
+              <MenuItem Style="{StaticResource DarkMenuItem}" Header="移除观看记录"
+                        Click="OnMenuRemoveRecord">
+                <MenuItem.Icon>
+                  <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                </MenuItem.Icon>
+              </MenuItem>
+            </ContextMenu>
+          </Border.ContextMenu>
           <Grid ClipToBounds="True">
             <TextBlock Text="{Binding Initial}" FontSize="42" FontWeight="SemiBold"
                        Foreground="#2AFFFFFF" HorizontalAlignment="Center"
@@ -383,7 +442,7 @@
     </StackPanel>
 
     <!-- 媒体库内容（原网格视图） -->
-    <Grid x:Name="BrowseRoot" Margin="32,24,32,0" Visibility="Collapsed">
+    <Grid x:Name="BrowseRoot" Margin="32,16,32,0" Visibility="Collapsed">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -392,7 +451,7 @@
         <RowDefinition Height="*" />
       </Grid.RowDefinitions>
 
-      <Grid Height="52">
+      <Grid Height="44">
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
           <Button Style="{StaticResource ToolButton}" Click="OnBackToOverview" ToolTip="返回">
             <TextBlock Text="&#xE72B;" FontFamily="{StaticResource IconFont}" FontSize="15" />
@@ -414,7 +473,7 @@
       </Grid>
 
       <!-- 类别 + 排序 -->
-      <Grid Grid.Row="1" Margin="0,10,0,0">
+      <Grid Grid.Row="1" Margin="0,6,0,0">
         <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Left">
           <StackPanel Orientation="Horizontal">
             <RadioButton x:Name="CatAll" Content="全部" GroupName="BrowseCat"
@@ -453,7 +512,7 @@
 
       <!-- 风格标签（只在「风格」下出现）。换行铺开，不做横向滚动，
            免得又出现一条抢滚轮的横条。 -->
-      <Border x:Name="GenreScroll" Grid.Row="2" Visibility="Collapsed" Margin="0,10,0,0">
+      <Border x:Name="GenreScroll" Grid.Row="2" Visibility="Collapsed" Margin="0,6,0,0">
         <ItemsControl x:Name="GenreBar">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -463,7 +522,7 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate>
               <Border Tag="{Binding Id}" MouseLeftButtonUp="OnGenreClick" Cursor="Hand"
-                      CornerRadius="8" Padding="12,6" Margin="0,0,8,8">
+                      CornerRadius="8" Padding="12,6" Margin="0,0,8,6">
                 <Border.Style>
                   <Style TargetType="Border">
                     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
@@ -483,7 +542,7 @@
         </ItemsControl>
       </Border>
 
-      <StackPanel Grid.Row="3" Margin="0,10,0,6">
+      <StackPanel Grid.Row="3" Margin="0,6,0,0">
         <StackPanel x:Name="Breadcrumb" Orientation="Horizontal" Visibility="Collapsed"
                     Margin="0,0,0,10">
           <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
@@ -528,11 +587,11 @@
         </ScrollViewer>
 
         <TextBlock x:Name="BrowseStatus" Style="{StaticResource Caption}"
-                   Margin="0,10,0,0" TextWrapping="Wrap" />
+                   Margin="0,6,0,4" TextWrapping="Wrap" />
       </StackPanel>
 
       <ScrollViewer x:Name="BrowseScroll" Grid.Row="4" VerticalScrollBarVisibility="Hidden"
-                    Margin="0,14,0,0" ScrollChanged="OnBrowseScroll"
+                    Margin="0,8,0,0" ScrollChanged="OnBrowseScroll"
                     SizeChanged="OnBrowseSizeChanged">
         <StackPanel>
           <ItemsControl x:Name="ItemGrid">
@@ -550,6 +609,24 @@
                           CornerRadius="10" Background="{Binding Background}"
                           SnapsToDevicePixels="True" Tag="{Binding Id}"
                           Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+                    <Border.ContextMenu>
+                      <ContextMenu Style="{StaticResource DarkContextMenu}">
+                        <MenuItem Style="{StaticResource DarkMenuItem}" Header="添加到收藏夹"
+                                  Click="OnMenuFavorite">
+                          <MenuItem.Icon>
+                            <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
+                                       FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                          </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                                  Click="OnMenuWatched">
+                          <MenuItem.Icon>
+                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                                       FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                          </MenuItem.Icon>
+                        </MenuItem>
+                      </ContextMenu>
+                    </Border.ContextMenu>
                     <Grid>
                       <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
                                  Foreground="#2AFFFFFF" HorizontalAlignment="Center"
