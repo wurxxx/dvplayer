@@ -107,6 +107,21 @@ extension MediaText {
         }
     }
 
+    /// 比特率：「24.6 Mbps」。
+    public static func bitRate(_ value: Int64?) -> String? {
+        guard let value, value > 0 else { return nil }
+        if value >= 1_000_000_000 {
+            return String(format: "%.2f Gbps", Double(value) / 1_000_000_000)
+        }
+        if value >= 1_000_000 {
+            return String(format: "%.1f Mbps", Double(value) / 1_000_000)
+        }
+        if value >= 1_000 {
+            return String(format: "%.0f kbps", Double(value) / 1_000)
+        }
+        return "\(value) bps"
+    }
+
     /// 卡片副标题：「剧集 · 12 集 · 2 季」。
     public static func describe(_ item: MediaItem) -> String {
         var parts = [kindLabel(item.kind)]

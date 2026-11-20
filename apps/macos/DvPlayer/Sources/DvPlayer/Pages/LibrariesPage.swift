@@ -239,11 +239,9 @@ struct LibrariesPage: View {
             if continueRecords.isEmpty {
                 Caption(text: "还没有看到一半的内容。", size: 12.5)
             } else {
-                HorizontalRow {
-                    ForEach(continueRecords) { record in
-                        ContinueCard(record: record) {
-                            state.showToast("播放器下一轮接入")
-                        }
+                HorizontalRow(items: continueRecords, itemWidth: 264) { record in
+                    ContinueCard(record: record) {
+                        state.showToast("播放器下一轮接入")
                     }
                 }
             }
@@ -258,11 +256,9 @@ struct LibrariesPage: View {
             if section.items.isEmpty {
                 Caption(text: "这个库里还没有条目。", size: 12.5)
             } else {
-                HorizontalRow {
-                    ForEach(section.items) { item in
-                        PosterCard(item: item, width: 160) {
-                            open(item)
-                        }
+                HorizontalRow(items: section.items, itemWidth: 176) { item in
+                    PosterCard(item: item, width: 160) {
+                        open(item)
                     }
                 }
             }

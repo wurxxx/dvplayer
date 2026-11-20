@@ -31,7 +31,9 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 - 「服务器」页添加 / 编辑 / 删除源（飞牛影视、Emby、Jellyfin），连上后自动跳该源的首页
 - 首页：Hero 轮播、我的媒体、继续观看、每库一行
 - 库 / 季 / 目录网格：类别、排序、风格、页内搜索、分页
-- 详情页：整块横版图 + 信息叠加、播放 / 重头看 / 收藏 / 标记看过、分季选集
+- 详情页：整块横版图 + 信息叠加、播放 / 重头看 / 收藏 / 标记看过、
+  分季选集（296 宽横卡，悬停出播放遮罩）、演职人员（点开头像看作品）、
+  豆瓣链接、媒体信息（视频 + 每条音轨一张卡）
 - 记录页：通用（继续观看分组 + 视频收藏）/ 观看 / 收藏
 - 搜索页：跨源搜索
 - 设置：续播、分辨率角标、自动连接；显示核心版本
@@ -39,8 +41,7 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 ## 还没做
 
 - 播放页（libmpv render API + `NSOpenGLView`，浮层控件照 Windows 的风格）
-- 演职人员、媒体信息面板、音轨 / 字幕选择
-- 横向行的悬停箭头（触控板横向滑动已经可用）
+- 详情页里的音轨 / 字幕选择（`MediaInfo` 已经读到了，等播放页一起接）
 
 ## 截图巡检
 
@@ -59,6 +60,8 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_PAGE` | 直接落在某页：`sources` / `records` / `search` / `settings` |
 | `DVPLAYER_DETAIL` | 直接打开某个条目（`<sourceId>:<itemId>`） |
 | `DVPLAYER_LIBRARY` | 直接打开某个媒体库的网格 |
+| `DVPLAYER_SCROLL` | `end` = 先把页面滚到底再截（长页面下半截） |
+| `DVPLAYER_ARROWS` | `1` = 强制显示横向行的左右箭头（截图用，正常是悬停才出） |
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

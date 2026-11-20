@@ -111,11 +111,9 @@ struct RecordsPage: View {
                         SectionTitle(text: group.title,
                                      trailing: "\(group.records.count)")
 
-                        HorizontalRow {
-                            ForEach(group.records) { record in
-                                ContinueCard(record: record) {
-                                    state.showToast("播放器下一轮接入")
-                                }
+                        HorizontalRow(items: group.records, itemWidth: 264) { record in
+                            ContinueCard(record: record) {
+                                state.showToast("播放器下一轮接入")
                             }
                         }
                     }

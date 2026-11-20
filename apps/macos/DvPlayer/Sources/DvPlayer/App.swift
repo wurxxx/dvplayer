@@ -48,11 +48,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(max(0.2, delay) * 1_000_000_000))
+
+            // `DVPLAYER_SCROLL=end`：截长页面底部（详情页的媒体信息在那里）。
+            if env["DVPLAYER_SCROLL"] == "end" {
+                Self.scrollToEnd()
+                try? await Task.sleep(nanoseconds: 900_000_000)
+            }
+
             Self.capture(to: shot)
             if env["DVPLAYER_EXIT"] == "1" {
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    /// 把主窗口里第一个纵向滚动视图滚到底，截图巡检长页面用。
+    @MainActor
+    static func scrollToEnd() {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return }
+        guard let scroll = findScroll(in: window.contentView) else { return }
+        guard let document = scroll.documentView else { return }
+        let maxY = max(0, document.bounds.height - scroll.contentView.bounds.height)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: maxY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    private static func findScroll(in view: NSView?) -> NSScrollView? {
+        guard let view else { return nil }
+        if let scroll = view as? NSScrollView,
+           let document = scroll.documentView,
+           document.bounds.height > scroll.contentView.bounds.height {
+            return scroll
+        }
+        for child in view.subviews {
+            if let found = findScroll(in: child) { return found }
+        }
+        return nil
     }
 
     /// 把主窗口内容画进 PNG。走 CALayer 渲染，绕开屏幕录制权限。

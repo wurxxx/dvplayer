@@ -269,17 +269,71 @@ struct EmptyState: View {
     }
 }
 
-/// 横向海报行：触控板横向滑动 / 拖滚动。左右箭头（悬停才出现）下一轮补，
-/// 那需要摸到 NSScrollView 才能平滑滚动，先用系统原生滚动。
-struct HorizontalRow<Content: View>: View {
-    @ViewBuilder var content: Content
+/// 横向卡片行：触控板横滑 / 拖滚动，鼠标停上来才浮出左右箭头，
+/// 和 Windows 的 `HorizontalRow` 行为一致。
+///
+/// 箭头按「整屏」翻，用 `ScrollViewReader` 滚到某一项的 `id`；
+/// 所以内容必须由这里喂进来（`items` + 闭包），不能直接塞 `ForEach`。
+struct HorizontalRow<Item: Identifiable, Content: View>: View {
+    let items: [Item]
+    /// 一项占的横向步长（卡宽 + 间距），用来算一屏能放几张。
+    var itemWidth: CGFloat
+    var spacing: CGFloat = 16
+    @ViewBuilder var content: (Item) -> Content
+
+    @State private var index = 0
+    @State private var hovering = ProcessInfo.processInfo.environment["DVPLAYER_ARROWS"] == "1"
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 16) {
-                content
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: spacing) {
+                    ForEach(items) { item in
+                        content(item)
+                            .id(item.id)
+                    }
+                }
+                .padding(.vertical, 2)
             }
-            .padding(.vertical, 2)
+            .overlay {
+                GeometryReader { geo in
+                    let perPage = max(1, Int(geo.size.width / max(itemWidth, 1)))
+                    HStack {
+                        if hovering && index > 0 {
+                            arrow("chevron.left") { move(proxy, by: -perPage) }
+                        }
+                        Spacer()
+                        if hovering && index < items.count - 1 {
+                            arrow("chevron.right") { move(proxy, by: perPage) }
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+            }
+            .onHover { hovering = $0 }
+            .onChange(of: items.count) { _ in index = 0 }
         }
+    }
+
+    private func move(_ proxy: ScrollViewProxy, by delta: Int) {
+        guard !items.isEmpty else { return }
+        let target = min(max(0, index + delta), items.count - 1)
+        guard target != index else { return }
+        index = target
+        withAnimation(.easeOut(duration: 0.26)) {
+            proxy.scrollTo(items[target].id, anchor: .leading)
+        }
+    }
+
+    private func arrow(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.9))
+                .frame(width: 34, height: 34)
+                .background(Color.black.opacity(0.55), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }

@@ -186,8 +186,13 @@ public struct AudioInfo: Codable, Hashable, Sendable {
     public let title: String?
     public let language: String?
     public let codec: String?
+    public let profile: String?
+    public let layout: String?
+    public let bitRate: Int64?
     public let channels: Int?
+    public let sampleRate: Int?
     public let isDefault: Bool?
+    public let isExternal: Bool?
 }
 
 public struct SubtitleInfo: Codable, Hashable, Sendable {
@@ -215,8 +220,22 @@ public struct VideoInfo: Codable, Sendable {
     public let bitRate: Int64?
     public let colorRange: String?
     public let profile: String?
+    public let level: Double?
+    public let aspectRatio: String?
+    public let interlaced: Bool?
     public let bitDepth: Int?
     public let pixelFormat: String?
+    public let dolbyVision: Bool?
+
+    /// 「4K」「1080p」这类从尺寸推出来的标签，标题缺失时兜底。
+    public var resolutionLabel: String? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        if width >= 3600 { return "4K" }
+        if width >= 2500 { return "1440p" }
+        if width >= 1800 { return "1080p" }
+        if width >= 1200 { return "720p" }
+        return "\(width)x\(height)"
+    }
 }
 
 /// 列表筛选（和 core 的 ListQuery 对齐）。
