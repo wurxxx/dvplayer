@@ -1,12 +1,30 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
 
+/// <summary>
+/// 媒体库页。顶部一个源名、媒体 / 搜索 / 收藏
+/// 分段，下面是 Hero 横幅、「我的媒体」库卡片、继续观看，以及每个库一行横向海报。
+/// 点库卡片或某行的箭头进入原来的网格视图（可下钻目录、加载更多）。
+/// </summary>
 public partial class LibrariesPage : Page
 {
+    private const int PreviewPerLibrary = 12;
+    private const double ScrollStep = 262;
+
     private static int PageSize => Math.Max(10, AppServices.Instance.Settings.PageSize);
+
+    private List<MediaLibraryDto> _libraries = new();
+    private List<LibraryCardItem> _libraryCards = new();
+
+    private string? _heroItemId;
+    private string _heroKind = "";
 
     private string? _libraryId;
     private string _libraryTitle = "";
@@ -46,40 +64,271 @@ public partial class LibrariesPage : Page
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
         AppServices.Instance.ConnectionChanged += OnConnectionChanged;
 
+        await LoadOverviewAsync().ConfigureAwait(true);
+    }
+
+    // —— 源首页 ——
+
+    private async Task LoadOverviewAsync()
+    {
         var services = AppServices.Instance;
         if (!services.IsConnected)
         {
-            StatusText.Text = "未连接媒体源，先去「设置」添加。";
+            SourceTitle.Text = "媒体库";
+            StatusText.Text = "未连接媒体源，先去「媒体源」添加。";
             return;
         }
 
         var core = services.Core!;
-        var result = await Task.Run(core.Libraries).ConfigureAwait(true);
+        SourceTitle.Text = services.Connections.FirstOrDefault(c => c.Ok)?.Name ?? "媒体库";
+        StatusText.Text = "正在读取…";
 
-        if (!result.Ok)
+        var librariesResult = await Task.Run(core.Libraries).ConfigureAwait(true);
+        if (!librariesResult.Ok || librariesResult.Data is null)
         {
-            StatusText.Text = "读取媒体库失败：" + (result.Error ?? "未知错误");
+            StatusText.Text = "读取媒体库失败：" + (librariesResult.Error ?? "未知错误");
             return;
         }
 
-        var libraries = result.Data ?? new List<MediaLibraryDto>();
-        LibraryBar.ItemsSource = libraries
-            .Select(l => new LibraryChip(l.Id, l.Title, l.Id == libraries[0].Id))
-            .ToList();
+        _libraries = librariesResult.Data;
+        LibrariesCount.Text = $"{_libraries.Count} 个";
 
-        if (libraries.Count > 0)
+        _libraryCards = _libraries
+            .Select(library =>
+            {
+                var card = new LibraryCardItem
+                {
+                    Id = library.Id,
+                    Title = library.Title,
+                    PosterPath = library.PosterPath,
+                    Initial = Palette.InitialOf(library.Title),
+                };
+                card.UseGradient(library.Id + library.Title);
+                return card;
+            })
+            .ToList();
+        LibraryCards.ItemsSource = _libraryCards;
+
+        // 每个库取一页做预览。库多的时候这是 N 次请求，但都是一页，不影响体感。
+        var sections = new List<LibrarySection>();
+        foreach (var library in _libraries)
         {
-            _libraryId = libraries[0].Id;
-            _libraryTitle = libraries[0].Title;
-            await LoadAsync(_libraryId, _libraryTitle, children: false).ConfigureAwait(true);
+            var id = library.Id;
+            var title = library.Title;
+            var page = await Task.Run(() => core.Items(id, 1, PreviewPerLibrary)).ConfigureAwait(true);
+            if (!page.Ok || page.Data is null)
+            {
+                continue;
+            }
+
+            sections.Add(new LibrarySection
+            {
+                Id = id,
+                Title = title,
+                CountText = $"{page.Data.Total} ›",
+                Items = page.Data.Items.Select(ToCard).ToList(),
+            });
+
+            // 库自己没有封面时，借这个库第一张有图的海报当封面。
+            var card = _libraryCards.FirstOrDefault(c => c.Id == id);
+            if (card is not null && string.IsNullOrWhiteSpace(card.PosterPath))
+            {
+                card.PosterPath = page.Data.Items
+                    .FirstOrDefault(i => !string.IsNullOrWhiteSpace(i.PosterPath))?.PosterPath;
+            }
+        }
+
+        Sections.ItemsSource = sections;
+        StatusText.Text = "";
+
+        // 继续观看（当前源的全部记录，取前 12 条未看完的）
+        var recordsResult = await Task.Run(core.Records).ConfigureAwait(true);
+        if (recordsResult.Ok && recordsResult.Data is not null)
+        {
+            var continuing = recordsResult.Data
+                .Where(r => r.DurationSeconds <= 0 || r.PositionSeconds < r.DurationSeconds * 0.98)
+                .OrderByDescending(r => r.LastPlayed ?? 0)
+                .Take(12)
+                .ToList();
+
+            var cards = continuing.Select(ToRecordCard).ToList();
+            ContinueRow.ItemsSource = cards;
+            ContinueEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ContinueCount.Text = cards.Count == 0 ? "" : $"{cards.Count} ›";
+
+            _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+        }
+
+        // Hero：第一个库的第一条；没有库时退回「我的媒体」第一张卡。
+        var featured = sections.FirstOrDefault()?.Items.FirstOrDefault();
+        if (featured is not null)
+        {
+            await LoadHeroAsync(featured.Id).ConfigureAwait(true);
         }
         else
         {
-            StatusText.Text = "这个源里没有媒体库。";
+            HeroTitle.Text = _libraries.Count > 0 ? _libraries[0].Title : "这个源里没有媒体库";
+            HeroMeta.Text = "";
+            HeroOverview.Text = "";
+        }
+
+        // 库卡片与分组里的海报最后补，先把结构画出来。
+        var all = sections.SelectMany(s => s.Items).ToList();
+        await Task.WhenAll(all.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+        await Task.WhenAll(_libraryCards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    private async Task LoadHeroAsync(string itemId)
+    {
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        var detail = await Task.Run(() => core.ItemDetail(itemId)).ConfigureAwait(true);
+        if (!detail.Ok || detail.Data is null)
+        {
+            return;
+        }
+
+        var item = detail.Data;
+        _heroItemId = item.Id;
+        _heroKind = item.Kind;
+
+        HeroTitle.Text = MediaText.Clean(item.Title);
+
+        var parts = new List<string>();
+        if (item.Rating is > 0)
+        {
+            parts.Add($"★ {item.Rating:0.0}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.ReleaseDate) && item.ReleaseDate.Length >= 4)
+        {
+            parts.Add(item.ReleaseDate[..4]);
+        }
+
+        parts.Add(MediaText.KindLabel(item.Kind));
+        HeroMeta.Text = string.Join(" · ", parts);
+        HeroOverview.Text = item.Overview ?? "";
+
+        await ApplyBackgroundAsync(HeroBackdrop, item.BackdropPath ?? item.PosterPath).ConfigureAwait(true);
+    }
+
+    private static async Task ApplyBackgroundAsync(Border border, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        var bitmap = await PosterLoader.LoadAsync(path, 1280).ConfigureAwait(true);
+        if (bitmap is null)
+        {
+            return;
+        }
+
+        var brush = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
+        brush.Freeze();
+        border.Background = brush;
+    }
+
+    private async void OnHeroClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_heroItemId is null)
+        {
+            return;
+        }
+
+        if (!MediaText.IsPlayable(_heroKind))
+        {
+            NavigationService?.Navigate(new SeriesPage(_heroItemId));
+            return;
+        }
+
+        await PlayWindow.OpenAsync(Window.GetWindow(this), _heroItemId);
+    }
+
+    private void OnTabChanged(object sender, RoutedEventArgs e)
+    {
+        if (OverviewRoot is null)
+        {
+            return;
+        }
+
+        // 搜索直接交给搜索页，那边有完整的输入框和空态。
+        if (SearchSegment.IsChecked == true)
+        {
+            (Window.GetWindow(this) as MainWindow)?.NavigateTo("search");
+            MediaSegment.IsChecked = true;
+            return;
+        }
+
+        var favorites = FavoriteSegment.IsChecked == true;
+        OverviewRoot.Visibility = favorites ? Visibility.Collapsed : Visibility.Visible;
+        FavoriteEmpty.Visibility = favorites ? Visibility.Visible : Visibility.Collapsed;
+        BrowseRoot.Visibility = Visibility.Collapsed;
+    }
+
+    private async void OnRefreshClick(object sender, RoutedEventArgs e)
+    {
+        BrowseRoot.Visibility = Visibility.Collapsed;
+        OverviewRoot.Visibility = Visibility.Visible;
+        MediaSegment.IsChecked = true;
+        await LoadOverviewAsync().ConfigureAwait(true);
+    }
+
+    private async void OnLibraryClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string id })
+        {
+            await ShowLibraryAsync(id).ConfigureAwait(true);
         }
     }
 
-    private async void OnChipClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private async void OnSectionMoreClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string id })
+        {
+            await ShowLibraryAsync(id).ConfigureAwait(true);
+        }
+    }
+
+    private void OnBackToOverview(object sender, RoutedEventArgs e)
+    {
+        BrowseRoot.Visibility = Visibility.Collapsed;
+        OverviewRoot.Visibility = Visibility.Visible;
+    }
+
+    // —— 库内网格（原视图） ——
+
+    private async Task ShowLibraryAsync(string libraryId)
+    {
+        var library = _libraries.FirstOrDefault(l => l.Id == libraryId);
+        if (library is null)
+        {
+            return;
+        }
+
+        LibraryBar.ItemsSource = _libraries
+            .Select(l => new LibraryChip(l.Id, l.Title, l.Id == libraryId))
+            .ToList();
+
+        OverviewRoot.Visibility = Visibility.Collapsed;
+        FavoriteEmpty.Visibility = Visibility.Collapsed;
+        BrowseRoot.Visibility = Visibility.Visible;
+
+        _libraryId = library.Id;
+        _libraryTitle = library.Title;
+        BrowseTitle.Text = library.Title;
+        _stack.Clear();
+        FilterBox.Text = string.Empty;
+
+        await LoadAsync(library.Id, library.Title, children: false).ConfigureAwait(true);
+    }
+
+    private async void OnChipClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not Border { Tag: string id })
         {
@@ -101,37 +350,62 @@ public partial class LibrariesPage : Page
         LibraryBar.ItemsSource = null;
         LibraryBar.ItemsSource = chips;
 
+        var active = chips.FirstOrDefault(c => c.Id == id);
         _libraryId = id;
-        _libraryTitle = chips.FirstOrDefault(c => c.Id == id)?.Title ?? "";
+        _libraryTitle = active?.Title ?? "";
+        BrowseTitle.Text = _libraryTitle;
         _stack.Clear();
+        FilterBox.Text = string.Empty;
         await LoadAsync(_libraryId, _libraryTitle, children: false).ConfigureAwait(true);
     }
 
-    private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private async void OnCardClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
         {
             return;
         }
 
+        // 网格里的卡片、横向海报行、继续观看卡片共用这个处理器；
+        // 只有网格卡片带 Kind，其它卡片都按可播放处理是不对的，
+        // 所以这里先查网格数据，找不到再看行卡片。
         var cards = ItemGrid.ItemsSource as List<ItemCard>;
         var card = cards?.FirstOrDefault(c => c.Id == id);
-        if (card is null)
+        if (card is not null)
         {
+            if (card.IsPlayable)
+            {
+                await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+                return;
+            }
+
+            NavigationService?.Navigate(new SeriesPage(id));
             return;
         }
 
-        if (card.IsPlayable)
+        var record = (ContinueRow.ItemsSource as List<RecordCard>)?.FirstOrDefault(c => c.ItemId == id);
+        if (record is not null)
         {
             await PlayWindow.OpenAsync(Window.GetWindow(this), id);
             return;
         }
 
-        // 剧集 / 季 / 未刮削目录：进详情页看季和集。
+        // 库分组里的海报：先看详情，能播就直接播。
+        var core = AppServices.Instance.Core;
+        if (core is not null)
+        {
+            var detail = await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(true);
+            if (detail is { Ok: true, Data: not null } && MediaText.IsPlayable(detail.Data.Kind))
+            {
+                await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+                return;
+            }
+        }
+
         NavigationService?.Navigate(new SeriesPage(id));
     }
 
-    private async void OnBackClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private async void OnBackClick(object sender, MouseButtonEventArgs e)
     {
         if (_stack.Count == 0)
         {
@@ -161,7 +435,7 @@ public partial class LibrariesPage : Page
         _parentId = parentId;
         _childrenMode = children;
         _page = 1;
-        StatusText.Text = "正在加载…";
+        BrowseStatus.Text = "正在加载…";
         ItemGrid.ItemsSource = null;
         _allCards = new List<ItemCard>();
         _total = 0;
@@ -175,7 +449,7 @@ public partial class LibrariesPage : Page
 
         if (!result.Ok || result.Data is null)
         {
-            StatusText.Text = "加载失败：" + (result.Error ?? "未知错误");
+            BrowseStatus.Text = "加载失败：" + (result.Error ?? "未知错误");
             return;
         }
 
@@ -273,7 +547,7 @@ public partial class LibrariesPage : Page
         ItemGrid.ItemsSource = null;
         ItemGrid.ItemsSource = cards;
 
-        StatusText.Text = string.IsNullOrEmpty(query)
+        BrowseStatus.Text = string.IsNullOrEmpty(query)
             ? $"{_libraryTitle} · 共 {_total} 条"
             : $"{_libraryTitle} · 筛出 {cards.Count} 条（已加载 {_allCards.Count} 条）";
 
@@ -292,7 +566,10 @@ public partial class LibrariesPage : Page
                 : Visibility.Collapsed;
         }
 
-        ApplyFilter();
+        if (BrowseRoot.Visibility == Visibility.Visible)
+        {
+            ApplyFilter();
+        }
     }
 
     private void UpdateBreadcrumb()
@@ -306,6 +583,77 @@ public partial class LibrariesPage : Page
             BreadcrumbText.Text = $"{_libraryTitle}  ›  {trail}";
         }
     }
+
+    // —— 横向滚动 ——
+
+    private void OnScrollLeft(object sender, RoutedEventArgs e) => ScrollRow(sender, -ScrollStep);
+
+    private void OnScrollRight(object sender, RoutedEventArgs e) => ScrollRow(sender, ScrollStep);
+
+    private static void ScrollRow(object sender, double delta)
+    {
+        if (FindRow(sender) is { } row)
+        {
+            Animate(row, row.HorizontalOffset + delta);
+        }
+    }
+
+    private static void Animate(ScrollViewer row, double target)
+    {
+        var clamped = Math.Clamp(target, 0, row.ScrollableWidth);
+
+        row.BeginAnimation(SmoothScroll.OffsetProperty, null);
+        SmoothScroll.SetOffset(row, row.HorizontalOffset);
+
+        var animation = new DoubleAnimation(row.HorizontalOffset, clamped,
+            TimeSpan.FromMilliseconds(260))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        row.BeginAnimation(SmoothScroll.OffsetProperty, animation);
+    }
+
+    private static ScrollViewer? FindRow(object sender)
+    {
+        if (sender is Button { Tag: ScrollViewer tagged })
+        {
+            return tagged;
+        }
+
+        if (sender is not DependencyObject node)
+        {
+            return null;
+        }
+
+        for (var parent = VisualTreeHelper.GetParent(node); parent is not null;
+             parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (parent is ScrollViewer scroll)
+            {
+                return scroll;
+            }
+
+            if (parent is Panel panel &&
+                panel.Children.OfType<ScrollViewer>().FirstOrDefault() is { } inner)
+            {
+                return inner;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnRowWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is ScrollViewer row)
+        {
+            Animate(row, row.HorizontalOffset - e.Delta * 1.2);
+            e.Handled = true;
+        }
+    }
+
+    // —— 数据装配 ——
 
     private static ItemCard ToCard(MediaItemDto item)
     {
@@ -325,6 +673,35 @@ public partial class LibrariesPage : Page
         };
         card.UseGradient(item.Id + item.Title);
         return card;
+    }
+
+    private static RecordCard ToRecordCard(PlayRecordDto record)
+    {
+        var progress = record.DurationSeconds <= 0
+            ? 0
+            : Math.Clamp((double)record.PositionSeconds / record.DurationSeconds, 0, 1);
+
+        var title = MediaText.RecordTitle(record);
+        var card = new RecordCard
+        {
+            ItemId = record.ItemId,
+            Title = title,
+            Sub = $"{(int)(progress * 100)}%",
+            Time = Format(record.DurationSeconds),
+            BarWidth = Math.Max(0, 248 * progress),
+            PosterPath = record.PosterPath,
+            Initial = Palette.InitialOf(title),
+        };
+        card.UseGradient(record.ItemId + title);
+        return card;
+    }
+
+    private static string Format(long seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return t.TotalHours >= 1
+            ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
+            : $"{t.Minutes:00}:{t.Seconds:00}";
     }
 
     private sealed class LibraryChip
@@ -355,5 +732,32 @@ public partial class LibrariesPage : Page
         public Visibility BadgeVisibility { get; init; } = Visibility.Collapsed;
 
         public bool IsPlayable => MediaText.IsPlayable(Kind);
+    }
+
+    private sealed class RecordCard : CardVisual
+    {
+        public string ItemId { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Sub { get; init; } = "";
+        public string Time { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public string? PosterPath { get; init; }
+        public double BarWidth { get; init; }
+    }
+
+    private sealed class LibraryCardItem : CardVisual
+    {
+        public string Id { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public string? PosterPath { get; set; }
+    }
+
+    private sealed class LibrarySection
+    {
+        public string Id { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string CountText { get; init; } = "";
+        public List<ItemCard> Items { get; init; } = new();
     }
 }

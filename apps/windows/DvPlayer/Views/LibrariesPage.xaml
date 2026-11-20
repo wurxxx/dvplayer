@@ -3,119 +3,371 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Background="{StaticResource BgBrush}">
 
+  <Page.Resources>
+
+    <!-- 媒体库卡片（「我的媒体」） -->
+    <DataTemplate x:Key="LibraryTemplate">
+      <StackPanel Width="220" Margin="0,0,14,14" Cursor="Hand">
+        <Border Height="124" CornerRadius="12" Background="{Binding Background}"
+                SnapsToDevicePixels="True" Tag="{Binding Id}"
+                MouseLeftButtonUp="OnLibraryClick">
+          <Grid>
+            <TextBlock Text="{Binding Initial}" FontSize="34" FontWeight="SemiBold"
+                       Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Visibility="{Binding PlaceholderVisibility}" />
+            <Border VerticalAlignment="Bottom" Height="42" Background="#66000000" />
+            <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="SemiBold"
+                       Foreground="#F2FFFFFF" Margin="12,0,12,10"
+                       VerticalAlignment="Bottom" TextTrimming="CharacterEllipsis" />
+          </Grid>
+        </Border>
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- 横向海报（每个库一行） -->
+    <DataTemplate x:Key="PosterTemplate">
+      <StackPanel Width="148" Margin="0,0,14,4">
+        <Border Height="222" CornerRadius="10" Background="{Binding Background}"
+                SnapsToDevicePixels="True" Tag="{Binding Id}"
+                Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+          <Grid>
+            <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
+                       Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Visibility="{Binding PlaceholderVisibility}" />
+            <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8"
+                    Background="#59000000" CornerRadius="5" Padding="6,2"
+                    Visibility="{Binding BadgeVisibility}">
+              <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#CCFFFFFF" />
+            </Border>
+          </Grid>
+        </Border>
+        <TextBlock Text="{Binding Title}" FontSize="12.5" Margin="1,9,0,0"
+                   Foreground="{StaticResource TextBrush}"
+                   TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{StaticResource FaintBrush}"
+                   Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- 继续观看（横版 + 进度） -->
+    <DataTemplate x:Key="ContinueTemplate">
+      <StackPanel Width="248" Margin="0,0,14,4">
+        <Border Height="140" CornerRadius="10" Background="{Binding Background}"
+                SnapsToDevicePixels="True" Tag="{Binding ItemId}"
+                Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+          <Grid ClipToBounds="True">
+            <TextBlock Text="{Binding Initial}" FontSize="42" FontWeight="SemiBold"
+                       Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Visibility="{Binding PlaceholderVisibility}" />
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Right"
+                    Margin="0,0,10,10" Background="#8C000000" CornerRadius="6" Padding="7,3">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                           FontSize="9" Foreground="#E6FFFFFF" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Time}" FontSize="10" Foreground="#E6FFFFFF"
+                           Margin="4,0,0,0" />
+              </StackPanel>
+            </Border>
+            <Border Height="3" VerticalAlignment="Bottom" Background="#33FFFFFF">
+              <Border Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
+                      Width="{Binding BarWidth}" />
+            </Border>
+          </Grid>
+        </Border>
+        <TextBlock Text="{Binding Title}" FontSize="13.5" Margin="2,9,0,0"
+                   Foreground="{StaticResource TextBrush}"
+                   TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{StaticResource FaintBrush}"
+                   Margin="2,3,0,0" TextTrimming="CharacterEllipsis" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- 每个媒体库一行：标题 + 计数 + 横向海报 + 箭头 -->
+    <DataTemplate x:Key="SectionTemplate">
+      <StackPanel Margin="0,0,0,24">
+        <Grid Margin="0,0,0,11">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitle}" FontSize="16" />
+            <TextBlock Text="{Binding CountText}" Style="{StaticResource Caption}"
+                       Margin="10,0,0,0" VerticalAlignment="Bottom" />
+          </StackPanel>
+          <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
+                  Tag="{Binding Id}" Click="OnSectionMoreClick" ToolTip="查看全部">
+            <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="12" />
+          </Button>
+        </Grid>
+
+        <Grid>
+          <ScrollViewer HorizontalScrollBarVisibility="Hidden"
+                        VerticalScrollBarVisibility="Disabled" PreviewMouseWheel="OnRowWheel">
+            <ItemsControl ItemsSource="{Binding Items}"
+                          ItemTemplate="{StaticResource PosterTemplate}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+          </ScrollViewer>
+
+          <Button Style="{StaticResource ScrollArrow}" Content="&#xE76B;"
+                  HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,94,0,0"
+                  Click="OnScrollLeft" />
+          <Button Style="{StaticResource ScrollArrow}" Content="&#xE76C;"
+                  HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,94,2,0"
+                  Click="OnScrollRight" />
+        </Grid>
+      </StackPanel>
+    </DataTemplate>
+  </Page.Resources>
+
   <Grid Margin="32,24,32,0">
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <!-- 统一工具条：标题 + 在当前库里查找 -->
-    <Grid Height="52">
-      <TextBlock Text="媒体库" Style="{StaticResource PageTitle}" VerticalAlignment="Center" />
+    <!-- 统一工具条：源名 / 分段 / 刷新 -->
+    <Grid Height="52" x:Name="TopBar">
+      <TextBlock x:Name="SourceTitle" Text="媒体库" Style="{StaticResource PageTitle}"
+                 VerticalAlignment="Center" />
 
-      <Border Style="{StaticResource SearchBoxBorder}" Width="280" HorizontalAlignment="Right"
+      <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Center"
               VerticalAlignment="Center">
-        <Grid>
-          <TextBlock Text="&#xE721;" Style="{StaticResource SearchBoxIcon}" />
-          <TextBox x:Name="FilterBox" Style="{StaticResource SearchBoxInput}"
-                   TextChanged="OnFilterChanged" />
-          <TextBlock x:Name="FilterPlaceholder" Text="在当前库中查找"
-                     Style="{StaticResource SearchBoxPlaceholder}" />
-        </Grid>
+        <StackPanel Orientation="Horizontal">
+          <RadioButton x:Name="MediaSegment" Content="媒体" GroupName="LibraryTab"
+                       Style="{StaticResource SegmentItem}" IsChecked="True"
+                       Checked="OnTabChanged" />
+          <RadioButton x:Name="SearchSegment" Content="搜索" GroupName="LibraryTab"
+                       Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                       Checked="OnTabChanged" />
+          <RadioButton x:Name="FavoriteSegment" Content="收藏" GroupName="LibraryTab"
+                       Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                       Checked="OnTabChanged" />
+        </StackPanel>
       </Border>
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+        <Button Style="{StaticResource ToolButton}" Click="OnRefreshClick" ToolTip="刷新">
+          <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="15" />
+        </Button>
+      </StackPanel>
     </Grid>
 
-    <TextBlock x:Name="StatusText" Grid.Row="1" Style="{StaticResource Caption}"
-               Margin="0,4,0,10" TextWrapping="Wrap" />
+    <!-- 源首页 -->
+    <ScrollViewer x:Name="OverviewRoot" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="0,6,0,32">
 
-    <StackPanel Grid.Row="2">
+        <!-- Hero 横幅 -->
+        <Border x:Name="HeroCard" Height="240" CornerRadius="14" Margin="0,0,0,22"
+                Cursor="Hand" MouseLeftButtonUp="OnHeroClick">
+          <Grid ClipToBounds="True">
+            <Border x:Name="HeroBackdrop" Background="{StaticResource SurfaceBrush}" />
+            <Border VerticalAlignment="Bottom" Height="220">
+              <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                  <GradientStop Color="#00000000" Offset="0" />
+                  <GradientStop Color="#E6000000" Offset="0.72" />
+                  <GradientStop Color="#F2000000" Offset="1" />
+                </LinearGradientBrush>
+              </Border.Background>
+            </Border>
 
-      <!-- 进入目录后的返回条 -->
-      <StackPanel x:Name="Breadcrumb" Orientation="Horizontal" Visibility="Collapsed"
-                  Margin="0,0,0,12">
-        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
-                Cursor="Hand" MouseLeftButtonUp="OnBackClick">
-          <TextBlock Text="&#xE72B;  返回上层" FontFamily="{StaticResource IconFont}"
-                     FontSize="12" Foreground="{StaticResource AccentBrush}" />
+            <StackPanel VerticalAlignment="Bottom" Margin="34,0,34,22"
+                        HorizontalAlignment="Center" Width="720">
+              <TextBlock x:Name="HeroTitle" Text="正在读取…" FontSize="28"
+                         FontFamily="{StaticResource DisplayFont}" FontWeight="SemiBold"
+                         Foreground="#F5FFFFFF" TextTrimming="CharacterEllipsis"
+                         HorizontalAlignment="Center" TextAlignment="Center" />
+              <TextBlock x:Name="HeroMeta" FontSize="12.5" Foreground="#CCFFFFFF"
+                         Margin="0,7,0,0" HorizontalAlignment="Center" />
+              <TextBlock x:Name="HeroOverview" FontSize="12.5" Foreground="#B8FFFFFF"
+                         Margin="0,8,0,0" MaxHeight="38" TextTrimming="CharacterEllipsis"
+                         TextWrapping="Wrap" LineHeight="19" TextAlignment="Center" />
+            </StackPanel>
+          </Grid>
         </Border>
-        <TextBlock x:Name="BreadcrumbText" FontSize="12.5"
-                   Foreground="{StaticResource MutedBrush}"
-                   VerticalAlignment="Center" Margin="12,0,0,0" />
-      </StackPanel>
 
-      <ScrollViewer HorizontalScrollBarVisibility="Hidden"
-                    VerticalScrollBarVisibility="Disabled">
-        <ItemsControl x:Name="LibraryBar">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <StackPanel Orientation="Horizontal" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border Tag="{Binding Id}" MouseLeftButtonUp="OnChipClick" Cursor="Hand"
-                      CornerRadius="8" Padding="14,7" Margin="0,0,8,0">
-                <Border.Style>
-                  <Style TargetType="Border">
-                    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-                    <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}" />
-                    <Style.Triggers>
-                      <DataTrigger Binding="{Binding Active}" Value="True">
-                        <Setter Property="Background" Value="#2E2412" />
-                        <Setter Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
-                      </DataTrigger>
-                    </Style.Triggers>
-                  </Style>
-                </Border.Style>
-                <TextBlock Text="{Binding Title}" FontSize="13" />
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
-    </StackPanel>
-
-    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="0,20,0,0">
-      <StackPanel>
-        <ItemsControl x:Name="ItemGrid">
+        <!-- 我的媒体 -->
+        <Grid Margin="0,0,0,11">
+          <TextBlock Text="我的媒体" Style="{StaticResource SectionTitle}" FontSize="16" />
+          <TextBlock x:Name="LibrariesCount" Style="{StaticResource Caption}"
+                     HorizontalAlignment="Right" VerticalAlignment="Bottom" />
+        </Grid>
+        <ItemsControl x:Name="LibraryCards" ItemTemplate="{StaticResource LibraryTemplate}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <WrapPanel />
             </ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <StackPanel Width="148" Margin="0,0,16,22">
-                <Border Height="222" CornerRadius="10" Background="{Binding Background}"
-                        SnapsToDevicePixels="True" Tag="{Binding Id}"
-                        Cursor="Hand" MouseLeftButtonUp="OnCardClick">
-                  <Grid>
-                    <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
-                               Foreground="#2AFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Visibility="{Binding PlaceholderVisibility}" />
-                    <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8"
-                            Background="#59000000" CornerRadius="5" Padding="6,2"
-                            Visibility="{Binding BadgeVisibility}">
-                      <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#CCFFFFFF" />
-                    </Border>
-                  </Grid>
-                </Border>
-                <TextBlock Text="{Binding Title}" FontSize="12.5" Margin="1,9,0,0"
-                           Foreground="{StaticResource TextBrush}"
-                           TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{StaticResource FaintBrush}"
-                           Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
-              </StackPanel>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
         </ItemsControl>
 
-        <Button x:Name="MoreButton" Content="加载更多" Click="OnMoreClick"
-                Style="{StaticResource GhostButton}" HorizontalAlignment="Left"
-                Margin="0,0,0,28" Visibility="Collapsed" />
+        <!-- 继续观看 -->
+        <Grid Margin="0,10,0,11">
+          <TextBlock Text="继续观看" Style="{StaticResource SectionTitle}" FontSize="16" />
+          <TextBlock x:Name="ContinueCount" Style="{StaticResource Caption}"
+                     HorizontalAlignment="Right" VerticalAlignment="Bottom" />
+        </Grid>
+        <Grid>
+          <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                        PreviewMouseWheel="OnRowWheel">
+            <ItemsControl x:Name="ContinueRow" ItemTemplate="{StaticResource ContinueTemplate}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+          </ScrollViewer>
+          <Button Style="{StaticResource ScrollArrow}" Content="&#xE76B;"
+                  HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,53,0,0"
+                  Click="OnScrollLeft" />
+          <Button Style="{StaticResource ScrollArrow}" Content="&#xE76C;"
+                  HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,53,2,0"
+                  Click="OnScrollRight" />
+        </Grid>
+        <TextBlock x:Name="ContinueEmpty" Text="还没有看到一半的内容。"
+                   Style="{StaticResource Caption}" Margin="0,10,0,0" Visibility="Collapsed" />
+
+        <!-- 每个媒体库一行 -->
+        <ItemsControl x:Name="Sections" ItemTemplate="{StaticResource SectionTemplate}"
+                      Margin="0,26,0,0" />
+
+        <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
+                   Margin="0,16,0,0" TextWrapping="Wrap" />
       </StackPanel>
     </ScrollViewer>
+
+    <!-- 收藏（空态） -->
+    <StackPanel x:Name="FavoriteEmpty" Grid.Row="1" HorizontalAlignment="Center"
+                VerticalAlignment="Center" Margin="0,0,0,80" Visibility="Collapsed">
+      <TextBlock Text="&#xE734;" Style="{StaticResource EmptyIcon}" />
+      <TextBlock Text="还没有收藏" Style="{StaticResource EmptyText}" FontSize="13.5" />
+      <TextBlock Text="收藏的影片会集中在这里" Style="{StaticResource EmptyText}"
+                 FontSize="11.5" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
+    </StackPanel>
+
+    <!-- 媒体库内容（原网格视图） -->
+    <Grid x:Name="BrowseRoot" Grid.Row="1" Visibility="Collapsed">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <Grid Height="52">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Button Style="{StaticResource ToolButton}" Click="OnBackToOverview" ToolTip="返回">
+            <TextBlock Text="&#xE72B;" FontFamily="{StaticResource IconFont}" FontSize="15" />
+          </Button>
+          <TextBlock x:Name="BrowseTitle" Text="" Style="{StaticResource PageTitle}"
+                     FontSize="21" Margin="8,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Border Style="{StaticResource SearchBoxBorder}" Width="280" HorizontalAlignment="Right"
+                VerticalAlignment="Center">
+          <Grid>
+            <TextBlock Text="&#xE721;" Style="{StaticResource SearchBoxIcon}" />
+            <TextBox x:Name="FilterBox" Style="{StaticResource SearchBoxInput}"
+                     TextChanged="OnFilterChanged" />
+            <TextBlock x:Name="FilterPlaceholder" Text="在当前库中查找"
+                       Style="{StaticResource SearchBoxPlaceholder}" />
+          </Grid>
+        </Border>
+      </Grid>
+
+      <StackPanel Grid.Row="1" Margin="0,8,0,6">
+        <TextBlock x:Name="BrowseStatus" Style="{StaticResource Caption}"
+                   Margin="0,0,0,10" TextWrapping="Wrap" />
+
+        <StackPanel x:Name="Breadcrumb" Orientation="Horizontal" Visibility="Collapsed"
+                    Margin="0,0,0,12">
+          <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
+                  Cursor="Hand" MouseLeftButtonUp="OnBackClick">
+            <TextBlock Text="&#xE72B;  返回上层" FontFamily="{StaticResource IconFont}"
+                       FontSize="12" Foreground="{StaticResource AccentBrush}" />
+          </Border>
+          <TextBlock x:Name="BreadcrumbText" FontSize="12.5"
+                     Foreground="{StaticResource MutedBrush}"
+                     VerticalAlignment="Center" Margin="12,0,0,0" />
+        </StackPanel>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Hidden"
+                      VerticalScrollBarVisibility="Disabled">
+          <ItemsControl x:Name="LibraryBar">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Tag="{Binding Id}" MouseLeftButtonUp="OnChipClick" Cursor="Hand"
+                        CornerRadius="8" Padding="14,7" Margin="0,0,8,0">
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+                      <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding Active}" Value="True">
+                          <Setter Property="Background" Value="#2E2412" />
+                          <Setter Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
+                  <TextBlock Text="{Binding Title}" FontSize="13" />
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </StackPanel>
+
+      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
+        <StackPanel>
+          <ItemsControl x:Name="ItemGrid">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Width="148" Margin="0,0,16,22">
+                  <Border Height="222" CornerRadius="10" Background="{Binding Background}"
+                          SnapsToDevicePixels="True" Tag="{Binding Id}"
+                          Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+                    <Grid>
+                      <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
+                                 Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Visibility="{Binding PlaceholderVisibility}" />
+                      <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8"
+                              Background="#59000000" CornerRadius="5" Padding="6,2"
+                              Visibility="{Binding BadgeVisibility}">
+                        <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#CCFFFFFF" />
+                      </Border>
+                    </Grid>
+                  </Border>
+                  <TextBlock Text="{Binding Title}" FontSize="12.5" Margin="1,9,0,0"
+                             Foreground="{StaticResource TextBrush}"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{StaticResource FaintBrush}"
+                             Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Button x:Name="MoreButton" Content="加载更多" Click="OnMoreClick"
+                  Style="{StaticResource GhostButton}" HorizontalAlignment="Left"
+                  Margin="0,0,0,28" Visibility="Collapsed" />
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
   </Grid>
 </Page>
