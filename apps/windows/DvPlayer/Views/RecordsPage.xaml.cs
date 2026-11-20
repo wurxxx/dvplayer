@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -67,22 +69,103 @@ public partial class RecordsPage : Page
             .Select(r => (Record: r, Card: ToCard(r)))
             .ToList();
 
-        var cards = all.Select(x => x.Card).ToList();
-        var continuing = all
+        WatchList.ItemsSource = all.Select(x => x.Card).ToList();
+
+        // 继续观看按媒体源分栏。源名与顺序都来自当前连接列表：
+        // 连上的排在前面，没连上的源不会出现在这里（记录可能还在，但点了打不开）。
+        var connections = AppServices.Instance.Connections;
+        var order = connections
+            .Select((c, index) => (c.Id, index))
+            .ToDictionary(x => x.Id, x => x.index);
+        var names = connections.ToDictionary(c => c.Id, c => c.Name);
+        var connected = connections.ToDictionary(c => c.Id, c => c.Ok);
+
+        var groups = all
             .Where(x => x.Record.DurationSeconds <= 0 ||
                         x.Record.PositionSeconds < x.Record.DurationSeconds * 0.98)
-            .Select(x => x.Card)
+            .GroupBy(x => x.Record.SourceId ?? "")
+            .OrderBy(g => order.TryGetValue(g.Key, out var index) ? index : int.MaxValue)
+            .Select(g =>
+            {
+                var id = g.Key;
+                var title = names.TryGetValue(id, out var name)
+                    ? name
+                    : string.IsNullOrEmpty(id) ? "其它" : id;
+                var ok = connected.TryGetValue(id, out var flag) && flag;
+
+                return new SourceGroup
+                {
+                    Title = title,
+                    CountText = $"{g.Count()} 条",
+                    StatusBrush = (Brush)Application.Current.Resources[ok ? "SuccessBrush" : "FaintBrush"]!,
+                    Items = g.Select(x => x.Card).ToList(),
+                };
+            })
             .ToList();
 
-        ContinueList.ItemsSource = continuing;
-        WatchList.ItemsSource = cards;
+        ContinueGroups.ItemsSource = groups;
+        ContinueEmpty.Visibility = groups.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        ContinueEmpty.Visibility = continuing.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         StatusText.Text = _records.Count == 0
             ? "还没有播放记录。"
             : $"{_records.Count} 条记录 · 继续上次看到的位置";
 
-        _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+        _ = Task.WhenAll(all.Select(x => x.Card).Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    private const double ScrollStep = 262;
+
+    private void OnScrollLeft(object sender, RoutedEventArgs e) => ScrollRow(sender, -ScrollStep);
+
+    private void OnScrollRight(object sender, RoutedEventArgs e) => ScrollRow(sender, ScrollStep);
+
+    private static void ScrollRow(object sender, double delta)
+    {
+        if (FindRow(sender) is { } row)
+        {
+            row.ScrollToHorizontalOffset(Math.Max(0, row.HorizontalOffset + delta));
+        }
+    }
+
+    /// <summary>按钮的父级 Grid 里就装着这一行的 ScrollViewer；不依赖 Tag 绑定。</summary>
+    private static ScrollViewer? FindRow(object sender)
+    {
+        if (sender is Button { Tag: ScrollViewer tagged })
+        {
+            return tagged;
+        }
+
+        if (sender is not DependencyObject node)
+        {
+            return null;
+        }
+
+        for (var parent = VisualTreeHelper.GetParent(node); parent is not null;
+             parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (parent is ScrollViewer scroll)
+            {
+                return scroll;
+            }
+
+            if (parent is Panel panel &&
+                panel.Children.OfType<ScrollViewer>().FirstOrDefault() is { } inner)
+            {
+                return inner;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>横向列表上用滚轮也能左右滚，不用去够箭头。</summary>
+    private void OnRowWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is ScrollViewer row)
+        {
+            row.ScrollToHorizontalOffset(Math.Max(0, row.HorizontalOffset - e.Delta));
+            e.Handled = true;
+        }
     }
 
     private static RecordCard ToCard(PlayRecordDto record)
@@ -177,5 +260,14 @@ public partial class RecordsPage : Page
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
         public double BarWidth { get; init; }
+    }
+
+    /// <summary>一个源在「继续观看」里的一行。</summary>
+    private sealed class SourceGroup
+    {
+        public string Title { get; init; } = "";
+        public string CountText { get; init; } = "";
+        public Brush? StatusBrush { get; init; }
+        public List<RecordCard> Items { get; init; } = new();
     }
 }

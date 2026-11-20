@@ -419,6 +419,31 @@
     <Setter Property="IsHitTestVisible" Value="False" />
   </Style>
 
+  <!-- 横向列表两侧的滚动箭头 -->
+  <Style x:Key="ScrollArrow" TargetType="Button">
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Background" Value="#99000000" />
+    <Setter Property="Foreground" Value="#F2FFFFFF" />
+    <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="17">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#CC000000" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <!-- 空态（搜索 / 收藏 / IPTV 那种居中提示） -->
   <Style x:Key="EmptyIcon" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
