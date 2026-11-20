@@ -1,28 +1,28 @@
-# dvplayer Windows 代理
+# dvplayer Windows agent
 #
-# 双击 agent.bat 即可，不需要管理员（装 SDK 走解压版，不写系统目录）。
-# 需要管理员时任务里调 Start-ElevatedAgent 再弹一次 UAC。
+# Double-click agent.bat. No admin needed (the SDK is unzipped, nothing goes to system dirs).
+# When a task needs admin it calls Start-ElevatedAgent for another UAC prompt.
 #
-# 它循环向 Mac 上的控制服务要任务：
+# It polls the control service on the Mac for tasks:
 #   GET  http://192.168.0.15:8080/agent/task?token=...
 #   POST http://192.168.0.15:8080/agent/result?token=...
 #   POST http://192.168.0.15:8080/agent/upload?token=...&name=...
 #
-# 任务是一段 base64 的 PowerShell，在本进程里执行，所以可以用到下面定义的
-# Send-File 函数把自己的日志/截图传回去。
-# 只有在同一局域网 + 知道 token 的人才能下发任务，别把这个窗口发给别人。
+# A task is a base64 PowerShell script run in this process, so it can use the
+# Send-File function below to send logs and screenshots back.
+# Only someone on the same LAN with the token can submit tasks. Do not share this window.
 
 $ErrorActionPreference = "Continue"
 $server = "http://192.168.0.15:8080"
 $token  = "dvplayer-lan-7c1f19"
 
-# --- 权限 ---
+# --- elevation ---
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 function Start-ElevatedAgent {
-    # 需要管理员时才用：新增一个装了 UAC 的代理窗口，这个窗口继续跑。
+    # Only when admin is required: spawn another agent window behind UAC; this one keeps running.
     Start-Process powershell -Verb RunAs -ArgumentList @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`""
     )
