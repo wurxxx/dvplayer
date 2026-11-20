@@ -43,6 +43,12 @@ public partial class PlayWindow : Window
     private readonly DispatcherTimer _ticker = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromSeconds(3) };
 
+    /// <summary>
+    /// 拖窗口时别指望鼠标事件：窗口会跟着鼠标跑，跨窗口的移动/抬起容易丢。
+    /// 改成每 15ms 直接读光标和左键状态，拖动和改大小都稳。
+    /// </summary>
+    private readonly DispatcherTimer _dragTimer = new() { Interval = TimeSpan.FromMilliseconds(15) };
+
     private readonly List<PlayEpisode> _playlist;
     private readonly string? _seriesTitle;
 
@@ -77,6 +83,28 @@ public partial class PlayWindow : Window
     private bool _windowPlaced;
 
     private Point _pressPoint;
+    private bool _pressInTopBar;
+    private bool _dragMoved;
+
+    /// <summary>手动拖动 / 改大小的状态（分层窗口用不了系统的非客户区行为）。</summary>
+    private DragKind _drag = DragKind.None;
+    private Point _dragOrigin;
+    private Rect _dragBounds;
+    private const double TopBarHeight = 64;
+
+    private enum DragKind
+    {
+        None,
+        Move,
+        Left,
+        Right,
+        Top,
+        Bottom,
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight,
+    }
 
     /// <summary>双击里的第一次点击已经切过暂停，双击时要还原。</summary>
     private bool _clickToggledPause;
@@ -106,6 +134,7 @@ public partial class PlayWindow : Window
 
         _ticker.Tick += OnTick;
         _hideTimer.Tick += OnHideTick;
+        _dragTimer.Tick += OnDragTick;
         _ticker.Start();
         ResetHideTimer();
 
@@ -132,7 +161,8 @@ public partial class PlayWindow : Window
             return null;
         }
 
-        var window = new PlayWindow(source, startSeconds, playlist, seriesTitle) { Owner = owner };
+        var window = new PlayWindow(source, startSeconds, playlist, seriesTitle);
+        window.AttachSurface(owner);
         window.Show();
         return window;
     }
@@ -143,6 +173,12 @@ public partial class PlayWindow : Window
         Title = "DV Player — " + title;
         TopTitle.Text = title;
         LoadingTitle.Text = title;
+
+        // 任务栏里那个窗口是视频层，标题跟着片名走。
+        if (_surface is not null)
+        {
+            _surface.Title = Title;
+        }
     }
 
     /// <summary>
@@ -186,6 +222,46 @@ public partial class PlayWindow : Window
         }
     }
 
+    /// <summary>
+    /// 先把视频层挂到主窗口名下并显示，再让浮层认视频层当 Owner：
+    /// 「主窗口 ← 视频 ← 浮层」是一条固定的所有权链，z 序不用每次去抢。
+    /// 任务栏里露出来的也是视频窗口（缩略图有画面），浮层不进任务栏。
+    /// </summary>
+    public void AttachSurface(Window? owner)
+    {
+        if (_surface is null)
+        {
+            return;
+        }
+
+        if (owner is { IsVisible: true })
+        {
+            _surface.Owner = owner;
+        }
+
+        _surface.Title = Title;
+        _surface.Show();
+        _surface.Activated += OnSurfaceActivated;
+        Owner = _surface;
+    }
+
+    /// <summary>从任务栏点回来时激活的是视频窗，把键盘焦点还给浮层。</summary>
+    private void OnSurfaceActivated(object? sender, EventArgs e)
+    {
+        if (IsActive)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (IsVisible && !IsActive)
+            {
+                Activate();
+            }
+        });
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         if (_surface is null)
@@ -193,21 +269,7 @@ public partial class PlayWindow : Window
             return;
         }
 
-        // 视频层也挂在主窗口名下：否则点了主窗口之后，视频会沉到它后面，
-        // 只剩浮层（透明窗口）孤零零地压在库页面上。
-        if (Owner is { IsVisible: true } owner && !ReferenceEquals(_surface.Owner, owner))
-        {
-            _surface.Owner = owner;
-        }
-
-        // 先把视频层摆到同一个矩形再显示，避免它先在 (-10000,-10000) 冒一下。
         SyncSurface();
-        if (!_surface.IsVisible)
-        {
-            _surface.Show();
-        }
-
-        PushSurfaceBelow();
 
         if (_hwnd != IntPtr.Zero)
         {
@@ -219,8 +281,6 @@ public partial class PlayWindow : Window
     {
         base.OnSourceInitialized(e);
 
-        (PresentationSource.FromVisual(this) as HwndSource)?.AddHook(WindowProc);
-
         if (!_windowPlaced)
         {
             _windowPlaced = true;
@@ -229,7 +289,6 @@ public partial class PlayWindow : Window
 
         LocationChanged += (_, _) => SyncSurface();
         SizeChanged += (_, _) => SyncSurface();
-        Activated += (_, _) => PushSurfaceBelow();
     }
 
     // —— 窗口尺寸 / 全屏 / 视频层同步 ——
@@ -285,25 +344,6 @@ public partial class PlayWindow : Window
             _surface.Width = Math.Max(1, Width);
             _surface.Height = Math.Max(1, Height);
         }
-    }
-
-    /// <summary>把视频层塞到这个窗口正下方（不抢激活）。</summary>
-    private void PushSurfaceBelow()
-    {
-        if (_surface is null)
-        {
-            return;
-        }
-
-        var play = new WindowInteropHelper(this).Handle;
-        var surface = new WindowInteropHelper(_surface).Handle;
-        if (play == IntPtr.Zero || surface == IntPtr.Zero)
-        {
-            return;
-        }
-
-        SetWindowPos(surface, play, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     }
 
     private void ToggleFullscreen()
@@ -387,46 +427,6 @@ public partial class PlayWindow : Window
             (info.rcMonitor.Bottom - info.rcMonitor.Top) / scaleY);
     }
 
-    /// <summary>无边框窗口自己算边角：靠近边缘 6px 就交给系统改窗口大小。</summary>
-    private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg != WM_NCHITTEST || _fullscreen)
-        {
-            return IntPtr.Zero;
-        }
-
-        var value = lParam.ToInt64();
-        var screenPoint = new Point((short)(value & 0xFFFF), (short)((value >> 16) & 0xFFFF));
-        var point = PointFromScreen(screenPoint);
-
-        const double grip = 6;
-        var left = point.X <= grip;
-        var right = point.X >= ActualWidth - grip;
-        var top = point.Y <= grip;
-        var bottom = point.Y >= ActualHeight - grip;
-
-        var code = (left, right, top, bottom) switch
-        {
-            (true, _, true, _) => HTTOPLEFT,
-            (_, true, true, _) => HTTOPRIGHT,
-            (true, _, _, true) => HTBOTTOMLEFT,
-            (_, true, _, true) => HTBOTTOMRIGHT,
-            (true, _, _, _) => HTLEFT,
-            (_, true, _, _) => HTRIGHT,
-            (_, _, true, _) => HTTOP,
-            (_, _, _, true) => HTBOTTOM,
-            _ => 0,
-        };
-
-        if (code == 0)
-        {
-            return IntPtr.Zero;
-        }
-
-        handled = true;
-        return new IntPtr(code);
-    }
-
     // —— 画面上的鼠标：单击暂停、双击全屏、滚轮音量 ——
 
     private void OnSurfaceMouseDown(object sender, MouseButtonEventArgs e)
@@ -450,12 +450,48 @@ public partial class PlayWindow : Window
             return;
         }
 
-        _pressPoint = e.GetPosition(this);
+        var point = e.GetPosition(this);
+
+        // 四边 8px：按住改窗口大小（分层窗口不吃系统的 WM_NCHITTEST，自己算）。
+        if (!_fullscreen)
+        {
+            var edge = HitEdge(point);
+            if (edge != DragKind.None)
+            {
+                BeginDrag(edge, e);
+                e.Handled = true;
+                return;
+            }
+        }
+
+        _pressPoint = point;
+
+        // 顶栏那一行按住就是拖窗口，松手也不算「点了画面」。
+        if (!_fullscreen && point.Y <= TopBarHeight)
+        {
+            _pressInTopBar = true;
+            BeginDrag(DragKind.Move, e);
+            e.Handled = true;
+            return;
+        }
+
+        _pressInTopBar = false;
     }
 
     private void OnSurfaceMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left || e.ClickCount > 1 || _ipc is null)
+        if (e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        if (_drag != DragKind.None)
+        {
+            EndDrag();
+            return;
+        }
+
+        if (e.ClickCount > 1 || _ipc is null || _pressInTopBar)
         {
             return;
         }
@@ -472,29 +508,177 @@ public partial class PlayWindow : Window
         e.Handled = true;
     }
 
+    private void BeginDrag(DragKind kind, MouseEventArgs e)
+    {
+        _drag = kind;
+        _dragOrigin = ScreenPoint();
+        _dragBounds = new Rect(Left, Top, Width, Height);
+        _dragMoved = false;
+        _dragTimer.Start();
+    }
+
+    private void EndDrag()
+    {
+        Trace.Write($"drag end {_drag} moved={_dragMoved} bounds={Left:0},{Top:0},{ActualWidth:0}x{ActualHeight:0}");
+        _dragTimer.Stop();
+        _drag = DragKind.None;
+        _pressInTopBar = false;
+    }
+
+    private void OnDragTick(object? sender, EventArgs e)
+    {
+        if (_drag == DragKind.None)
+        {
+            _dragTimer.Stop();
+            return;
+        }
+
+        if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
+        {
+            EndDrag();
+            return;
+        }
+
+        ApplyDrag();
+    }
+
+    private void ApplyDrag()
+    {
+        var now = ScreenPoint();
+        var dx = now.X - _dragOrigin.X;
+        var dy = now.Y - _dragOrigin.Y;
+
+        if (!_dragMoved && Math.Abs(dx) < 3 && Math.Abs(dy) < 3)
+        {
+            return;
+        }
+
+        _dragMoved = true;
+
+        const double minWidth = 480;
+        const double minHeight = 270;
+        var b = _dragBounds;
+
+        switch (_drag)
+        {
+            case DragKind.Move:
+                b = new Rect(b.X + dx, b.Y + dy, b.Width, b.Height);
+                break;
+
+            case DragKind.Left:
+            {
+                var width = Math.Max(minWidth, b.Width - dx);
+                b = new Rect(b.Right - width, b.Y, width, b.Height);
+                break;
+            }
+
+            case DragKind.Right:
+                b = new Rect(b.X, b.Y, Math.Max(minWidth, b.Width + dx), b.Height);
+                break;
+
+            case DragKind.Top:
+            {
+                var height = Math.Max(minHeight, b.Height - dy);
+                b = new Rect(b.X, b.Bottom - height, b.Width, height);
+                break;
+            }
+
+            case DragKind.Bottom:
+                b = new Rect(b.X, b.Y, b.Width, Math.Max(minHeight, b.Height + dy));
+                break;
+
+            case DragKind.TopLeft:
+            {
+                var width = Math.Max(minWidth, b.Width - dx);
+                var height = Math.Max(minHeight, b.Height - dy);
+                b = new Rect(b.Right - width, b.Bottom - height, width, height);
+                break;
+            }
+
+            case DragKind.TopRight:
+            {
+                var height = Math.Max(minHeight, b.Height - dy);
+                b = new Rect(b.X, b.Bottom - height, Math.Max(minWidth, b.Width + dx), height);
+                break;
+            }
+
+            case DragKind.BottomLeft:
+            {
+                var width = Math.Max(minWidth, b.Width - dx);
+                b = new Rect(b.Right - width, b.Y, width, Math.Max(minHeight, b.Height + dy));
+                break;
+            }
+
+            case DragKind.BottomRight:
+                b = new Rect(
+                    b.X, b.Y,
+                    Math.Max(minWidth, b.Width + dx),
+                    Math.Max(minHeight, b.Height + dy));
+                break;
+        }
+
+        ApplyBounds(new Rect(
+            Math.Round(b.X), Math.Round(b.Y), Math.Round(b.Width), Math.Round(b.Height)));
+    }
+
+    /// <summary>鼠标在哪个边上（8px 以内）；拖动中或全屏时不算。</summary>
+    private DragKind HitEdge(Point point)
+    {
+        if (_fullscreen || _drag != DragKind.None)
+        {
+            return DragKind.None;
+        }
+
+        const double grip = 8;
+        var left = point.X <= grip;
+        var right = point.X >= ActualWidth - grip;
+        var top = point.Y <= grip;
+        var bottom = point.Y >= ActualHeight - grip;
+
+        return (left, right, top, bottom) switch
+        {
+            (true, _, true, _) => DragKind.TopLeft,
+            (_, true, true, _) => DragKind.TopRight,
+            (true, _, _, true) => DragKind.BottomLeft,
+            (_, true, _, true) => DragKind.BottomRight,
+            (true, _, _, _) => DragKind.Left,
+            (_, true, _, _) => DragKind.Right,
+            (_, _, true, _) => DragKind.Top,
+            (_, _, _, true) => DragKind.Bottom,
+            _ => DragKind.None,
+        };
+    }
+
+    /// <summary>光标位置（屏幕物理像素）换算成 DIP，拖窗口时以它为准。</summary>
+    private Point ScreenPoint()
+    {
+        if (!GetCursorPos(out var point))
+        {
+            return new Point(Left, Top);
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        return new Point(
+            point.X / (dpi.DpiScaleX <= 0 ? 1 : dpi.DpiScaleX),
+            point.Y / (dpi.DpiScaleY <= 0 ? 1 : dpi.DpiScaleY));
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT point);
+
+
     private void OnSurfaceWheel(object sender, MouseWheelEventArgs e)
     {
         ChangeVolume(e.Delta > 0 ? 2 : -2);
         ShowChrome();
         e.Handled = true;
-    }
-
-    /// <summary>按住顶栏空白处拖窗口（全屏时不需要）。</summary>
-    private void OnTitleBarDrag(object sender, MouseButtonEventArgs e)
-    {
-        if (_fullscreen || e.ButtonState != MouseButtonState.Pressed)
-        {
-            return;
-        }
-
-        try
-        {
-            DragMove();
-        }
-        catch (InvalidOperationException)
-        {
-            // 鼠标已经松开：忽略。
-        }
     }
 
     private void OnFullscreenClick(object sender, RoutedEventArgs e) => ToggleFullscreen();
@@ -748,9 +932,6 @@ public partial class PlayWindow : Window
 
     private void OnTick(object? sender, EventArgs e)
     {
-        // 两个窗口必须一直贴在一起：谁被激活、桌面怎么切，都靠这一下兜底。
-        PushSurfaceBelow();
-
         if (++_sinceReport < ReportEverySeconds || _position <= 0)
         {
             return;
@@ -1410,6 +1591,7 @@ public partial class PlayWindow : Window
     {
         _ticker.Stop();
         _hideTimer.Stop();
+        _dragTimer.Stop();
 
         if (!_eof && _position > 0)
         {
@@ -1419,8 +1601,12 @@ public partial class PlayWindow : Window
         _ipc?.Dispose();
         _mpv.Dispose();
 
-        _surface?.Close();
-        _surface = null;
+        if (_surface is not null)
+        {
+            _surface.Activated -= OnSurfaceActivated;
+            _surface.Close();
+            _surface = null;
+        }
     }
 
     private void OnKeyDown(object sender, KeyEventArgs e)
@@ -1500,16 +1686,40 @@ public partial class PlayWindow : Window
         _ipc?.Command("set_property", "volume", (int)Math.Round(value));
     }
 
-    private void OnMouseMove(object sender, MouseEventArgs e) => ShowChrome();
+    private void OnMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_drag != DragKind.None)
+        {
+            return;
+        }
 
-    private void ShowChrome()
+        ShowChrome();
+        UpdateCursor(e.GetPosition(this));
+    }
+
+    /// <summary>鼠标贴近四边就换成改大小的光标。</summary>
+    private void UpdateCursor(Point point)
     {
         if (!_chromeVisible)
         {
-            _chromeVisible = true;
-            SetChromeOpacity(1);
+            Cursor = Cursors.None;
+            return;
         }
 
+        Cursor = HitEdge(point) switch
+        {
+            DragKind.Left or DragKind.Right => Cursors.SizeWE,
+            DragKind.Top or DragKind.Bottom => Cursors.SizeNS,
+            DragKind.TopLeft or DragKind.BottomRight => Cursors.SizeNWSE,
+            DragKind.TopRight or DragKind.BottomLeft => Cursors.SizeNESW,
+            _ => Cursors.Arrow,
+        };
+    }
+
+    private void ShowChrome()
+    {
+        _chromeVisible = true;
+        SetChromeOpacity(1);
         ResetHideTimer();
     }
 
@@ -1532,7 +1742,8 @@ public partial class PlayWindow : Window
         _hideTimer.Stop();
 
         // 鼠标停在控制条上、正在拖动、或者面板开着，就别隐藏。
-        if (Chrome.IsMouseOver || TopBar.IsMouseOver || RightActions.IsMouseOver ||
+        if (_drag != DragKind.None || _pressInTopBar ||
+            Chrome.IsMouseOver || TopBar.IsMouseOver || RightActions.IsMouseOver ||
             _seeking || _volumeDragging ||
             EpisodePanel.Visibility == Visibility.Visible ||
             MediaInfoPanel.Visibility == Visibility.Visible)
@@ -1565,6 +1776,85 @@ public partial class PlayWindow : Window
 
     /// <summary>截图巡检用：把浮层强制显示出来。</summary>
     public void ShowChromeForShot() => ShowChrome();
+
+    /// <summary>
+    /// 巡检用：用真实鼠标事件验证「点画面暂停 / 顶栏拖动 / 右边缘改大小」。
+    /// 走 SendInput 那套消息，和手点等价；中间让出消息泵，不然拖动不会生效。
+    /// </summary>
+    public async Task RunInputTestAsync()
+    {
+        var before = new Rect(Left, Top, ActualWidth, ActualHeight);
+
+        // 1) 点画面正中：应当暂停
+        MoveCursor(ActualWidth / 2, ActualHeight / 2);
+        await Task.Delay(200);
+        Click();
+        await Task.Delay(400);
+        Trace.Write($"input test click paused={_paused}");
+
+        // 2) 按住顶栏往右下拖 120x60
+        var bar = ToScreen(ActualWidth / 2, 28);
+        SetCursorPos((int)bar.X, (int)bar.Y);
+        await Task.Delay(200);
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        await Task.Delay(120);
+
+        for (var i = 1; i <= 10; i++)
+        {
+            SetCursorPos((int)(bar.X + i * 12), (int)(bar.Y + i * 6));
+            await Task.Delay(40);
+        }
+
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        await Task.Delay(400);
+        Trace.Write($"input test drag {before.Left:0},{before.Top:0} -> {Left:0},{Top:0}");
+
+        // 3) 拖右边缘往右 120
+        var edge = ToScreen(ActualWidth - 5, ActualHeight / 2);
+        var width = ActualWidth;
+        SetCursorPos((int)edge.X, (int)edge.Y);
+        await Task.Delay(200);
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        await Task.Delay(120);
+
+        for (var i = 1; i <= 10; i++)
+        {
+            SetCursorPos((int)(edge.X + i * 12), (int)edge.Y);
+            await Task.Delay(40);
+        }
+
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        await Task.Delay(400);
+        Trace.Write($"input test resize {width:0} -> {ActualWidth:0}");
+    }
+
+    private void MoveCursor(double x, double y)
+    {
+        var point = ToScreen(x, y);
+        SetCursorPos((int)point.X, (int)point.Y);
+    }
+
+    private Point ToScreen(double x, double y) => PointToScreen(new Point(x, y));
+
+    private void Click()
+    {
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+    }
+
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+
+    private const int VK_LBUTTON = 0x01;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int key);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, int extra);
 
     /// <summary>截图巡检用：打一行几何信息，排查两个窗口没对齐。</summary>
     public string DescribeBounds()
@@ -1612,21 +1902,6 @@ public partial class PlayWindow : Window
         UpdateMediaInfoText();
     }
 
-    private const int WM_NCHITTEST = 0x0084;
-    private const int HTLEFT = 10;
-    private const int HTRIGHT = 11;
-    private const int HTTOP = 12;
-    private const int HTTOPLEFT = 13;
-    private const int HTTOPRIGHT = 14;
-    private const int HTBOTTOM = 15;
-    private const int HTBOTTOMLEFT = 16;
-    private const int HTBOTTOMRIGHT = 17;
-
-    private const uint SWP_NOSIZE = 0x0001;
-    private const uint SWP_NOMOVE = 0x0002;
-    private const uint SWP_NOACTIVATE = 0x0010;
-    private const uint SWP_NOOWNERZORDER = 0x0200;
-
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
     {
@@ -1650,10 +1925,6 @@ public partial class PlayWindow : Window
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowPos(
-        IntPtr hwnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
     private sealed class MpvTrack
     {

@@ -35,8 +35,7 @@
     <Grid x:Name="Overlay" Background="Transparent">
 
       <!-- 顶部：片名居中，右上角是缓存速度和静音状态 -->
-      <Grid x:Name="TopBar" VerticalAlignment="Top" Height="64" Opacity="0"
-            MouseLeftButtonDown="OnTitleBarDrag">
+      <Grid x:Name="TopBar" VerticalAlignment="Top" Height="64" Opacity="1">
         <Border Height="130" VerticalAlignment="Top" IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
@@ -68,7 +67,7 @@
 
       <!-- 右侧中部：截图 / 选集 -->
       <StackPanel x:Name="RightActions" HorizontalAlignment="Right" VerticalAlignment="Center"
-                  Margin="0,0,18,0" Opacity="0">
+                  Margin="0,0,18,0" Opacity="1">
         <Button x:Name="ShotButton" Style="{StaticResource PlayerCircleButton}"
                 Click="OnShotClick" ToolTip="截图">
           <TextBlock Text="&#xE722;" FontFamily="{StaticResource IconFont}" FontSize="18"
@@ -184,7 +183,7 @@
                  Background="#B3000000" Padding="14,7" Visibility="Collapsed" />
 
       <!-- 底部控制条 -->
-      <Grid x:Name="Chrome" VerticalAlignment="Bottom" Opacity="0">
+      <Grid x:Name="Chrome" VerticalAlignment="Bottom" Opacity="1">
         <Border Height="230" VerticalAlignment="Bottom" IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">

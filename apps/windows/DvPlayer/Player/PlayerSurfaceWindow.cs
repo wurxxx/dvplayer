@@ -18,7 +18,8 @@ public sealed class PlayerSurfaceWindow : Window
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.Manual;
-        ShowInTaskbar = false;
+        // 任务栏里显示的是这一层（缩略图有画面），浮层不进任务栏。
+        ShowInTaskbar = true;
         ShowActivated = false;
         Background = Brushes.Black;
         Left = -10000;

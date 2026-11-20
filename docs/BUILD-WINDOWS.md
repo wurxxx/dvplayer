@@ -143,6 +143,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
 | `--play-shot <dir>` | 播放页巡检：依次截图 `play.png` / `play-episodes.png` / `play-audio.png` / `play-more.png` / `play-info.png`（浮层、选集、两个菜单、媒体信息），另有 `play-screen.png` / `play-episodes-screen.png` 是从桌面抓的真实画面（含视频） |
 | `--play-end` | 配合 `--play-shot`：跳到片尾前 4 秒，20 秒后截 `play-next.png`，验证播完自动接下一集 |
+| `--play-input` | 配合 `--play-shot`：用真实鼠标事件验证点画面暂停 / 拖顶栏移动 / 拖右边缘改大小，结果写进 `player.log`，最后截 `desktop-input.png` |
 | `--play first` | 配合 `--play-series`：直接播这个剧的第一集，不用先查集 id |
 | `--play-series <剧 id>` | 给播放页的「选集」拼列表（剧 → 第一个季 → 集），片名也用它拼 |
 
@@ -170,9 +171,10 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 > ```
 >
 > 播放页现在是两个窗口：视频在 `PlayerSurfaceWindow`（黑窗），控制条是
-> `PlayWindow`（透明浮层）。`RenderTargetBitmap` 只截得到浮层，所以巡检会
-> 额外用 `UiCapture.SaveScreen` 从桌面 BitBlt 一张 `play-screen.png`，
-> 那张才是用户看到的样子（视频 + 浮层）。桌面抓图要求进程在 Session 2 里跑。
+> `PlayWindow`（透明浮层，Owner 是视频窗）。`RenderTargetBitmap` 只截得到浮层，
+> 所以巡检会额外从桌面 BitBlt 几张：`desktop-open.png`（刚打开，控制条该在）、
+> `desktop-early.png`、`desktop.png`（主窗口拿回前台之后）、`desktop-input.png`。
+> 桌面抓图要求进程在 Session 2 里跑。
 
 > 注意：PowerShell 5.1 按 ANSI 读 `.ps1`，带中文的脚本必须存成 **UTF-8 with BOM**，
 > 否则解析直接报「字符串缺少终止符」。仓库里的 `run-session2.ps1` 已经带 BOM。

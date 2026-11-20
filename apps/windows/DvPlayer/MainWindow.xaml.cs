@@ -112,8 +112,27 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // --play-input：真实鼠标事件验证点画面暂停 / 拖窗口 / 改大小。
+        if (ArgumentAfter("--play-input") is not null)
+        {
+            await Task.Delay(9000);
+            await player.RunInputTestAsync();
+            await Task.Delay(600);
+            UiCapture.SaveDesktop(Path.Combine(dir, "desktop-input.png"));
+            player.Close();
+            return;
+        }
+
+        // 打开后先看一眼：控制条应该立即出现（3 秒无操作才会自动隐藏）。
+        await Task.Delay(1500);
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop-open.png"));
+
         // 网络流要一会儿才出画面。
-        await Task.Delay(10000);
+        await Task.Delay(8500);
+
+        // 刚打开、还没碰过任何窗口时，控制条就该在。
+        Trace.Write("player bounds (fresh) " + player.DescribeBounds());
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop-early.png"));
 
         // 回归：把主窗口点回前台，视频层不能沉到它后面。
         Activate();
