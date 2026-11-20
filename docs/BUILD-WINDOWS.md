@@ -121,6 +121,8 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--scroll <像素>` | 把服务器首页往下滚再截，检查分组标题与横向海报行 |
 | `--timing` | 把首页各阶段耗时写到 `%TEMP%\dvplayer\startup.log`，排查加载慢用 |
 | `--favorites` | 媒体库页切到「收藏」分段再截，检查空态与顶栏 |
+| `--inline-search <关键词>` | 媒体库页切到页内搜索并填好关键词 |
+| `--edit-source` | 服务器页打开第一个源的编辑表单 |
 | `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`） |
 | `--series-season <n>` | 详情页默认展开第 n 季（验证季切换） |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
