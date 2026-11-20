@@ -6,10 +6,12 @@ use std::collections::BTreeMap;
 
 use crate::error::{compact_json, percent_decode, percent_encode, ApiEnvelope, MediaError, Result};
 use crate::models::{
+    Person,
+    AudioInfo, MediaInfo, VideoInfo,
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
-use crate::sources::MediaSource;
+use crate::sources::{pick_bool, pick_f64, pick_i32, pick_i64, pick_str, MediaSource};
 
 const API_PREFIX: &str = "/v/api/v1";
 const SIGN_SALT: &str = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh";
@@ -643,10 +645,12 @@ impl FnOsSource {
         }
 
         let path = format!("/item/{}", item_id);
-        let env: ApiEnvelope<DetailDto> =
+        let env: ApiEnvelope<serde_json::Value> =
             self.send(Method::GET, &path, &BTreeMap::new(), None)?;
 
-        let d = env.data.unwrap_or_default();
+        let value = env.data.unwrap_or(serde_json::Value::Null);
+
+        let d: DetailDto = serde_json::from_value(value).unwrap_or_default();
         let title = d.title.clone().unwrap_or_default();
         let episode_count = d
             .number_of_episodes
@@ -927,6 +931,195 @@ impl FnOsSource {
             audio_streams,
             subtitle_streams,
         })
+    }
+
+    /// 详情页「媒体信息」：`/play/info` 拿 media_guid，再 `/stream` 取轨道明细。
+    ///
+    /// 飞牛给的字段没有 Emby 全，取不到的项留空，界面自动跳过。
+    pub fn media_info(&self, item_id: &str) -> Result<MediaInfo> {
+        #[derive(Deserialize, Default)]
+        struct InfoDto {
+            #[serde(default)]
+            media_guid: String,
+        }
+
+        // 播放过一次就有缓存，详情页不用再问一遍服务器。
+        let cached = self
+            .media_cache
+            .lock()
+            .ok()
+            .and_then(|c| c.get(item_id).cloned())
+            .unwrap_or_default();
+
+        let media_guid = if cached.is_empty() {
+            let body = compact_json(&serde_json::json!({ "item_guid": item_id }))?;
+            let env: ApiEnvelope<InfoDto> =
+                self.send(Method::POST, "/play/info", &BTreeMap::new(), Some(&body))?;
+            let info = env.data.ok_or_else(|| MediaError::Api {
+                code: env.code,
+                msg: env.msg.unwrap_or_else(|| "no play info".into()),
+            })?;
+
+            if info.media_guid.is_empty() {
+                return Err(MediaError::Other("该条目没有可播放的媒体文件".into()));
+            }
+
+            if let Ok(mut cache) = self.media_cache.lock() {
+                cache.insert(item_id.to_string(), info.media_guid.clone());
+            }
+
+            info.media_guid
+        } else {
+            cached
+        };
+
+        // 新版接口（界面「文件媒体信息」用的就是它）：GET /stream/list/<media_guid>，
+        // 字段是 ffprobe 那套 snake_case；老服务器没有这个端点时退回 POST /stream。
+        let list_path = format!("/stream/list/{}", media_guid);
+        let data = match self.send::<serde_json::Value>(
+            Method::GET,
+            &list_path,
+            &BTreeMap::new(),
+            None,
+        ) {
+            Ok(env) => env.data,
+            Err(_) => None,
+        };
+
+        let data = match data {
+            Some(value) if !value.is_null() => value,
+            _ => {
+                let stream_body = compact_json(&serde_json::json!({
+                    "media_guid": media_guid,
+                    "ip": "00000000-0000-4000-8000-000000000000",
+                    "header": { "User-Agent": ["DVPlayer"] }
+                }))?;
+                let raw: ApiEnvelope<serde_json::Value> = self.send(
+                    Method::POST,
+                    "/stream",
+                    &BTreeMap::new(),
+                    Some(&stream_body),
+                )?;
+                raw.data
+                    .ok_or_else(|| MediaError::Other("服务器没有返回媒体信息".into()))?
+            }
+        };
+
+        let video = data.get("video_stream").map(|v| {
+            let resolution = pick_str(v, &["resolution_type"]);
+            let color = pick_str(v, &["color_range_type", "color_range"])
+                .or_else(|| Some("SDR".into()));
+
+            // 卡片标题：`1080p SDR`，和服务器自己的「文件媒体信息」一致。
+            let title = [resolution.clone(), color.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            VideoInfo {
+                title: (!title.is_empty()).then_some(title),
+                codec: pick_str(v, &["codec_name", "codec"]).map(|c| c.to_uppercase()),
+                width: pick_i32(v, &["width"]),
+                height: pick_i32(v, &["height"]),
+                frame_rate: pick_f64(v, &["avg_frame_rate", "frame_rate", "r_frame_rate"]),
+                bit_rate: pick_i64(v, &["bps", "bit_rate", "bitrate"]),
+                color_range: color,
+                profile: pick_str(v, &["profile"]),
+                level: pick_f64(v, &["level"]),
+                aspect_ratio: pick_str(v, &["display_aspect_ratio", "aspect_ratio"]),
+                // 飞牛给的是 `progressive=1`，取反才是交错。
+                interlaced: pick_bool(v, &["progressive"]).map(|p| !p).or_else(|| {
+                    pick_bool(v, &["is_interlaced", "interlaced", "field_order"])
+                }),
+                bit_depth: pick_i32(v, &["bit_depth", "bits_per_raw_sample"]),
+                pixel_format: pick_str(v, &["pix_fmt", "pixel_format"]),
+                dolby_vision: pick_i32(v, &["dv_profile"]).unwrap_or(0) > 0,
+            }
+        });
+
+        let audios = data
+            .get("audio_streams")
+            .and_then(|v| v.as_array())
+            .map(|list| {
+                list.iter()
+                    .map(|a| AudioInfo {
+                        title: pick_str(a, &["title"]),
+                        // 飞牛没识别出语言时写 `und`，界面显示「--」更清楚。
+                        language: pick_str(a, &["language"]).filter(|l| {
+                            !l.eq_ignore_ascii_case("und") && !l.eq_ignore_ascii_case("unknown")
+                        }),
+                        codec: pick_str(a, &["codec_name", "codec"]).map(|c| c.to_uppercase()),
+                        profile: pick_str(a, &["profile"]),
+                        layout: pick_str(a, &["channel_layout"]),
+                        bit_rate: pick_i64(a, &["bps", "bit_rate", "bitrate"]),
+                        channels: pick_i32(a, &["channels"]),
+                        sample_rate: pick_i32(a, &["sample_rate"]),
+                        is_default: pick_i32(a, &["is_default"]).unwrap_or(0) > 0,
+                        is_external: pick_i32(a, &["is_external"]).unwrap_or(0) > 0,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok(MediaInfo { video, audios })
+    }
+
+    /// 演职人员：`POST /person/list/<guid>`。
+    ///
+    /// 这个端点各版本行为不一致（有的要空 body、有的要 GET），按顺序试一遍，
+    /// 第一个给出非空列表的为准；全空就是服务器没刮到人。
+    pub fn people(&self, item_id: &str) -> Result<Vec<Person>> {
+        let path = format!("/person/list/{}", item_id);
+        let empty_body = compact_json(&serde_json::json!({}))?;
+        let guid_body = compact_json(&serde_json::json!({ "item_guid": item_id }))?;
+
+        // 端点有效时可能只回 `{"list":[],"total":0}`——那也算拿到答案，别再换姿势问。
+        let attempts = [
+            (Method::POST, path.as_str(), None),
+            (Method::POST, path.as_str(), Some(empty_body.as_str())),
+            (Method::POST, "/person/list", Some(guid_body.as_str())),
+        ];
+
+        let mut data = serde_json::Value::Null;
+
+        for (method, target, body) in attempts {
+            let Ok(env) = self.send::<serde_json::Value>(
+                method.clone(),
+                target,
+                &BTreeMap::new(),
+                body,
+            ) else {
+                continue;
+            };
+
+            if let Some(value) = env.data.filter(|v| !v.is_null()) {
+                data = value;
+                break;
+            }
+        }
+
+        let Some(list) = list_of(&data) else {
+            return Ok(Vec::new());
+        };
+
+        Ok(list
+            .iter()
+            .filter_map(|p| {
+                let name = pick_str(p, &["name", "person_name", "title"])?;
+                let image = pick_str(p, &["poster", "avatar", "image", "thumb", "poster_path"])
+                    // 外部完整地址走不了 sys/img，丢掉。
+                    .filter(|path| !path.starts_with("http"));
+
+                Some(Person {
+                    id: pick_str(p, &["guid", "person_guid", "id"]).unwrap_or_default(),
+                    name,
+                    role: pick_str(p, &["character", "role", "actor_role"]),
+                    job: pick_str(p, &["job", "type", "position", "department"]),
+                    image_path: image,
+                })
+            })
+            .collect())
     }
 
     /// 海报地址：图片接口只认 Authorization 头，调用方要带着头去取字节。
@@ -1219,6 +1412,15 @@ pub(crate) struct MediaStreamDto {
     pub color_range_type: Option<serde_json::Value>,
 }
 
+/// 演员列表：直接是数组，或包在 `list` / `persons` 里。
+fn list_of(data: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
+    data.as_array()
+        .cloned()
+        .or_else(|| data.get("list").and_then(|v| v.as_array()).cloned())
+        .or_else(|| data.get("persons").and_then(|v| v.as_array()).cloned())
+        .or_else(|| data.get("data").and_then(|v| v.as_array()).cloned())
+}
+
 /// 从「字符串或字符串数组」里取第一个非空值。
 pub(crate) fn first_string(value: Option<&serde_json::Value>) -> Option<String> {
     let value = value?;
@@ -1310,6 +1512,14 @@ impl MediaSource for FnOsSource {
 
     fn play_source(&self, item_id: &str) -> Result<PlaySource> {
         FnOsSource::play_source(self, item_id)
+    }
+
+    fn media_info(&self, item_id: &str) -> Result<MediaInfo> {
+        FnOsSource::media_info(self, item_id)
+    }
+
+    fn people(&self, item_id: &str) -> Result<Vec<Person>> {
+        FnOsSource::people(self, item_id)
     }
 
     fn image_source(&self, path: &str) -> Result<ImageSource> {

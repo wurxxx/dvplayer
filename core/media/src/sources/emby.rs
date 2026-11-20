@@ -15,6 +15,8 @@ use serde::Deserialize;
 
 use crate::error::{percent_encode, MediaError, Result};
 use crate::models::{
+    Person,
+    AudioInfo, MediaInfo, VideoInfo,
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
@@ -32,7 +34,7 @@ ChildCount,RecursiveItemCount,CommunityRating,Status,PremiereDate";
 const DETAIL_FIELDS: &str = "Overview,ProductionYear,RunTimeTicks,UserData,ImageTags,\
 BackdropImageTags,ParentId,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,\
 ChildCount,RecursiveItemCount,CommunityRating,OfficialRating,Status,PremiereDate,\
-OriginalTitle,MediaStreams,MediaSources,Path,Container,PrimaryImageAspectRatio";
+OriginalTitle,MediaStreams,MediaSources,Path,Container,PrimaryImageAspectRatio,People";
 
 pub struct EmbySource {
     pub id: String,
@@ -491,6 +493,111 @@ impl EmbySource {
         })
     }
 
+    /// 演职人员：条目详情里的 `People` 字段。
+    pub fn people(&self, item_id: &str) -> Result<Vec<Person>> {
+        let item = self.item(item_id)?;
+
+        Ok(item
+            .people
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| !p.name.is_empty())
+            .map(|p| Person {
+                image_path: p
+                    .primary_image_tag
+                    .as_deref()
+                    .filter(|t| !t.is_empty())
+                    .map(|_| format!("{}/Primary", p.id)),
+                id: p.id,
+                name: p.name,
+                role: p.role.filter(|r| !r.is_empty()),
+                // Emby 的 Type 是英文：Actor / Director / Writer。
+                job: p.kind.map(|k| match k.as_str() {
+                    "Actor" => "演员".to_string(),
+                    "Director" => "导演".to_string(),
+                    "Writer" => "编剧".to_string(),
+                    "Producer" => "制片".to_string(),
+                    "GuestStar" => "客串".to_string(),
+                    other => other.to_string(),
+                }),
+            })
+            .collect())
+    }
+
+    /// 详情页「媒体信息」：一次 `PlaybackInfo` 就带全部轨道属性。
+    pub fn media_info(&self, item_id: &str) -> Result<MediaInfo> {
+        let item = self.item(item_id)?;
+        let user = self.user_id()?;
+        let info: PlaybackInfoDto = self
+            .post_json(
+                &format!("/Items/{item_id}/PlaybackInfo"),
+                &serde_json::json!({ "UserId": user }),
+            )
+            .unwrap_or_default();
+
+        let media = info.media_sources.first().cloned().unwrap_or_default();
+        let streams = if media.media_streams.is_empty() {
+            item.media_streams.clone().unwrap_or_default()
+        } else {
+            media.media_streams.clone()
+        };
+
+        let video = streams.iter().find(|s| s.kind == "Video").map(|v| {
+            let label = [
+                resolution_label(v).unwrap_or_default(),
+                color_label(v).unwrap_or_else(|| "SDR".into()),
+            ]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+            VideoInfo {
+                title: (!label.is_empty()).then_some(label),
+                codec: v.codec.clone().filter(|s| !s.is_empty()).map(|c| c.to_uppercase()),
+                width: v.width,
+                height: v.height,
+                frame_rate: v.frame_rate.or(v.average_frame_rate),
+                bit_rate: v.bit_rate,
+                color_range: color_label(v).or_else(|| Some("SDR".into())),
+                profile: v.profile.clone().filter(|s| !s.is_empty()),
+                level: v.level,
+                aspect_ratio: v.aspect_ratio.clone().filter(|s| !s.is_empty()),
+                interlaced: Some(v.is_interlaced),
+                bit_depth: v.bit_depth,
+                pixel_format: v.pixel_format.clone().filter(|s| !s.is_empty()),
+                dolby_vision: v.dolby_vision_profile.unwrap_or(0) > 0
+                    || v.video_range_type
+                        .as_deref()
+                        .map(|r| r.eq_ignore_ascii_case("DOVI"))
+                        .unwrap_or(false),
+            }
+        });
+
+        let audios = streams
+            .iter()
+            .filter(|s| s.kind == "Audio")
+            .map(|a| AudioInfo {
+                title: a
+                    .title
+                    .clone()
+                    .or_else(|| a.display_title.clone())
+                    .filter(|s| !s.is_empty()),
+                language: a.language.clone().filter(|s| !s.is_empty()),
+                codec: a.codec.clone().filter(|s| !s.is_empty()).map(|c| c.to_uppercase()),
+                profile: a.profile.clone().filter(|s| !s.is_empty()),
+                layout: a.channel_layout.clone().filter(|s| !s.is_empty()),
+                bit_rate: a.bit_rate,
+                channels: a.channels,
+                sample_rate: a.sample_rate,
+                is_default: a.is_default,
+                is_external: a.is_external,
+            })
+            .collect();
+
+        Ok(MediaInfo { video, audios })
+    }
+
     /// 图片：`path` 形如 `{itemId}/Primary`、`{itemId}/Backdrop/0`、`{itemId}/Logo`。
     pub fn image_source(&self, path: &str) -> Result<ImageSource> {
         let (item_id, kind) = path
@@ -845,6 +952,14 @@ impl MediaSource for EmbySource {
         EmbySource::play_source(self, item_id)
     }
 
+    fn media_info(&self, item_id: &str) -> Result<MediaInfo> {
+        EmbySource::media_info(self, item_id)
+    }
+
+    fn people(&self, item_id: &str) -> Result<Vec<Person>> {
+        EmbySource::people(self, item_id)
+    }
+
     fn image_source(&self, path: &str) -> Result<ImageSource> {
         EmbySource::image_source(self, path)
     }
@@ -918,6 +1033,23 @@ struct ItemDto {
     backdrop_image_tags: Option<Vec<String>>,
     #[serde(default)]
     media_streams: Option<Vec<StreamDto>>,
+    #[serde(default)]
+    people: Option<Vec<PersonDto>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct PersonDto {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default, rename = "Type")]
+    kind: Option<String>,
+    #[serde(default)]
+    primary_image_tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -980,6 +1112,33 @@ struct StreamDto {
     video_range_type: Option<String>,
     #[serde(default)]
     dolby_vision_profile: Option<i32>,
+    // —— 详情页「媒体信息」要的字段，Emby / Jellyfin 都给全 ——
+    #[serde(default)]
+    width: Option<i32>,
+    #[serde(default)]
+    frame_rate: Option<f64>,
+    #[serde(default)]
+    average_frame_rate: Option<f64>,
+    #[serde(default)]
+    bit_rate: Option<i64>,
+    #[serde(default)]
+    level: Option<f64>,
+    #[serde(default)]
+    is_interlaced: bool,
+    #[serde(default)]
+    bit_depth: Option<i32>,
+    #[serde(default)]
+    pixel_format: Option<String>,
+    #[serde(default)]
+    aspect_ratio: Option<String>,
+    #[serde(default)]
+    sample_rate: Option<i32>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    display_title: Option<String>,
+    #[serde(default)]
+    channel_layout: Option<String>,
 }
 
 // —— 映射与解析 ——

@@ -171,6 +171,20 @@ public sealed class MediaCore : IDisposable
         return Read(ptr, root => root.Deserialize<PlaySourceDto>(Json)!);
     }
 
+    /// <summary>详情页「媒体信息」：编码、分辨率、比特率、音轨明细。</summary>
+    public ApiResult<MediaInfoDto> MediaInfo(string itemId)
+    {
+        var ptr = dv_hub_media_info(_handle, itemId);
+        return Read(ptr, root => root.Deserialize<MediaInfoDto>(Json)!);
+    }
+
+    /// <summary>演职人员（演员 / 导演 / 编剧）。</summary>
+    public ApiResult<List<PersonDto>> People(string itemId)
+    {
+        var ptr = dv_hub_people(_handle, itemId);
+        return Read(ptr, root => root.Deserialize<List<PersonDto>>(Json) ?? new());
+    }
+
     /// <summary>海报地址与鉴权头（图片不能直接给 Image，要自己下载）。</summary>
     public ApiResult<ImageSourceDto> ImageSource(string posterPath)
     {
@@ -386,6 +400,16 @@ public sealed class MediaCore : IDisposable
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
+    [DllImport(Lib, EntryPoint = "dv_hub_people", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_people(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_media_info", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_media_info(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
+
     [DllImport(Lib, EntryPoint = "dv_hub_play_source", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_play_source(
         IntPtr handle,
@@ -481,6 +505,43 @@ public sealed record MediaDetailDto(
     string? ColorRange,
     string? PlayItemId,
     string? SingleChildId);
+
+public sealed record PersonDto(
+    string Id,
+    string Name,
+    string? Role,
+    string? Job,
+    string? ImagePath);
+
+public sealed record MediaInfoDto(VideoInfoDto? Video, List<AudioInfoDto> Audios);
+
+public sealed record VideoInfoDto(
+    string? Title,
+    string? Codec,
+    int? Width,
+    int? Height,
+    double? FrameRate,
+    long? BitRate,
+    string? ColorRange,
+    string? Profile,
+    double? Level,
+    string? AspectRatio,
+    bool? Interlaced,
+    int? BitDepth,
+    string? PixelFormat,
+    bool DolbyVision);
+
+public sealed record AudioInfoDto(
+    string? Title,
+    string? Language,
+    string? Codec,
+    string? Profile,
+    string? Layout,
+    long? BitRate,
+    int? Channels,
+    int? SampleRate,
+    bool IsDefault,
+    bool IsExternal);
 
 public sealed record PlayRecordDto(
     string ItemId,

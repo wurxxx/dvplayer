@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{MediaError, Result};
 use crate::models::{
-    Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord,
-    PlaySource,
+    Genre, ImageSource, ListQuery, MediaDetail, MediaInfo, MediaItem, MediaLibrary, Paged,
+    Person, PlayRecord, PlaySource,
 };
 
 /// 一个媒体源的连接参数。序列化后就是 `dv_source_create` 的入参。
@@ -111,6 +111,18 @@ pub trait MediaSource: Send + Sync {
     /// 取播放源：直链、请求头、续播点、轨道。
     fn play_source(&self, item_id: &str) -> Result<PlaySource>;
 
+    /// 演职人员（演员 / 导演 / 编剧）。没有这个概念就返回空列表。
+    fn people(&self, _item_id: &str) -> Result<Vec<Person>> {
+        Ok(Vec::new())
+    }
+
+    /// 详情页「媒体信息」：编码、分辨率、比特率、音轨明细。
+    ///
+    /// 拿不到就返回错误，界面把这一块整段藏起来——宁可没有，也不要一排空行。
+    fn media_info(&self, _item_id: &str) -> Result<MediaInfo> {
+        Err(MediaError::Other("这个服务器不支持媒体信息".into()))
+    }
+
     /// 取图片地址与鉴权头。
     fn image_source(&self, path: &str) -> Result<ImageSource>;
 }
@@ -135,4 +147,82 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
         ))),
         _ => None,
     }
+}
+
+// —— ffprobe 风格字段的宽松读取 ——
+//
+// 各家服务器的流信息字段名和类型都不统一（`bit_rate` 有时是数字有时是字符串，
+// 帧率有 `frame_rate` / `avg_frame_rate` 两种写法），这里按候选键名挨个试，
+// 类型对不上就跳过，交给界面显示「没有这一项」。
+
+/// 取第一个非空的字符串字段；数字转成字符串。
+pub(crate) fn pick_str(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter().filter_map(|k| v.get(*k)).find_map(|value| match value {
+        serde_json::Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() || trimmed == "0" {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    })
+}
+
+pub(crate) fn pick_i64(v: &serde_json::Value, keys: &[&str]) -> Option<i64> {
+    keys.iter().filter_map(|k| v.get(*k)).find_map(|value| match value {
+        serde_json::Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        serde_json::Value::String(s) => s.trim().parse::<i64>().ok(),
+        _ => None,
+    })
+}
+
+pub(crate) fn pick_i32(v: &serde_json::Value, keys: &[&str]) -> Option<i32> {
+    pick_i64(v, keys).and_then(|n| i32::try_from(n).ok()).filter(|n| *n > 0)
+}
+
+pub(crate) fn pick_f64(v: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().filter_map(|k| v.get(*k)).find_map(|value| match value {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => parse_rate(s),
+        _ => None,
+    })
+}
+
+/// `"30000/1001"`、`"29.97"` 都能认。
+pub(crate) fn parse_rate(raw: &str) -> Option<f64> {
+    let raw = raw.trim();
+    // 飞牛写成 `"30 fps"`，Emby 是纯数字。
+    let raw = raw
+        .strip_suffix("fps")
+        .or_else(|| raw.strip_suffix("FPS"))
+        .unwrap_or(raw)
+        .trim();
+    if raw.is_empty() || raw == "0" || raw == "0/0" {
+        return None;
+    }
+
+    match raw.split_once('/') {
+        Some((num, den)) => {
+            let num: f64 = num.trim().parse().ok()?;
+            let den: f64 = den.trim().parse().ok()?;
+            (den != 0.0).then_some(num / den)
+        }
+        None => raw.parse().ok(),
+    }
+}
+
+pub(crate) fn pick_bool(v: &serde_json::Value, keys: &[&str]) -> Option<bool> {
+    keys.iter().filter_map(|k| v.get(*k)).find_map(|value| match value {
+        serde_json::Value::Bool(b) => Some(*b),
+        serde_json::Value::Number(n) => Some(n.as_i64().unwrap_or(0) != 0),
+        serde_json::Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "" => None,
+            "0" | "false" | "no" | "progressive" => Some(false),
+            _ => Some(true),
+        },
+        _ => None,
+    })
 }

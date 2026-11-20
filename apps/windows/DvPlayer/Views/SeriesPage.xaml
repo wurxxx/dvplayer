@@ -3,7 +3,7 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Background="{StaticResource BgBrush}">
 
-  <ScrollViewer VerticalScrollBarVisibility="Hidden">
+  <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Hidden">
     <StackPanel>
 
       <!-- 顶部背景图：没有 backdrop 的目录用海报模糊撑起来 -->
@@ -91,103 +91,218 @@
         </StackPanel>
       </Grid>
 
-      <!-- 季选择 -->
-      <ScrollViewer x:Name="SeasonBarHost" HorizontalScrollBarVisibility="Hidden"
-                    VerticalScrollBarVisibility="Disabled" Margin="40,34,40,0"
-                    Visibility="Collapsed">
-        <ItemsControl x:Name="SeasonBar">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <StackPanel Orientation="Horizontal" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border Tag="{Binding Id}" MouseLeftButtonUp="OnSeasonClick" Cursor="Hand"
-                      CornerRadius="8" Padding="15,7" Margin="0,0,8,0">
-                <Border.Style>
-                  <Style TargetType="Border">
-                    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-                    <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}" />
-                    <Style.Triggers>
-                      <DataTrigger Binding="{Binding Active}" Value="True">
-                        <Setter Property="Background" Value="#2E2412" />
-                        <Setter Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
-                      </DataTrigger>
-                    </Style.Triggers>
-                  </Style>
-                </Border.Style>
-                <TextBlock Text="{Binding Title}" FontSize="13.5" />
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
+      <!-- 季选择 + 集：横向一行，鼠标移上去两侧出箭头 -->
+      <StackPanel x:Name="EpisodeSection" Margin="40,32,40,0" Visibility="Collapsed">
 
-      <!-- 集列表 -->
-      <StackPanel Margin="40,20,40,40">
-        <TextBlock x:Name="EpisodeHeader" Text="" Style="{StaticResource SectionTitle}"
-                   Margin="0,0,0,14" />
-
-        <ItemsControl x:Name="EpisodeList">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <WrapPanel />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <StackPanel Width="226" Margin="0,0,14,18" Cursor="Hand"
-                          Tag="{Binding Id}" MouseLeftButtonUp="OnEpisodeClick">
-                <Border x:Name="Thumb" Height="127" CornerRadius="9"
-                        Background="{Binding Background}" SnapsToDevicePixels="True">
-                  <Grid ClipToBounds="True">
-                    <TextBlock Text="{Binding Initial}" FontSize="30" FontWeight="SemiBold"
-                               Foreground="#2AFFFFFF" HorizontalAlignment="Center"
-                               VerticalAlignment="Center"
-                               Visibility="{Binding PlaceholderVisibility}" />
-
-                    <!-- 集号 -->
-                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
-                            Background="#8C000000" CornerRadius="5" Padding="7,2">
-                      <TextBlock Text="{Binding Badge}" FontSize="11.5" Foreground="#F2FFFFFF" />
-                    </Border>
-
-                    <!-- 播放态 -->
-                    <Border x:Name="HoverVeil" Background="#40000000" Visibility="Collapsed">
-                      <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="26" Foreground="#F2FFFFFF"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-
-                    <!-- 进度 -->
-                    <Border VerticalAlignment="Bottom" Height="3" Background="#33000000">
-                      <Border Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
-                              Width="{Binding ProgressWidth}" />
-                    </Border>
-                  </Grid>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="SeasonPicker" Click="OnSeasonPickerClick" Cursor="Hand"
+                  HorizontalAlignment="Left" VerticalAlignment="Center">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border Background="Transparent" Padding="0">
+                  <ContentPresenter VerticalAlignment="Center" />
                 </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.72" />
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
+            <StackPanel Orientation="Horizontal">
+              <TextBlock x:Name="SeasonPickerText" FontFamily="{StaticResource DisplayFont}"
+                         FontSize="19" FontWeight="SemiBold"
+                         Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+              <TextBlock x:Name="SeasonPickerChevron" Text="&#xE70D;"
+                         FontFamily="{StaticResource IconFont}" FontSize="11"
+                         Foreground="{StaticResource MutedBrush}" Margin="9,3,0,0"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
 
-                <StackPanel Orientation="Horizontal" Margin="2,9,0,0">
-                  <TextBlock Text="{Binding Title}" FontSize="13"
-                             Foreground="{StaticResource TextBrush}"
-                             TextTrimming="CharacterEllipsis" MaxWidth="150" />
-                  <TextBlock Text="{Binding Duration}" FontSize="12.5"
-                             Foreground="{StaticResource FaintBrush}" Margin="8,0,0,0"
-                             VerticalAlignment="Bottom" />
-                </StackPanel>
-              </StackPanel>
-              <DataTemplate.Triggers>
-                <Trigger SourceName="Thumb" Property="IsMouseOver" Value="True">
-                  <Setter TargetName="HoverVeil" Property="Visibility" Value="Visible" />
-                </Trigger>
-              </DataTemplate.Triggers>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+          <TextBlock x:Name="EpisodeCountText" Style="{StaticResource Caption}"
+                     Margin="14,3,0,0" VerticalAlignment="Center" />
+        </StackPanel>
 
-        <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" Margin="0,8,0,0" />
+        <Grid Margin="0,16,0,0">
+          <ScrollViewer x:Name="EpisodeScroller"
+                        HorizontalScrollBarVisibility="Hidden"
+                        VerticalScrollBarVisibility="Disabled"
+                        PreviewMouseWheel="OnEpisodeWheel">
+            <ItemsControl x:Name="EpisodeList">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Width="296" Margin="0,0,18,6" Cursor="Hand"
+                              Tag="{Binding Id}" MouseLeftButtonUp="OnEpisodeClick">
+                    <Border x:Name="Thumb" Height="166" CornerRadius="10"
+                            Background="{Binding Background}" SnapsToDevicePixels="True">
+                      <Grid ClipToBounds="True">
+                        <TextBlock Text="{Binding Initial}" FontSize="34" FontWeight="SemiBold"
+                                   Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding PlaceholderVisibility}" />
+
+                        <!-- 播放态 -->
+                        <Border x:Name="HoverVeil" Background="#40000000" Visibility="Collapsed">
+                          <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                                     FontSize="28" Foreground="#F2FFFFFF"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+
+                        <!-- 进度 -->
+                        <Border VerticalAlignment="Bottom" Height="3" Background="#33000000"
+                                Visibility="{Binding ProgressVisibility}">
+                          <Border Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
+                                  Width="{Binding ProgressWidth}" />
+                        </Border>
+                      </Grid>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Margin="2,9,0,0">
+                      <TextBlock Text="{Binding Badge}" FontSize="13.5" FontWeight="SemiBold"
+                                 Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="·" FontSize="13.5" Margin="7,0"
+                                 Foreground="{StaticResource FaintBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="{Binding Title}" FontSize="13.5"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 TextTrimming="CharacterEllipsis" MaxWidth="212"
+                                 VerticalAlignment="Center" />
+                    </StackPanel>
+                  </StackPanel>
+                  <DataTemplate.Triggers>
+                    <Trigger SourceName="Thumb" Property="IsMouseOver" Value="True">
+                      <Setter TargetName="HoverVeil" Property="Visibility" Value="Visible" />
+                    </Trigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+
+          <Button x:Name="EpisodeLeftButton" Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,18"
+                  Click="OnEpisodeScrollLeft">
+            <TextBlock Text="&#xE76B;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+          <Button x:Name="EpisodeRightButton" Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,18"
+                  Click="OnEpisodeScrollRight">
+            <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+        </Grid>
       </StackPanel>
+
+      <!-- 演职人员 -->
+      <StackPanel x:Name="CastSection" Margin="40,32,40,0" Visibility="Collapsed">
+        <TextBlock Text="演职人员" Style="{StaticResource SectionTitle}" />
+
+        <Grid Margin="0,14,0,0">
+          <ScrollViewer x:Name="CastScroller"
+                        HorizontalScrollBarVisibility="Hidden"
+                        VerticalScrollBarVisibility="Disabled"
+                        PreviewMouseWheel="OnEpisodeWheel">
+            <ItemsControl x:Name="CastList">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Width="96" Margin="0,0,16,4">
+                    <Border Height="118" CornerRadius="10" Background="{Binding Background}"
+                            SnapsToDevicePixels="True">
+                      <Grid ClipToBounds="True">
+                        <TextBlock Text="{Binding Initial}" FontSize="30" FontWeight="SemiBold"
+                                   Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding PlaceholderVisibility}" />
+                      </Grid>
+                    </Border>
+
+                    <TextBlock Text="{Binding Name}" FontSize="13.5" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}" Margin="0,8,0,0"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Role}" FontSize="12.5"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"
+                               TextTrimming="CharacterEllipsis"
+                               Visibility="{Binding RoleVisibility}" />
+                    <TextBlock Text="{Binding Job}" FontSize="11.5"
+                               Foreground="{StaticResource FaintBrush}" Margin="0,3,0,0"
+                               Visibility="{Binding JobVisibility}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+
+          <Button x:Name="CastLeftButton" Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,30"
+                  Click="OnCastScrollLeft">
+            <TextBlock Text="&#xE76B;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+          <Button x:Name="CastRightButton" Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,30"
+                  Click="OnCastScrollRight">
+            <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+        </Grid>
+      </StackPanel>
+
+      <!-- 链接 -->
+      <StackPanel x:Name="LinksSection" Margin="40,32,40,0" Visibility="Collapsed">
+        <TextBlock Text="链接" Style="{StaticResource SectionTitle}" />
+        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+          <Border x:Name="DoubanButton" CornerRadius="18" Padding="15,8" Cursor="Hand"
+                  Background="{StaticResource SurfaceBrush}"
+                  MouseLeftButtonUp="OnDoubanClick">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE71B;" FontFamily="{StaticResource IconFont}" FontSize="12.5"
+                         Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+              <TextBlock Text="豆瓣" FontSize="13" Foreground="{StaticResource TextBrush}"
+                         Margin="8,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 媒体信息：视频、音频各一张卡，横向排开 -->
+      <StackPanel x:Name="MediaInfoSection" Margin="40,32,40,40" Visibility="Collapsed">
+        <TextBlock Text="媒体信息" Style="{StaticResource SectionTitle}" />
+
+        <Grid Margin="0,14,0,0">
+          <ScrollViewer x:Name="MediaInfoScroller"
+                        HorizontalScrollBarVisibility="Hidden"
+                        VerticalScrollBarVisibility="Disabled"
+                        PreviewMouseWheel="OnEpisodeWheel">
+            <StackPanel x:Name="MediaInfoPanel" Orientation="Horizontal" />
+          </ScrollViewer>
+
+          <Button x:Name="MediaInfoLeftButton" Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,18"
+                  Click="OnMediaInfoScrollLeft">
+            <TextBlock Text="&#xE76B;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+          <Button x:Name="MediaInfoRightButton" Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,18"
+                  Click="OnMediaInfoScrollRight">
+            <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+        </Grid>
+      </StackPanel>
+
+      <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" Margin="40,10,40,40" />
     </StackPanel>
   </ScrollViewer>
 </Page>

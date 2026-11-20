@@ -11,6 +11,8 @@ use std::collections::HashMap;
 
 use crate::error::{MediaError, Result};
 use crate::models::{
+    Person,
+    MediaInfo,
     Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord,
     PlaySource,
 };
@@ -176,6 +178,24 @@ impl MediaHub {
         detail.play_item_id = qualify_opt(&entry.id, detail.play_item_id);
 
         Ok(detail)
+    }
+
+    /// 详情页「媒体信息」。条目 id 可能带源前缀，这里去掉再交给适配器。
+    pub fn media_info(&self, item_id: &str) -> Result<MediaInfo> {
+        let (entry, raw) = self.route(item_id)?;
+        entry.source.media_info(raw)
+    }
+
+    /// 演职人员；头像路径也要加源前缀，界面才知道去哪取图。
+    pub fn people(&self, item_id: &str) -> Result<Vec<Person>> {
+        let (entry, raw) = self.route(item_id)?;
+        let mut people = entry.source.people(raw)?;
+
+        for person in &mut people {
+            person.image_path = qualify_opt(&entry.id, person.image_path.take());
+        }
+
+        Ok(people)
     }
 
     pub fn play_source(&self, item_id: &str) -> Result<PlaySource> {

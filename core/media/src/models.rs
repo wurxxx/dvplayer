@@ -330,6 +330,97 @@ pub struct Genre {
     pub title: String,
 }
 
+/// 演职人员。Emby 给 `Type`（Actor/Director/Writer），飞牛给中文职位。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Person {
+    /// 演员自己的 id（取头像用），没有就空。
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    /// 演的是谁（角色名）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// 导演 / 编剧 / 演员这类职位。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_path: Option<String>,
+}
+
+/// 详情页「媒体信息」：一路视频 + 若干音轨。
+///
+/// 字段全部可空：飞牛的 `/stream` 只给一部分，Emby 给全，缺的项界面直接不显示。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video: Option<VideoInfo>,
+    #[serde(default)]
+    pub audios: Vec<AudioInfo>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoInfo {
+    /// 一行标题，例如 `1080p SDR`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_rate: Option<f64>,
+    /// 比特率，bit/s。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bit_rate: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_range: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interlaced: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bit_depth: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pixel_format: Option<String>,
+    #[serde(default)]
+    pub dolby_vision: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// 声道布局，例如 `stereo` / `5.1`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bit_rate: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channels: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_rate: Option<i32>,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default)]
+    pub is_external: bool,
+}
+
 /// 统一响应外壳，FFI 全部返回它。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

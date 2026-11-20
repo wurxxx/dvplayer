@@ -132,8 +132,12 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--favorites` | 媒体库页 / 记录页切到「收藏」分段再截，检查空态与海报网格 |
 | `--inline-search <关键词>` | 媒体库页切到页内搜索并填好关键词 |
 | `--edit-source` | 服务器页打开第一个源的编辑表单 |
-| `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`） |
+| `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`）；传 `first` 自动挑一个有集的条目 |
 | `--series-season <n>` | 详情页默认展开第 n 季（验证季切换） |
+| `--series-scroll <像素>` | 详情页往下滚 N 像素（集行在首屏下沿之外时用） |
+| `--detail-bottom` | 详情页滚到底，看「链接 / 媒体信息」两块 |
+| `--row-arrows` | 把横向行两侧的翻页箭头强制显示（截不到鼠标悬停） |
+| `--season-menu` | 单独渲染季下拉菜单 `series-season-menu.png` |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
 
 ## 需要出画面的验证（mpv / D3D11）

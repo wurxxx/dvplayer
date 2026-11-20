@@ -129,6 +129,42 @@ public partial class MainWindow : FluentWindow
         // --series <id>[,<id>...]：额外截详情页，用来验证剧集 / 未刮削目录两种布局。
         var seriesIds = ArgumentAfter("--series")?
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // `--series first`：从库里挑一部真正有集的条目，省得手抄 guid。
+        if (seriesIds is ["first"] && AppServices.Instance.Core is { } firstCore)
+        {
+            var libs = await Task.Run(firstCore.Libraries).ConfigureAwait(true);
+            string? picked = null;
+
+            foreach (var lib in libs.Data ?? new List<MediaLibraryDto>())
+            {
+                var items = await Task.Run(() => firstCore.Items(lib.Id, 1, 40, new ListQuery()))
+                    .ConfigureAwait(true);
+
+                // 目录里可能空着（只有标题没有文件），挨个点进去看一下。
+                var candidates = (items.Data?.Items ?? new List<MediaItemDto>())
+                    .Where(it => it.Kind is "series" or "folder")
+                    .Take(8);
+
+                foreach (var candidate in candidates)
+                {
+                    var kids = await Task.Run(() => firstCore.Children(candidate.Id, 1, 5))
+                        .ConfigureAwait(true);
+                    if (kids.Ok && kids.Data?.Items.Count > 0)
+                    {
+                        picked = candidate.Id;
+                        break;
+                    }
+                }
+
+                if (picked is not null)
+                {
+                    break;
+                }
+            }
+
+            seriesIds = picked is null ? null : new[] { picked };
+        }
+
         if (seriesIds is not null)
         {
             var season = int.TryParse(ArgumentAfter("--series-season"), out var n) ? n - 1 : 0;
@@ -137,6 +173,38 @@ public partial class MainWindow : FluentWindow
             {
                 ContentFrame.Navigate(new SeriesPage(seriesIds[i], season));
                 await Task.Delay(6000);
+
+                if (ContentFrame.Content is SeriesPage scrollShot &&
+                    int.TryParse(ArgumentAfter("--series-scroll"), out var seriesOffset))
+                {
+                    scrollShot.ScrollByForShot(seriesOffset);
+                    await Task.Delay(600);
+                }
+
+                if (ContentFrame.Content is SeriesPage arrowsPage &&
+                    Environment.GetCommandLineArgs().Contains("--row-arrows"))
+                {
+                    arrowsPage.ShowRowArrowsForShot();
+                    await Task.Delay(400);
+                }
+
+                if (Environment.GetCommandLineArgs().Contains("--season-menu") &&
+                    ContentFrame.Content is SeriesPage seasonShot &&
+                    seasonShot.OpenSeasonMenuForShot() is { } seasonMenu)
+                {
+                    await Task.Delay(700);
+                    UiCapture.Save(seasonMenu, Path.Combine(dir, "series-season-menu.png"));
+                    seasonMenu.IsOpen = false;
+                    await Task.Delay(300);
+                }
+
+                if (ContentFrame.Content is SeriesPage seriesPage &&
+                    Environment.GetCommandLineArgs().Contains("--detail-bottom"))
+                {
+                    seriesPage.ScrollToMediaInfoForShot();
+                    await Task.Delay(1200);
+                }
+
                 var name = seriesIds.Length == 1 ? "series.png" : $"series-{i + 1}.png";
                 UiCapture.Save(this, Path.Combine(dir, name));
                 Navigate("libraries");

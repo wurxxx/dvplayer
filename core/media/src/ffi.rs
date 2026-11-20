@@ -16,6 +16,8 @@ use serde::Serialize;
 use crate::error::MediaError;
 use crate::hub::MediaHub;
 use crate::models::{
+    Person,
+    MediaInfo,
     Envelope, Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged,
     PlayRecord, PlaySource,
 };
@@ -417,6 +419,38 @@ pub extern "C" fn dv_hub_detail(handle: *const HubHandle, item_id: *const c_char
             return reply::<MediaDetail>(Err(MediaError::Other("null item id".into())));
         };
         reply(h.inner.detail(&id))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_people(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Vec<Person>>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<Vec<Person>>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.people(&id))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_media_info(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<MediaInfo>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<MediaInfo>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.media_info(&id))
     })
 }
 

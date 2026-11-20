@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using DvPlayer.Services;
 
@@ -14,7 +16,7 @@ namespace DvPlayer.Views;
 /// </summary>
 public partial class SeriesPage : Page
 {
-    private const double TileWidth = 226;
+    private const double TileWidth = 296;
 
     private readonly string _itemId;
     private readonly int _initialSeason;
@@ -24,6 +26,14 @@ public partial class SeriesPage : Page
     private int _resumeEpisode;
     private string? _currentSeasonId;
     private bool _episodesAreFlat;
+
+    /// <summary>季选择用的列表（按钮弹出菜单，不再是一排胶囊）。</summary>
+    private List<SeasonChip> _seasons = new();
+
+    /// <summary>媒体信息按条目缓存，切季回来不用重新请求。</summary>
+    private readonly Dictionary<string, MediaInfoDto?> _mediaInfoCache = new();
+
+    private bool _mediaInfoLoading;
 
     /// <summary>本地实际有几季（服务器可能只刮到第一季）。</summary>
     private int _localSeasonCount;
@@ -40,6 +50,28 @@ public partial class SeriesPage : Page
         Loaded += OnLoaded;
         KeyDown += OnKeyDown;
     }
+
+    /// <summary>截图巡检用：往下滚一段，把集行露出来。</summary>
+    public void ScrollByForShot(double offset) => PageScroll.ScrollToVerticalOffset(offset);
+
+    /// <summary>截图巡检用：把横向行两侧的箭头强制显示（截不到鼠标悬停）。</summary>
+    public void ShowRowArrowsForShot()
+    {
+        Button[] arrows =
+        {
+            EpisodeLeftButton, EpisodeRightButton,
+            CastLeftButton, CastRightButton,
+            MediaInfoLeftButton, MediaInfoRightButton,
+        };
+
+        foreach (var arrow in arrows)
+        {
+            arrow.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>截图巡检用：滚到底，看「链接 / 媒体信息」两块。</summary>
+    public void ScrollToMediaInfoForShot() => PageScroll.ScrollToEnd();
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -76,20 +108,21 @@ public partial class SeriesPage : Page
         }
 
         RenderHeader();
+        _ = LoadPeopleAsync();
 
         if (seasons.Count > 0)
         {
             // 剧集：先季，再集。
             var start = Math.Min(_initialSeason, seasons.Count - 1);
 
-            SeasonBar.ItemsSource = seasons
+            _seasons = seasons
                 .Select((s, i) => new SeasonChip(
                     s.Id,
                     string.IsNullOrWhiteSpace(s.Title) ? $"第 {s.SeasonNumber ?? i + 1} 季" : s.Title,
                     i == start))
                 .ToList();
-            SeasonBarHost.Visibility = seasons.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
 
+            UpdateSeasonPicker();
             await LoadSeasonAsync(seasons[start].Id).ConfigureAwait(true);
             return;
         }
@@ -118,6 +151,19 @@ public partial class SeriesPage : Page
 
     private async Task RenderEpisodesAsync(List<MediaItemDto> items)
     {
+        try
+        {
+            await RenderEpisodesCoreAsync(items).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            Trace.Write($"render episodes err {ex}");
+            StatusText.Text = "读取剧集失败：" + ex.Message;
+        }
+    }
+
+    private async Task RenderEpisodesCoreAsync(List<MediaItemDto> items)
+    {
         var ordered = items
             .Select((item, index) => (item, number: EpisodeNumberOf(item) ?? index + 1))
             .OrderBy(pair => pair.number)
@@ -135,6 +181,9 @@ public partial class SeriesPage : Page
             PosterPath = pair.item.PosterPath,
             Initial = Palette.InitialOf(pair.item.Title ?? ""),
             ProgressWidth = Math.Max(0, TileWidth * Math.Clamp(pair.item.Progress, 0, 1)),
+            ProgressVisibility = pair.item.Progress > 0.01
+                ? Visibility.Visible
+                : Visibility.Collapsed,
         }).ToList();
 
         foreach (var tile in tiles)
@@ -150,22 +199,35 @@ public partial class SeriesPage : Page
             _playTargetId = resume.item?.Id ?? tiles[0].Id;
             _resumeEpisode = resume.item is null ? 0 : EpisodeNumberOf(resume.item) ?? 1;
 
-            EpisodeHeader.Text = _episodesAreFlat ? $"全部 {tiles.Count} 集" : "剧集";
-            EpisodeHeader.Visibility = Visibility.Visible;
+            EpisodeSection.Visibility = Visibility.Visible;
+            EpisodeCountText.Text = $"{tiles.Count} 集";
+
+            // 未刮削目录没有季，按钮就退化成一行静态标题。
+            if (_seasons.Count == 0)
+            {
+                SeasonPickerText.Text = "全部剧集";
+                SeasonPicker.IsEnabled = false;
+                SeasonPickerChevron.Visibility = Visibility.Collapsed;
+            }
             StatusText.Text = string.Empty;
             UpdatePlayButton();
         }
         else
         {
             // 没有子项：电影或单集，直接播自己。
+            SeasonPickerText.Text = "全部剧集";
+            SeasonPicker.IsEnabled = false;
             _playTargetId = _itemId;
             _resumeEpisode = 0;
-            EpisodeHeader.Visibility = Visibility.Collapsed;
+            EpisodeSection.Visibility = Visibility.Collapsed;
             StatusText.Text = string.Empty;
             UpdatePlayButton();
         }
 
+        LinksSection.Visibility = Visibility.Visible;
+
         await Task.WhenAll(tiles.Select(t => t.ApplyPosterAsync(t.PosterPath)));
+        _ = LoadMediaInfoAsync();
     }
 
     private void RenderHeader()
@@ -364,32 +426,376 @@ public partial class SeriesPage : Page
         await PlayWindow.OpenAsync(Window.GetWindow(this), id);
     }
 
-    private async void OnSeasonClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    // —— 季选择 ——
+
+    private void UpdateSeasonPicker()
     {
-        if (sender is not Border { Tag: string id })
+        var chip = _seasons.FirstOrDefault(c => c.Active) ?? _seasons.FirstOrDefault();
+        SeasonPickerText.Text = chip?.Title ?? "剧集";
+        SeasonPicker.Visibility = _seasons.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SeasonPicker.IsEnabled = _seasons.Count > 1;
+        SeasonPickerChevron.Visibility = _seasons.Count > 1
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void OnSeasonPickerClick(object sender, RoutedEventArgs e)
+    {
+        if (_seasons.Count <= 1)
         {
             return;
         }
 
-        var chips = SeasonBar.ItemsSource as List<SeasonChip>;
-        if (chips is null)
+        BuildSeasonMenu().IsOpen = true;
+    }
+
+    /// <summary>截图巡检用：把季菜单打开（Popup 抓不到整窗，单独渲染）。</summary>
+    public ContextMenu? OpenSeasonMenuForShot()
+    {
+        if (_seasons.Count == 0)
+        {
+            return null;
+        }
+
+        var menu = BuildSeasonMenu();
+        menu.IsOpen = true;
+        menu.UpdateLayout();
+        return menu;
+    }
+
+    private ContextMenu BuildSeasonMenu()
+    {
+        var menu = new ContextMenu
+        {
+            Style = (Style)FindResource("DarkContextMenu"),
+            PlacementTarget = SeasonPicker,
+            Placement = PlacementMode.Bottom,
+        };
+
+        foreach (var chip in _seasons)
+        {
+            var item = new MenuItem
+            {
+                Header = chip.Title,
+                Style = (Style)FindResource("DarkMenuItem"),
+                Tag = chip.Id,
+            };
+
+            if (chip.Active)
+            {
+                item.Icon = new TextBlock
+                {
+                    Text = "\uE73E",
+                    FontFamily = (FontFamily)FindResource("IconFont"),
+                    FontSize = 12,
+                    Foreground = (Brush)FindResource("AccentBrush"),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+            }
+
+            item.Click += OnSeasonMenuClick;
+            menu.Items.Add(item);
+        }
+
+        return menu;
+    }
+
+    private async void OnSeasonMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string id } || id == _currentSeasonId)
         {
             return;
         }
 
-        foreach (var chip in chips)
+        foreach (var chip in _seasons)
         {
             chip.Active = chip.Id == id;
         }
 
-        SeasonBar.ItemsSource = null;
-        SeasonBar.ItemsSource = chips;
+        UpdateSeasonPicker();
+        EpisodeScroller.ScrollToLeftEnd();
+        await LoadSeasonAsync(id).ConfigureAwait(true);
+    }
 
-        if (id != _currentSeasonId)
+    // —— 集横向行 ——
+
+    private void OnEpisodeScrollLeft(object sender, RoutedEventArgs e) =>
+        EpisodeScroller.ScrollToHorizontalOffset(EpisodeScroller.HorizontalOffset - 640);
+
+    private void OnEpisodeScrollRight(object sender, RoutedEventArgs e) =>
+        EpisodeScroller.ScrollToHorizontalOffset(EpisodeScroller.HorizontalOffset + 640);
+
+    private void OnCastScrollLeft(object sender, RoutedEventArgs e) =>
+        CastScroller.ScrollToHorizontalOffset(CastScroller.HorizontalOffset - 640);
+
+    private void OnCastScrollRight(object sender, RoutedEventArgs e) =>
+        CastScroller.ScrollToHorizontalOffset(CastScroller.HorizontalOffset + 640);
+
+    private void OnMediaInfoScrollLeft(object sender, RoutedEventArgs e) =>
+        MediaInfoScroller.ScrollToHorizontalOffset(MediaInfoScroller.HorizontalOffset - 720);
+
+    private void OnMediaInfoScrollRight(object sender, RoutedEventArgs e) =>
+        MediaInfoScroller.ScrollToHorizontalOffset(MediaInfoScroller.HorizontalOffset + 720);
+
+    /// <summary>横向行不抢滚轮：转给外层纵向滚动，横向只能用箭头。</summary>
+    private void OnEpisodeWheel(object sender, MouseWheelEventArgs e)
+    {
+        for (var parent = VisualTreeHelper.GetParent(this); parent is not null;
+             parent = VisualTreeHelper.GetParent(parent))
         {
-            await LoadSeasonAsync(id).ConfigureAwait(true);
+            if (parent is ScrollViewer { VerticalScrollBarVisibility: not ScrollBarVisibility.Disabled }
+                scroll)
+            {
+                scroll.ScrollToVerticalOffset(scroll.VerticalOffset - e.Delta * 0.5);
+                e.Handled = true;
+                return;
+            }
         }
     }
+
+    // —— 链接 ——
+
+    private void OnDoubanClick(object sender, MouseButtonEventArgs e)
+    {
+        var title = MediaText.Clean(_detail?.Title);
+        if (string.IsNullOrWhiteSpace(title) || title == "(未命名)")
+        {
+            return;
+        }
+
+        var url = "https://search.douban.com/movie/subject_search?search_text=" +
+                  Uri.EscapeDataString(title);
+        System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+    }
+
+    // —— 演职人员 ——
+
+    private async Task LoadPeopleAsync()
+    {
+        if (AppServices.Instance.Core is not { } core)
+        {
+            return;
+        }
+
+        var result = await Task.Run(() => core.People(_itemId)).ConfigureAwait(true);
+        var people = result.Ok ? result.Data ?? new List<PersonDto>() : new List<PersonDto>();
+        Trace.Write($"people id={_itemId} ok={result.Ok} n={people.Count} err={result.Error}");
+
+        if (people.Count == 0)
+        {
+            CastSection.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var cards = people.Select(person => new CastCard
+        {
+            Name = person.Name,
+            Role = person.Role ?? "",
+            Job = person.Job ?? "",
+            PosterPath = person.ImagePath,
+            Initial = Palette.InitialOf(person.Name),
+        }).ToList();
+
+        foreach (var card in cards)
+        {
+            card.UseGradient(card.Name);
+        }
+
+        CastList.ItemsSource = cards;
+        CastSection.Visibility = Visibility.Visible;
+
+        await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    // —— 媒体信息 ——
+
+    private async Task LoadMediaInfoAsync()
+    {
+        var id = _playTargetId;
+        if (string.IsNullOrEmpty(id) || AppServices.Instance.Core is not { } core ||
+            _mediaInfoLoading)
+        {
+            return;
+        }
+
+        if (!_mediaInfoCache.TryGetValue(id, out var info))
+        {
+            _mediaInfoLoading = true;
+            try
+            {
+                var result = await Task.Run(() => core.MediaInfo(id)).ConfigureAwait(true);
+                info = result.Ok ? result.Data : null;
+                _mediaInfoCache[id] = info;
+                Trace.Write($"media info id={id} ok={result.Ok} err={result.Error} " +
+                            $"video={info?.Video is not null} audios={info?.Audios.Count}");
+            }
+            finally
+            {
+                _mediaInfoLoading = false;
+            }
+        }
+
+        // 读的过程中切了季，就等新的那次请求。
+        if (_playTargetId == id)
+        {
+            RenderMediaInfo(info);
+        }
+    }
+
+    private void RenderMediaInfo(MediaInfoDto? info)
+    {
+        MediaInfoPanel.Children.Clear();
+
+        if (info?.Video is { } video)
+        {
+            var rows = new List<(string Key, string Value)>
+            {
+                ("标题", video.Title ?? ""),
+                ("编码", video.Codec ?? ""),
+                ("分辨率", video.Width is > 0 && video.Height is > 0
+                    ? $"{video.Width} x {video.Height}"
+                    : ""),
+                ("帧率", video.FrameRate is > 0 ? $"{video.FrameRate:0.##} fps" : ""),
+                ("比特率", FormatBitRate(video.BitRate)),
+                ("动态范围", video.ColorRange ?? (video.DolbyVision ? "DV" : "")),
+                ("配置", video.Profile ?? ""),
+                ("等级", video.Level is { } level ? level.ToString("0.###") : ""),
+                ("长宽比", video.AspectRatio ?? ""),
+                ("交错", video.Interlaced is { } interlaced ? (interlaced ? "是" : "否") : ""),
+                ("位深", video.BitDepth is > 0 ? $"{video.BitDepth} bit" : ""),
+                ("像素格式", video.PixelFormat ?? ""),
+            };
+
+            MediaInfoPanel.Children.Add(BuildInfoCard("\uE714", "视频", rows));
+        }
+
+        // 每条音轨一张卡，当前音轨（默认轨）打勾。
+        foreach (var audio in info?.Audios ?? new List<AudioInfoDto>())
+        {
+            var rows = new List<(string Key, string Value)>
+            {
+                ("标题", audio.Title ?? ""),
+                ("语言", audio.Language ?? "--"),
+                ("编码", audio.Codec ?? ""),
+                ("配置", audio.Profile ?? ""),
+                ("布局", audio.Layout ?? ""),
+                ("声道", audio.Channels is > 0 ? $"{audio.Channels} ch" : ""),
+                ("采样率", audio.SampleRate is > 0 ? $"{audio.SampleRate} Hz" : ""),
+                ("比特率", FormatBitRate(audio.BitRate)),
+                ("默认", audio.IsDefault ? "是" : "否"),
+                ("外部", audio.IsExternal ? "是" : "否"),
+            };
+
+            MediaInfoPanel.Children.Add(BuildInfoCard("\uE8D6", "音频", rows, audio.IsDefault));
+        }
+
+        MediaInfoSection.Visibility = MediaInfoPanel.Children.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    /// <summary>一张「视频 / 音频」卡：标题 + 键值行，空值整行跳过。</summary>
+    private Border BuildInfoCard(
+        string icon,
+        string title,
+        IEnumerable<(string Key, string Value)> rows,
+        bool active = false)
+    {
+        var body = new StackPanel();
+
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        header.Children.Add(new TextBlock
+        {
+            Text = icon,
+            FontFamily = (FontFamily)FindResource("IconFont"),
+            FontSize = 14,
+            Foreground = (Brush)FindResource("MutedBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0),
+        });
+        header.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 14.5,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("TextBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        if (active)
+        {
+            header.Children.Add(new TextBlock
+            {
+                Text = "\uE73E",
+                FontFamily = (FontFamily)FindResource("IconFont"),
+                FontSize = 12,
+                Foreground = (Brush)FindResource("TextBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 0, 0),
+            });
+        }
+
+        body.Children.Add(header);
+
+        foreach (var (key, value) in rows)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var line = new Grid { Margin = new Thickness(0, 7, 0, 0) };
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            line.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star),
+            });
+
+            var keyText = new TextBlock
+            {
+                Text = key,
+                FontSize = 12.5,
+                Foreground = (Brush)FindResource("MutedBrush"),
+                MinWidth = 84,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(keyText, 0);
+            line.Children.Add(keyText);
+
+            var valueText = new TextBlock
+            {
+                Text = value,
+                FontSize = 13,
+                Foreground = (Brush)FindResource("TextBrush"),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(valueText, 1);
+            line.Children.Add(valueText);
+
+            body.Children.Add(line);
+        }
+
+        return new Border
+        {
+            Background = (Brush)FindResource("SurfaceBrush"),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(18, 16, 18, 16),
+            Margin = new Thickness(0, 0, 18, 18),
+            Width = 380,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Child = body,
+        };
+    }
+
+    private static string FormatBitRate(long? bits) => bits is > 0
+        ? bits >= 1_000_000
+            ? $"{bits.Value / 1_000_000.0:0.##} Mbps"
+            : $"{bits.Value / 1000.0:0.##} Kbps"
+        : "";
 
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
@@ -444,6 +850,23 @@ public partial class SeriesPage : Page
         public bool Active { get; set; }
     }
 
+    private sealed class CastCard : CardVisual
+    {
+        public string Name { get; init; } = "";
+        public string Role { get; init; } = "";
+        public string Job { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public string? PosterPath { get; init; }
+
+        public Visibility RoleVisibility => string.IsNullOrWhiteSpace(Role)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        public Visibility JobVisibility => string.IsNullOrWhiteSpace(Job)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
     private sealed class EpisodeTile : CardVisual
     {
         public string Id { get; init; } = "";
@@ -453,5 +876,6 @@ public partial class SeriesPage : Page
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
         public double ProgressWidth { get; init; }
+        public Visibility ProgressVisibility { get; init; } = Visibility.Collapsed;
     }
 }
