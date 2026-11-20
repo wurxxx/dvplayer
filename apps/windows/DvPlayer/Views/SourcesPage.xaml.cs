@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using DvPlayer.Dialogs;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -221,11 +222,12 @@ public partial class SourcesPage : Page
             return;
         }
 
-        // 删除要重连整库，误触代价不小，先确认。
-        var answer = MessageBox.Show(Window.GetWindow(this)!,
-            $"删除服务器「{source.Name}」？\n播放记录与已收藏的进度都还在，重新添加这个源就能接上。",
-            "删除服务器", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-        if (answer != MessageBoxResult.OK)
+        // 删除要重连整库，误触代价不小，先确认（用 app 自己的深色确认框）。
+        var confirmed = ConfirmDialog.Ask(Window.GetWindow(this),
+            "删除服务器",
+            $"删除服务器「{source.Name}」？\n播放记录与已收藏的进度都还在，\n重新添加这个源就能接上。",
+            "删除");
+        if (!confirmed)
         {
             return;
         }

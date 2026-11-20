@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using DvPlayer.Dialogs;
 using DvPlayer.Player;
 using DvPlayer.Services;
 
@@ -171,8 +172,7 @@ public partial class PlayWindow : Window
         var (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
         if (source is null)
         {
-            MessageBox.Show(owner, error ?? "取播放地址失败", "DV Player",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ConfirmDialog.Alert(owner, "无法播放", error ?? "取播放地址失败");
             return null;
         }
 

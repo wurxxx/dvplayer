@@ -7,6 +7,8 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shell;
+using System.Windows.Threading;
+using DvPlayer.Dialogs;
 using DvPlayer.Services;
 using DvPlayer.Views;
 using Wpf.Ui.Controls;
@@ -28,6 +30,66 @@ public partial class MainWindow : FluentWindow
         if (Environment.GetCommandLineArgs().Contains("--window-test"))
         {
             await RunWindowTestAsync();
+            return;
+        }
+
+        // --dialog-test：自动点一次确认、一次取消，验证深色确认框的返回值。
+        if (Environment.GetCommandLineArgs().Contains("--dialog-test"))
+        {
+            var logPath = Path.Combine(Path.GetTempPath(), "dvplayer", "dialog-test.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            File.WriteAllText(logPath, "");
+            void Log(string line) => File.AppendAllText(logPath, line + Environment.NewLine);
+
+            // 确认框是模态的，用 DispatcherTimer 在它的消息循环里点按钮。
+            void ClickLater(string name, int delay)
+            {
+                var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(delay) };
+                timer.Tick += (_, _) =>
+                {
+                    timer.Stop();
+                    var dialog = Application.Current.Windows.OfType<ConfirmDialog>().FirstOrDefault();
+                    if (dialog?.FindName(name) is System.Windows.Controls.Button button)
+                    {
+                        button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                    }
+                    else
+                    {
+                        Log($"找不到 {name}");
+                    }
+                };
+                timer.Start();
+            }
+
+            ClickLater("ConfirmButton", 700);
+            Log($"点确认 → Ask={ConfirmDialog.Ask(this, "删除服务器", "测试一下", "删除")}");
+
+            ClickLater("CancelButton", 700);
+            Log($"点取消 → Ask={ConfirmDialog.Ask(this, "删除服务器", "测试一下", "删除")}");
+
+            Application.Current.Shutdown();
+            return;
+        }
+
+        // --dialog-shot <目录>：把深色确认框单独渲染一张，检查它和页面是不是一套。
+        if (ArgumentAfter("--dialog-shot") is { Length: > 0 } dialogDir)
+        {
+            var dialog = new ConfirmDialog();
+            dialog.Configure("删除服务器",
+                "删除服务器「飞牛影视」？\n播放记录与已收藏的进度都还在，\n重新添加这个源就能接上。",
+                "删除", danger: true, showCancel: true);
+            dialog.Owner = this;
+            dialog.Show();
+            await Task.Delay(700);
+
+            var origin = dialog.PointToScreen(new Point(0, 0));
+            var dpi = VisualTreeHelper.GetDpi(dialog);
+            Trace.Write($"dialog bounds {dialog.ActualWidth:0}x{dialog.ActualHeight:0} " +
+                        $"at {origin.X / dpi.DpiScaleX:0},{origin.Y / dpi.DpiScaleY:0}");
+
+            UiCapture.Save(dialog, Path.Combine(dialogDir, "confirm.png"));
+            dialog.Close();
+            Application.Current.Shutdown();
             return;
         }
 

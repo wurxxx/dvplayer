@@ -265,6 +265,32 @@
 
 
   <!-- 播放器 -->
+  <!-- 危险操作（删除 / 清空）：红色实底，和窗口关闭按钮悬停同一个红。 -->
+  <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+    <Setter Property="Background" Value="#C42B1C" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="9"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#D13A2A" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#A82316" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="PlayerButton" TargetType="Button">
     <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="Transparent" />
