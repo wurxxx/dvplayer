@@ -58,6 +58,9 @@ pub trait MediaSource: Send + Sync {
     /// 某个条目下的子条目（剧集 → 季 → 集）。
     fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>>;
 
+    /// 关键词搜索。返回的是平铺的条目（可能是集/文件），由上层按父级归并。
+    fn search(&self, query: &str) -> Result<Vec<MediaItem>>;
+
     /// 条目详情：背景图、简介、季集数等列表接口没有的信息。
     fn detail(&self, item_id: &str) -> Result<MediaDetail>;
 

@@ -98,6 +98,13 @@ public sealed class MediaCore : IDisposable
         return Read(ptr, root => root.Deserialize<PagedDto<MediaItemDto>>(Json)!);
     }
 
+    /// <summary>跨源关键词搜索。返回平铺的条目，集/文件由界面按父级归并。</summary>
+    public ApiResult<List<MediaItemDto>> Search(string query)
+    {
+        var ptr = dv_hub_search(_handle, query);
+        return Read(ptr, root => root.Deserialize<List<MediaItemDto>>(Json) ?? new());
+    }
+
     public ApiResult<List<PlayRecordDto>> Records()
     {
         var ptr = dv_hub_records(_handle);
@@ -298,6 +305,11 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_version", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_version();
+
+    [DllImport(Lib, EntryPoint = "dv_hub_search", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_search(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string query);
 
     [DllImport(Lib, EntryPoint = "dv_hub_detail", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_detail(

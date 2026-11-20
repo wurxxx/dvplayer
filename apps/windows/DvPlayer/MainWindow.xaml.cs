@@ -144,6 +144,14 @@ public partial class MainWindow : FluentWindow
             await Task.Delay((tag == "search" ? 15000 : tag == "libraries" ? 9000 : 5000)
                              + extraDelay * 1000);
 
+            // --inline-search <关键词>：截图时停在页内搜索结果。
+            var inlineQuery = ArgumentAfter("--inline-search");
+            if (inlineQuery is not null && ContentFrame.Content is LibrariesPage searchShot)
+            {
+                searchShot.ShowInlineSearchForShot(inlineQuery);
+                await Task.Delay(6000);
+            }
+
             // --favorites：截图时停在「收藏」分段，检查空态和顶栏。
             if (Environment.GetCommandLineArgs().Contains("--favorites") &&
                 ContentFrame.Content is LibrariesPage favPage)

@@ -216,6 +216,27 @@ impl FnOsSource {
         })
     }
 
+    /// 飞牛的搜索接口：`GET /v/api/v1/search/list?q=<关键词>`，返回平铺的条目。
+    pub fn search(&self, query: &str) -> Result<Vec<MediaItem>> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut params = BTreeMap::new();
+        params.insert("q".to_string(), q.to_string());
+
+        let env: ApiEnvelope<Vec<ItemDto>> =
+            self.send(Method::GET, "/search/list", &params, None)?;
+
+        Ok(env
+            .data
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| self.map_item(d))
+            .collect())
+    }
+
     pub fn records(&self) -> Result<Vec<PlayRecord>> {
         let env: ApiEnvelope<Vec<ItemDto>> =
             self.send(Method::GET, "/play/list", &BTreeMap::new(), None)?;
@@ -1048,6 +1069,10 @@ impl MediaSource for FnOsSource {
 
     fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
         FnOsSource::children(self, parent_id, page, page_size)
+    }
+
+    fn search(&self, query: &str) -> Result<Vec<MediaItem>> {
+        FnOsSource::search(self, query)
     }
 
     fn detail(&self, item_id: &str) -> Result<MediaDetail> {

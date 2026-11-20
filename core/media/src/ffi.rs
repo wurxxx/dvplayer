@@ -348,6 +348,19 @@ pub extern "C" fn dv_hub_items(
 }
 
 #[no_mangle]
+pub extern "C" fn dv_hub_search(handle: *const HubHandle, query: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Vec<MediaItem>>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(q) = read_cstr(query) else {
+            return reply::<Vec<MediaItem>>(Err(MediaError::Other("null query".into())));
+        };
+        reply(h.inner.search(&q))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn dv_hub_children(
     handle: *const HubHandle,
     parent_id: *const c_char,

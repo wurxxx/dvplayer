@@ -125,6 +125,20 @@ impl MediaHub {
         Ok(paged)
     }
 
+    /// 跨源关键词搜索。各源结果合并后截断，避免界面一次塞太多。
+    pub fn search(&self, query: &str) -> Result<Vec<MediaItem>> {
+        let mut list = self.collect(
+            |entry| entry.source.search(query),
+            |entry, mut item| {
+                qualify_items(&entry.id, std::slice::from_mut(&mut item));
+                item
+            },
+        )?;
+
+        list.truncate(120);
+        Ok(list)
+    }
+
     pub fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
         let (entry, raw) = self.route(parent_id)?;
         let mut paged = entry.source.children(raw, page, page_size)?;

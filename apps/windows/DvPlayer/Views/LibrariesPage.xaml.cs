@@ -619,7 +619,7 @@ public partial class LibrariesPage : Page
         foreach (var page in pages)
         {
             details.AddRange(await SampleRandomPageDetailsAsync(
-                core, page.Library.Id, page.Total, 8).ConfigureAwait(true));
+                core, page.Library.Id, page.Total, 12).ConfigureAwait(true));
         }
 
         if (version != _loadVersion || !IsVisible)
@@ -638,7 +638,22 @@ public partial class LibrariesPage : Page
 
         Trace("hero 换到横版图");
 
-        ApplyHeroPool(picked, pages);
+        // 全部详情都留着：有横版图的排前面，其余当后备，别让圆点只剩一个。
+        var previous = _heroPool.ToList();
+        ApplyHeroPool(details, pages);
+        foreach (var hero in previous)
+        {
+            if (_heroPool.Count >= 8)
+            {
+                break;
+            }
+
+            if (_heroPool.All(h => h.Id != hero.Id))
+            {
+                _heroPool.Add(hero);
+            }
+        }
+
         await ShowHeroAsync(0).ConfigureAwait(true);
         if (_heroPool.Count > 1)
         {
@@ -828,6 +843,14 @@ public partial class LibrariesPage : Page
             .ToList();
     }
 
+    /// <summary>截图巡检用：切到「搜索」分段并填好关键词。</summary>
+    public void ShowInlineSearchForShot(string query)
+    {
+        SearchSegment.IsChecked = true;
+        InlineSearchBox.Text = query;
+        InlineSearchBox.Focus();
+    }
+
     /// <summary>截图巡检用：切到「收藏」分段。</summary>
     public void ShowFavoritesForShot() => FavoriteSegment.IsChecked = true;
 
@@ -910,7 +933,8 @@ public partial class LibrariesPage : Page
         TopBar.Visibility = Visibility.Visible;
 
         var favorites = FavoriteEmpty.Visibility == Visibility.Visible;
-        var solid = favorites || OverviewRoot.VerticalOffset > 24;
+        var searching = SearchPanel.Visibility == Visibility.Visible;
+        var solid = favorites || searching || OverviewRoot.VerticalOffset > 24;
 
         TopBar.Background = solid
             ? (Brush)FindResource("BgBrush")
@@ -927,6 +951,7 @@ public partial class LibrariesPage : Page
         BrowseRoot.Visibility = Visibility.Collapsed;
         OverviewPanel.Visibility = Visibility.Visible;
         FavoriteEmpty.Visibility = Visibility.Collapsed;
+        SearchPanel.Visibility = Visibility.Collapsed;
         MediaSegment.IsChecked = true;
         UpdateTopBar();
 
@@ -936,21 +961,127 @@ public partial class LibrariesPage : Page
         }
     }
 
-    private void OnTabChanged(object sender, RoutedEventArgs e)
+    // —— 页内搜索（只在当前服务器里找）——
+
+    private int _inlineSearchVersion;
+
+    private void OnInlineSearchTextChanged(object sender, TextChangedEventArgs e)
     {
-        // XAML 解析时 MediaSegment 的 IsChecked 先触发，后面的控件字段还没赋值。
-        if (SearchSegment is null || FavoriteSegment is null || BrowseRoot is null)
+        UpdateInlineSearchPlaceholder();
+        _ = RunInlineSearchAsync(InlineSearchBox.Text);
+    }
+
+    private void UpdateInlineSearchPlaceholder() =>
+        InlineSearchPlaceholder.Visibility = string.IsNullOrEmpty(InlineSearchBox.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    private void ShowInlineEmpty(string title, string hint)
+    {
+        InlineSearchEmptyTitle.Text = title;
+        InlineSearchEmptyHint.Text = hint;
+        InlineSearchEmptyHint.Visibility = string.IsNullOrEmpty(hint)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        InlineSearchEmpty.Visibility = Visibility.Visible;
+        InlineSearchScroll.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 交给核心搜索（飞牛走 /search/list，Emby 走 SearchTerm），只留当前源的结果。
+    /// 命中的可能是某一集，按父级归并成一张卡片，点进去就是那部剧。
+    /// </summary>
+    private async Task RunInlineSearchAsync(string raw)
+    {
+        var query = raw.Trim();
+        var version = ++_inlineSearchVersion;
+
+        if (query.Length == 0)
+        {
+            ShowInlineEmpty($"搜索「{SourceTitle.Text}」中的内容", "输入片名、剧名或关键词");
+            return;
+        }
+
+        var core = AppServices.Instance.Core;
+        if (core is null || !AppServices.Instance.IsConnected)
+        {
+            ShowInlineEmpty("还没有连接媒体源", "先去「服务器」添加一个");
+            return;
+        }
+
+        ShowInlineEmpty("正在搜索…", "");
+
+        var result = await Task.Run(() => core.Search(query)).ConfigureAwait(true);
+        if (version != _inlineSearchVersion)
         {
             return;
         }
 
-        // 搜索直接交给搜索页，那边有完整的输入框和空态。
-        if (SearchSegment.IsChecked == true)
+        if (!result.Ok || result.Data is null)
         {
-            (Window.GetWindow(this) as MainWindow)?.NavigateTo("search");
-            MediaSegment.IsChecked = true;
+            ShowInlineEmpty("搜索失败", result.Error ?? "未知错误");
             return;
         }
+
+        var sourceId = AppServices.Instance.Settings.LastSourceId;
+        var shown = result.Data
+            .Where(i => sourceId is null || i.SourceId == sourceId)
+            .GroupBy(i => string.IsNullOrWhiteSpace(i.ParentId) ? i.Id : i.ParentId!)
+            .Select(g => g.OrderByDescending(i => i.LastPlayed ?? 0).First())
+            .Select(item => string.IsNullOrWhiteSpace(item.ParentId)
+                ? item
+                : item with
+                {
+                    Id = item.ParentId!,
+                    Title = string.IsNullOrWhiteSpace(item.ParentTitle) ? item.Title : item.ParentTitle!,
+                    Kind = "series",
+                })
+            .ToList();
+
+        if (version != _inlineSearchVersion)
+        {
+            return;
+        }
+
+        if (shown.Count == 0)
+        {
+            ShowInlineEmpty($"没有找到「{query}」", "试试剧名或更短的关键词");
+            return;
+        }
+
+        var cards = shown.Select(ToCard).ToList();
+        InlineSearchResults.ItemsSource = cards;
+        InlineSearchStatus.Text = $"{cards.Count} 个结果";
+        InlineSearchEmpty.Visibility = Visibility.Collapsed;
+        InlineSearchScroll.Visibility = Visibility.Visible;
+
+        await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath))).ConfigureAwait(true);
+    }
+
+    private void OnTabChanged(object sender, RoutedEventArgs e)
+    {
+        // XAML 解析时 MediaSegment 的 IsChecked 先触发，后面的控件字段还没赋值。
+        if (SearchSegment is null || FavoriteSegment is null || BrowseRoot is null ||
+            SearchPanel is null)
+        {
+            return;
+        }
+
+        // 「搜索」是服务器页内的视图：只搜当前源的库，不跳全局搜索页。
+        if (SearchSegment.IsChecked == true)
+        {
+            OverviewPanel.Visibility = Visibility.Collapsed;
+            FavoriteEmpty.Visibility = Visibility.Collapsed;
+            BrowseRoot.Visibility = Visibility.Collapsed;
+            SearchPanel.Visibility = Visibility.Visible;
+            _heroTimer.Stop();
+            UpdateTopBar();
+            UpdateInlineSearchPlaceholder();
+            InlineSearchBox.Focus();
+            return;
+        }
+
+        SearchPanel.Visibility = Visibility.Collapsed;
 
         var favorites = FavoriteSegment.IsChecked == true;
         OverviewPanel.Visibility = favorites ? Visibility.Collapsed : Visibility.Visible;
@@ -973,6 +1104,7 @@ public partial class LibrariesPage : Page
         BrowseRoot.Visibility = Visibility.Collapsed;
         OverviewPanel.Visibility = Visibility.Visible;
         FavoriteEmpty.Visibility = Visibility.Collapsed;
+        SearchPanel.Visibility = Visibility.Collapsed;
         MediaSegment.IsChecked = true;
         UpdateTopBar();
         _heroTimer.Stop();
@@ -999,6 +1131,7 @@ public partial class LibrariesPage : Page
     {
         BrowseRoot.Visibility = Visibility.Collapsed;
         OverviewPanel.Visibility = Visibility.Visible;
+        SearchPanel.Visibility = Visibility.Collapsed;
         UpdateTopBar();
 
         if (_heroPool.Count > 1)
@@ -1024,6 +1157,7 @@ public partial class LibrariesPage : Page
         _heroTimer.Stop();
         OverviewPanel.Visibility = Visibility.Collapsed;
         FavoriteEmpty.Visibility = Visibility.Collapsed;
+        SearchPanel.Visibility = Visibility.Collapsed;
         BrowseRoot.Visibility = Visibility.Visible;
         UpdateTopBar();
 

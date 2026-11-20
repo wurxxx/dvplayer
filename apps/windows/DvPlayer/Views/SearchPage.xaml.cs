@@ -14,11 +14,9 @@ namespace DvPlayer.Views;
 /// </summary>
 public partial class SearchPage : Page
 {
-    private const int IndexPerLibrary = 300;
 
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(280) };
 
-    private List<IndexEntry>? _mediaIndex;
     private List<PlayRecordDto>? _recordIndex;
 
     /// <summary>连点输入时只认最后一次查询的结果。</summary>
@@ -63,7 +61,6 @@ public partial class SearchPage : Page
     private void OnConnectionChanged(object? sender, EventArgs e) =>
         Dispatcher.BeginInvoke(() =>
         {
-            _mediaIndex = null;
             _recordIndex = null;
             if (!string.IsNullOrWhiteSpace(SearchBox.Text))
             {
@@ -149,7 +146,7 @@ public partial class SearchPage : Page
             EmptyState.Visibility = Visibility.Collapsed;
             ResultScroll.Visibility = Visibility.Visible;
             StatusText.Text = $"{cards.Count} 个结果" +
-                (RecordSegment.IsChecked == true ? "" : $" · 每个库搜索前 {IndexPerLibrary} 条");
+                "";
 
             await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
         }
@@ -162,73 +159,61 @@ public partial class SearchPage : Page
         }
     }
 
+    /// <summary>跨源搜索，交给核心（飞牛 /search/list、Emby SearchTerm）。</summary>
     private async Task<List<SearchCard>> SearchMediaAsync(string query)
-    {
-        if (_mediaIndex is null)
-        {
-            _mediaIndex = await BuildMediaIndexAsync().ConfigureAwait(true);
-        }
-
-        return _mediaIndex
-            .Where(e => Matches(e.Item.Title, query) || Matches(e.Item.ParentTitle, query))
-            .GroupBy(e => e.Item.Id)
-            .Select(g => g.First())
-            .Select(e =>
-            {
-                var item = e.Item;
-                var card = new SearchCard
-                {
-                    Id = item.Id,
-                    Kind = item.Kind,
-                    Title = MediaText.Clean(item.Title),
-                    Sub = e.LibraryTitle + " · " + MediaText.Describe(item),
-                    Badge = AppServices.Instance.Settings.ShowResolution && !string.IsNullOrEmpty(item.Resolution)
-                        ? item.Resolution!
-                        : "",
-                    PosterPath = item.PosterPath,
-                    Initial = Palette.InitialOf(item.Title),
-                    BadgeVisibility = AppServices.Instance.Settings.ShowResolution &&
-                                      !string.IsNullOrEmpty(item.Resolution)
-                        ? Visibility.Visible
-                        : Visibility.Collapsed,
-                };
-                card.UseGradient(item.Id + item.Title);
-                return card;
-            })
-            .Take(120)
-            .ToList();
-    }
-
-    /// <summary>每个库抓一页条目做关键词索引。库多、条目多以后再交给核心。</summary>
-    private static async Task<List<IndexEntry>> BuildMediaIndexAsync()
     {
         var core = AppServices.Instance.Core;
         if (core is null)
         {
-            return new List<IndexEntry>();
+            return new List<SearchCard>();
         }
 
-        var libraries = await Task.Run(core.Libraries).ConfigureAwait(true);
-        if (!libraries.Ok || libraries.Data is null)
+        var result = await Task.Run(() => core.Search(query)).ConfigureAwait(true);
+        if (!result.Ok || result.Data is null)
         {
-            return new List<IndexEntry>();
+            return new List<SearchCard>();
         }
 
-        var entries = new List<IndexEntry>();
-        foreach (var library in libraries.Data)
-        {
-            var id = library.Id;
-            var title = library.Title;
-            var page = await Task.Run(() => core.Items(id, 1, IndexPerLibrary)).ConfigureAwait(true);
-            if (!page.Ok || page.Data is null)
+        var showResolution = AppServices.Instance.Settings.ShowResolution;
+        return result.Data
+            // 命中的可能是某一集，按父级归并成一部剧。
+            .GroupBy(i => string.IsNullOrWhiteSpace(i.ParentId) ? i.Id : i.ParentId!)
+            .Select(g => g.OrderByDescending(i => i.LastPlayed ?? 0).First())
+            .Select(item =>
             {
-                continue;
-            }
+                // 命中某一集时按它所属的剧展示。
+                var shown = string.IsNullOrWhiteSpace(item.ParentId)
+                    ? item
+                    : item with
+                    {
+                        Id = item.ParentId!,
+                        Title = string.IsNullOrWhiteSpace(item.ParentTitle) ? item.Title : item.ParentTitle!,
+                        Kind = "series",
+                    };
 
-            entries.AddRange(page.Data.Items.Select(item => new IndexEntry(title, item)));
-        }
+                var id = shown.Id;
+                var title = shown.Title;
 
-        return entries;
+                var card = new SearchCard
+                {
+                    Id = id,
+                    Kind = shown.Kind,
+                    Title = MediaText.Clean(title),
+                    Sub = MediaText.Describe(shown),
+                    Badge = showResolution && !string.IsNullOrEmpty(item.Resolution)
+                        ? item.Resolution!
+                        : "",
+                    PosterPath = item.PosterPath,
+                    Initial = Palette.InitialOf(title),
+                    BadgeVisibility = showResolution && !string.IsNullOrEmpty(item.Resolution)
+                        ? Visibility.Visible
+                        : Visibility.Collapsed,
+                };
+                card.UseGradient(id + title);
+                return card;
+            })
+            .Take(120)
+            .ToList();
     }
 
     private async Task<List<SearchCard>> SearchRecordsAsync(string query)
@@ -305,7 +290,6 @@ public partial class SearchPage : Page
         await PlayWindow.OpenAsync(Window.GetWindow(this), id);
     }
 
-    private sealed record IndexEntry(string LibraryTitle, MediaItemDto Item);
 
     private sealed class SearchCard : CardVisual
     {

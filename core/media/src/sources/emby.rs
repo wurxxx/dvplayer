@@ -165,6 +165,29 @@ impl EmbySource {
         self.list(parent_id, page, page_size)
     }
 
+    /// Emby / Jellyfin 的搜索：`/Users/{uid}/Items?searchTerm=`，跨库递归。
+    pub fn search(&self, query: &str) -> Result<Vec<MediaItem>> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let user = self.user_id()?;
+        let params = vec![
+            ("SearchTerm", q.to_string()),
+            ("Recursive", "true".into()),
+            ("Limit", "60".into()),
+            ("IncludeItemTypes", "Movie,Series,Episode".into()),
+            ("Fields", LIST_FIELDS.into()),
+            ("EnableImages", "true".into()),
+            ("ImageTypeLimit", "1".into()),
+            ("EnableImageTypes", "Primary,Backdrop".into()),
+        ];
+
+        let dto: ItemQueryDto = self.get(&format!("/Users/{user}/Items"), &params)?;
+        Ok(dto.items.iter().map(|d| self.map_item(d)).collect())
+    }
+
     fn list(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
         let user = self.user_id()?;
         let start = ((page.max(1) - 1) * page_size.max(1)).to_string();
@@ -633,6 +656,10 @@ impl MediaSource for EmbySource {
 
     fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
         EmbySource::children(self, parent_id, page, page_size)
+    }
+
+    fn search(&self, query: &str) -> Result<Vec<MediaItem>> {
+        EmbySource::search(self, query)
     }
 
     fn detail(&self, item_id: &str) -> Result<MediaDetail> {
