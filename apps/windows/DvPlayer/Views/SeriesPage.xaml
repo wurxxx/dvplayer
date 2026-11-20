@@ -29,16 +29,22 @@
           </Border.Effect>
         </Border>
 
-        <!-- 顶部压暗让返回按钮看得清；下半部压暗是为了白字压在亮图上也能读 -->
+        <!--
+          顶部压暗让返回按钮看得清；下半部压暗是为了白字压在亮图上也能读。
+          底色必须和页面背景（BgColor #141419）完全一样、并且提前淡完，
+          否则大图下沿会留下一条和页面不同色的硬边。
+        -->
         <Border IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-              <GradientStop Color="#7A0E0E12" Offset="0" />
-              <GradientStop Color="#120E0E12" Offset="0.18" />
-              <GradientStop Color="#380E0E12" Offset="0.42" />
-              <GradientStop Color="#8C0E0E12" Offset="0.66" />
-              <GradientStop Color="#E60E0E12" Offset="0.88" />
-              <GradientStop Color="#FF0E0E12" Offset="1" />
+              <GradientStop Color="#7A141419" Offset="0" />
+              <GradientStop Color="#12141419" Offset="0.16" />
+              <GradientStop Color="#33141419" Offset="0.38" />
+              <GradientStop Color="#75141419" Offset="0.58" />
+              <GradientStop Color="#AD141419" Offset="0.72" />
+              <GradientStop Color="#D9141419" Offset="0.84" />
+              <GradientStop Color="#F2141419" Offset="0.93" />
+              <GradientStop Color="#FF141419" Offset="1" />
             </LinearGradientBrush>
           </Border.Background>
         </Border>
@@ -47,9 +53,9 @@
         <Border IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-              <GradientStop Color="#800E0E12" Offset="0" />
-              <GradientStop Color="#330E0E12" Offset="0.4" />
-              <GradientStop Color="#000E0E12" Offset="0.75" />
+              <GradientStop Color="#7A141419" Offset="0" />
+              <GradientStop Color="#2E141419" Offset="0.4" />
+              <GradientStop Color="#00141419" Offset="0.75" />
             </LinearGradientBrush>
           </Border.Background>
         </Border>
@@ -61,7 +67,7 @@
                      FontSize="16" Foreground="#E6FFFFFF" />
         </Button>
 
-        <StackPanel VerticalAlignment="Bottom" Margin="40,180,40,36">
+        <StackPanel VerticalAlignment="Bottom" Margin="40,180,40,24">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="380" />
@@ -109,7 +115,7 @@
       </Grid>
 
       <!-- 季选择 + 集：横向一行，鼠标移上去两侧出箭头 -->
-      <StackPanel x:Name="EpisodeSection" Margin="40,32,40,0" Visibility="Collapsed">
+      <StackPanel x:Name="EpisodeSection" Margin="40,22,40,0" Visibility="Collapsed">
 
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="SeasonPicker" Click="OnSeasonPickerClick" Cursor="Hand"

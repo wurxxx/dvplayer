@@ -270,12 +270,19 @@
             <Border x:Name="HeroFade" Opacity="0"
                     RenderOptions.BitmapScalingMode="HighQuality" />
 
-            <Border VerticalAlignment="Bottom" Height="320">
+            <!--
+              渐变直接淡到页面底色，别用纯黑收尾：纯黑会在横幅下沿
+              切出一条比页面更黑的带子。
+            -->
+            <Border VerticalAlignment="Bottom" Height="340">
               <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                  <GradientStop Color="#00000000" Offset="0" />
-                  <GradientStop Color="#B3000000" Offset="0.55" />
-                  <GradientStop Color="#F2000000" Offset="1" />
+                  <GradientStop Color="#00141419" Offset="0" />
+                  <GradientStop Color="#3D141419" Offset="0.3" />
+                  <GradientStop Color="#8C141419" Offset="0.55" />
+                  <GradientStop Color="#C7141419" Offset="0.75" />
+                  <GradientStop Color="#EB141419" Offset="0.88" />
+                  <GradientStop Color="#FF141419" Offset="1" />
                 </LinearGradientBrush>
               </Border.Background>
             </Border>
