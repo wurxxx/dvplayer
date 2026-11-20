@@ -178,8 +178,10 @@
           <Grid x:Name="HeroCard" Height="560" Cursor="Hand"
                 MouseLeftButtonUp="OnHeroClick"
                 MouseEnter="OnHeroEnter" MouseLeave="OnHeroLeave">
-            <Border x:Name="HeroBackdrop" Background="{StaticResource SurfaceBrush}" />
-            <Border x:Name="HeroFade" Opacity="0" />
+            <Border x:Name="HeroBackdrop" Background="{StaticResource SurfaceBrush}"
+                    RenderOptions.BitmapScalingMode="HighQuality" />
+            <Border x:Name="HeroFade" Opacity="0"
+                    RenderOptions.BitmapScalingMode="HighQuality" />
 
             <Border VerticalAlignment="Bottom" Height="320">
               <Border.Background>

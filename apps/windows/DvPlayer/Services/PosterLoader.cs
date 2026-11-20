@@ -131,12 +131,21 @@ public static class PosterLoader
     {
         try
         {
+            // 原图比要求的小时不要放大解码：先糊一次再缩回去只会更软。
+            int natural;
+            using (var probe = new MemoryStream(bytes))
+            {
+                natural = BitmapFrame
+                    .Create(probe, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None)
+                    .PixelWidth;
+            }
+
             using var stream = new MemoryStream(bytes);
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
             image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-            image.DecodePixelWidth = width;
+            image.DecodePixelWidth = Math.Min(width, natural);
             image.StreamSource = stream;
             image.EndInit();
             image.Freeze();

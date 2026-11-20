@@ -27,7 +27,6 @@ public partial class LibrariesPage : Page
 
     /// <summary>Hero 轮播的候选（有横版图的条目，最多 8 个）。</summary>
     private readonly List<HeroItem> _heroPool = new();
-    private readonly List<string> _heroCandidates = new();
     private int _heroIndex;
     private int _heroVersion;
 
@@ -123,7 +122,6 @@ public partial class LibrariesPage : Page
 
         _heroTimer.Stop();
         _heroPool.Clear();
-        _heroCandidates.Clear();
 
         var librariesResult = await Task.Run(core.Libraries).ConfigureAwait(true);
         if (!librariesResult.Ok || librariesResult.Data is null)
@@ -162,6 +160,7 @@ public partial class LibrariesPage : Page
 
         // 每个库取一页做预览。库多的时候这是 N 次请求，但都是一页，不影响体感。
         var sections = new List<LibrarySection>();
+        var libraryTotals = new Dictionary<string, int>();
         foreach (var library in _libraries)
         {
             var id = library.Id;
@@ -180,29 +179,7 @@ public partial class LibrariesPage : Page
                 Items = page.Data.Items.Select(ToCard).ToList(),
             });
 
-            // Hero 随机推荐：随机翻一页再打乱，避免总是最新入库的那几条。
-            if (_heroCandidates.Count < 8)
-            {
-                var take = 8 - _heroCandidates.Count;
-                var total = page.Data.Total;
-                var pages = Math.Max(1, (total + 99) / 100);
-                var randomPage = pages > 1 ? Random.Shared.Next(2, pages + 1) : 1;
-                var pool = page.Data.Items;
-
-                if (randomPage > 1)
-                {
-                    var picked = await Task.Run(() => core.Items(id, randomPage, 100)).ConfigureAwait(true);
-                    if (picked.Ok && picked.Data is not null)
-                    {
-                        pool = picked.Data.Items;
-                    }
-                }
-
-                _heroCandidates.AddRange(pool
-                    .OrderBy(_ => Random.Shared.Next())
-                    .Take(take)
-                    .Select(item => item.Id));
-            }
+            libraryTotals[id] = page.Data.Total;
 
             // 库自己没有封面时，借这个库第一张有图的海报当封面。
             var card = _libraryCards.FirstOrDefault(c => c.Id == id);
@@ -216,34 +193,23 @@ public partial class LibrariesPage : Page
         Sections.ItemsSource = sections;
         StatusText.Text = "";
 
-        // 详情里才有横版图和简介；并发 4 个，8 条大约一秒。
-        if (_heroCandidates.Count > 0)
+        // Hero 随机推荐：随机翻页、优先刮削过的条目，凑几张有横版图的。
+        var heroDetails = new List<MediaDetailDto>();
+        foreach (var (libId, total) in libraryTotals)
         {
-            using var gate = new SemaphoreSlim(4);
-            var details = await Task.WhenAll(_heroCandidates.Select(async id =>
-            {
-                await gate.WaitAsync().ConfigureAwait(true);
-                try
-                {
-                    return await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(true);
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            })).ConfigureAwait(true);
-
-            _heroPool.AddRange(details
-                .Where(d => d.Ok && d.Data is not null)
-                .Select(d => d.Data!)
-                .Where(d => !string.IsNullOrWhiteSpace(d.BackdropPath) ||
-                            !string.IsNullOrWhiteSpace(d.PosterPath))
-                // 有简介的排前面，横幅上的信息才不空。
-                .OrderBy(d => string.IsNullOrWhiteSpace(d.Overview) ? 1 : 0)
-                .ThenByDescending(d => d.Rating ?? 0)
-                .Take(8)
-                .Select(ToHero));
+            heroDetails.AddRange(await SampleHeroDetailsAsync(core, libId, total, 8).ConfigureAwait(true));
         }
+
+        // 有横版图的排前面：竖版海报裁成横幅会放大、也不好看。
+        _heroPool.AddRange(heroDetails
+            .DistinctBy(d => d.Id)
+            .Where(d => !string.IsNullOrWhiteSpace(d.BackdropPath) ||
+                        !string.IsNullOrWhiteSpace(d.PosterPath))
+            .OrderBy(d => string.IsNullOrWhiteSpace(d.BackdropPath) ? 1 : 0)
+            .ThenBy(d => string.IsNullOrWhiteSpace(d.Overview) ? 1 : 0)
+            .ThenByDescending(d => d.Rating ?? 0)
+            .Take(8)
+            .Select(ToHero));
 
         // 一个横版图都没有时，退回第一张海报，至少不空着。
         if (_heroPool.Count == 0)
@@ -308,13 +274,59 @@ public partial class LibrariesPage : Page
 
     // —— Hero 轮播 ——
 
+    /// <summary>随机翻一页，挑几条（跳过未刮削目录）取详情，供 Hero 用。</summary>
+    private static async Task<List<MediaDetailDto>> SampleHeroDetailsAsync(
+        MediaCore core, string libraryId, int total, int take)
+    {
+        const int pageSize = 100;
+        var pages = Math.Max(1, (total + pageSize - 1) / pageSize);
+        var page = pages > 1 ? Random.Shared.Next(2, pages + 1) : 1;
+
+        var result = await Task.Run(() => core.Items(libraryId, page, pageSize)).ConfigureAwait(true);
+        if (!result.Ok || result.Data is null)
+        {
+            return new List<MediaDetailDto>();
+        }
+
+        var ids = result.Data.Items
+            .Where(item => !string.Equals(item.Kind, "folder", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(_ => Random.Shared.Next())
+            .Take(take)
+            .Select(item => item.Id)
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            return new List<MediaDetailDto>();
+        }
+
+        using var gate = new SemaphoreSlim(6);
+        var details = await Task.WhenAll(ids.Select(async id =>
+        {
+            await gate.WaitAsync().ConfigureAwait(true);
+            try
+            {
+                return await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(true);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(true);
+
+        return details
+            .Where(d => d.Ok && d.Data is not null)
+            .Select(d => d.Data!)
+            .ToList();
+    }
+
     private static HeroItem ToHero(MediaDetailDto item) => new()
     {
         Id = item.Id,
         Kind = item.Kind,
         Title = MediaText.Clean(item.Title),
         Meta = BuildMeta(item),
-        Overview = (item.Overview ?? "").Trim(),
+        Overview = Collapse(item.Overview),
         Chips = new[] { item.Resolution, item.ColorRange, item.AudioType }
             .Where(v => !string.IsNullOrWhiteSpace(v))
             .Select(v => v!.Trim())
@@ -322,6 +334,12 @@ public partial class LibrariesPage : Page
             .ToList(),
         BackdropPath = item.BackdropPath ?? item.PosterPath,
     };
+
+    /// <summary>简介里的换行和空行压成空格，免得三行文字被拆成两段。</summary>
+    private static string Collapse(string? text) =>
+        string.IsNullOrWhiteSpace(text)
+            ? ""
+            : string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     private static string BuildMeta(MediaDetailDto item)
     {
