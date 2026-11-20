@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -149,14 +150,12 @@ public partial class LibrariesPage : Page
                 {
                     Id = library.Id,
                     Title = library.Title,
-                    PosterPath = library.PosterPath,
                     Initial = Palette.InitialOf(library.Title),
                 };
                 card.UseGradient(library.Id + library.Title);
                 return card;
             })
             .ToList();
-        LibraryCards.ItemsSource = _libraryCards;
 
         // 每个库取一页做预览。库多的时候这是 N 次请求，但都是一页，不影响体感。
         var sections = new List<LibrarySection>();
@@ -181,15 +180,26 @@ public partial class LibrariesPage : Page
 
             libraryTotals[id] = page.Data.Total;
 
-            // 库自己没有封面时，借这个库第一张有图的海报当封面。
+            // 「我的媒体」用最近入库的三张海报拼图，和列表顺序一致。
             var card = _libraryCards.FirstOrDefault(c => c.Id == id);
-            if (card is not null && string.IsNullOrWhiteSpace(card.PosterPath))
+            if (card is not null)
             {
-                card.PosterPath = page.Data.Items
-                    .FirstOrDefault(i => !string.IsNullOrWhiteSpace(i.PosterPath))?.PosterPath;
+                foreach (var item in page.Data.Items
+                             .Where(i => !string.IsNullOrWhiteSpace(i.PosterPath))
+                             .Take(3))
+                {
+                    var art = new LibraryArt
+                    {
+                        Path = item.PosterPath,
+                        Initial = Palette.InitialOf(item.Title),
+                    };
+                    art.UseGradient(item.Id + item.Title);
+                    card.Arts.Add(art);
+                }
             }
         }
 
+        LibraryCards.ItemsSource = _libraryCards;
         Sections.ItemsSource = sections;
         StatusText.Text = "";
 
@@ -269,7 +279,10 @@ public partial class LibrariesPage : Page
         // 库卡片与分组里的海报最后补，先把结构画出来。
         var all = sections.SelectMany(s => s.Items).ToList();
         await Task.WhenAll(all.Select(c => c.ApplyPosterAsync(c.PosterPath)));
-        await Task.WhenAll(_libraryCards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+        await Task.WhenAll(_libraryCards
+            .SelectMany(c => c.Arts)
+            .Where(a => !string.IsNullOrWhiteSpace(a.Path))
+            .Select(a => a.ApplyPosterAsync(a.Path)));
     }
 
     // —— Hero 轮播 ——
@@ -1042,7 +1055,17 @@ public partial class LibrariesPage : Page
         public string Id { get; init; } = "";
         public string Title { get; init; } = "";
         public string Initial { get; init; } = "";
-        public string? PosterPath { get; set; }
+
+        /// <summary>最近入库的三张海报，没凑齐时按实际张数分栏。</summary>
+        public ObservableCollection<LibraryArt> Arts { get; } = new();
+
+        public int ArtColumns => Math.Max(1, Arts.Count);
+    }
+
+    private sealed class LibraryArt : CardVisual
+    {
+        public string Initial { get; init; } = "";
+        public string? Path { get; init; }
     }
 
     private sealed class HeroItem

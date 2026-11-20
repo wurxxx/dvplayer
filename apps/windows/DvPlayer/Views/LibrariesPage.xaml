@@ -30,20 +30,45 @@
       </Setter>
     </Style>
 
-    <!-- 媒体库卡片（「我的媒体」） -->
+    <!-- 媒体库卡片（「我的媒体」）：最近入库的三张竖版海报拼成一张横卡 -->
     <DataTemplate x:Key="LibraryTemplate">
-      <StackPanel Width="220" Margin="0,0,14,14" Cursor="Hand">
-        <Border Height="124" CornerRadius="12" Background="{Binding Background}"
+      <StackPanel Margin="0,0,16,16" Cursor="Hand">
+        <Border Width="420" Height="220" CornerRadius="12" Background="{Binding Background}"
                 SnapsToDevicePixels="True" Tag="{Binding Id}"
                 MouseLeftButtonUp="OnLibraryClick">
           <Grid>
-            <TextBlock Text="{Binding Initial}" FontSize="34" FontWeight="SemiBold"
-                       Foreground="#2AFFFFFF" HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       Visibility="{Binding PlaceholderVisibility}" />
-            <Border VerticalAlignment="Bottom" Height="42" Background="#66000000" />
-            <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="SemiBold"
-                       Foreground="#F2FFFFFF" Margin="12,0,12,10"
+            <Grid.Clip>
+              <RectangleGeometry Rect="0,0,420,220" RadiusX="12" RadiusY="12" />
+            </Grid.Clip>
+
+            <ItemsControl ItemsSource="{Binding Arts}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <UniformGrid Rows="1" Columns="{Binding ArtColumns}" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Background="{Binding Background}" SnapsToDevicePixels="True">
+                    <TextBlock Text="{Binding Initial}" FontSize="30" FontWeight="SemiBold"
+                               Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding PlaceholderVisibility}" />
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Border VerticalAlignment="Bottom" Height="96" IsHitTestVisible="False">
+              <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                  <GradientStop Color="#00000000" Offset="0" />
+                  <GradientStop Color="#D9000000" Offset="1" />
+                </LinearGradientBrush>
+              </Border.Background>
+            </Border>
+            <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold"
+                       Foreground="#F2FFFFFF" Margin="14,0,14,13"
                        VerticalAlignment="Bottom" TextTrimming="CharacterEllipsis" />
           </Grid>
         </Border>

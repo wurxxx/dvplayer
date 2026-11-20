@@ -109,14 +109,10 @@
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <Grid Tag="{Binding Id}" MouseLeftButtonUp="OnSourceItemClick" Cursor="Hand">
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="14"
-                               VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding Name}" FontSize="13" Margin="12,0,0,0"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                  </StackPanel>
-                  <Ellipse Width="6" Height="6" HorizontalAlignment="Right"
-                           VerticalAlignment="Center" Fill="{Binding DotBrush}" />
+                  <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                             VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Name}" FontSize="13" Margin="12,0,0,0"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </Grid>
               </DataTemplate>
             </ListBox.ItemTemplate>

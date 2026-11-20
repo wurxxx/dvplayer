@@ -272,6 +272,19 @@ public partial class MainWindow : FluentWindow
         _syncingSources = false;
     }
 
+    /// <summary>清掉服务器列表的选中，不触发切换源。</summary>
+    private void ClearSourceSelection()
+    {
+        if (SourceNav is null || SourceNav.SelectedItem is null)
+        {
+            return;
+        }
+
+        _syncingSources = true;
+        SourceNav.SelectedItem = null;
+        _syncingSources = false;
+    }
+
     private void OnSourceSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_syncingSources || SourceNav.SelectedItem is not SourceNavItem item)
@@ -316,7 +329,6 @@ public partial class MainWindow : FluentWindow
             Id = id;
             Name = name;
             Ok = ok;
-            DotBrush = (Brush)Application.Current.FindResource(ok ? "AccentBrush" : "DangerBrush");
         }
 
         public string Id { get; }
@@ -324,8 +336,6 @@ public partial class MainWindow : FluentWindow
         public string Name { get; }
 
         public bool Ok { get; }
-
-        public Brush DotBrush { get; }
     }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -338,6 +348,12 @@ public partial class MainWindow : FluentWindow
 
         if (Nav.SelectedItem is ListBoxItem { Tag: string tag })
         {
+            // 离开源首页后，下面服务器列表不该还留着选中态。
+            if (tag != "libraries")
+            {
+                ClearSourceSelection();
+            }
+
             Navigate(tag);
         }
     }
