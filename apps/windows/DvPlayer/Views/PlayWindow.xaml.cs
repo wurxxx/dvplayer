@@ -67,6 +67,10 @@ public partial class PlayWindow : Window
 
     private double _position;
     private double _duration;
+
+    /// <summary>本次起播的续播点与起播时刻：用来认出「一开就播完」的假片尾。</summary>
+    private double _launchStart;
+    private DateTime _launchAt = DateTime.UtcNow;
     private bool _seeking;
     private bool _volumeDragging;
     private bool _paused;
@@ -822,8 +826,10 @@ public partial class PlayWindow : Window
     private void Launch(PlaySourceDto source, double? startSeconds)
     {
         var launch = Playback.ToLaunch(source, startSeconds);
+        _launchStart = launch.StartSeconds;
+        _launchAt = DateTime.UtcNow;
         Trace.Write($"mpv start url={launch.Url} headers={launch.Headers?.Count ?? 0} " +
-                    $"start={launch.StartSeconds}");
+                    $"start={launch.StartSeconds} resume={source.PositionSeconds}");
 
         try
         {
@@ -965,12 +971,32 @@ public partial class PlayWindow : Window
                     _eof = value.GetBoolean();
                     if (_eof)
                     {
-                        Playback.Report(_itemId, EffectiveDuration, EffectiveDuration);
-                        AdvanceOrClose();
+                        HandleEof();
                     }
                     break;
             }
         });
+    }
+
+    private void HandleEof()
+    {
+        // 续播点正好停在片尾（「已看完」的记录）：mpv 一加载就 EOF，
+        // 这时候不该当成播完 —— 电影会当场关窗、剧集会立刻跳下一集。
+        // 从头放一遍才是用户点开这部片的本意。
+        var instant = (DateTime.UtcNow - _launchAt).TotalSeconds < 3;
+        if (instant && _launchStart > 0 && _duration > 0 && _launchStart >= _duration - 2)
+        {
+            Trace.Write($"eof at resume point start={_launchStart:0} dur={_duration:0} -> restart");
+            _eof = false;
+            _ipc = null;
+            _position = 0;
+            Seek.Value = 0;
+            Launch(_current, 0);
+            return;
+        }
+
+        Playback.Report(_itemId, EffectiveDuration, EffectiveDuration);
+        AdvanceOrClose();
     }
 
     /// <summary>
@@ -1876,7 +1902,9 @@ public partial class PlayWindow : Window
         LoadingPanel.Visibility = Visibility.Visible;
         LoadingStatus.Text = "正在打开…";
 
-        Launch(source, null);
+        // 切集一律从头开始：服务器给的续播点是「上次看到哪」，
+        // 已经看完的集会带着片尾位置回来，起播就立刻 EOF 跳到下一集。
+        Launch(source, 0);
         await Task.CompletedTask;
     }
 
@@ -2258,6 +2286,15 @@ public partial class PlayWindow : Window
 
     /// <summary>截图巡检用：打开右侧选集面板。</summary>
     public void ShowEpisodesForShot() => OnEpisodesClick(this, new RoutedEventArgs());
+
+    /// <summary>截图巡检用：像点选集面板那样切到第 index 集（0 起）。</summary>
+    public void PickEpisodeForShot(int index)
+    {
+        if (index >= 0 && index < _playlist.Count)
+        {
+            _ = SwitchToAsync(_playlist[index].Id);
+        }
+    }
 
     /// <summary>截图巡检用：打开音频菜单（菜单是独立窗口，需要单独截）。</summary>
     public ContextMenu? OpenAudioMenuForShot() => OpenAudioMenu();

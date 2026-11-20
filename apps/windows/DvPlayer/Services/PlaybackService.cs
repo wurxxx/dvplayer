@@ -40,6 +40,14 @@ public static class Playback
                 ? source.PositionSeconds
                 : 0);
 
+        // 已经看完的（记录停在片尾）从头放：续播点正好是时长，
+        // mpv 一加载就 EOF，播完即关的片会当场关掉、剧集会立刻跳下一集。
+        if (startOverride is null && source.DurationSeconds > 0 &&
+            start >= source.DurationSeconds - 1)
+        {
+            start = 0;
+        }
+
         var headers = (source.Headers ?? new List<HttpHeaderDto>())
             .Select(h => new MpvHeader(h.Name, h.Value))
             .ToList();

@@ -180,6 +180,17 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // --play-pick N：像点右侧选集那样切到第 N 集，验证是从头开始，
+        // 而不是接着上一回看到的位置（看完的集会立刻 EOF 跳到下一集）。
+        if (int.TryParse(ArgumentAfter("--play-pick"), out var pick) && playlist is { Count: > 0 })
+        {
+            player.PickEpisodeForShot(pick);
+            await Task.Delay(9000);
+            Trace.Write("pick state " + player.DescribePlaybackState());
+            player.Close();
+            return;
+        }
+
         player.ShowChromeForShot();
         await Task.Delay(700);
         Trace.Write("player bounds " + player.DescribeBounds());

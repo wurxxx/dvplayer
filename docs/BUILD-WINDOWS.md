@@ -144,6 +144,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--play-shot <dir>` | 播放页巡检：依次截图 `play.png` / `play-episodes.png` / `play-audio.png` / `play-more.png` / `play-info.png`（浮层、选集、两个菜单、媒体信息），另有 `play-screen.png` / `play-episodes-screen.png` 是从桌面抓的真实画面（含视频） |
 | `--play-end` | 配合 `--play-shot`：跳到片尾前 4 秒，20 秒后截 `play-next.png`，验证播完自动接下一集 |
 | `--play-input` | 配合 `--play-shot`：用真实鼠标事件验证点画面暂停 / 拖顶栏移动 / 拖右边缘改大小，结果写进 `player.log`，最后截 `desktop-input.png` |
+| `--play-pick N` | 配合 `--play-shot` / `--play-series`：打开后像点右侧选集面板那样切到第 N 集（0 起），日志里 `mpv start ... start=0 resume=N` 说明切集是从头开始，`pick state ...` 给出切完的位置（应该是几秒，不是片尾） |
 | `--play-record N` | 配合 `--play-shot`：拿观看记录第 N 条（默认第一条）走「继续观看」的真实路径，日志里 `record play ... episodes=N` 说明选集拼出来了，最后截 `desktop-record.png` / `play-record.png`；再加 `--play-end` 会跳到片尾，验证续播的剧集也能自动接下一集 |
 | `--play-min` | 配合 `--play-shot`：播放窗最小化 → 还原 → 最大化 → 还原 → 主窗口最小化 → 还原，每步从桌面截一张（`desktop-min.png` / `desktop-restore.png` / `desktop-max.png` / `desktop-main-min.png` / `desktop-main-restore.png`），验证浮层不会飘在桌面上 |
 | `--play first` | 配合 `--play-series`：直接播这个剧的第一集，不用先查集 id |
