@@ -1,4 +1,5 @@
 import SwiftUI
+import DvCore
 
 @main
 struct DvPlayerApp: App {
@@ -63,6 +64,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // 自检：`DVPLAYER_PLAY=<itemId>` 等核心连上后直接开播放窗。
+        // 远程验证用：`DVPLAYER_PLAY_SHOT=<png>` 截播放窗，`DVPLAYER_PLAY_UI=` 拨浮层 / 切轨，
+        // `DVPLAYER_PLAY_SECONDS=` 后打印位置，`DVPLAYER_EXIT=1` 收工退出。
+        if let itemId = ProcessInfo.processInfo.environment["DVPLAYER_PLAY"], !itemId.isEmpty {
+            Task { @MainActor in
+                await Self.waitForCore()
+                let env = ProcessInfo.processInfo.environment
+
+                // `DVPLAYER_PLAY_RECORD=1`：模拟「继续观看」入口——从观看记录续播，
+                // 选集由 `PlaylistLoader` 顺着记录自己找回来。
+                if env["DVPLAYER_PLAY_RECORD"] == "1" {
+                    // 记录是连上以后才拉的，比 core 晚到几秒。
+                    for _ in 0..<240 {
+                        if !AppState.shared.records.isEmpty { break }
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                    }
+
+                    if let record = AppState.shared.records.first {
+                        PlayerLauncher.shared.play(record: record)
+                        NSLog("[PlayTest] record \(record.itemId) parent=\(record.parentId ?? "-")")
+                    } else {
+                        NSLog("[PlayTest] 没有观看记录")
+                    }
+
+                    let wait = Double(env["DVPLAYER_PLAY_RECORD_WAIT"] ?? "") ?? 3
+                    try? await Task.sleep(nanoseconds: UInt64(max(0.5, wait) * 1_000_000_000))
+                    if let spec = env["DVPLAYER_PLAY_UI"] {
+                        Self.runPlayerUI(spec)
+                    }
+                    if let path = env["DVPLAYER_PLAY_FRAME"] {
+                        PlayerLauncher.shared.current?.mpv.captureFrame(to: path)
+                    }
+                    Self.logPlayerState()
+                    if let path = env["DVPLAYER_PLAY_SHOT"] {
+                        PlayerLauncher.shared.current?.showChrome()
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        Self.capture(to: path, window: PlayerLauncher.shared.window)
+                    }
+                    if env["DVPLAYER_EXIT"] == "1" { NSApp.terminate(nil) }
+                    return
+                }
+
+                // `DVPLAYER_PLAY_CONTAINER=<剧集 id>`：模拟详情页入口，先把这一季的集列出来，
+                // 再带 playlist 打开（验证选集面板 / 自动接下一集）。
+                var playlist: [PlayerEpisode] = []
+                var seriesTitle: String?
+                if let containerId = env["DVPLAYER_PLAY_CONTAINER"],
+                   let core = AppState.shared.core {
+                    if let detail = try? await core.detail(containerId) {
+                        seriesTitle = MediaText.clean(detail.title)
+                    }
+                    if let page = try? await core.children(containerId, page: 1, pageSize: 100) {
+                        playlist = PlayerEpisode.list(from: page.items, season: nil)
+                    }
+                    NSLog("[PlayTest] playlist=\(playlist.count) title=\(seriesTitle ?? "-") "
+                          + "first=\(playlist.first?.id ?? "-") last=\(playlist.last?.id ?? "-")")
+                }
+
+                PlayerLauncher.shared.play(itemId: itemId,
+                                          startSeconds: nil,
+                                          playlist: playlist,
+                                          seriesTitle: seriesTitle,
+                                          hintTitle: seriesTitle)
+                NSLog("[PlayTest] open \(itemId)")
+
+
+                if let text = env["DVPLAYER_PLAY_SEEK"], let seconds = Double(text) {
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    PlayerLauncher.shared.current?.seek(to: seconds)
+                    NSLog("[PlayTest] seek \(seconds)")
+                }
+
+                if let path = env["DVPLAYER_PLAY_FRAME"] {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    PlayerLauncher.shared.current?.mpv.captureFrame(to: path)
+                    NSLog("[PlayTest] frame \(path)")
+                }
+
+                if let spec = env["DVPLAYER_PLAY_UI"] {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    Self.runPlayerUI(spec)
+                }
+
+                if let text = env["DVPLAYER_PLAY_SECONDS"], let seconds = Double(text) {
+                    try? await Task.sleep(nanoseconds: UInt64(max(0.1, seconds) * 1_000_000_000))
+                    Self.logPlayerState()
+                }
+
+                if let path = env["DVPLAYER_PLAY_SHOT"] {
+                    let delay = Double(env["DVPLAYER_PLAY_SHOT_DELAY"] ?? "") ?? 6
+                    try? await Task.sleep(nanoseconds: UInt64(max(0.2, delay) * 1_000_000_000))
+                    PlayerLauncher.shared.current?.showChrome()
+                    // 等 SwiftUI 把浮层真正画进图层，再截。
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    NSLog("[PlayTest] player window=\(PlayerLauncher.shared.window.map { "\($0.frame.width)x\($0.frame.height)" } ?? "-")")
+                    Self.capture(to: path, window: PlayerLauncher.shared.window)
+                    if env["DVPLAYER_EXIT"] == "1" { NSApp.terminate(nil) }
+                    return
+                }
+
+                if env["DVPLAYER_EXIT"] == "1" {
+                    Self.logPlayerState()
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+
         // 自检：`DVPLAYER_CLICKTEST="x,y"`（左上角原点）在窗口上合成一次点击，
         // 看 firstResponder 有没有变成输入框——排查「搜索框点不进去」用。
         // 配了 `DVPLAYER_SCROLL=end` 时改成「滚到底再点」（坐标按滚动后的位置给），
@@ -106,6 +214,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    /// 等核心连上（媒体源的手动连接 / 自动连接都在 `AppState.start()` 里）。
+    @MainActor
+    static func waitForCore() async {
+        for _ in 0..<120 {
+            if AppState.shared.core != nil { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        NSLog("[PlayTest] core 一直没连上")
+    }
+
+    /// 播放页自检：`episodes` / `info` / `audio:N` / `subtitle:N`（-1 关闭）/ `pause` / `close`。
+    @MainActor
+    static func runPlayerUI(_ spec: String) {
+        guard let session = PlayerLauncher.shared.current else {
+            NSLog("[PlayTest] 没有播放窗")
+            return
+        }
+
+        let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        switch parts[0] {
+            case "episodes":
+                session.togglePanel(.episodes)
+            case "info":
+                session.togglePanel(.info)
+            case "pause":
+                session.togglePause()
+            case "close":
+                session.requestClose()
+            case "fullscreen":
+                session.toggleFullscreen()
+            case "audio":
+                let index = Int(parts.count > 1 ? parts[1] : "") ?? 0
+                if session.audioTracks.indices.contains(index) {
+                    session.selectAudio(session.audioTracks[index].id)
+                }
+                NSLog("[PlayTest] audio=\(index) -> \(session.selectedAudioId) of \(session.audioTracks.count)")
+            case "subtitle":
+                let index = Int(parts.count > 1 ? parts[1] : "") ?? 0
+                if index < 0 {
+                    session.selectSubtitle(0)
+                } else if session.subtitleTracks.indices.contains(index) {
+                    session.selectSubtitle(session.subtitleTracks[index].id)
+                }
+                NSLog("[PlayTest] subtitle=\(index) -> \(session.selectedSubtitleId) of \(session.subtitleTracks.count)")
+            default:
+                break
+        }
+
+        NSLog("[PlayTest] ui=\(spec) panel=\(session.panel) chrome=\(session.chromeVisible)")
+    }
+
+    @MainActor
+    static func logPlayerState() {
+        guard let session = PlayerLauncher.shared.current else {
+            NSLog("[PlayTest] 没有播放窗")
+            return
+        }
+        NSLog("[PlayTest] tracks \(session.trackSummary)")
+        NSLog("[PlayTest] item=\(session.itemId) pos=\(Int(session.position)) dur=\(Int(session.duration)) "
+              + "paused=\(session.paused) eof=\(session.eof) loading=\(session.loading) "
+              + "audio=\(session.audioTracks.count)/aid=\(session.selectedAudioId) "
+              + "subs=\(session.subtitleTracks.count)/sid=\(session.selectedSubtitleId) "
+              + "playlist=\(session.playlist.count) fullscreen=\(session.isFullscreen) "
+              + "error=\(session.error ?? "-")")
     }
 
     /// 合成一次鼠标点击 + 几个字符，验证控件真的能拿到焦点。
@@ -255,8 +429,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 手机上看截图时 PNG（2x，2–5MB）经常加载不完。要原尺寸就设
     /// `DVPLAYER_SHOT_SCALE=2`。
     @MainActor
-    static func capture(to path: String) {
-        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+    static func capture(to path: String, window only: NSWindow? = nil) {
+        guard let window = only ?? NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
               let view = window.contentView else {
             NSLog("[DvPlayer] 截图失败：找不到窗口")
             return
@@ -271,6 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : view
 
         let size = target.bounds.size
+        NSLog("[Shot] win=\(window.title) num=\(window.windowNumber) size=\(Int(size.width))x\(Int(size.height))")
         guard size.width > 0, size.height > 0 else { return }
 
         let lowered = path.lowercased()
@@ -298,8 +473,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let cg = context.cgContext
         cg.saveGState()
-        // 内容视图的图层是「上下颠倒」的，翻一次；整个窗口（含标题栏）不用翻。
-        if target === view {
+        // 内容视图的图层是「上下颠倒」的（SwiftUI 的 hosting 用 flipped 坐标），翻一次；
+        // 整个窗口（含标题栏）不用翻。普通 NSView 容器（播放窗）本来就是正的。
+        if target === view && view.isFlipped {
             cg.translateBy(x: 0, y: size.height)
             cg.scaleBy(x: 1, y: -1)
         }
@@ -308,7 +484,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 弹层（popover / 菜单）是独立窗口，单独渲染会丢，顺手叠上去。
         let base = window.frame
-        for extra in NSApp.windows where extra !== window && extra.isVisible && extra.contentView != nil {
+        // 只叠真正的弹层（popover / 菜单）；普通窗口（主窗口、播放窗）互相独立，不能叠。
+        for extra in NSApp.windows where extra !== window && extra.isVisible
+            && extra.contentView != nil && (extra.level != .normal || extra is NSPanel) {
             let dx = extra.frame.minX - base.minX
             let dy = extra.frame.minY - base.minY
             cg.saveGState()

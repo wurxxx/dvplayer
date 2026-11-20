@@ -66,8 +66,7 @@ struct LibrariesPage: View {
     var body: some View {
         ZStack {
             if let detailId {
-                DetailPage(itemId: detailId, onBack: { self.detailId = nil },
-                           onPlay: { _ in state.showToast("播放器下一轮接入") })
+                DetailPage(itemId: detailId, onBack: { self.detailId = nil })
                     .transition(.opacity)
             } else if let target = browseTarget {
                 BrowseView(scopeId: target.id, title: target.title,
@@ -352,7 +351,7 @@ struct LibrariesPage: View {
             } else {
                 HorizontalRow(items: continueRecords, itemWidth: 264) { record in
                     ContinueCard(record: record) {
-                        state.showToast("播放器下一轮接入")
+                        PlayerLauncher.shared.play(record: record)
                     }
                 }
             }

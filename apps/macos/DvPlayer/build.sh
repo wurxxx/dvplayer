@@ -36,11 +36,31 @@ install_name_tool -id @rpath/libdvplayer_media.dylib \
 install_name_tool -change "$CORE_ID" @rpath/libdvplayer_media.dylib \
     "$APP/Contents/MacOS/DvPlayer"
 
-# 播放页落地后会用到 libmpv：先一起带上，省得到时又改打包脚本。
-if [[ -f "$ROOT/prefix/lib/libmpv.2.dylib" ]]; then
-    cp "$ROOT/prefix/lib/libmpv.2.dylib" "$APP/Contents/Frameworks/"
-    install_name_tool -id @rpath/libmpv.2.dylib \
-        "$APP/Contents/Frameworks/libmpv.2.dylib"
+# libmpv 和它的依赖（libass / libav* / libplacebo / libsw*）。
+# prefix/lib 里这些 dylib 的 install name 都是本机绝对路径，拷进包后统一改成
+# @rpath/<名字>，否则换台机器就找不到。
+MPV_LIB="$ROOT/prefix/lib"
+if [[ -f "$MPV_LIB/libmpv.2.dylib" ]]; then
+    # prefix/lib 里既有 libfoo.dylib 这种副本，也有 libfoo.9.dylib -> libfoo.9.0.1.dylib 的软链。
+    # 只拷真实文件（软链不拷），引用名再映射到真实名。
+    for lib in "$MPV_LIB"/*.dylib; do
+        [[ -L "$lib" ]] && continue
+        cp "$lib" "$APP/Contents/Frameworks/"
+    done
+
+    # 依赖名 -> 包里的真实文件名（`libavcodec.63.dylib` -> `libavcodec.63.1.102.dylib`）。
+    real_name() {
+        python3 -c 'import os,sys; print(os.path.basename(os.path.realpath(sys.argv[1])))' \
+            "$MPV_LIB/$1"
+    }
+
+    for file in "$APP/Contents/Frameworks"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
+        install_name_tool -id "@rpath/$(basename "$file")" "$file" 2>/dev/null || true
+        while read -r dep; do
+            [[ -z "$dep" ]] && continue
+            install_name_tool -change "$dep" "@rpath/$(real_name "$(basename "$dep")")" "$file"
+        done < <(otool -L "$file" | tail -n +2 | awk '{print $1}' | grep "^$MPV_LIB/" || true)
+    done
 fi
 
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true

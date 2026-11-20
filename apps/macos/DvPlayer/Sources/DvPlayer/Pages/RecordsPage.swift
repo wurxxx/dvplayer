@@ -113,7 +113,7 @@ struct RecordsPage: View {
 
                         HorizontalRow(items: group.records, itemWidth: 264) { record in
                             ContinueCard(record: record) {
-                                state.showToast("播放器下一轮接入")
+                                PlayerLauncher.shared.play(record: record)
                             }
                         }
                     }

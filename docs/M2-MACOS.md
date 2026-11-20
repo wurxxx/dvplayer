@@ -1,6 +1,6 @@
 # M2 · macOS 客户端
 
-> 状态：壳与浏览链路可用（2026-11-20）；播放页未开始。
+> 状态：壳、浏览链路、播放页都可用（2026-11-21）；HDR10 只验过管线，DV 未做。
 > 产物：`apps/macos/DvPlayer`（Swift Package + `build.sh` 出 `.app`）。
 
 ## 1. 范围
@@ -96,12 +96,93 @@
 - **截图拍不到弹层**：popover / 菜单是独立窗口。截图时把其它可见窗口的图层
   叠上去（内容视图是翻转坐标系，要再翻一次）。
 
-## 4. 下一步
+## 4. 播放页
 
-1. **播放页**：`NSOpenGLView` + `mpv_render_context`，`--keep-open`、`--start`、
-   音轨 / 字幕按 `aid` / `sid` 应用；浮层控件照 Windows（顶栏 48、右侧截图 / 选集、
-   底部规格 chips + 控制条、3 秒淡出、单击暂停、双击全屏、Esc 退出）。
-2. 播放页与库的进度回写、播完接下一集 / 关窗（和 Windows 同一套规则：
-   切集一律从头、记录停在片尾的从 0 开始）。
-3. 详情页里的音轨 / 字幕选择（`MediaInfo` 已读到，等播放页一起接 `TrackPrefs` 等价物）。
-4. 键盘：空格 / ←→ / 上下键 / Esc，和 Windows 对齐。
+### 4.1 管线
+
+和 Windows 的「mpv 自己开窗口 + 壳贴上去」不同，macOS 走 render API（ADR-0009）：
+
+```
+core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
+        │
+        ├─► DVMpvView (ObjC++, Sources/MpvKit)
+        │     mpv_create → mpv_initialize → mpv_render_context_create(OPENGL)
+        │     事件线程 mpv_wait_event → 属性观察 → 主线程回调
+        │     drawRect: mpv_render_context_render(FBO) → flushBuffer
+        │
+        └─► PlayerView (SwiftUI，NSHostingView 叠在 NSOpenGLView 上)
+              顶栏片名 / 左上自绘三圆点 / 右侧截图·选集 /
+              底部 chips + 控制条 / 选集面板 / 媒体信息面板 / 3 秒淡出
+```
+
+- `PlayerSession`：起播、切集、EOF 接下一集、进度回写（10 秒一次）、
+  轨道解析与中文默认、规格 chips、截图、浮层自动隐藏。
+- `PlayerWindowController`：单播放窗、自绘红黄绿、键盘、全屏、顶部 30px 拖窗区。
+- `PlaylistLoader`：继续观看只有一条记录，要顺着 `parentId`（或剧名）把整季找回来；
+  先播记录本身，选集后台补上（播放中 core 被拉流挤到 11–22 秒，不能挡起播）。
+- 入口：详情页「播放 / 重头看 / 选集卡」、记录页与库首页的「继续观看」卡片。
+
+### 4.2 打包
+
+`build.sh` 把 `prefix/lib` 里 libmpv 和它的依赖（libass / libav* / libplacebo / libsw*）
+一起拷进 `Contents/Frameworks`。这些 dylib 的 install name 是本机绝对路径，
+统一改写成 `@rpath/<真实文件名>`：`libavcodec.63.dylib` 是软链，真实文件叫
+`libavcodec.63.1.102.dylib`，所以引用名要用 `realpath` 映射到真实名，否则
+dyld 找不到。改完用 `DYLD_PRINT_LIBRARIES=1` 确认没有一条来自 `prefix/lib`。
+
+### 4.3 自检参数
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `DVPLAYER_PLAY=<itemId>` | 等核心连上后直接开播放窗 |
+| `DVPLAYER_PLAY_CONTAINER=<剧集 id>` | 先列这一季的集，再带 playlist 打开（模拟详情页） |
+| `DVPLAYER_PLAY_RECORD=1` | 从第一条观看记录续播（模拟「继续观看」，选集由 `PlaylistLoader` 补） |
+| `DVPLAYER_PLAY_SEEK=<秒>` | 起播 2.5 秒后跳转 |
+| `DVPLAYER_PLAY_UI=episodes\|info\|audio:N\|subtitle:N\|pause\|fullscreen\|close` | 拨浮层 / 切轨（N 是轨序号，字幕 -1 为关闭） |
+| `DVPLAYER_PLAY_FRAME=<png>` | 读回 GL 前台缓冲存 PNG——截图工具拍不到 `NSOpenGLView`，这个才是屏幕上的画面 |
+| `DVPLAYER_PLAY_SHOT=<png>` / `DVPLAYER_PLAY_SHOT_DELAY=` | 截播放窗的 SwiftUI 浮层 |
+| `DVPLAYER_PLAY_SECONDS=<秒>` | 到点打印 `[PlayTest]` 状态（位置 / 时长 / 轨道 / playlist） |
+| `DVPLAYER_MPV_LOG=1` | 打 mpv 日志与 GL 帧计数（`[gl] draws=`） |
+
+日志前缀：`[Play] open / load / loaded / tracks / select / eof / report`、`[PlayTest]`、`[gl]`。
+
+### 4.4 播放页的坑
+
+- **`keep-open` 播完会停在暂停态**：续播点正好在片尾时 `loadfile` 同一文件，
+  `pause` 不会自己复位，起播就卡住不动。`MPV_EVENT_FILE_LOADED` 里显式
+  `pause=no` 一次；「片尾续播点」另有一条兜底：起播 3 秒内 EOF 且起点在片尾，
+  直接从 0 重放。
+- **EOF 后 `time-pos` 会复位**：关窗 / `stop()` 里再上报一次 `position` 会把刚写好的
+  「已看完」覆盖成 1 秒。EOF 之后不再按 position 上报，只在 `!eof` 时回写。
+- **起播立刻上报会把时长写成 0**：`lastReportAt` 从 `.distantPast` 起步时，
+  第一个位置回调就触发上报，而 `duration` 还没下来。改成从起播时刻计时，
+  并且 `total <= 0` 时干脆不写。
+- **`CALayer.render` 拍不到 `NSOpenGLView`**：播放窗截图里视频区是黑的，
+  浮层正常。验画面用 `DVMpvView -captureFrameTo:`（`glReadPixels` 读回前台缓冲）。
+- **播放窗截图会被主窗口盖住**：`capture` 会把其它可见窗口当弹层叠上去。
+  现在只叠 `level != .normal` 或 `NSPanel` 的窗口（popover / 菜单）。
+- **坐标系翻转的判据**：主窗口的 `contentView` 是 SwiftUI hosting（flipped，要翻一次），
+  播放窗是普通 `NSView` 容器（不用翻）。按 `view.isFlipped` 判断，不能只看
+  `target === view`。
+- **选集面板要落到当前集**：`ScrollViewReader` + `onAppear` / `onChange(of: itemId)`
+  滚到正在播的那一集；列表用 `PlayerEpisode.list(from:season:)` 排号（和详情页
+  `makeRows` 同一套「漏号用最小未占用号补」规则），否则飞牛的倒序会让 E70 排在最前。
+- **全屏要求窗口是 key**：从终端 / 自检启动时 app 不在前台，`toggleFullScreen` 不生效
+  （日志里 `key=false`）。正常点击时窗口是 key，不受影响；自检这条只能人工看。
+
+## 5. 下一步
+
+1. **DV**：Profile 5 的 RPU 整形（和 Windows 一样走 `--vf=format` + tone-map，
+   或等 core 的 dovi 解析接进来）；macOS 目前只保证 HDR10 管线（`target-colorspace-hint`）。
+2. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，
+   真正的 PQ 输出要在 HDR 显示器上看一次。
+3. 播放页细节对齐：顶栏右侧的倍速 / 静音指示（Windows 有，macOS 现在只在底部）、
+   进度条缓冲段。
+
+## 6. 旧的下一步（已完成）
+
+1. ~~播放页~~：`NSOpenGLView` + `mpv_render_context`，`--keep-open`、`--start`、
+   音轨 / 字幕按 `aid` / `sid` 应用；浮层控件照 Windows。
+2. ~~进度回写、播完接下一集 / 关窗~~：切集一律从头、记录停在片尾的从 0 开始。
+3. ~~详情页音轨 / 字幕选择~~：`TrackPrefs` 两端同名同规则。
+4. ~~键盘~~：空格 / ←→ / 上下键 / Esc，和 Windows 对齐。

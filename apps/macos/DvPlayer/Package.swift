@@ -28,10 +28,30 @@ let package = Package(
             ]
         ),
 
-        // 壳。mpv 等播放页落地时再链，先留着 rpath 让 dylib 从 .app 里找。
+        // libmpv 渲染封装（ObjC++）：mpv 只解码，画面画进 NSOpenGLView。
+        .target(
+            name: "MpvKit",
+            path: "Sources/MpvKit",
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .unsafeFlags(["-fobjc-arc", "-I\(repo)/prefix/include"]),
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L\(repo)/prefix/lib", "-lmpv",
+                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
+                ]),
+                .linkedFramework("Cocoa"),
+                .linkedFramework("OpenGL"),
+                .linkedFramework("QuartzCore"),
+                .linkedFramework("CoreVideo"),
+            ]
+        ),
+
+        // 壳。
         .executableTarget(
             name: "DvPlayer",
-            dependencies: ["DvCore"],
+            dependencies: ["DvCore", "MpvKit"],
             path: "Sources/DvPlayer",
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),

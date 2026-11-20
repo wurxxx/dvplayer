@@ -25,7 +25,6 @@ struct EpisodeRow: Identifiable {
 struct DetailPage: View {
     let itemId: String
     let onBack: () -> Void
-    let onPlay: (String) -> Void
 
     @EnvironmentObject private var state: AppState
 
@@ -51,8 +50,7 @@ struct DetailPage: View {
         ZStack {
             if let nestedItemId {
                 DetailPage(itemId: nestedItemId,
-                           onBack: { self.nestedItemId = nil },
-                           onPlay: onPlay)
+                           onBack: { self.nestedItemId = nil })
             } else {
                 content
             }
@@ -210,7 +208,7 @@ struct DetailPage: View {
         HStack(spacing: 10) {
             Button {
                 guard let detail else { return }
-                onPlay(playTargetId ?? detail.id)
+                play(playTargetId ?? detail.id, startSeconds: nil)
             } label: {
                 Label("播放", systemImage: "play.fill")
                     .labelStyle(.titleAndIcon)
@@ -219,7 +217,7 @@ struct DetailPage: View {
 
             Button {
                 guard let detail else { return }
-                onPlay(playTargetId ?? detail.id)
+                play(playTargetId ?? detail.id, startSeconds: 0)
             } label: {
                 Text("重头看")
             }
@@ -303,7 +301,7 @@ struct DetailPage: View {
 
             HorizontalRow(items: episodes, itemWidth: 314, spacing: 18) { row in
                 EpisodeCard(episode: row) {
-                    onPlay(row.id)
+                    play(row.id, startSeconds: nil)
                 }
             }
         }
@@ -466,6 +464,26 @@ struct DetailPage: View {
 
     private var playTargetId: String? {
         detail?.playItemId ?? episodes.first?.id ?? (detail != nil ? itemId : nil)
+    }
+
+    /// 当前季的季号：选集面板里补成 `S01E03` 这种。
+    private var currentSeasonNumber: Int? {
+        let number = seasons.first { $0.id == seasonId }?.seasonNumber
+        return (number ?? 0) > 0 ? number : nil
+    }
+
+    /// 起播。选集用当前季这行集，和 Windows 的 `BuildPlaylist()` 一致。
+    private func play(_ target: String, startSeconds: Double?) {
+        let list = episodes.map { row in
+            PlayerEpisode(item: row.item, number: row.number, season: currentSeasonNumber)
+        }
+
+        PlayerLauncher.shared.play(
+            itemId: target,
+            startSeconds: startSeconds,
+            playlist: list,
+            seriesTitle: detail.map { MediaText.clean($0.title) },
+            hintTitle: detail.map { MediaText.clean($0.title) })
     }
 
     private var metaLine: String? {
