@@ -9,10 +9,19 @@
                  Background="{StaticResource BgBrush}">
 
   <Grid>
-    <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="216" />
-      <ColumnDefinition Width="*" />
-    </Grid.ColumnDefinitions>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="36" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar Grid.Row="0" Title="DV Player"
+                 ShowMaximize="True" ShowMinimize="True" ShowClose="True" />
+
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="216" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
 
     <!-- 侧栏：品牌 / 导航 / 连接状态，入口平铺 -->
     <Border Grid.Column="0" Background="{StaticResource SidebarBrush}"
@@ -112,5 +121,6 @@
     <!-- 内容区 -->
     <Frame x:Name="ContentFrame" Grid.Column="1" NavigationUIVisibility="Hidden"
            Background="{StaticResource BgBrush}" />
+    </Grid>
   </Grid>
 </ui:FluentWindow>
