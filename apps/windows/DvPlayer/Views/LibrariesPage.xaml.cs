@@ -899,26 +899,20 @@ public partial class LibrariesPage : Page
         HeroNext.BeginAnimation(OpacityProperty, animation);
     }
 
-    private async void OnHeroClick(object sender, MouseButtonEventArgs e)
+    /// <summary>点 Hero 进影片详情，不直接播放——详情页再决定从哪一集开始。</summary>
+    private void OnHeroClick(object sender, MouseButtonEventArgs e)
     {
         if (_heroPool.Count == 0)
         {
             return;
         }
 
-        var hero = _heroPool[_heroIndex];
-        if (!MediaText.IsPlayable(hero.Kind))
-        {
-            NavigationService?.Navigate(new SeriesPage(hero.Id));
-            return;
-        }
-
-        await PlayWindow.OpenAsync(Window.GetWindow(this), hero.Id);
+        NavigationService?.Navigate(new SeriesPage(_heroPool[_heroIndex].Id));
     }
 
     /// <summary>
-    /// 顶栏的三个状态：媒体首页（透明浮在 Hero 上，滚动后变实底）、
-    /// 收藏空态（实底）、库内网格（不显示，网格自己有面包屑）。
+    /// 顶栏一直浮在内容上：Hero 页用渐变压暗，滚动后渐变加深，但不做实底。
+    /// 收藏 / 搜索面板和库内网格不需要这层。
     /// </summary>
     private void UpdateTopBar()
     {
@@ -926,21 +920,24 @@ public partial class LibrariesPage : Page
         {
             TopBar.Visibility = Visibility.Collapsed;
             TopBarScrim.Visibility = Visibility.Collapsed;
-            TopBarEdge.Visibility = Visibility.Collapsed;
+            TopBarScrimStrong.Visibility = Visibility.Collapsed;
             return;
         }
 
         TopBar.Visibility = Visibility.Visible;
+        TopBar.Background = Brushes.Transparent;
 
-        var favorites = FavoriteEmpty.Visibility == Visibility.Visible;
-        var searching = SearchPanel.Visibility == Visibility.Visible;
-        var solid = favorites || searching || OverviewRoot.VerticalOffset > 24;
+        var overview = FavoriteEmpty.Visibility != Visibility.Visible &&
+                       SearchPanel.Visibility != Visibility.Visible;
 
-        TopBar.Background = solid
-            ? (Brush)FindResource("BgBrush")
-            : Brushes.Transparent;
-        TopBarScrim.Visibility = solid ? Visibility.Collapsed : Visibility.Visible;
-        TopBarEdge.Visibility = solid ? Visibility.Visible : Visibility.Collapsed;
+        TopBarScrim.Visibility = overview ? Visibility.Visible : Visibility.Collapsed;
+        TopBarScrimStrong.Visibility = overview ? Visibility.Visible : Visibility.Collapsed;
+
+        if (overview)
+        {
+            // 0 → 72px 的滚动距离里，浓渐变从无到有。
+            TopBarScrimStrong.Opacity = Math.Clamp((OverviewRoot.VerticalOffset - 12) / 72, 0, 1);
+        }
     }
 
     private void OnOverviewScroll(object sender, ScrollChangedEventArgs e) => UpdateTopBar();

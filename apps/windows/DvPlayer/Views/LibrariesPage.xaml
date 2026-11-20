@@ -502,19 +502,29 @@
       </ScrollViewer>
     </Grid>
 
-      <!-- 顶栏浮层：源名 / 分段 / 刷新 -->
-      <Border x:Name="TopBarScrim" Height="108" VerticalAlignment="Top" IsHitTestVisible="False">
+      <!-- 顶栏浮层：源名 / 分段 / 刷新。
+           只用渐变把海报压暗，不做实底——实底会在 Hero 上切出一条黑带。 -->
+      <Border x:Name="TopBarScrim" Height="120" VerticalAlignment="Top" IsHitTestVisible="False">
         <Border.Background>
           <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#99000000" Offset="0" />
+            <GradientStop Color="#8C000000" Offset="0" />
+            <GradientStop Color="#40000000" Offset="0.55" />
             <GradientStop Color="#00000000" Offset="1" />
           </LinearGradientBrush>
         </Border.Background>
       </Border>
 
-      <Border x:Name="TopBarEdge" Height="1" VerticalAlignment="Top" Margin="0,72,0,0"
-              Background="{StaticResource LineBrush}" Visibility="Collapsed"
-              IsHitTestVisible="False" />
+      <!-- 滚动后再叠一层更浓的渐变，随滚动距离淡入 -->
+      <Border x:Name="TopBarScrimStrong" Height="150" VerticalAlignment="Top"
+              IsHitTestVisible="False" Opacity="0">
+        <Border.Background>
+          <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#D9000000" Offset="0" />
+            <GradientStop Color="#8C000000" Offset="0.5" />
+            <GradientStop Color="#00000000" Offset="1" />
+          </LinearGradientBrush>
+        </Border.Background>
+      </Border>
 
       <Grid Height="72" x:Name="TopBar" Margin="32,0,32,0" VerticalAlignment="Top">
         <TextBlock x:Name="SourceTitle" Text="媒体库" FontSize="17" FontWeight="SemiBold"
