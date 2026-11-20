@@ -28,13 +28,17 @@ public static class Playback
             : (null, result.Error ?? "取播放地址失败");
     }
 
-    /// <summary>把统一的播放源翻译成 mpv 的启动参数。</summary>
-    public static MpvLaunch ToLaunch(PlaySourceDto source)
+    /// <summary>
+    /// 把统一的播放源翻译成 mpv 的启动参数。
+    /// <paramref name="startOverride"/> 非空时以它为准（详情页「重头看」传 0）。
+    /// </summary>
+    public static MpvLaunch ToLaunch(PlaySourceDto source, double? startOverride = null)
     {
         var resume = AppServices.Instance.Settings.ResumePlayback;
-        var start = resume && source.PositionSeconds >= ResumeThresholdSeconds
-            ? source.PositionSeconds
-            : 0;
+        double start = startOverride
+            ?? (resume && source.PositionSeconds >= ResumeThresholdSeconds
+                ? source.PositionSeconds
+                : 0);
 
         var headers = (source.Headers ?? new List<HttpHeaderDto>())
             .Select(h => new MpvHeader(h.Name, h.Value))

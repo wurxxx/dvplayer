@@ -526,7 +526,7 @@ public partial class LibrariesPage : Page
                 .Select(h => new MediaDetailDto(
                     h.Id, h.Title, h.Kind, null, h.Overview, h.BackdropPath, h.BackdropPath,
                     null, null, null, null, null, null, null, null, null, null, null, null,
-                    null, null))
+                    null, null, null, null))
                 .ToList();
 
             var file = SnapshotPath(sourceId);

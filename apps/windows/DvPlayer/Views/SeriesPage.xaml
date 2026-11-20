@@ -82,8 +82,44 @@
               <TextBlock x:Name="OriginalTitleText" FontSize="13" Foreground="{StaticResource FaintBrush}"
                          Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
 
+              <!-- 播放按钮旁边的一组动作：重头看 / 已观看 / 收藏 / 音轨 / 字幕 -->
+              <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+                <Button x:Name="RestartButton" Style="{StaticResource HeroCircleButton}"
+                        Click="OnRestartClick" ToolTip="重头看" Visibility="Collapsed">
+                  <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}"
+                             FontSize="16" Foreground="#141419" />
+                </Button>
+
+                <Button x:Name="WatchedButton" Style="{StaticResource HeroCircleButton}"
+                        Click="OnWatchedClick" ToolTip="标记已观看">
+                  <TextBlock x:Name="WatchedGlyph" Text="&#xE73E;"
+                             FontFamily="{StaticResource IconFont}"
+                             FontSize="16" Foreground="#141419" />
+                </Button>
+
+                <Button x:Name="FavoriteButton" Style="{StaticResource HeroCircleButton}"
+                        Click="OnFavoriteClick" ToolTip="加入收藏">
+                  <TextBlock x:Name="FavoriteGlyph" Text="&#xE734;"
+                             FontFamily="{StaticResource IconFont}"
+                             FontSize="16" Foreground="#141419" />
+                </Button>
+
+                <!-- 只有多音轨 / 有字幕时才出现 -->
+                <Button x:Name="AudioButton" Style="{StaticResource HeroCircleButton}"
+                        Click="OnAudioClick" Visibility="Collapsed" ToolTip="选择音轨">
+                  <TextBlock Text="&#xE8D6;" FontFamily="{StaticResource IconFont}"
+                             FontSize="16" Foreground="#141419" />
+                </Button>
+
+                <Button x:Name="SubtitleButton" Style="{StaticResource HeroCircleButton}"
+                        Click="OnSubtitleClick" Visibility="Collapsed" ToolTip="选择字幕">
+                  <TextBlock Text="&#xE8D4;" FontFamily="{StaticResource IconFont}"
+                             FontSize="16" Foreground="#141419" />
+                </Button>
+              </StackPanel>
+
               <Button x:Name="PlayButton" Style="{StaticResource AccentButton}"
-                      Click="OnPlayClick" Padding="26,11" Margin="0,20,0,0"
+                      Click="OnPlayClick" Padding="26,11" Margin="0,16,0,0"
                       HorizontalAlignment="Left">
                 <StackPanel Orientation="Horizontal">
                   <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" FontSize="14"

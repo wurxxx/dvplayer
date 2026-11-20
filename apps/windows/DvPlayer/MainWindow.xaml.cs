@@ -56,6 +56,14 @@ public partial class MainWindow : FluentWindow
         var playId = ArgumentAfter("--play");
         if (playId is not null)
         {
+            // --play-shot <目录>：把播放页的控制条 / 选集 / 菜单各截一张。
+            if (ArgumentAfter("--play-shot") is { Length: > 0 } playDir)
+            {
+                await CapturePlayerAsync(playId, playDir);
+                Close();
+                return;
+            }
+
             var player = await PlayWindow.OpenAsync(this, playId);
 
             if (int.TryParse(ArgumentAfter("--play-seconds"), out var seconds) && seconds > 0)
@@ -72,6 +80,118 @@ public partial class MainWindow : FluentWindow
         {
             await CaptureTourAsync(shotDir);
         }
+    }
+
+    /// <summary>
+    /// 播放页截图：等 mpv 出画面后分别截控制条、选集面板、音频菜单和「更多」菜单。
+    /// 菜单是独立窗口，得单独渲染。
+    /// </summary>
+    private async Task CapturePlayerAsync(string itemId, string dir)
+    {
+        Directory.CreateDirectory(dir);
+
+        var shot = await BuildShotPlaylistAsync().ConfigureAwait(true);
+        var playlist = shot?.Items;
+        var seriesTitle = shot?.Title;
+
+        // `--play first` 让截图落在 --play-series 的第一集上，省得另外记一个集 id。
+        if (itemId is "first" or "-")
+        {
+            if (playlist is not { Count: > 0 })
+            {
+                Trace.Write("--play first 需要 --play-series");
+                return;
+            }
+
+            itemId = playlist[0].Id;
+        }
+
+        var player = await PlayWindow.OpenAsync(this, itemId, null, playlist, seriesTitle);
+        if (player is null)
+        {
+            return;
+        }
+
+        // 网络流要一会儿才出画面。
+        await Task.Delay(10000);
+
+        player.ShowChromeForShot();
+        await Task.Delay(700);
+        UiCapture.Save(player, Path.Combine(dir, "play.png"));
+
+        if (playlist is { Count: > 0 })
+        {
+            player.ShowEpisodesForShot();
+            await Task.Delay(900);
+            UiCapture.Save(player, Path.Combine(dir, "play-episodes.png"));
+            player.ShowEpisodesForShot();
+            await Task.Delay(300);
+        }
+
+        if (player.OpenAudioMenuForShot() is { } audioMenu)
+        {
+            await Task.Delay(700);
+            UiCapture.Save(audioMenu, Path.Combine(dir, "play-audio.png"));
+            audioMenu.IsOpen = false;
+            await Task.Delay(300);
+        }
+
+        if (player.OpenMoreMenuForShot() is { } moreMenu)
+        {
+            await Task.Delay(700);
+            UiCapture.Save(moreMenu, Path.Combine(dir, "play-more.png"));
+            moreMenu.IsOpen = false;
+            await Task.Delay(300);
+        }
+
+        player.ShowMediaInfoForShot();
+        await Task.Delay(600);
+        UiCapture.Save(player, Path.Combine(dir, "play-info.png"));
+
+        player.Close();
+    }
+
+    /// <summary>--play-series <剧 id>：拼一份选集列表 + 剧名，给播放页截图用。</summary>
+    private static async Task<(List<PlayEpisode> Items, string? Title)?> BuildShotPlaylistAsync()
+    {
+        var seriesId = ArgumentAfter("--play-series");
+        if (seriesId is null || AppServices.Instance.Core is not { } core)
+        {
+            return null;
+        }
+
+        var result = await Task.Run(() => core.Children(seriesId, 1, 200)).ConfigureAwait(true);
+        var items = (result.Data?.Items ?? new List<MediaItemDto>()).ToList();
+
+        // 剧集的直接子项是「季」，要再下一层才是集。
+        if (items.Count > 0 &&
+            (items[0].Kind is "season" or "Season" || items[0].SeasonNumber is not null))
+        {
+            var season = items.FirstOrDefault(item => item.SeasonNumber is > 0) ?? items[0];
+            var episodes = await Task.Run(() => core.Children(season.Id, 1, 500)).ConfigureAwait(true);
+            items = episodes.Data?.Items ?? new List<MediaItemDto>();
+        }
+
+        items = items.OrderBy(item => item.EpisodeNumber ?? 0).ToList();
+
+        var detail = await Task.Run(() => core.ItemDetail(seriesId)).ConfigureAwait(true);
+        var seriesTitle = detail.Ok ? MediaText.Clean(detail.Data?.Title) : null;
+
+        var rows = items
+            .Select((item, index) => new PlayEpisode(
+                item.Id,
+                item.EpisodeNumber is { } number ? $"S01E{number:00}" : $"E{index + 1:00}",
+                string.Join(" · ", new[]
+                    {
+                        item.Resolution,
+                        item.RuntimeSeconds is { } runtime ? $"{runtime / 60}:{runtime % 60:00}" : null,
+                    }
+                    .Where(part => !string.IsNullOrWhiteSpace(part))),
+                item.PosterPath,
+                MediaText.Clean(item.Title)))
+            .ToList();
+
+        return (rows, seriesTitle);
     }
 
     /// <summary>启动页来自设置；只接受导航里真实存在的项。</summary>

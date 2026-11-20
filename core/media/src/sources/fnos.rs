@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use crate::error::{compact_json, percent_decode, percent_encode, ApiEnvelope, MediaError, Result};
 use crate::models::{
     Person,
-    AudioInfo, MediaInfo, VideoInfo,
+    AudioInfo, MediaInfo, SubtitleInfo, VideoInfo,
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
@@ -644,6 +644,10 @@ impl FnOsSource {
             single_child_guid: Option<String>,
             #[serde(default)]
             media_stream: Option<MediaStreamDto>,
+            #[serde(default)]
+            is_favorite: i32,
+            #[serde(default)]
+            is_watched: i32,
         }
 
         let path = format!("/item/{}", item_id);
@@ -701,6 +705,8 @@ impl FnOsSource {
             ),
             play_item_id: empty_to_none(d.play_item_guid.unwrap_or_default()),
             single_child_id: empty_to_none(d.single_child_guid.unwrap_or_default()),
+            is_favorite: Some(d.is_favorite > 0),
+            is_watched: Some(d.is_watched > 0),
         })
     }
 
@@ -1063,7 +1069,30 @@ impl FnOsSource {
             })
             .unwrap_or_default();
 
-        Ok(MediaInfo { video, audios })
+        let subtitles = data
+            .get("subtitle_streams")
+            .and_then(|v| v.as_array())
+            .map(|list| {
+                list.iter()
+                    .map(|t| SubtitleInfo {
+                        title: pick_str(t, &["title"]),
+                        language: pick_str(t, &["language"])
+                            .and_then(|l| language_label(&l)),
+                        codec: pick_str(t, &["codec_name", "codec"]).map(|c| c.to_uppercase()),
+                        format: pick_str(t, &["format"]),
+                        is_default: pick_i32(t, &["is_default"]).unwrap_or(0) > 0,
+                        is_bitmap: pick_i32(t, &["is_bitmap"]).unwrap_or(0) > 0,
+                        is_external: pick_i32(t, &["is_external"]).unwrap_or(0) > 0,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok(MediaInfo {
+            video,
+            audios,
+            subtitles,
+        })
     }
 
     /// 演职人员：`POST /person/list/<guid>`。

@@ -33,6 +33,14 @@ public partial class SeriesPage : Page
     /// <summary>媒体信息按条目缓存，切季回来不用重新请求。</summary>
     private readonly Dictionary<string, MediaInfoDto?> _mediaInfoCache = new();
 
+    /// <summary>续播点（秒），按条目缓存。详情页的播放按钮上要显示它。</summary>
+    private readonly Dictionary<string, long> _resumeCache = new();
+
+    private MediaInfoDto? _tracks;
+    private long _resumeSeconds;
+    private bool _watched;
+    private bool _favorite;
+
     private bool _mediaInfoLoading;
 
     /// <summary>本地实际有几季（服务器可能只刮到第一季）。</summary>
@@ -193,6 +201,7 @@ public partial class SeriesPage : Page
             Title = EpisodeTitle(pair.item, pair.number),
             Badge = $"E{pair.number:00}",
             Duration = FormatDuration(pair.item.RuntimeSeconds),
+            Resolution = pair.item.Resolution,
             PosterPath = pair.item.PosterPath,
             Initial = Palette.InitialOf(pair.item.Title ?? ""),
             ProgressWidth = Math.Max(0, TileWidth * Math.Clamp(pair.item.Progress, 0, 1)),
@@ -250,6 +259,9 @@ public partial class SeriesPage : Page
         var title = MediaText.Clean(_detail?.Title);
 
         TitleText.Text = title;
+        _watched = _detail?.IsWatched ?? false;
+        _favorite = _detail?.IsFavorite ?? false;
+        UpdateStateButtons();
 
         var original = MediaText.Clean(_detail?.OriginalTitle);
         if (original != title && original != "(未命名)")
@@ -406,9 +418,239 @@ public partial class SeriesPage : Page
     private void UpdatePlayButton()
     {
         PlayButton.IsEnabled = !string.IsNullOrEmpty(_playTargetId);
-        PlayButtonText.Text = _resumeEpisode > 0
+
+        // 没看过就别摆「重头看」，跟播放键重复。
+        RestartButton.IsEnabled = !string.IsNullOrEmpty(_playTargetId);
+        RestartButton.Visibility = _resumeSeconds >= 5 ? Visibility.Visible : Visibility.Collapsed;
+
+        var text = _resumeEpisode > 0
             ? $"继续观看 第 {_resumeEpisode} 集"
             : _episodesAreFlat ? "播放" : "从第 1 集开始";
+
+        // 有进度就把时间也显示出来。
+        if (_resumeSeconds >= 5)
+        {
+            text += $"  {Clock(_resumeSeconds)}";
+        }
+
+        PlayButtonText.Text = text;
+        RestartButton.ToolTip = _resumeSeconds >= 5
+            ? $"重头看（上次看到 {Clock(_resumeSeconds)}）"
+            : "重头看";
+    }
+
+    /// <summary>已观看 / 收藏的图标状态：亮起 = 已标记。</summary>
+    private void UpdateStateButtons()
+    {
+        WatchedGlyph.Foreground = new SolidColorBrush(_watched ? Accent : DarkIcon);
+        WatchedButton.ToolTip = _watched ? "标记为未观看" : "标记为已观看";
+
+        FavoriteGlyph.Foreground = new SolidColorBrush(_favorite ? Accent : DarkIcon);
+        FavoriteButton.ToolTip = _favorite ? "取消收藏" : "加入收藏";
+    }
+
+    private static readonly Color Accent = Color.FromRgb(0xFF, 0xB0, 0x20);
+    private static readonly Color DarkIcon = Color.FromRgb(0x14, 0x14, 0x19);
+
+    private static string Clock(double seconds)
+    {
+        var time = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return time.TotalHours >= 1
+            ? $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}"
+            : $"{time.Minutes:00}:{time.Seconds:00}";
+    }
+
+    /// <summary>当前这集的播放列表，播放页右侧的「选集」用它。</summary>
+    private List<PlayEpisode> BuildPlaylist()
+    {
+        if (EpisodeList.ItemsSource is not List<EpisodeTile> tiles || tiles.Count == 0)
+        {
+            return new List<PlayEpisode>();
+        }
+
+        var season = _seasons.Count > 0 ? _seasons.FindIndex(c => c.Active) + 1 : 0;
+
+        return tiles
+            .Select(t => new PlayEpisode(
+                t.Id,
+                season > 0 ? $"S{season:00}{t.Badge}" : t.Badge,
+                string.Join(" · ", new[] { t.Resolution, t.Duration }
+                    .Where(part => !string.IsNullOrWhiteSpace(part))),
+                t.PosterPath,
+                MediaText.Clean(t.Title)))
+            .ToList();
+    }
+
+    /// <summary>详情页的按钮组：重头看 / 已观看 / 收藏 / 音轨 / 字幕。</summary>
+    private async void OnRestartClick(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_playTargetId))
+        {
+            return;
+        }
+
+        await PlayWindow.OpenAsync(
+            Window.GetWindow(this), _playTargetId, 0, BuildPlaylist(), MediaText.Clean(_detail?.Title));
+    }
+
+    private void OnWatchedClick(object sender, RoutedEventArgs e)
+    {
+        _watched = !_watched;
+        UpdateStateButtons();
+
+        if (AppServices.Instance.Core is { } core)
+        {
+            _ = Task.Run(() => core.SetWatched(_itemId, _watched));
+        }
+    }
+
+    private void OnFavoriteClick(object sender, RoutedEventArgs e)
+    {
+        _favorite = !_favorite;
+        UpdateStateButtons();
+
+        if (AppServices.Instance.Core is { } core)
+        {
+            _ = Task.Run(() => core.SetFavorite(_itemId, _favorite));
+        }
+    }
+
+    private void OnAudioClick(object sender, RoutedEventArgs e)
+    {
+        var audios = _tracks?.Audios ?? new List<AudioInfoDto>();
+        if (audios.Count == 0)
+        {
+            return;
+        }
+
+        var selected = TrackPrefs.Audio(_playTargetId ?? _itemId)
+            ?? Math.Max(0, audios.FindIndex(a => a.IsDefault));
+
+        var choices = audios
+            .Select((a, i) => (
+                Label: string.Join("  ", new[]
+                    {
+                        a.Title,
+                        a.Language,
+                        a.Codec,
+                        a.Channels is > 0 ? $"{a.Channels}ch" : null,
+                        a.SampleRate is > 0 ? $"{a.SampleRate}Hz" : null,
+                        a.BitRate is > 0 ? $"{a.BitRate / 1000}kbps" : null,
+                    }
+                    .Where(part => !string.IsNullOrWhiteSpace(part))),
+                Selected: i == selected,
+                Value: i))
+            .ToList();
+
+        ShowChoiceMenu(AudioButton, choices, value =>
+        {
+            TrackPrefs.SetAudio(_playTargetId ?? _itemId, value);
+            UpdateTrackButtons(_tracks);
+        });
+    }
+
+    private void OnSubtitleClick(object sender, RoutedEventArgs e)
+    {
+        var subs = _tracks?.Subtitles ?? new List<SubtitleInfoDto>();
+        if (subs.Count == 0)
+        {
+            return;
+        }
+
+        var key = _playTargetId ?? _itemId;
+        var selected = TrackPrefs.Subtitle(key)
+            ?? (subs.FindIndex(s => s.IsDefault) is var index && index >= 0 ? index : TrackPrefs.SubtitleOff);
+
+        var choices = new List<(string Label, bool Selected, int Value)>
+        {
+            ("关闭字幕", selected == TrackPrefs.SubtitleOff, TrackPrefs.SubtitleOff),
+        };
+
+        choices.AddRange(subs.Select((s, i) => (
+            Label: string.Join("  ", new[]
+                {
+                    s.Language,
+                    s.Title,
+                    s.Codec,
+                    s.IsBitmap ? "图形" : null,
+                    s.IsExternal ? "外挂" : null,
+                }
+                .Where(part => !string.IsNullOrWhiteSpace(part))),
+            Selected: i == selected,
+            Value: i)));
+
+        ShowChoiceMenu(SubtitleButton, choices, value =>
+        {
+            TrackPrefs.SetSubtitle(key, value);
+            UpdateTrackButtons(_tracks);
+        });
+    }
+
+    private void ShowChoiceMenu(
+        Button anchor,
+        IEnumerable<(string Label, bool Selected, int Value)> choices,
+        Action<int> pick)
+    {
+        var menu = new ContextMenu
+        {
+            Style = (Style)FindResource("DarkContextMenu"),
+            PlacementTarget = anchor,
+            Placement = PlacementMode.Top,
+            IsOpen = true,
+        };
+
+        foreach (var choice in choices)
+        {
+            var item = new MenuItem
+            {
+                Header = string.IsNullOrWhiteSpace(choice.Label) ? "未命名" : choice.Label,
+                Style = (Style)FindResource("DarkMenuItem"),
+            };
+
+            if (choice.Selected)
+            {
+                item.Icon = new TextBlock
+                {
+                    Text = "\uE73E",
+                    FontFamily = (FontFamily)FindResource("IconFont"),
+                    FontSize = 12,
+                    Foreground = (Brush)FindResource("AccentBrush"),
+                };
+            }
+
+            var value = choice.Value;
+            item.Click += (_, _) => pick(value);
+            menu.Items.Add(item);
+        }
+    }
+
+    /// <summary>多音轨 / 有字幕时才显示对应按钮，并把当前选择写进提示。</summary>
+    private void UpdateTrackButtons(MediaInfoDto? info)
+    {
+        _tracks = info;
+        var audios = info?.Audios ?? new List<AudioInfoDto>();
+        var subs = info?.Subtitles ?? new List<SubtitleInfoDto>();
+
+        AudioButton.Visibility = audios.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        SubtitleButton.Visibility = subs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        AudioButton.IsEnabled = info is not null;
+        SubtitleButton.IsEnabled = info is not null;
+
+        if (audios.Count > 1)
+        {
+            var index = TrackPrefs.Audio(_playTargetId ?? _itemId)
+                ?? Math.Max(0, audios.FindIndex(a => a.IsDefault));
+            var audio = audios[Math.Min(index, audios.Count - 1)];
+            AudioButton.ToolTip = "音轨：" + (audio.Language ?? audio.Title ?? audio.Codec ?? "默认");
+        }
+
+        if (subs.Count > 0)
+        {
+            var index = TrackPrefs.Subtitle(_playTargetId ?? _itemId);
+            SubtitleButton.ToolTip = index is null or TrackPrefs.SubtitleOff
+                ? "选择字幕"
+                : "字幕：" + (subs.ElementAtOrDefault((int)index)?.Language ?? "已选");
+        }
     }
 
     private async void OnPlayClick(object sender, RoutedEventArgs e)
@@ -418,7 +660,8 @@ public partial class SeriesPage : Page
             return;
         }
 
-        await PlayWindow.OpenAsync(Window.GetWindow(this), _playTargetId);
+        await PlayWindow.OpenAsync(
+            Window.GetWindow(this), _playTargetId, null, BuildPlaylist(), MediaText.Clean(_detail?.Title));
     }
 
     private async void OnEpisodeClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -428,7 +671,8 @@ public partial class SeriesPage : Page
             return;
         }
 
-        await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+        await PlayWindow.OpenAsync(
+            Window.GetWindow(this), id, null, BuildPlaylist(), MediaText.Clean(_detail?.Title));
     }
 
     // —— 季选择 ——
@@ -616,11 +860,18 @@ public partial class SeriesPage : Page
             _mediaInfoLoading = true;
             try
             {
-                var result = await Task.Run(() => core.MediaInfo(id)).ConfigureAwait(true);
-                info = result.Ok ? result.Data : null;
+                // 媒体信息（轨道清单）和播放源（续播点）一起取：详情页的按钮
+                // 既要列出音轨 / 字幕，也要在播放键上显示「上次看到哪」。
+                var bundle = await Task.Run(() => (Info: core.MediaInfo(id), Play: core.PlaySource(id)))
+                    .ConfigureAwait(true);
+
+                info = bundle.Info.Ok ? bundle.Info.Data : null;
                 _mediaInfoCache[id] = info;
-                Trace.Write($"media info id={id} ok={result.Ok} err={result.Error} " +
-                            $"video={info?.Video is not null} audios={info?.Audios.Count}");
+                _resumeCache[id] = bundle.Play.Ok ? bundle.Play.Data?.PositionSeconds ?? 0 : 0;
+
+                Trace.Write($"media info id={id} ok={bundle.Info.Ok} err={bundle.Info.Error} " +
+                            $"video={info?.Video is not null} audios={info?.Audios.Count} " +
+                            $"subs={info?.Subtitles.Count} resume={_resumeCache[id]}");
             }
             finally
             {
@@ -631,6 +882,9 @@ public partial class SeriesPage : Page
         // 读的过程中切了季，就等新的那次请求。
         if (_playTargetId == id)
         {
+            _resumeSeconds = _resumeCache.TryGetValue(id, out var resume) ? resume : 0;
+            UpdatePlayButton();
+            UpdateTrackButtons(info);
             RenderMediaInfo(info);
         }
     }
@@ -892,6 +1146,7 @@ public partial class SeriesPage : Page
         public string Title { get; init; } = "";
         public string Badge { get; init; } = "";
         public string Duration { get; init; } = "";
+        public string? Resolution { get; init; }
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
         public double ProgressWidth { get; init; }

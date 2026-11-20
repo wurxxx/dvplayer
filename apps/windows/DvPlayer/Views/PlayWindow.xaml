@@ -24,88 +24,261 @@
                  Foreground="#99FFFFFF" Margin="0,10,0,0" TextAlignment="Center" />
     </StackPanel>
 
-    <!-- 控制条 -->
-    <Border x:Name="Chrome" VerticalAlignment="Bottom" Background="#E6141419"
-            Opacity="1">
-      <StackPanel Margin="30,14,30,18">
+    <!-- 播放器浮层：跟着鼠标显隐 -->
+    <Grid x:Name="Overlay" Background="Transparent">
 
+      <!-- 顶部：片名居中，右上角是缓存速度和静音状态 -->
+      <Grid x:Name="TopBar" VerticalAlignment="Top" Height="64" Opacity="0">
+        <Border Height="130" VerticalAlignment="Top" IsHitTestVisible="False">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+              <GradientStop Color="#B3000000" Offset="0" />
+              <GradientStop Color="#00000000" Offset="1" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+
+        <TextBlock x:Name="TopTitle" HorizontalAlignment="Center" VerticalAlignment="Top"
+                   Margin="0,18,0,0" FontSize="15" FontWeight="SemiBold"
+                   Foreground="#F2FFFFFF" TextTrimming="CharacterEllipsis" MaxWidth="620" />
+
+        <Button x:Name="BackButton" Style="{StaticResource PlayerCircleButton}"
+                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="22,16,0,0"
+                Width="38" Height="38" Click="OnCloseClick" ToolTip="返回（Esc）">
+          <TextBlock Text="&#xE72B;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                     Foreground="#E6FFFFFF" />
+        </Button>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,16,22,0">
+          <TextBlock x:Name="SpeedText" FontSize="12.5" Foreground="#E6FFFFFF"
+                     VerticalAlignment="Center" Margin="0,0,14,0" />
+          <TextBlock x:Name="TopMuteGlyph" Text="&#xE74F;" FontFamily="{StaticResource IconFont}"
+                     FontSize="15" Foreground="#E6FFFFFF" Visibility="Collapsed" />
+        </StackPanel>
+      </Grid>
+
+      <!-- 右侧中部：截图 / 选集 -->
+      <StackPanel x:Name="RightActions" HorizontalAlignment="Right" VerticalAlignment="Center"
+                  Margin="0,0,18,0" Opacity="0">
+        <Button x:Name="ShotButton" Style="{StaticResource PlayerCircleButton}"
+                Click="OnShotClick" ToolTip="截图">
+          <TextBlock Text="&#xE722;" FontFamily="{StaticResource IconFont}" FontSize="18"
+                     Foreground="#E6FFFFFF">
+            <TextBlock.Effect>
+              <DropShadowEffect Color="Black" BlurRadius="8" ShadowDepth="0" Opacity="0.7" />
+            </TextBlock.Effect>
+          </TextBlock>
+        </Button>
+        <Button x:Name="EpisodesButton" Style="{StaticResource PlayerCircleButton}"
+                Click="OnEpisodesClick" ToolTip="选集"
+                Margin="0,8,0,0" Visibility="Collapsed">
+          <TextBlock Text="&#xE8FD;" FontFamily="{StaticResource IconFont}" FontSize="18"
+                     Foreground="#E6FFFFFF">
+            <TextBlock.Effect>
+              <DropShadowEffect Color="Black" BlurRadius="8" ShadowDepth="0" Opacity="0.7" />
+            </TextBlock.Effect>
+          </TextBlock>
+        </Button>
+      </StackPanel>
+
+      <!-- 选集面板（右侧中部弹出） -->
+      <Border x:Name="EpisodePanel" HorizontalAlignment="Right" VerticalAlignment="Center"
+              Width="380" MaxHeight="580" Margin="0,0,74,0" Visibility="Collapsed"
+              Background="#F2141419" BorderBrush="#26FFFFFF" BorderThickness="1"
+              CornerRadius="14" Padding="8">
         <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
 
-          <TextBlock x:Name="PositionText" Text="00:00" FontSize="12.5"
-                     Foreground="#B3FFFFFF" VerticalAlignment="Center" Width="62" />
+          <Grid Margin="8,4,8,8">
+            <TextBlock x:Name="EpisodePanelTitle" Text="选集" FontSize="14" FontWeight="SemiBold"
+                       Foreground="{StaticResource TextBrush}" />
+            <TextBlock x:Name="EpisodePanelMeta" HorizontalAlignment="Right" VerticalAlignment="Center"
+                       Style="{StaticResource Caption}" />
+          </Grid>
 
-          <Slider x:Name="Seek" Grid.Column="1" Style="{StaticResource SeekBar}"
-                  Margin="10,0" Minimum="0" Maximum="1" Value="0"
-                  IsMoveToPointEnabled="True"
-                  Thumb.DragStarted="OnSeekDragStarted"
-                  Thumb.DragCompleted="OnSeekDragCompleted" />
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="EpisodeList" Margin="0,0,6,0">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border x:Name="RowBorder" Margin="0,0,0,6" CornerRadius="10" Padding="6"
+                          Background="Transparent" Cursor="Hand"
+                          Tag="{Binding Id}" MouseLeftButtonUp="OnEpisodePick">
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="132" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
 
-          <TextBlock x:Name="DurationText" Grid.Column="2" Text="00:00" FontSize="12.5"
-                     Foreground="#B3FFFFFF" VerticalAlignment="Center" Width="62"
-                     TextAlignment="Right" />
+                      <Border Width="132" Height="74" CornerRadius="7"
+                              Background="{Binding Background}" SnapsToDevicePixels="True">
+                        <Grid ClipToBounds="True">
+                          <TextBlock Text="{Binding Initial}" FontSize="22" FontWeight="SemiBold"
+                                     Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Visibility="{Binding PlaceholderVisibility}" />
+                        </Grid>
+                      </Border>
+
+                      <Border x:Name="ActiveRing" Grid.ColumnSpan="2" Margin="-2" CornerRadius="9"
+                              BorderBrush="{StaticResource AccentBrush}" BorderThickness="2"
+                              Visibility="{Binding SelectedVisibility}" />
+
+                      <StackPanel Grid.Column="1" Margin="12,0,4,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Badge}" FontSize="15" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Meta}" FontSize="12.5" Margin="0,5,0,0"
+                                   Foreground="{StaticResource FaintBrush}"
+                                   TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                  <DataTemplate.Triggers>
+                    <Trigger SourceName="RowBorder" Property="IsMouseOver" Value="True">
+                      <Setter TargetName="RowBorder" Property="Background" Value="#1AFFFFFF" />
+                    </Trigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
         </Grid>
+      </Border>
 
-        <Grid Margin="0,8,0,0">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-
-            <Button x:Name="PlayPauseButton" Style="{StaticResource PlayerButton}"
-                    Click="OnPlayPauseClick" ToolTip="播放 / 暂停（空格）">
-              <TextBlock x:Name="PlayPauseGlyph" Text="&#xE769;" FontFamily="{StaticResource IconFont}"
-                         FontSize="17" />
+      <!-- 媒体信息（「更多」里打开） -->
+      <Border x:Name="MediaInfoPanel" HorizontalAlignment="Right" VerticalAlignment="Center"
+              Width="380" MaxHeight="520" Margin="0,0,74,0" Visibility="Collapsed"
+              Background="#F2141419" BorderBrush="#26FFFFFF" BorderThickness="1"
+              CornerRadius="14" Padding="18,14">
+        <StackPanel>
+          <Grid Margin="0,0,0,10">
+            <TextBlock Text="媒体信息" FontSize="14" FontWeight="SemiBold"
+                       Foreground="{StaticResource TextBrush}" />
+            <Button Click="OnCloseMediaInfoClick" Style="{StaticResource PlayerButton}"
+                    Width="30" Height="30" HorizontalAlignment="Right" ToolTip="关闭">
+              <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="13"
+                         Foreground="#B3FFFFFF" />
             </Button>
+          </Grid>
+          <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="440">
+            <TextBlock x:Name="MediaInfoText" FontSize="12.5" Foreground="#C2FFFFFF"
+                       TextWrapping="Wrap" LineHeight="21" />
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
+
+      <TextBlock x:Name="ToastText" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                 Margin="0,0,0,132" FontSize="13.5" Foreground="#F2FFFFFF"
+                 Background="#B3000000" Padding="14,7" Visibility="Collapsed" />
+
+      <!-- 底部控制条 -->
+      <Grid x:Name="Chrome" VerticalAlignment="Bottom" Opacity="0">
+        <Border Height="230" VerticalAlignment="Bottom" IsHitTestVisible="False">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+              <GradientStop Color="#00000000" Offset="0" />
+              <GradientStop Color="#80000000" Offset="0.55" />
+              <GradientStop Color="#E6000000" Offset="1" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+
+        <StackPanel Margin="24,0,24,18" VerticalAlignment="Bottom">
+
+          <!-- 规格标签：HW / HEVC / HDR / 2160p / 23FPS / 70mbps -->
+          <StackPanel x:Name="ChipsRow" Orientation="Horizontal" Margin="0,0,0,10" />
+
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
             <Button Style="{StaticResource PlayerButton}" Click="OnBack10Click"
-                    Margin="2,0,0,0" ToolTip="后退 10 秒（←）">
-              <TextBlock Text="&#xE7A7;" FontFamily="{StaticResource IconFont}" FontSize="16" />
+                    ToolTip="后退 10 秒（←）" VerticalAlignment="Center">
+              <TextBlock Text="&#xE7A7;" FontFamily="{StaticResource IconFont}" FontSize="17"
+                         Foreground="#F2FFFFFF" />
             </Button>
 
-            <Button Style="{StaticResource PlayerButton}" Click="OnForward10Click"
-                    ToolTip="前进 10 秒（→）">
-              <TextBlock Text="&#xE7A8;" FontFamily="{StaticResource IconFont}" FontSize="16" />
+            <Button x:Name="PlayPauseButton" Grid.Column="1" Style="{StaticResource PlayerButton}"
+                    Click="OnPlayPauseClick" ToolTip="播放 / 暂停（空格）" VerticalAlignment="Center">
+              <TextBlock x:Name="PlayPauseGlyph" Text="&#xE769;" FontFamily="{StaticResource IconFont}"
+                         FontSize="20" Foreground="#F2FFFFFF" />
             </Button>
 
-            <Button x:Name="MuteButton" Style="{StaticResource PlayerButton}"
-                    Click="OnMuteClick" Margin="8,0,0,0" ToolTip="静音（M）">
+            <Button Grid.Column="2" Style="{StaticResource PlayerButton}" Click="OnForward10Click"
+                    ToolTip="前进 10 秒（→）" VerticalAlignment="Center">
+              <TextBlock Text="&#xE7A8;" FontFamily="{StaticResource IconFont}" FontSize="17"
+                         Foreground="#F2FFFFFF" />
+            </Button>
+
+            <TextBlock x:Name="PositionText" Grid.Column="3" Text="00:00" FontSize="12.5"
+                       Foreground="#E6FFFFFF" VerticalAlignment="Center" Width="58"
+                       Margin="6,0,0,0" />
+
+            <Slider x:Name="Seek" Grid.Column="4" Style="{StaticResource SeekBar}"
+                    Margin="8,0" Minimum="0" Maximum="1" Value="0"
+                    IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                    Thumb.DragStarted="OnSeekDragStarted"
+                    Thumb.DragCompleted="OnSeekDragCompleted" />
+
+            <TextBlock x:Name="DurationText" Grid.Column="5" Text="00:00" FontSize="12.5"
+                       Foreground="#B3FFFFFF" VerticalAlignment="Center" Width="66"
+                       Margin="6,0,10,0" />
+
+            <Button x:Name="MuteButton" Grid.Column="6" Style="{StaticResource PlayerButton}"
+                    Click="OnMuteClick" ToolTip="静音（M）" VerticalAlignment="Center">
               <TextBlock x:Name="MuteGlyph" Text="&#xE767;" FontFamily="{StaticResource IconFont}"
-                         FontSize="16" />
+                         FontSize="16" Foreground="#F2FFFFFF" />
             </Button>
 
-            <Slider x:Name="Volume" Width="92" Margin="6,0,0,0"
-                    Minimum="0" Maximum="100" Value="100"
-                    VerticalAlignment="Center"
+            <Slider x:Name="Volume" Grid.Column="7" Width="86" Margin="2,0,10,0"
+                    Style="{StaticResource VolumeBar}"
+                    Minimum="0" Maximum="100" Value="100" VerticalAlignment="Center"
                     ValueChanged="OnVolumeChanged"
                     Thumb.DragStarted="OnVolumeDragStarted" />
-          </StackPanel>
 
-          <TextBlock x:Name="TitleText" Grid.Column="1" Text="" FontSize="13"
-                     Foreground="#99FFFFFF" VerticalAlignment="Center"
-                     Margin="18,0" TextTrimming="CharacterEllipsis" />
-
-          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-            <Button x:Name="TracksButton" Style="{StaticResource PlayerButton}"
-                    Click="OnTracksClick" ToolTip="音轨 / 字幕">
-              <TextBlock Text="&#xE8D4;" FontFamily="{StaticResource IconFont}" FontSize="16" />
+            <Button x:Name="AudioButton" Grid.Column="8" Style="{StaticResource PlayerButton}"
+                    Click="OnAudioClick" ToolTip="音轨" VerticalAlignment="Center">
+              <TextBlock Text="&#xE8D6;" FontFamily="{StaticResource IconFont}" FontSize="17"
+                         Foreground="#F2FFFFFF" />
             </Button>
 
-            <Button Style="{StaticResource PlayerButton}" Click="OnCloseClick"
-                    ToolTip="退出（Esc）">
-              <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="16" />
+            <Button x:Name="SubtitleButton" Grid.Column="9" Style="{StaticResource PlayerButton}"
+                    Click="OnSubtitleClick" ToolTip="字幕" VerticalAlignment="Center">
+              <TextBlock Text="&#xE8D4;" FontFamily="{StaticResource IconFont}" FontSize="17"
+                         Foreground="#F2FFFFFF" />
             </Button>
-          </StackPanel>
-        </Grid>
-      </StackPanel>
-    </Border>
+
+            <Button x:Name="SpeedButton" Grid.Column="10" Style="{StaticResource PlayerButton}"
+                    Click="OnSpeedClick" ToolTip="播放速度" VerticalAlignment="Center">
+              <TextBlock x:Name="SpeedGlyph" Text="1.0×" FontSize="12.5" FontWeight="SemiBold"
+                         Foreground="#F2FFFFFF" />
+            </Button>
+
+            <Button x:Name="MoreButton" Grid.Column="11" Style="{StaticResource PlayerButton}"
+                    Click="OnMoreClick" ToolTip="更多" VerticalAlignment="Center">
+              <TextBlock Text="&#xE712;" FontFamily="{StaticResource IconFont}" FontSize="17"
+                         Foreground="#F2FFFFFF" />
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Grid>
+    </Grid>
 
     <!-- 错误 -->
     <Border x:Name="ErrorPanel" Visibility="Collapsed" MaxWidth="560"

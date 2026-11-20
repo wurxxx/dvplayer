@@ -16,7 +16,7 @@ use serde::Deserialize;
 use crate::error::{percent_encode, MediaError, Result};
 use crate::models::{
     Person,
-    AudioInfo, MediaInfo, VideoInfo,
+    AudioInfo, MediaInfo, SubtitleInfo, VideoInfo,
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
@@ -317,6 +317,8 @@ impl EmbySource {
             color_range: None,
             play_item_id: playable.then(|| item.id.clone()),
             single_child_id: item.single_child_id,
+            is_favorite: d.user_data.as_ref().map(|u| u.is_favorite),
+            is_watched: d.user_data.as_ref().map(|u| u.played),
         })
     }
 
@@ -608,7 +610,29 @@ impl EmbySource {
             })
             .collect();
 
-        Ok(MediaInfo { video, audios })
+        let subtitles = streams
+            .iter()
+            .filter(|s| s.kind == "Subtitle")
+            .map(|t| SubtitleInfo {
+                title: t
+                    .title
+                    .clone()
+                    .or_else(|| t.display_title.clone())
+                    .filter(|s| !s.is_empty()),
+                language: t.language.as_deref().and_then(language_label),
+                codec: t.codec.clone().filter(|s| !s.is_empty()).map(|c| c.to_uppercase()),
+                format: None,
+                is_default: t.is_default,
+                is_bitmap: matches!(t.is_text_subtitle_stream, Some(false)),
+                is_external: t.is_external,
+            })
+            .collect();
+
+        Ok(MediaInfo {
+            video,
+            audios,
+            subtitles,
+        })
     }
 
     /// 图片：`path` 形如 `{itemId}/Primary`、`{itemId}/Backdrop/0`、`{itemId}/Logo`。
@@ -1074,6 +1098,8 @@ struct PersonDto {
 struct UserDataDto {
     #[serde(default)]
     playback_position_ticks: i64,
+    #[serde(default)]
+    played: bool,
     #[serde(default)]
     is_favorite: bool,
     #[serde(default)]

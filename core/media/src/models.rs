@@ -282,6 +282,11 @@ pub struct MediaDetail {
     /// 只有一季时，直接给出季 id，少一次请求。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub single_child_id: Option<String>,
+    /// 详情页按钮的初始状态：是否已收藏 / 已看完。源不支持时是 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_favorite: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_watched: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,6 +363,29 @@ pub struct MediaInfo {
     pub video: Option<VideoInfo>,
     #[serde(default)]
     pub audios: Vec<AudioInfo>,
+    /// 字幕轨。详情页和播放页的「选择字幕」都读这份，顺序和文件里的轨序一致。
+    #[serde(default)]
+    pub subtitles: Vec<SubtitleInfo>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub is_default: bool,
+    /// 图形字幕（PGS / VobSub），mpv 不能改字号。
+    #[serde(default)]
+    pub is_bitmap: bool,
+    #[serde(default)]
+    pub is_external: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -486,6 +486,8 @@ mod tests {
                 color_range: None,
                 play_item_id: Some("3".into()),
                 single_child_id: None,
+                is_favorite: None,
+                is_watched: None,
             })
         }
 

@@ -1,17 +1,29 @@
+using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using DvPlayer.Player;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
 
+/// <summary>播放页右侧「选集」里的一集。由详情页拼好传进来，播放器不查库。</summary>
+public sealed record PlayEpisode(
+    string Id,
+    string Badge,
+    string Meta,
+    string? PosterPath,
+    string? Title = null);
+
 /// <summary>
-/// 播放窗口：一个 <see cref="MpvHost"/> + 底部控制条。
+/// 播放窗口：一个 <see cref="MpvHost"/> + 浮层控制条（。
 ///
-/// 视频画面完全由 mpv 渲染（<c>--wid</c> 挂进来），壳只负责控制条、
-/// 快捷键和进度回写。构造函数只接收 <see cref="PlaySourceDto"/>，
+/// 视频画面完全由 mpv 渲染（<c>--wid</c> 挂进来），壳只负责浮层、快捷键、
+/// 轨道选择、选集和进度回写。构造函数只认 <see cref="PlaySourceDto"/>，
 /// 所以飞牛、Emby 以及以后任何源都走同一个窗口。
 /// </summary>
 public partial class PlayWindow : Window
@@ -20,14 +32,27 @@ public partial class PlayWindow : Window
     private const int ReportEverySeconds = 10;
 
     private readonly PlaySourceDto _source;
+    private readonly double? _startSeconds;
     private readonly MpvProcess _mpv = new();
 
     private readonly DispatcherTimer _ticker = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromSeconds(3) };
 
+    private readonly List<PlayEpisode> _playlist;
+    private readonly string? _seriesTitle;
+
     private IntPtr _hwnd;
     private bool _started;
     private MpvIpc? _ipc;
+    private int _session;
+
+    private string _itemId;
+    private PlaySourceDto _current;
+
+    private MediaInfoDto? _mediaInfo;
+    private readonly List<MpvTrack> _audioTracks = new();
+    private readonly List<MpvTrack> _subtitleTracks = new();
+    private bool _tracksApplied;
 
     private double _position;
     private double _duration;
@@ -37,14 +62,24 @@ public partial class PlayWindow : Window
     private bool _eof;
     private int _sinceReport;
     private bool _chromeVisible = true;
+    private bool _hardwareDecode = true;
 
-    public PlayWindow(PlaySourceDto source)
+    public PlayWindow(
+        PlaySourceDto source,
+        double? startSeconds = null,
+        List<PlayEpisode>? playlist = null,
+        string? seriesTitle = null)
     {
         _source = source;
+        _current = source;
+        _startSeconds = startSeconds;
+        _playlist = playlist ?? new List<PlayEpisode>();
+        _seriesTitle = seriesTitle;
+        _itemId = source.ItemId;
+
         InitializeComponent();
 
-        TitleText.Text = source.Title;
-        LoadingTitle.Text = source.Title;
+        ApplySourceToUi(source);
         DurationText.Text = Format(source.DurationSeconds);
 
         Host.HostReady += OnHostReady;
@@ -55,12 +90,21 @@ public partial class PlayWindow : Window
         _hideTimer.Tick += OnHideTick;
         _ticker.Start();
         ResetHideTimer();
+
+        RenderPlaylist();
     }
 
     /// <summary>
     /// 解析播放源并打开窗口。失败时在主窗口提示，不抛异常。
     /// </summary>
-    public static async Task<PlayWindow?> OpenAsync(Window? owner, string itemId)
+    /// <param name="startSeconds">0 = 重头看；null = 按服务器给的续播点。</param>
+    /// <param name="playlist">剧集的选集列表；电影传 null。</param>
+    public static async Task<PlayWindow?> OpenAsync(
+        Window? owner,
+        string itemId,
+        double? startSeconds = null,
+        List<PlayEpisode>? playlist = null,
+        string? seriesTitle = null)
     {
         var (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
         if (source is null)
@@ -70,10 +114,50 @@ public partial class PlayWindow : Window
             return null;
         }
 
-        var window = new PlayWindow(source) { Owner = owner };
+        var window = new PlayWindow(source, startSeconds, playlist, seriesTitle) { Owner = owner };
         window.Show();
         return window;
     }
+
+    private void ApplySourceToUi(PlaySourceDto source)
+    {
+        var title = DisplayTitle(source);
+        Title = "DV Player — " + title;
+        TopTitle.Text = title;
+        LoadingTitle.Text = title;
+    }
+
+    /// <summary>
+    /// 顶栏片名。飞牛给单集时常常没有 title，这时用「剧名 + 集号」拼，
+    /// 比「正在播放」有信息量；刮削占位的「（未命名）」也当成没有。
+    /// </summary>
+    private string DisplayTitle(PlaySourceDto source)
+    {
+        var episode = _playlist.FirstOrDefault(e => e.Id == source.ItemId);
+
+        if (!string.IsNullOrWhiteSpace(_seriesTitle) && episode is not null)
+        {
+            return $"{_seriesTitle}  {episode.Badge}";
+        }
+
+        if (IsRealTitle(source.Title))
+        {
+            return source.Title!;
+        }
+
+        if (IsRealTitle(episode?.Title))
+        {
+            return episode!.Title!;
+        }
+
+        return episode?.Badge ?? "正在播放";
+    }
+
+    /// <summary>刮削失败时飞牛会写「（未命名）」，这种标题不算数。</summary>
+    private static bool IsRealTitle(string? title) =>
+        !string.IsNullOrWhiteSpace(title) &&
+        !title.Contains("未命名", StringComparison.Ordinal) &&
+        !title.Contains("未知", StringComparison.Ordinal);
 
     private void OnHostReady(object? sender, IntPtr hwnd)
     {
@@ -100,12 +184,18 @@ public partial class PlayWindow : Window
         }
 
         _started = true;
+        Launch(_current, _startSeconds);
+    }
 
-        var launch = Playback.ToLaunch(_source);
-        Trace.Write($"mpv start url={launch.Url} headers={launch.Headers?.Count ?? 0} start={launch.StartSeconds}");
+    private void Launch(PlaySourceDto source, double? startSeconds)
+    {
+        var launch = Playback.ToLaunch(source, startSeconds);
+        Trace.Write($"mpv start url={launch.Url} headers={launch.Headers?.Count ?? 0} " +
+                    $"start={launch.StartSeconds}");
 
         try
         {
+            _tracksApplied = false;
             _mpv.Start(_hwnd, launch);
         }
         catch (Exception ex)
@@ -116,10 +206,12 @@ public partial class PlayWindow : Window
         }
 
         _ = AttachIpcAsync();
+        _ = LoadMediaInfoAsync(source.ItemId);
     }
 
     private async Task AttachIpcAsync()
     {
+        var session = ++_session;
         var ready = _mpv.IpcReady;
         var ipc = _mpv.Ipc;
         if (ready is null || ipc is null)
@@ -128,7 +220,7 @@ public partial class PlayWindow : Window
         }
 
         // 控制条不是必需品：IPC 连不上也让它继续播。
-        if (!await ready.ConfigureAwait(true))
+        if (!await ready.ConfigureAwait(true) || session != _session)
         {
             LoadingStatus.Text = "已开始播放（控制通道未连上）";
             await Task.Delay(1200).ConfigureAwait(true);
@@ -137,16 +229,29 @@ public partial class PlayWindow : Window
         }
 
         _ipc = ipc;
-        ipc.PropertyChanged += OnMpvProperty;
+        ipc.PropertyChanged += (name, value) =>
+        {
+            if (session == _session)
+            {
+                OnMpvProperty(name, value);
+            }
+        };
+
         ipc.Disconnected += () => Dispatcher.BeginInvoke(() =>
         {
-            if (!_eof)
+            if (session != _session || _eof)
             {
-                Close();
+                return;
             }
+
+            Close();
         });
 
-        foreach (var name in new[] { "time-pos", "duration", "pause", "volume", "eof-reached" })
+        foreach (var name in new[]
+                 {
+                     "time-pos", "duration", "pause", "volume", "mute", "eof-reached",
+                     "track-list", "cache-speed", "speed", "hwdec",
+                 })
         {
             ipc.Observe(name);
         }
@@ -180,16 +285,108 @@ public partial class PlayWindow : Window
                     PlayPauseGlyph.Text = _paused ? "\uE768" : "\uE769";
                     break;
 
+                case "mute" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                    TopMuteGlyph.Visibility = value.GetBoolean() ? Visibility.Visible : Visibility.Collapsed;
+                    break;
+
+                case "cache-speed" when value.ValueKind == JsonValueKind.Number:
+                    // 刚起播或本地缓存时速度是 0，这时候没必要显示。
+                    var megaBytes = value.GetDouble() / 1024 / 1024;
+                    SpeedText.Text = $"{megaBytes:0.0} MB/s";
+                    SpeedText.Visibility = megaBytes >= 0.05
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+                    break;
+
+                case "speed" when value.ValueKind == JsonValueKind.Number:
+                    _lastSpeed = value.GetDouble();
+                    SpeedGlyph.Text = $"{_lastSpeed:0.##}×";
+                    break;
+
+                case "hwdec" when value.ValueKind == JsonValueKind.String:
+                    _hardwareDecode = value.GetString() is not ("no" or "");
+                    UpdateChips();
+                    break;
+
+                case "track-list":
+                    ParseTracks(value);
+                    break;
+
                 case "eof-reached" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
                     _eof = value.GetBoolean();
                     if (_eof)
                     {
-                        Playback.Report(_source.ItemId, EffectiveDuration, EffectiveDuration);
+                        Playback.Report(_itemId, EffectiveDuration, EffectiveDuration);
                         Close();
                     }
                     break;
             }
         });
+    }
+
+    /// <summary>mpv 的轨道清单：音轨 / 字幕菜单和「按详情页的选择播放」都读它。</summary>
+    private void ParseTracks(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        _audioTracks.Clear();
+        _subtitleTracks.Clear();
+
+        foreach (var track in value.EnumerateArray())
+        {
+            var type = track.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
+            if (type is not ("audio" or "sub"))
+            {
+                continue;
+            }
+
+            var item = new MpvTrack(
+                track.TryGetProperty("id", out var idElement) ? idElement.GetInt32() : 0,
+                type,
+                track.TryGetProperty("lang", out var lang) ? lang.GetString() : null,
+                track.TryGetProperty("title", out var title) ? title.GetString() : null,
+                track.TryGetProperty("codec", out var codec) ? codec.GetString() : null,
+                track.TryGetProperty("demux-channel-count", out var channels) && channels.ValueKind == JsonValueKind.Number
+                    ? channels.GetInt32()
+                    : null,
+                track.TryGetProperty("selected", out var selected) && selected.ValueKind == JsonValueKind.True);
+
+            (type == "audio" ? _audioTracks : _subtitleTracks).Add(item);
+        }
+
+        // 只在第一次拿到轨道清单时套用详情页的选择，之后是用户在播放页里改。
+        // 没有音轨的文件也要能套用字幕选择，所以两个清单任一非空即可。
+        if (!_tracksApplied && (_audioTracks.Count > 0 || _subtitleTracks.Count > 0))
+        {
+            _tracksApplied = true;
+            ApplyTrackPrefs();
+        }
+    }
+
+    /// <summary>详情页选了音轨 / 字幕，起播后立刻切过去。</summary>
+    private void ApplyTrackPrefs()
+    {
+        if (_ipc is null)
+        {
+            return;
+        }
+
+        if (TrackPrefs.Audio(_itemId) is { } audio && audio >= 0 && audio < _audioTracks.Count)
+        {
+            _ipc.Command("set_property", "aid", _audioTracks[audio].Id);
+        }
+
+        if (TrackPrefs.Subtitle(_itemId) is { } subtitle)
+        {
+            _ipc.Command("set_property", "sid", subtitle == TrackPrefs.SubtitleOff
+                ? "no"
+                : subtitle >= 0 && subtitle < _subtitleTracks.Count
+                    ? _subtitleTracks[subtitle].Id
+                    : "auto");
+        }
     }
 
     private void UpdatePositionUi()
@@ -206,7 +403,7 @@ public partial class PlayWindow : Window
     /// mpv 有时迟迟不给 duration（网络流要等索引），而服务端本来就知道片长，
     /// 所以优先用 mpv 的，拿不到就退回播放源里的值。
     /// </summary>
-    private double EffectiveDuration => _duration > 0 ? _duration : _source.DurationSeconds;
+    private double EffectiveDuration => _duration > 0 ? _duration : _current.DurationSeconds;
 
     private void OnTick(object? sender, EventArgs e)
     {
@@ -216,7 +413,170 @@ public partial class PlayWindow : Window
         }
 
         _sinceReport = 0;
-        Playback.Report(_source.ItemId, _position, EffectiveDuration);
+        Playback.Report(_itemId, _position, EffectiveDuration);
+    }
+
+    // —— 媒体信息 / 规格标签 ——
+
+    private async Task LoadMediaInfoAsync(string itemId)
+    {
+        if (AppServices.Instance.Core is not { } core)
+        {
+            return;
+        }
+
+        var result = await Task.Run(() => core.MediaInfo(itemId)).ConfigureAwait(true);
+        if (itemId != _itemId)
+        {
+            return;
+        }
+
+        _mediaInfo = result.Ok ? result.Data : null;
+        UpdateChips();
+        UpdateMediaInfoText();
+    }
+
+    private void UpdateChips()
+    {
+        ChipsRow.Children.Clear();
+
+        var video = _mediaInfo?.Video;
+        var chips = new List<string>();
+
+        if (_hardwareDecode)
+        {
+            chips.Add("HW");
+        }
+
+        if (video?.Codec is { Length: > 0 } codec)
+        {
+            chips.Add(codec);
+        }
+        else if (_current.VideoCodec is { Length: > 0 } sourceCodec)
+        {
+            chips.Add(sourceCodec.ToUpperInvariant());
+        }
+
+        var range = video?.ColorRange ?? _current.ColorRange;
+        if (!string.IsNullOrWhiteSpace(range))
+        {
+            chips.Add(range);
+        }
+
+        if (video?.Height is { } height && height > 0)
+        {
+            chips.Add($"{height}p");
+        }
+        else if (!string.IsNullOrWhiteSpace(_current.Resolution))
+        {
+            chips.Add(_current.Resolution);
+        }
+
+        if (video?.FrameRate is { } fps && fps > 0)
+        {
+            chips.Add($"{fps:0}FPS");
+        }
+
+        if (video?.BitRate is { } bitRate && bitRate > 0)
+        {
+            chips.Add($"{bitRate / 1_000_000.0:0.0}mbps");
+        }
+
+        foreach (var chip in chips)
+        {
+            ChipsRow.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0)),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(7, 2, 7, 3),
+                Margin = new Thickness(0, 0, 7, 0),
+                Child = new TextBlock
+                {
+                    Text = chip,
+                    FontSize = 11.5,
+                    Foreground = new SolidColorBrush(Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF)),
+                },
+            });
+        }
+
+    }
+
+    private void UpdateMediaInfoText()
+    {
+        var lines = new List<string>();
+
+        void Add(string key, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                lines.Add($"{key}   {value}");
+            }
+        }
+
+        Add("标题", DisplayTitle(_current));
+        Add("直链", _current.IsDirect ? "是" : "服务端转码");
+        Add("时长", Format(EffectiveDuration));
+        Add("硬解码", _hardwareDecode ? "开" : "关");
+
+        var video = _mediaInfo?.Video;
+        if (video is not null)
+        {
+            lines.Add("");
+            lines.Add("视频");
+            Add("编码", video.Codec);
+            Add("分辨率", video.Width is > 0 && video.Height is > 0 ? $"{video.Width} × {video.Height}" : null);
+            Add("帧率", video.FrameRate is { } fps && fps > 0 ? $"{fps:0.##} fps" : null);
+            Add("比特率", video.BitRate is { } rate && rate > 0 ? $"{rate / 1_000_000.0:0.0} mbps" : null);
+            Add("动态范围", video.ColorRange ?? (video.DolbyVision ? "Dolby Vision" : null));
+            Add("位深", video.BitDepth is { } depth && depth > 0 ? $"{depth} bit" : null);
+        }
+
+        var audios = _mediaInfo?.Audios ?? new List<AudioInfoDto>();
+        if (audios.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("音轨");
+            for (var i = 0; i < audios.Count; i++)
+            {
+                var audio = audios[i];
+                var parts = new[]
+                    {
+                        audio.Language,
+                        audio.Codec,
+                        audio.Channels is > 0 ? $"{audio.Channels} ch" : null,
+                        audio.SampleRate is > 0 ? $"{audio.SampleRate} Hz" : null,
+                        audio.BitRate is > 0 ? $"{audio.BitRate / 1000} kbps" : null,
+                        audio.IsDefault ? "默认" : null,
+                    }
+                    .Where(part => !string.IsNullOrWhiteSpace(part));
+
+                lines.Add($"{i + 1}.  " + string.Join("  ", parts));
+            }
+        }
+
+        var subtitles = _mediaInfo?.Subtitles ?? new List<SubtitleInfoDto>();
+        if (subtitles.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("字幕");
+            for (var i = 0; i < subtitles.Count; i++)
+            {
+                var sub = subtitles[i];
+                var parts = new[]
+                    {
+                        sub.Language,
+                        sub.Title,
+                        sub.Codec,
+                        sub.IsBitmap ? "图形" : null,
+                        sub.IsExternal ? "外挂" : null,
+                    }
+                    .Where(part => !string.IsNullOrWhiteSpace(part));
+
+                lines.Add($"{i + 1}.  " + string.Join("  ", parts));
+            }
+        }
+
+        MediaInfoText.Text = string.Join(Environment.NewLine, lines);
     }
 
     // —— 控制条 ——
@@ -288,13 +648,371 @@ public partial class PlayWindow : Window
         _ipc?.Command("cycle", "mute");
     }
 
-    private void OnTracksClick(object sender, RoutedEventArgs e)
+    // —— 音轨 / 字幕 / 速度 / 更多 ——
+
+    private void OnAudioClick(object sender, RoutedEventArgs e)
     {
-        // 音轨/字幕面板：下一轮补；这里先把当前轨道写进日志，便于确认直链里的轨道。
-        if (_ipc is not null)
+        if (OpenAudioMenu() is null)
         {
-            _ipc.Command("script-message", "dv-tracks");
+            ShowToast("这个文件只有一条音轨");
         }
+    }
+
+    private void OnSubtitleClick(object sender, RoutedEventArgs e) => OpenSubtitleMenu();
+
+    private ContextMenu? OpenAudioMenu()
+    {
+        if (_audioTracks.Count == 0)
+        {
+            return null;
+        }
+
+        var choices = _audioTracks
+            .Select(track => (
+                Label: track.Describe(),
+                Selected: track.Selected,
+                Action: (Action)(() => SelectAudio(track.Id))))
+            .ToList();
+
+        choices.Add(("禁用", !_audioTracks.Any(t => t.Selected), () => SelectAudio("no")));
+
+        return OpenMenu(AudioButton, choices);
+    }
+
+    private void SelectAudio(object id)
+    {
+        _ipc?.Command("set_property", "aid", id);
+        if (id is int index)
+        {
+            var position = _audioTracks.FindIndex(t => t.Id == index);
+            if (position >= 0)
+            {
+                TrackPrefs.SetAudio(_itemId, position);
+            }
+        }
+    }
+
+    private ContextMenu OpenSubtitleMenu()
+    {
+        var anySelected = _subtitleTracks.Any(t => t.Selected);
+        var choices = new List<(string Label, bool Selected, Action Action)>
+        {
+            ("关闭字幕", !anySelected, TurnSubtitlesOff),
+        };
+
+        for (var i = 0; i < _subtitleTracks.Count; i++)
+        {
+            var track = _subtitleTracks[i];
+            var position = i;
+            choices.Add((track.Describe(), track.Selected, (Action)(() => SelectSubtitle(position))));
+        }
+
+        return OpenMenu(SubtitleButton, choices);
+    }
+
+    private void TurnSubtitlesOff()
+    {
+        _ipc?.Command("set_property", "sid", "no");
+        TrackPrefs.SetSubtitle(_itemId, TrackPrefs.SubtitleOff);
+    }
+
+    private void SelectSubtitle(int index)
+    {
+        if (index < 0 || index >= _subtitleTracks.Count)
+        {
+            return;
+        }
+
+        _ipc?.Command("set_property", "sid", _subtitleTracks[index].Id);
+        TrackPrefs.SetSubtitle(_itemId, index);
+    }
+
+    private void OnSpeedClick(object sender, RoutedEventArgs e)
+    {
+        double[] speeds = { 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3 };
+        var current = Math.Round(_lastSpeed, 2);
+
+        var choices = speeds
+            .Select(speed => (
+                Label: speed == 1 ? "正常（1.0×）" : $"{speed:0.##}×",
+                Selected: Math.Abs(speed - current) < 0.01,
+                Action: (Action)(() => SetSpeed(speed))))
+            .ToList();
+
+        OpenMenu(SpeedButton, choices);
+    }
+
+    private double _lastSpeed = 1;
+
+    private void SetSpeed(double speed)
+    {
+        _lastSpeed = speed;
+        SpeedGlyph.Text = $"{speed:0.##}×";
+        _ipc?.Command("set_property", "speed", speed);
+    }
+
+    private void OnMoreClick(object sender, RoutedEventArgs e) => OpenMoreMenu();
+
+    private ContextMenu OpenMoreMenu() => OpenMenu(MoreButton, new List<(string Label, bool Selected, Action Action)>
+    {
+        (
+            _hardwareDecode ? "硬解码：开（HW / GPU）" : "硬解码：关（软解）",
+            _hardwareDecode,
+            ToggleHardwareDecode),
+        ("媒体信息", MediaInfoPanel.Visibility == Visibility.Visible, ToggleMediaInfo),
+        ("打开日志目录", false, OpenLogFolder),
+    });
+
+    private void ToggleHardwareDecode()
+    {
+        _hardwareDecode = !_hardwareDecode;
+        _ipc?.Command("set_property", "hwdec", _hardwareDecode ? "auto-safe" : "no");
+        UpdateChips();
+        UpdateMediaInfoText();
+    }
+
+    private void ToggleMediaInfo()
+    {
+        EpisodePanel.Visibility = Visibility.Collapsed;
+        MediaInfoPanel.Visibility = MediaInfoPanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        if (MediaInfoPanel.Visibility == Visibility.Visible)
+        {
+            UpdateMediaInfoText();
+        }
+
+        ShowChrome();
+    }
+
+    private void OnCloseMediaInfoClick(object sender, RoutedEventArgs e) =>
+        MediaInfoPanel.Visibility = Visibility.Collapsed;
+
+    private void OpenLogFolder()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.GetDirectoryName(MpvProcess.LogPath)!,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("open log folder failed: " + ex.Message);
+        }
+    }
+
+    private ContextMenu OpenMenu(
+        FrameworkElement anchor,
+        IEnumerable<(string Label, bool Selected, Action Action)> choices)
+    {
+        var menu = new ContextMenu
+        {
+            Style = (Style)FindResource("DarkContextMenu"),
+            PlacementTarget = anchor,
+            Placement = PlacementMode.Top,
+        };
+
+        foreach (var choice in choices)
+        {
+            var item = new MenuItem
+            {
+                Header = choice.Label,
+                Style = (Style)FindResource("DarkMenuItem"),
+            };
+
+            if (choice.Selected)
+            {
+                item.Icon = new TextBlock
+                {
+                    Text = "\uE73E",
+                    FontFamily = (FontFamily)FindResource("IconFont"),
+                    FontSize = 12,
+                    Foreground = (Brush)FindResource("AccentBrush"),
+                };
+            }
+
+            var action = choice.Action;
+            item.Click += (_, _) => action();
+            menu.Items.Add(item);
+        }
+
+        menu.IsOpen = true;
+        return menu;
+    }
+
+    private async void ShowToast(string message)
+    {
+        ToastText.Text = message;
+        ToastText.Visibility = Visibility.Visible;
+        await Task.Delay(1800).ConfigureAwait(true);
+        ToastText.Visibility = Visibility.Collapsed;
+    }
+
+    // —— 截图 ——
+
+    private void OnShotClick(object sender, RoutedEventArgs e) => TakeScreenshot();
+
+    private void TakeScreenshot()
+    {
+        if (_ipc is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var folder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "DVPlayer");
+            Directory.CreateDirectory(folder);
+
+            var name = string.Join("_", (_current.Title ?? "截图")
+                .Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+            var file = Path.Combine(folder, $"{name}_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+
+            // mpv 的路径参数用正斜杠，省得反斜杠被当成转义。
+            _ipc.Command("screenshot-to-file", file.Replace('\\', '/'), "video");
+            Trace.Write("screenshot " + file);
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("screenshot failed: " + ex.Message);
+        }
+    }
+
+    // —— 选集 ——
+
+    private void RenderPlaylist()
+    {
+        EpisodesButton.Visibility = _playlist.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (_playlist.Count == 0)
+        {
+            return;
+        }
+
+        EpisodePanelTitle.Text = "选集";
+        EpisodePanelMeta.Text = $"{_playlist.Count} 集";
+
+        var rows = _playlist.Select(episode =>
+        {
+            var row = new EpisodeRow
+            {
+                Id = episode.Id,
+                Badge = episode.Badge,
+                Meta = episode.Meta,
+                PosterPath = episode.PosterPath,
+                Initial = Palette.InitialOf(episode.Badge),
+                IsSelected = episode.Id == _itemId,
+            };
+            row.UseGradient(episode.Id + episode.Badge);
+            return row;
+        }).ToList();
+
+        EpisodeList.ItemsSource = rows;
+        _ = Task.WhenAll(rows.Select(row => row.ApplyPosterAsync(row.PosterPath)));
+    }
+
+    private void UpdatePlaylistSelection()
+    {
+        if (EpisodeList.ItemsSource is not List<EpisodeRow> rows)
+        {
+            return;
+        }
+
+        foreach (var row in rows)
+        {
+            row.IsSelected = row.Id == _itemId;
+        }
+    }
+
+    private void OnEpisodesClick(object sender, RoutedEventArgs e)
+    {
+        MediaInfoPanel.Visibility = Visibility.Collapsed;
+        EpisodePanel.Visibility = EpisodePanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        if (EpisodePanel.Visibility == Visibility.Visible)
+        {
+            ScrollPlaylistToCurrent();
+        }
+
+        ShowChrome();
+    }
+
+    private void ScrollPlaylistToCurrent()
+    {
+        if (EpisodeList.ItemsSource is not List<EpisodeRow> rows)
+        {
+            return;
+        }
+
+        var index = rows.FindIndex(row => row.Id == _itemId);
+        if (index < 0)
+        {
+            return;
+        }
+
+        // 放到列表中间附近，前后都能看到。
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            if (EpisodeList.ItemContainerGenerator.ContainerFromIndex(index) is FrameworkElement container)
+            {
+                container.BringIntoView();
+            }
+        });
+    }
+
+    private async void OnEpisodePick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id) ||
+            id == _itemId)
+        {
+            return;
+        }
+
+        await SwitchToAsync(id).ConfigureAwait(true);
+    }
+
+    /// <summary>切集：重新取播放源，在同一个窗口里重启 mpv，UI 状态跟着重置。</summary>
+    private async Task SwitchToAsync(string itemId)
+    {
+        var (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
+        if (source is null)
+        {
+            ShowToast(error ?? "这一集打不开");
+            return;
+        }
+
+        _ipc = null;
+        _current = source;
+        _itemId = itemId;
+        _position = 0;
+        _duration = 0;
+        _eof = false;
+        _tracksApplied = false;
+        _audioTracks.Clear();
+        _subtitleTracks.Clear();
+        _mediaInfo = null;
+        _sinceReport = 0;
+
+        _seeking = false;
+        Seek.Value = 0;
+        Seek.Maximum = Math.Max(1, source.DurationSeconds);
+        PositionText.Text = "00:00";
+        DurationText.Text = Format(source.DurationSeconds);
+        ChipsRow.Children.Clear();
+
+        ApplySourceToUi(source);
+        UpdatePlaylistSelection();
+        LoadingPanel.Visibility = Visibility.Visible;
+        LoadingStatus.Text = "正在打开…";
+
+        Launch(source, null);
+        await Task.CompletedTask;
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
@@ -308,7 +1026,7 @@ public partial class PlayWindow : Window
 
         if (!_eof && _position > 0)
         {
-            Playback.Report(_source.ItemId, _position, EffectiveDuration);
+            Playback.Report(_itemId, _position, EffectiveDuration);
         }
 
         _ipc?.Dispose();
@@ -344,6 +1062,14 @@ public partial class PlayWindow : Window
                 break;
 
             case Key.Escape:
+                if (EpisodePanel.Visibility == Visibility.Visible ||
+                    MediaInfoPanel.Visibility == Visibility.Visible)
+                {
+                    EpisodePanel.Visibility = Visibility.Collapsed;
+                    MediaInfoPanel.Visibility = Visibility.Collapsed;
+                    break;
+                }
+
                 Close();
                 break;
 
@@ -369,12 +1095,18 @@ public partial class PlayWindow : Window
         if (!_chromeVisible)
         {
             _chromeVisible = true;
-            Chrome.Opacity = 1;
-            Chrome.IsHitTestVisible = true;
-            Cursor = Cursors.Arrow;
+            SetChromeOpacity(1);
         }
 
         ResetHideTimer();
+    }
+
+    private void SetChromeOpacity(double opacity)
+    {
+        TopBar.Opacity = opacity;
+        Chrome.Opacity = opacity;
+        RightActions.Opacity = opacity;
+        Cursor = opacity > 0 ? Cursors.Arrow : Cursors.None;
     }
 
     private void ResetHideTimer()
@@ -387,23 +1119,24 @@ public partial class PlayWindow : Window
     {
         _hideTimer.Stop();
 
-        // 鼠标停在控制条上、或正在拖动时别隐藏。
-        if (Chrome.IsMouseOver || _seeking || _volumeDragging)
+        // 鼠标停在控制条上、正在拖动、或者面板开着，就别隐藏。
+        if (Chrome.IsMouseOver || TopBar.IsMouseOver || RightActions.IsMouseOver ||
+            _seeking || _volumeDragging ||
+            EpisodePanel.Visibility == Visibility.Visible ||
+            MediaInfoPanel.Visibility == Visibility.Visible)
         {
             ResetHideTimer();
             return;
         }
 
         _chromeVisible = false;
-        Chrome.Opacity = 0;
-        Chrome.IsHitTestVisible = false;
-        Cursor = Cursors.None;
+        SetChromeOpacity(0);
     }
 
     private void ShowError(string message)
     {
         LoadingPanel.Visibility = Visibility.Collapsed;
-        Chrome.Visibility = Visibility.Collapsed;
+        Overlay.Visibility = Visibility.Collapsed;
         ErrorText.Text = message;
         ErrorPanel.Visibility = Visibility.Visible;
     }
@@ -414,5 +1147,95 @@ public partial class PlayWindow : Window
         return time.TotalHours >= 1
             ? $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}"
             : $"{time.Minutes:00}:{time.Seconds:00}";
+    }
+
+    // —— 截图巡检用的公开入口 ——
+
+    /// <summary>截图巡检用：把浮层强制显示出来。</summary>
+    public void ShowChromeForShot() => ShowChrome();
+
+    /// <summary>截图巡检用：打开右侧选集面板。</summary>
+    public void ShowEpisodesForShot() => OnEpisodesClick(this, new RoutedEventArgs());
+
+    /// <summary>截图巡检用：打开音频菜单（菜单是独立窗口，需要单独截）。</summary>
+    public ContextMenu? OpenAudioMenuForShot() => OpenAudioMenu();
+
+    /// <summary>截图巡检用：打开「更多」菜单。</summary>
+    public ContextMenu OpenMoreMenuForShot() => OpenMoreMenu();
+
+    /// <summary>截图巡检用：直接打开媒体信息面板。</summary>
+    public void ShowMediaInfoForShot()
+    {
+        EpisodePanel.Visibility = Visibility.Collapsed;
+        MediaInfoPanel.Visibility = Visibility.Visible;
+        UpdateMediaInfoText();
+    }
+
+    private sealed class MpvTrack
+    {
+        public MpvTrack(int id, string type, string? language, string? title, string? codec,
+            int? channels, bool selected)
+        {
+            Id = id;
+            Type = type;
+            Language = language;
+            Title = title;
+            Codec = codec;
+            Channels = channels;
+            Selected = selected;
+        }
+
+        public int Id { get; }
+        public string Type { get; }
+        public string? Language { get; }
+        public string? Title { get; }
+        public string? Codec { get; }
+        public int? Channels { get; }
+        public bool Selected { get; }
+
+        /// <summary>菜单文案：语言 / 标题 / 编码 / 声道，缺的跳掉。</summary>
+        public string Describe()
+        {
+            var parts = new[]
+                {
+                    Language,
+                    Title,
+                    Codec is null ? null : Codec.ToUpperInvariant(),
+                    Channels is > 0 ? $"{Channels}ch" : null,
+                }
+                .Where(part => !string.IsNullOrWhiteSpace(part));
+
+            var text = string.Join("  ", parts);
+            return string.IsNullOrWhiteSpace(text) ? $"轨道 {Id}" : text;
+        }
+    }
+
+    private sealed class EpisodeRow : CardVisual
+    {
+        private bool _selected;
+
+        public string Id { get; init; } = "";
+        public string Badge { get; init; } = "";
+        public string Meta { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public string? PosterPath { get; init; }
+
+        public bool IsSelected
+        {
+            get => _selected;
+            set
+            {
+                if (_selected == value)
+                {
+                    return;
+                }
+
+                _selected = value;
+                Raise(nameof(SelectedVisibility));
+            }
+        }
+
+        public Visibility SelectedVisibility =>
+            _selected ? Visibility.Visible : Visibility.Collapsed;
     }
 }

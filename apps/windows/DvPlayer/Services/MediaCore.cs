@@ -516,7 +516,9 @@ public sealed record MediaDetailDto(
     string? AudioType,
     string? ColorRange,
     string? PlayItemId,
-    string? SingleChildId);
+    string? SingleChildId,
+    bool? IsFavorite,
+    bool? IsWatched);
 
 public sealed record PersonDto(
     string Id,
@@ -525,7 +527,19 @@ public sealed record PersonDto(
     string? Job,
     string? ImagePath);
 
-public sealed record MediaInfoDto(VideoInfoDto? Video, List<AudioInfoDto> Audios);
+public sealed record MediaInfoDto(
+    VideoInfoDto? Video,
+    List<AudioInfoDto> Audios,
+    List<SubtitleInfoDto> Subtitles);
+
+public sealed record SubtitleInfoDto(
+    string? Title,
+    string? Language,
+    string? Codec,
+    string? Format,
+    bool IsDefault,
+    bool IsBitmap,
+    bool IsExternal);
 
 public sealed record VideoInfoDto(
     string? Title,

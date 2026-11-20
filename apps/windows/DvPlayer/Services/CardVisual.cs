@@ -38,6 +38,10 @@ public abstract class CardVisual : INotifyPropertyChanged
 
     public void UseGradient(string key) => Background = Palette.GradientFor(key);
 
+    /// <summary>派生类改了绑定属性后叫一声。</summary>
+    protected void Raise(string name) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
     public async Task ApplyPosterAsync(string? posterPath)
     {
         if (string.IsNullOrWhiteSpace(posterPath))
