@@ -295,19 +295,24 @@ struct HorizontalRow<Item: Identifiable, Content: View>: View {
                 }
                 .padding(.vertical, 2)
             }
+            .background(RowWheelBridge())
             .overlay {
                 GeometryReader { geo in
                     let perPage = max(1, Int(geo.size.width / max(itemWidth, 1)))
+                    let scrollable = CGFloat(items.count) * itemWidth > geo.size.width + 1
+
+                    // 内容一屏放得下就不出箭头；箭头和整行垂直居中。
                     HStack {
-                        if hovering && index > 0 {
+                        if hovering && scrollable && index > 0 {
                             arrow("chevron.left") { move(proxy, by: -perPage) }
                         }
                         Spacer()
-                        if hovering && index < items.count - 1 {
+                        if hovering && scrollable && index < items.count - 1 {
                             arrow("chevron.right") { move(proxy, by: perPage) }
                         }
                     }
                     .padding(.horizontal, 2)
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
             .onHover { hovering = $0 }

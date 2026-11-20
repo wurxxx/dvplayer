@@ -32,6 +32,7 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 - 首页：Hero 轮播、我的媒体、继续观看、每库一行
 - 库 / 季 / 目录网格：类别、排序、风格、页内搜索、分页
 - 详情页：整块横版图 + 信息叠加、播放 / 重头看 / 收藏 / 标记看过、
+  音轨 / 字幕选择（多条音轨或有字幕才出现，弹层选完记在 `TrackPrefs`）、
   分季选集（296 宽横卡，悬停出播放遮罩）、演职人员（点开头像看作品）、
   豆瓣链接、媒体信息（视频 + 每条音轨一张卡）
 - 记录页：通用（继续观看分组 + 视频收藏）/ 观看 / 收藏
@@ -63,6 +64,7 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_SCROLL` | `end` = 先把页面滚到底再截（长页面下半截） |
 | `DVPLAYER_ARROWS` | `1` = 强制显示横向行的左右箭头（截图用，正常是悬停才出） |
 | `DVPLAYER_SHOT_SCALE` | 渲染倍数；JPEG 默认 1x，PNG 默认屏幕倍数（Retina 是 2x） |
+| `DVPLAYER_MENU` | `audio` / `subtitle` = 打开详情页后自动展开音轨 / 字幕弹层（截图用） |
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

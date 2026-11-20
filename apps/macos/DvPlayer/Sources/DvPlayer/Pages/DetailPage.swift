@@ -37,6 +37,10 @@ struct DetailPage: View {
     @State private var mediaInfo: MediaInfo?
     @State private var loading = true
     @State private var busy = false
+    @State private var showingAudio = false
+    @State private var showingSubtitle = false
+    /// 选了音轨 / 字幕之后戳一下，让按钮上的文字跟着变。
+    @State private var trackRevision = 0
 
     /// 点演职人员后浮出来的作品页。
     @State private var works: PersonWorks?
@@ -211,6 +215,32 @@ struct DetailPage: View {
                     .labelStyle(.titleAndIcon)
             }
             .buttonStyle(SecondaryButtonStyle())
+
+            if let info = mediaInfo, info.audios.count > 1 {
+                Button {
+                    showingAudio.toggle()
+                } label: {
+                    Label(audioLabel, systemImage: "waveform")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .popover(isPresented: $showingAudio, arrowEdge: .bottom) {
+                    TrackMenuView(title: "选择音轨", choices: audioChoices(info))
+                }
+            }
+
+            if let info = mediaInfo, !info.subtitles.isEmpty {
+                Button {
+                    showingSubtitle.toggle()
+                } label: {
+                    Label(subtitleLabel, systemImage: "captions.bubble")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .popover(isPresented: $showingSubtitle, arrowEdge: .bottom) {
+                    TrackMenuView(title: "选择字幕", choices: subtitleChoices(info))
+                }
+            }
 
             if busy {
                 ProgressView().controlSize(.small)
@@ -417,6 +447,101 @@ struct DetailPage: View {
         return MediaText.clean(season.title)
     }
 
+    // MARK: - 音轨 / 字幕
+
+    private var trackKey: String { playTargetId ?? itemId }
+
+    /// 没选过就用服务器给的默认轨。
+    private func effectiveAudioIndex(_ info: MediaInfo) -> Int {
+        if let saved = TrackPrefs.audio(trackKey), info.audios.indices.contains(saved) {
+            return saved
+        }
+        return max(0, info.audios.firstIndex(where: { $0.isDefault == true }) ?? 0)
+    }
+
+    /// 没选过就用默认字幕；一条都没有默认的就当关闭。
+    private func effectiveSubtitleIndex(_ info: MediaInfo) -> Int {
+        if let saved = TrackPrefs.subtitle(trackKey) { return saved }
+        return info.subtitles.firstIndex(where: { $0.isDefault == true }) ?? TrackPrefs.subtitleOff
+    }
+
+    private var audioLabel: String {
+        _ = trackRevision
+        guard let info = mediaInfo, info.audios.count > 1 else { return "音轨" }
+        let index = effectiveAudioIndex(info)
+        guard info.audios.indices.contains(index) else { return "音轨" }
+        let audio = info.audios[index]
+        return "音轨：" + (audio.language ?? audio.title ?? audio.codec ?? "默认")
+    }
+
+    private var subtitleLabel: String {
+        _ = trackRevision
+        guard let info = mediaInfo, !info.subtitles.isEmpty else { return "字幕" }
+        let index = effectiveSubtitleIndex(info)
+        if index == TrackPrefs.subtitleOff { return "字幕：关" }
+        guard info.subtitles.indices.contains(index) else { return "字幕" }
+        let subtitle = info.subtitles[index]
+        return "字幕：" + (subtitle.language ?? subtitle.title ?? subtitle.codec ?? "默认")
+    }
+
+    private func audioChoices(_ info: MediaInfo) -> [TrackChoice] {
+        let current = effectiveAudioIndex(info)
+        return info.audios.enumerated().map { index, audio in
+            var parts: [String] = []
+            if let language = audio.language, !language.isEmpty { parts.append(language) }
+            if let codec = audio.codec, !codec.isEmpty { parts.append(codec) }
+            if let profile = audio.profile, !profile.isEmpty { parts.append(profile) }
+            if let layout = audio.layout, !layout.isEmpty { parts.append(layout) }
+            if let channels = audio.channels, channels > 0 { parts.append("\(channels) 声道") }
+            if let rate = audio.sampleRate, rate > 0 { parts.append("\(rate) Hz") }
+            if let bitRate = MediaText.bitRate(audio.bitRate) { parts.append(bitRate) }
+
+            return TrackChoice(id: index,
+                               label: audio.title ?? audio.language ?? audio.codec ?? "音轨 \(index + 1)",
+                               detail: parts.joined(separator: " · "),
+                               selected: index == current) {
+                TrackPrefs.setAudio(trackKey, index)
+                trackRevision += 1
+                showingAudio = false
+            }
+        }
+    }
+
+    private func subtitleChoices(_ info: MediaInfo) -> [TrackChoice] {
+        let current = effectiveSubtitleIndex(info)
+
+        var choices: [TrackChoice] = [
+            TrackChoice(id: TrackPrefs.subtitleOff,
+                        label: "关闭字幕",
+                        detail: "",
+                        selected: current == TrackPrefs.subtitleOff) {
+                TrackPrefs.setSubtitle(trackKey, TrackPrefs.subtitleOff)
+                trackRevision += 1
+                showingSubtitle = false
+            },
+        ]
+
+        choices.append(contentsOf: info.subtitles.enumerated().map { index, subtitle in
+            var parts: [String] = []
+            if let language = subtitle.language, !language.isEmpty { parts.append(language) }
+            if let codec = subtitle.codec, !codec.isEmpty { parts.append(codec) }
+            if let format = subtitle.format, !format.isEmpty { parts.append(format) }
+            if subtitle.isBitmap == true { parts.append("图形") }
+            if subtitle.isExternal == true { parts.append("外挂") }
+
+            return TrackChoice(id: index,
+                               label: subtitle.title ?? "字幕 \(index + 1)",
+                               detail: parts.joined(separator: " · "),
+                               selected: index == current) {
+                TrackPrefs.setSubtitle(trackKey, index)
+                trackRevision += 1
+                showingSubtitle = false
+            }
+        })
+
+        return choices
+    }
+
     // MARK: - 数据
 
     private func toggleFavorite() {
@@ -515,6 +640,15 @@ struct DetailPage: View {
     private func loadMediaInfo() async {
         guard let core = state.core, let target = playTargetId else { return }
         mediaInfo = try? await core.mediaInfo(target)
+
+        // 截图巡检：直接展开音轨 / 字幕菜单（等界面铺好再弹）。
+        if let menu = ProcessInfo.processInfo.environment["DVPLAYER_MENU"] {
+            Task {
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                if menu == "audio" { showingAudio = true }
+                if menu == "subtitle" { showingSubtitle = true }
+            }
+        }
     }
 
     private func makeRows(_ items: [MediaItem]) -> [EpisodeRow] {
@@ -776,5 +910,67 @@ private struct PersonWorksPanel: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 音轨 / 字幕菜单
+
+private struct TrackChoice: Identifiable {
+    /// 「关闭字幕」用 `TrackPrefs.subtitleOff`，其余是轨下标。
+    let id: Int
+    let label: String
+    let detail: String
+    let selected: Bool
+    let pick: () -> Void
+}
+
+private struct TrackMenuView: View {
+    let title: String
+    let choices: [TrackChoice]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.faint)
+                .padding(.horizontal, 10)
+                .padding(.top, 9)
+                .padding(.bottom, 5)
+
+            ForEach(choices) { choice in
+                Button(action: choice.pick) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .opacity(choice.selected ? 1 : 0)
+                            .frame(width: 12)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(choice.label)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+
+                            if !choice.detail.isEmpty {
+                                Text(choice.detail)
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(Theme.faint)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 8)
+        .frame(width: 300, alignment: .leading)
+        .background(Theme.surface)
     }
 }

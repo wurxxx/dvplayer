@@ -137,6 +137,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.layer?.render(in: cg)
         cg.restoreGState()
 
+        // 弹层（popover / 菜单）是独立窗口，单独渲染会丢，顺手叠上去。
+        let base = window.frame
+        for extra in NSApp.windows where extra !== window && extra.isVisible && extra.contentView != nil {
+            let dx = extra.frame.minX - base.minX
+            let dy = extra.frame.minY - base.minY
+            cg.saveGState()
+            cg.translateBy(x: dx, y: dy)
+            // 弹层的内容视图是翻转坐标系，跟主窗口方向相反，再翻一次。
+            if let content = extra.contentView, content.isFlipped {
+                cg.translateBy(x: 0, y: content.bounds.height)
+                cg.scaleBy(x: 1, y: -1)
+            }
+            extra.contentView?.layer?.render(in: cg)
+            cg.restoreGState()
+        }
+
         NSGraphicsContext.restoreGraphicsState()
 
         let data = jpeg
