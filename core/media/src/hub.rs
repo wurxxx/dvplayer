@@ -11,7 +11,8 @@ use std::collections::HashMap;
 
 use crate::error::{MediaError, Result};
 use crate::models::{
-    ImageSource, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource,
+    Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord,
+    PlaySource,
 };
 use crate::sources::{create, MediaSource, SourceConfig};
 
@@ -118,11 +119,23 @@ impl MediaHub {
             .collect())
     }
 
-    pub fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+    pub fn items(
+        &self,
+        library_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
         let (entry, raw) = self.route(library_id)?;
-        let mut paged = entry.source.items(raw, page, page_size)?;
+        let mut paged = entry.source.items(raw, page, page_size, query)?;
         qualify_items(&entry.id, &mut paged.items);
         Ok(paged)
+    }
+
+    /// 某个库可用的风格列表，id 与 [`ListQuery::genre`] 对得上。
+    pub fn genres(&self, scope_id: &str) -> Result<Vec<Genre>> {
+        let (entry, raw) = self.route(scope_id)?;
+        entry.source.genres(raw)
     }
 
     /// 跨源关键词搜索。各源结果合并后截断，避免界面一次塞太多。
@@ -139,9 +152,15 @@ impl MediaHub {
         Ok(list)
     }
 
-    pub fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+    pub fn children(
+        &self,
+        parent_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
         let (entry, raw) = self.route(parent_id)?;
-        let mut paged = entry.source.children(raw, page, page_size)?;
+        let mut paged = entry.source.children(raw, page, page_size, query)?;
         qualify_items(&entry.id, &mut paged.items);
         Ok(paged)
     }
@@ -325,7 +344,13 @@ mod tests {
             }])
         }
 
-        fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        fn items(
+            &self,
+            library_id: &str,
+            page: i32,
+            page_size: i32,
+            _query: &ListQuery,
+        ) -> Result<Paged<MediaItem>> {
             Ok(Paged {
                 items: vec![self.item("1", library_id)],
                 total: 1,
@@ -334,13 +359,23 @@ mod tests {
             })
         }
 
-        fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        fn children(
+            &self,
+            parent_id: &str,
+            page: i32,
+            page_size: i32,
+            _query: &ListQuery,
+        ) -> Result<Paged<MediaItem>> {
             Ok(Paged {
                 items: vec![self.item("2", parent_id)],
                 total: 1,
                 page,
                 page_size,
             })
+        }
+
+        fn search(&self, _query: &str) -> Result<Vec<MediaItem>> {
+            Ok(Vec::new())
         }
 
         fn detail(&self, item_id: &str) -> Result<MediaDetail> {
@@ -483,12 +518,12 @@ mod tests {
     fn items_go_back_to_the_right_source() {
         let hub = two_sources();
 
-        let page = hub.items("b:lib-b", 1, 60).unwrap();
+        let page = hub.items("b:lib-b", 1, 60, &ListQuery::default()).unwrap();
         assert_eq!(page.items[0].id, "b:1");
         assert_eq!(page.items[0].parent_id.as_deref(), Some("b:lib-b"));
         assert_eq!(page.items[0].poster_path.as_deref(), Some("b:/x.webp"));
 
-        let kids = hub.children("a:1", 1, 60).unwrap();
+        let kids = hub.children("a:1", 1, 60, &ListQuery::default()).unwrap();
         assert_eq!(kids.items[0].id, "a:2");
         assert_eq!(kids.items[0].parent_id.as_deref(), Some("a:1"));
     }

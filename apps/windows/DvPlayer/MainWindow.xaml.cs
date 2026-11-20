@@ -196,6 +196,29 @@ public partial class MainWindow : FluentWindow
             {
                 await page.ShowFirstLibraryAsync();
                 await Task.Delay(8000);
+
+                // --browse-cat <all|tv|movie|genre|folder>：切到某个类别再截图。
+                if (ArgumentAfter("--browse-cat") is { Length: > 0 } category)
+                {
+                    page.SelectCategoryForShot(category);
+                    await Task.Delay(3000);
+                }
+
+                // --browse-sort <added|name|release|rating>：选排序字段。
+                if (ArgumentAfter("--browse-sort") is { Length: > 0 } sortField)
+                {
+                    page.SelectSortForShot(sortField);
+                    await Task.Delay(2500);
+                }
+
+                // --browse-scroll <像素>：滚到接近底部，验证「自动加载更多」。
+                if (int.TryParse(ArgumentAfter("--browse-scroll"), out var browseOffset) &&
+                    browseOffset > 0)
+                {
+                    page.ScrollBrowse(browseOffset);
+                    await Task.Delay(2500);
+                }
+
                 UiCapture.Save(this, Path.Combine(dir, "library-browse.png"));
             }
         }

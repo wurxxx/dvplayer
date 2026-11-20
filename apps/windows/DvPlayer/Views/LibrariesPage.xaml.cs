@@ -76,13 +76,31 @@ public partial class LibrariesPage : Page
 
     /// <summary>已经取到的全部卡片；顶栏搜索只过滤这一份，不再打服务器。</summary>
     private List<ItemCard> _allCards = new();
+
+    /// <summary>当前显示的卡片。滚到底自动续页，往这里追加而不是整份重设。</summary>
+    private readonly ObservableCollection<ItemCard> _visible = new();
+
     private int _total;
+    private bool _loadingPage;
+    private bool _hasMore;
+    private DateTime _retryAfter = DateTime.MinValue;
+
+    /// <summary>类别 / 排序 / 风格一变就换一个版本号，丢掉过期的分页结果。</summary>
+    private int _browseVersion;
+
+    private string _sortField = "added";
+    private bool _sortDescending = true;
+
+    private List<GenreDto> _genres = new();
+    private string? _activeGenre;
 
     private int _page;
 
     public LibrariesPage()
     {
         InitializeComponent();
+        SortBox.SelectedIndex = 0;
+        UpdateSortIcon();
         _heroTimer.Tick += (_, _) => _ = ShowHeroAsync(_heroIndex + 1);
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -860,6 +878,36 @@ public partial class LibrariesPage : Page
     /// <summary>截图巡检用：滚到指定位置，看横幅下面几块。</summary>
     public void ScrollOverview(double offset) => OverviewRoot.ScrollToVerticalOffset(offset);
 
+    /// <summary>截图巡检用：把库内网格往下滚，触发自动加载。</summary>
+    public void ScrollBrowse(double offset) => BrowseScroll.ScrollToVerticalOffset(offset);
+
+    /// <summary>截图巡检用：切到某个类别（all / tv / movie / genre / folder）。</summary>
+    public void SelectCategoryForShot(string key)
+    {
+        var button = key.ToLowerInvariant() switch
+        {
+            "tv" => CatTv,
+            "movie" => CatMovie,
+            "folder" => CatFolder,
+            "genre" => CatGenre,
+            _ => CatAll,
+        };
+        button.IsChecked = true;
+    }
+
+    /// <summary>截图巡检用：选排序字段。</summary>
+    public void SelectSortForShot(string field)
+    {
+        foreach (var item in SortBox.Items.OfType<ComboBoxItem>())
+        {
+            if (string.Equals(item.Tag as string, field, StringComparison.OrdinalIgnoreCase))
+            {
+                SortBox.SelectedItem = item;
+                return;
+            }
+        }
+    }
+
     private void StepHero(int delta)
     {
         _ = ShowHeroAsync(_heroIndex + delta);
@@ -1150,6 +1198,7 @@ public partial class LibrariesPage : Page
         LibraryBar.ItemsSource = _libraries
             .Select(l => new LibraryChip(l.Id, l.Title, l.Id == libraryId))
             .ToList();
+        LibraryScroll.Visibility = _libraries.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
 
         _heroTimer.Stop();
         OverviewPanel.Visibility = Visibility.Collapsed;
@@ -1163,6 +1212,9 @@ public partial class LibrariesPage : Page
         BrowseTitle.Text = library.Title;
         _stack.Clear();
         FilterBox.Text = string.Empty;
+        _genres.Clear();
+        _activeGenre = null;
+        GenreBar.ItemsSource = null;
 
         await LoadAsync(library.Id, library.Title, children: false).ConfigureAwait(true);
     }
@@ -1195,6 +1247,9 @@ public partial class LibrariesPage : Page
         BrowseTitle.Text = _libraryTitle;
         _stack.Clear();
         FilterBox.Text = string.Empty;
+        _genres.Clear();
+        _activeGenre = null;
+        GenreBar.ItemsSource = null;
         await LoadAsync(_libraryId, _libraryTitle, children: false).ConfigureAwait(true);
     }
 
@@ -1265,39 +1320,117 @@ public partial class LibrariesPage : Page
 
     private async Task LoadAsync(string parentId, string title, bool children)
     {
-        var services = AppServices.Instance;
-        if (!services.IsConnected)
+        if (!AppServices.Instance.IsConnected)
         {
             return;
         }
 
         _parentId = parentId;
         _childrenMode = children;
-        _page = 1;
-        BrowseStatus.Text = "正在加载…";
-        ItemGrid.ItemsSource = null;
-        _allCards = new List<ItemCard>();
-        _total = 0;
-        MoreButton.Visibility = Visibility.Collapsed;
         UpdateBreadcrumb();
 
-        var core = services.Core!;
-        var result = await Task.Run(() => children
-            ? core.Children(parentId, 1, PageSize)
-            : core.Items(parentId, 1, PageSize)).ConfigureAwait(true);
-
-        if (!result.Ok || result.Data is null)
+        if (CategoryKey == "genre")
         {
-            BrowseStatus.Text = "加载失败：" + (result.Error ?? "未知错误");
+            await EnsureGenresAsync().ConfigureAwait(true);
+        }
+
+        await ReloadBrowseAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>换类别 / 排序后从头拉第一页。</summary>
+    private async Task ReloadBrowseAsync()
+    {
+        var version = ++_browseVersion;
+        _page = 1;
+        _hasMore = true;
+        _loadingPage = false;
+        _retryAfter = DateTime.MinValue;
+        _allCards = new List<ItemCard>();
+        _visible.Clear();
+        _total = 0;
+        BrowseStatus.Text = "正在加载…";
+        BrowseFooter.Text = "";
+        ItemGrid.ItemsSource = _visible;
+
+        await LoadPageAsync(version).ConfigureAwait(true);
+    }
+
+    /// <summary>拉下一页并追加到列表末尾；滚到底由 OnBrowseScroll 触发。</summary>
+    private async Task LoadPageAsync(int version)
+    {
+        if (_loadingPage || !_hasMore || _parentId is null || !AppServices.Instance.IsConnected)
+        {
             return;
         }
 
-        var cards = result.Data.Items.Select(ToCard).ToList();
-        _allCards = cards;
-        _total = result.Data.Total;
-        ApplyFilter();
+        if (DateTime.UtcNow < _retryAfter)
+        {
+            return;
+        }
 
-        await FillMissingPostersAsync(cards);
+        _loadingPage = true;
+        // 首屏由状态行说「正在加载」，页脚只在后面续页时出现。
+        BrowseFooter.Text = _allCards.Count > 0 ? "正在加载…" : "";
+        Trace($"load page {_page} v{version} cat={CategoryKey}");
+
+        var page = _page;
+        var parentId = _parentId;
+        var children = _childrenMode;
+        var query = BuildQuery();
+        var core = AppServices.Instance.Core!;
+
+        try
+        {
+            var result = await Task.Run(() => children
+                ? core.Children(parentId, page, PageSize, query)
+                : core.Items(parentId, page, PageSize, query)).ConfigureAwait(true);
+
+            if (version != _browseVersion)
+            {
+                return;
+            }
+
+            if (!result.Ok || result.Data is null)
+            {
+                _retryAfter = DateTime.UtcNow.AddSeconds(3);
+                BrowseFooter.Text = "加载失败：" + (result.Error ?? "未知错误");
+                return;
+            }
+
+            var cards = result.Data.Items.Select(ToCard).ToList();
+            Trace($"page {page} ok n={cards.Count} total={result.Data.Total}");
+            _page = page + 1;
+            _total = result.Data.Total;
+            _allCards.AddRange(cards);
+            _hasMore = cards.Count > 0 && _allCards.Count < _total;
+
+            AppendVisible(cards);
+            UpdateBrowseStatus();
+            BrowseFooter.Text = _hasMore ? "" : (_total > 0 ? "已全部加载" : "");
+
+            await FillMissingPostersAsync(cards).ConfigureAwait(true);
+        }
+        finally
+        {
+            if (version == _browseVersion)
+            {
+                _loadingPage = false;
+            }
+        }
+    }
+
+    /// <summary>滚到离底 700px 就续下一页，不再让用户点按钮。</summary>
+    private void OnBrowseScroll(object sender, ScrollChangedEventArgs e)
+    {
+        if (BrowseRoot.Visibility != Visibility.Visible || !_hasMore || _loadingPage)
+        {
+            return;
+        }
+
+        if (e.ExtentHeight - (e.VerticalOffset + e.ViewportHeight) < 700)
+        {
+            _ = LoadPageAsync(_browseVersion);
+        }
     }
 
     /// <summary>
@@ -1341,59 +1474,40 @@ public partial class LibrariesPage : Page
             .Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
-    private async void OnMoreClick(object sender, RoutedEventArgs e)
-    {
-        if (_parentId is null || !AppServices.Instance.IsConnected)
-        {
-            return;
-        }
-
-        _page++;
-        var core = AppServices.Instance.Core!;
-        var page = _page;
-        var children = _childrenMode;
-        var parentId = _parentId;
-
-        var result = await Task.Run(() => children
-            ? core.Children(parentId, page, PageSize)
-            : core.Items(parentId, page, PageSize)).ConfigureAwait(true);
-
-        if (!result.Ok || result.Data is null)
-        {
-            _page--;
-            return;
-        }
-
-        var added = result.Data.Items.Select(ToCard).ToList();
-        _allCards.AddRange(added);
-        _total = result.Data.Total;
-        ApplyFilter();
-
-        await FillMissingPostersAsync(added);
-    }
-
-    /// <summary>顶栏搜索：只在已取到的条目里过滤，不打断分页。</summary>
+    /// <summary>顶栏搜索：只在已取到的条目里过滤，滚到底仍然会继续取下一页。</summary>
     private void ApplyFilter()
     {
         var query = FilterBox?.Text?.Trim() ?? "";
-        var cards = string.IsNullOrEmpty(query)
-            ? _allCards
-            : _allCards
-                .Where(c => c.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                            c.Sub.Contains(query, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+        _visible.Clear();
+        foreach (var card in _allCards.Where(c => Matches(c, query)))
+        {
+            _visible.Add(card);
+        }
 
-        ItemGrid.ItemsSource = null;
-        ItemGrid.ItemsSource = cards;
+        UpdateBrowseStatus();
+    }
 
+    private static bool Matches(ItemCard card, string query) =>
+        string.IsNullOrEmpty(query) ||
+        card.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        card.Sub.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private void AppendVisible(IEnumerable<ItemCard> cards)
+    {
+        var query = FilterBox?.Text?.Trim() ?? "";
+        foreach (var card in cards.Where(c => Matches(c, query)))
+        {
+            _visible.Add(card);
+        }
+    }
+
+    private void UpdateBrowseStatus()
+    {
+        var query = FilterBox?.Text?.Trim() ?? "";
         BrowseStatus.Text = string.IsNullOrEmpty(query)
-            ? $"{_libraryTitle} · 共 {_total} 条"
-            : $"{_libraryTitle} · 筛出 {cards.Count} 条（已加载 {_allCards.Count} 条）";
-
-        // 过滤状态下不再提供「加载更多」：那一页还没拉下来，命中率没法保证。
-        MoreButton.Visibility = string.IsNullOrEmpty(query) && _allCards.Count < _total
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+            ? $"{_libraryTitle} · 共 {_total} 条" +
+              (_allCards.Count < _total ? $" · 已加载 {_allCards.Count}" : "")
+            : $"{_libraryTitle} · 筛出 {_visible.Count} 条（已加载 {_allCards.Count} 条）";
     }
 
     private void OnFilterChanged(object sender, TextChangedEventArgs e)
@@ -1409,6 +1523,176 @@ public partial class LibrariesPage : Page
         {
             ApplyFilter();
         }
+    }
+
+    // —— 类别 / 排序 / 风格 ——
+
+    private string CategoryKey =>
+        CatTv.IsChecked == true ? "tv"
+        : CatMovie.IsChecked == true ? "movie"
+        : CatFolder.IsChecked == true ? "folder"
+        : CatGenre.IsChecked == true ? "genre"
+        : "all";
+
+    private ListQuery BuildQuery() => new()
+    {
+        Kinds = CategoryKey switch
+        {
+            "tv" => new List<string> { "tv" },
+            "movie" => new List<string> { "movie" },
+            "folder" => new List<string> { "folder" },
+            _ => new List<string>(),
+        },
+        Genre = CategoryKey == "genre" ? _activeGenre : null,
+        Sort = _sortField,
+        Descending = _sortDescending,
+    };
+
+    private async void OnCategoryChanged(object sender, RoutedEventArgs e)
+    {
+        if (BrowseRoot is null || BrowseRoot.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        GenreScroll.Visibility = CategoryKey == "genre"
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        if (CategoryKey == "genre")
+        {
+            await EnsureGenresAsync().ConfigureAwait(true);
+        }
+
+        await ReloadBrowseAsync().ConfigureAwait(true);
+    }
+
+    private async Task EnsureGenresAsync()
+    {
+        if (_genres.Count > 0 || _libraryId is null)
+        {
+            RenderGenres();
+            return;
+        }
+
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        var result = await Task.Run(() => core.Genres(_libraryId)).ConfigureAwait(true);
+        Trace($"genres scope={_libraryId} ok={result.Ok} n={result.Data?.Count} err={result.Error}");
+        if (!result.Ok || result.Data is null)
+        {
+            RenderGenres();
+            return;
+        }
+
+        _genres = result.Data;
+        if (_activeGenre is null || _genres.All(g => g.Id != _activeGenre))
+        {
+            _activeGenre = _genres.FirstOrDefault()?.Id;
+        }
+
+        RenderGenres();
+    }
+
+    private void RenderGenres()
+    {
+        GenreBar.ItemsSource = _genres
+            .Select(g => new GenreChip(g.Id, GenreLabel(g.Title), g.Id == _activeGenre))
+            .ToList();
+    }
+
+    /// <summary>飞牛返回的是 TMDB 的英文风格名，界面上用中文。</summary>
+    private static string GenreLabel(string title) => title switch
+    {
+        "Action" => "动作",
+        "Adventure" => "冒险",
+        "Animation" => "动画",
+        "Comedy" => "喜剧",
+        "Crime" => "犯罪",
+        "Documentary" => "纪录",
+        "Drama" => "剧情",
+        "Family" => "家庭",
+        "Fantasy" => "奇幻",
+        "History" => "历史",
+        "Horror" => "恐怖",
+        "Music" => "音乐",
+        "Mystery" => "悬疑",
+        "Romance" => "爱情",
+        "Science Fiction" => "科幻",
+        "TV Movie" => "电视电影",
+        "Thriller" => "惊悚",
+        "War" => "战争",
+        "War & Politics" => "战争与政治",
+        "Western" => "西部",
+        "Action & Adventure" => "动作冒险",
+        "Sci-Fi & Fantasy" => "科幻奇幻",
+        "Kids" => "儿童",
+        "News" => "新闻",
+        "Reality" => "真人秀",
+        "Soap" => "肥皂剧",
+        "Talk" => "脱口秀",
+        "Sports" => "体育",
+        "Finance" => "财经",
+        "Education" => "教育",
+        "Lifestyle" => "生活",
+        "Local" => "本地",
+        "Others" => "其他",
+        _ => title,
+    };
+
+    private async void OnGenreClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Border { Tag: string id } || id == _activeGenre)
+        {
+            return;
+        }
+
+        _activeGenre = id;
+        RenderGenres();
+        await ReloadBrowseAsync().ConfigureAwait(true);
+    }
+
+    private async void OnSortChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SortBox.SelectedItem is not ComboBoxItem { Tag: string field })
+        {
+            return;
+        }
+
+        if (field != _sortField)
+        {
+            _sortField = field;
+            // 名称默认升序，其它字段默认把最新的 / 最高分放前面。
+            _sortDescending = field != "name";
+            UpdateSortIcon();
+        }
+
+        if (BrowseRoot is { Visibility: Visibility.Visible })
+        {
+            await ReloadBrowseAsync().ConfigureAwait(true);
+        }
+    }
+
+    private async void OnSortDirClick(object sender, RoutedEventArgs e)
+    {
+        _sortDescending = !_sortDescending;
+        UpdateSortIcon();
+
+        if (BrowseRoot is { Visibility: Visibility.Visible })
+        {
+            await ReloadBrowseAsync().ConfigureAwait(true);
+        }
+    }
+
+    private void UpdateSortIcon()
+    {
+        // E74A 向上（升序），E74B 向下（降序）。
+        SortDirIcon.Text = _sortDescending ? "\uE74B" : "\uE74A";
+        SortDirButton.ToolTip = _sortDescending ? "当前降序，点击改升序" : "当前升序，点击改降序";
     }
 
     private void UpdateBreadcrumb()
@@ -1567,6 +1851,22 @@ public partial class LibrariesPage : Page
         return t.TotalHours >= 1
             ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
             : $"{t.Minutes:00}:{t.Seconds:00}";
+    }
+
+    private sealed class GenreChip
+    {
+        public GenreChip(string id, string title, bool active)
+        {
+            Id = id;
+            Title = title;
+            Active = active;
+        }
+
+        public string Id { get; }
+
+        public string Title { get; }
+
+        public bool Active { get; }
     }
 
     private sealed class LibraryChip

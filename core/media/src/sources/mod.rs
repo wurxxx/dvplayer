@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::models::{
-    ImageSource, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource,
+    Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord,
+    PlaySource,
 };
 
 /// 一个媒体源的连接参数。序列化后就是 `dv_source_create` 的入参。
@@ -52,11 +53,28 @@ pub trait MediaSource: Send + Sync {
 
     fn libraries(&self) -> Result<Vec<MediaLibrary>>;
 
-    /// 媒体库第一层条目。
-    fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>>;
+    /// 媒体库第一层条目。`query` 带筛选与排序，默认值等于「全部、服务器默认顺序」。
+    fn items(
+        &self,
+        library_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>>;
 
     /// 某个条目下的子条目（剧集 → 季 → 集）。
-    fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>>;
+    fn children(
+        &self,
+        parent_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>>;
+
+    /// 这个库里可用的风格列表。没有概念的源返回空。
+    fn genres(&self, _scope_id: &str) -> Result<Vec<Genre>> {
+        Ok(Vec::new())
+    }
 
     /// 关键词搜索。返回的是平铺的条目（可能是集/文件），由上层按父级归并。
     fn search(&self, query: &str) -> Result<Vec<MediaItem>>;

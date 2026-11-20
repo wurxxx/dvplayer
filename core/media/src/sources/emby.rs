@@ -15,8 +15,8 @@ use serde::Deserialize;
 
 use crate::error::{percent_encode, MediaError, Result};
 use crate::models::{
-    AudioTrack, HttpHeader, ImageSource, MediaDetail, MediaItem, MediaKind, MediaLibrary, Paged,
-    PlayRecord, PlaySource, SubtitleTrack,
+    AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
+    MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
 use crate::sources::MediaSource;
 
@@ -157,12 +157,44 @@ impl EmbySource {
             .collect())
     }
 
-    pub fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        self.list(library_id, page, page_size)
+    pub fn items(
+        &self,
+        library_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        self.list(library_id, page, page_size, query)
     }
 
-    pub fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        self.list(parent_id, page, page_size)
+    pub fn children(
+        &self,
+        parent_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        self.list(parent_id, page, page_size, query)
+    }
+
+    /// Emby 的风格就是 `Genres` 名字，库内 `ParentId` 限定范围。
+    pub fn genres(&self, scope_id: &str) -> Result<Vec<Genre>> {
+        let query = vec![
+            ("ParentId", scope_id.to_string()),
+            ("Recursive", "true".into()),
+            ("Fields", "ItemType".into()),
+        ];
+
+        let dto: ItemQueryDto = self.get("/Genres", &query)?;
+        Ok(dto
+            .items
+            .iter()
+            .filter(|d| !d.name.is_empty())
+            .map(|d| Genre {
+                id: d.name.clone(),
+                title: d.name.clone(),
+            })
+            .collect())
     }
 
     /// Emby / Jellyfin 的搜索：`/Users/{uid}/Items?searchTerm=`，跨库递归。
@@ -188,23 +220,60 @@ impl EmbySource {
         Ok(dto.items.iter().map(|d| self.map_item(d)).collect())
     }
 
-    fn list(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+    fn list(
+        &self,
+        parent_id: &str,
+        page: i32,
+        page_size: i32,
+        opts: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
         let user = self.user_id()?;
         let start = ((page.max(1) - 1) * page_size.max(1)).to_string();
         let limit = page_size.to_string();
 
-        let query = vec![
+        let include_types: Vec<&str> = match opts.kinds.as_slice() {
+            [] => Vec::new(),
+            kinds => kinds
+                .iter()
+                .flat_map(|kind| match kind.as_str() {
+                    "tv" => vec!["Series"],
+                    "movie" => vec!["Movie"],
+                    "folder" => vec!["Folder", "BoxSet"],
+                    _ => Vec::new(),
+                })
+                .collect(),
+        };
+
+        let sort_by = match opts.sort.as_deref() {
+            Some("name") => "SortName",
+            Some("added") => "DateCreated",
+            Some("release") => "PremiereDate",
+            Some("rating") => "CommunityRating",
+            _ => "SortName",
+        };
+
+        let mut query = vec![
             ("ParentId", parent_id.to_string()),
             ("Recursive", "false".into()),
             ("StartIndex", start),
             ("Limit", limit),
-            ("SortBy", "SortName".into()),
-            ("SortOrder", "Ascending".into()),
+            ("SortBy", sort_by.to_string()),
+            (
+                "SortOrder",
+                if opts.descending { "Descending" } else { "Ascending" }.into(),
+            ),
             ("Fields", LIST_FIELDS.into()),
             ("EnableImages", "true".into()),
             ("ImageTypeLimit", "1".into()),
             ("EnableImageTypes", "Primary,Backdrop".into()),
         ];
+
+        if !include_types.is_empty() {
+            query.push(("IncludeItemTypes", include_types.join(",")));
+        }
+        if let Some(genre) = opts.genre.as_deref().filter(|g| !g.is_empty()) {
+            query.push(("Genres", genre.to_string()));
+        }
 
         let dto: ItemQueryDto = self.get(&format!("/Users/{user}/Items"), &query)?;
 
@@ -650,12 +719,28 @@ impl MediaSource for EmbySource {
         EmbySource::libraries(self)
     }
 
-    fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        EmbySource::items(self, library_id, page, page_size)
+    fn items(
+        &self,
+        library_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        EmbySource::items(self, library_id, page, page_size, query)
     }
 
-    fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        EmbySource::children(self, parent_id, page, page_size)
+    fn children(
+        &self,
+        parent_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        EmbySource::children(self, parent_id, page, page_size, query)
+    }
+
+    fn genres(&self, scope_id: &str) -> Result<Vec<Genre>> {
+        EmbySource::genres(self, scope_id)
     }
 
     fn search(&self, query: &str) -> Result<Vec<MediaItem>> {

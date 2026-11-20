@@ -303,6 +303,33 @@ impl<T> Paged<T> {
     }
 }
 
+/// 列表的筛选与排序参数。界面只传抽象值（`tv` / `movie` / `folder`），
+/// 各适配器自己翻译成服务器认识的类型名。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ListQuery {
+    /// 只要这些类型：`tv` / `movie` / `folder`。空表示不按类型过滤。
+    pub kinds: Vec<String>,
+    /// 风格 / 类型标签，取值来自 [`Genre::id`]。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    /// 排序字段：`name` / `added` / `release` / `rating`。
+    /// 空表示用服务器默认顺序。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    /// 是否降序。
+    #[serde(default)]
+    pub descending: bool,
+}
+
+/// 一个可筛选的风格。飞牛是 TMDB genre（id 是数字），Emby 直接用名字。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Genre {
+    pub id: String,
+    pub title: String,
+}
+
 /// 统一响应外壳，FFI 全部返回它。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

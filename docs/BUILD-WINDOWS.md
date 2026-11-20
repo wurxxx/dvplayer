@@ -116,6 +116,9 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--screenshot <dir> [页面...]` | 只截指定页（`libraries` / `sources` / `records` / `search` / `settings`） |
 | `--search-text <关键词>` | 搜索页带一个查询启动，用来截结果网格 |
 | `--browse` | 巡检完再进第一个媒体库的网格，多截一张 `library-browse.png` |
+| `--browse-cat <all\|tv\|movie\|genre\|folder>` | 网格切到某个类别再截图（风格会带风格标签行） |
+| `--browse-sort <added\|name\|release\|rating>` | 网格换一种排序 |
+| `--browse-scroll <像素>` | 把网格滚到接近底部，验证自动续页（状态行会显示「已加载 N」） |
 | `--delay <秒>` | 每页再多等几秒（媒体库页默认 9 秒等 Hero 大图） |
 | `--hover` | 媒体库页把 Hero 左右箭头显示出来，检查位置与样式 |
 | `--scroll <像素>` | 把服务器首页往下滚再截，检查分组标题与横向海报行 |

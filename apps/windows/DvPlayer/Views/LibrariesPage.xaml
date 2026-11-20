@@ -387,6 +387,8 @@
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
         <RowDefinition Height="*" />
       </Grid.RowDefinitions>
 
@@ -411,9 +413,79 @@
         </Border>
       </Grid>
 
-      <StackPanel Grid.Row="1" Margin="0,8,0,6">
+      <!-- 类别 + 排序 -->
+      <Grid Grid.Row="1" Margin="0,10,0,0">
+        <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Left">
+          <StackPanel Orientation="Horizontal">
+            <RadioButton x:Name="CatAll" Content="全部" GroupName="BrowseCat"
+                         Style="{StaticResource SegmentItem}" IsChecked="True"
+                         Checked="OnCategoryChanged" />
+            <RadioButton x:Name="CatTv" Content="剧集" GroupName="BrowseCat"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnCategoryChanged" />
+            <RadioButton x:Name="CatMovie" Content="电影" GroupName="BrowseCat"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnCategoryChanged" />
+            <RadioButton x:Name="CatGenre" Content="风格" GroupName="BrowseCat"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnCategoryChanged" />
+            <RadioButton x:Name="CatFolder" Content="文件夹" GroupName="BrowseCat"
+                         Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                         Checked="OnCategoryChanged" />
+          </StackPanel>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <ComboBox x:Name="SortBox" Width="128" Height="34" Style="{StaticResource Select}"
+                    SelectionChanged="OnSortChanged">
+            <ComboBoxItem Content="添加日期" Tag="added" />
+            <ComboBoxItem Content="名称" Tag="name" />
+            <ComboBoxItem Content="发行日期" Tag="release" />
+            <ComboBoxItem Content="评分" Tag="rating" />
+          </ComboBox>
+          <Button x:Name="SortDirButton" Style="{StaticResource ToolButton}"
+                  Click="OnSortDirClick" Margin="6,0,0,0" ToolTip="切换升序 / 降序">
+            <TextBlock x:Name="SortDirIcon" Text="&#xE74B;" FontFamily="{StaticResource IconFont}"
+                       FontSize="12" />
+          </Button>
+        </StackPanel>
+      </Grid>
+
+      <!-- 风格标签（只在「风格」下出现）。换行铺开，不做横向滚动，
+           免得又出现一条抢滚轮的横条。 -->
+      <Border x:Name="GenreScroll" Grid.Row="2" Visibility="Collapsed" Margin="0,10,0,0">
+        <ItemsControl x:Name="GenreBar">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Tag="{Binding Id}" MouseLeftButtonUp="OnGenreClick" Cursor="Hand"
+                      CornerRadius="8" Padding="12,6" Margin="0,0,8,8">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+                    <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding Active}" Value="True">
+                        <Setter Property="Background" Value="#2E2412" />
+                        <Setter Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding Title}" FontSize="13" />
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Border>
+
+      <StackPanel Grid.Row="3" Margin="0,10,0,6">
         <StackPanel x:Name="Breadcrumb" Orientation="Horizontal" Visibility="Collapsed"
-                    Margin="0,0,0,12">
+                    Margin="0,0,0,10">
           <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
                   Cursor="Hand" MouseLeftButtonUp="OnBackClick">
             <TextBlock Text="&#xE72B;  返回上层" FontFamily="{StaticResource IconFont}"
@@ -424,7 +496,7 @@
                      VerticalAlignment="Center" Margin="12,0,0,0" />
         </StackPanel>
 
-        <ScrollViewer HorizontalScrollBarVisibility="Hidden"
+        <ScrollViewer x:Name="LibraryScroll" HorizontalScrollBarVisibility="Hidden"
                       VerticalScrollBarVisibility="Disabled">
           <ItemsControl x:Name="LibraryBar">
             <ItemsControl.ItemsPanel>
@@ -459,7 +531,8 @@
                    Margin="0,10,0,0" TextWrapping="Wrap" />
       </StackPanel>
 
-      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden" Margin="0,14,0,0">
+      <ScrollViewer x:Name="BrowseScroll" Grid.Row="4" VerticalScrollBarVisibility="Hidden"
+                    Margin="0,14,0,0" ScrollChanged="OnBrowseScroll">
         <StackPanel>
           <ItemsControl x:Name="ItemGrid">
             <ItemsControl.ItemsPanel>
@@ -495,9 +568,8 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
 
-          <Button x:Name="MoreButton" Content="加载更多" Click="OnMoreClick"
-                  Style="{StaticResource GhostButton}" HorizontalAlignment="Left"
-                  Margin="0,0,0,28" Visibility="Collapsed" />
+          <TextBlock x:Name="BrowseFooter" Style="{StaticResource Caption}"
+                     Margin="2,0,0,28" />
         </StackPanel>
       </ScrollViewer>
     </Grid>

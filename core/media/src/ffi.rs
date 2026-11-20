@@ -16,7 +16,8 @@ use serde::Serialize;
 use crate::error::MediaError;
 use crate::hub::MediaHub;
 use crate::models::{
-    Envelope, ImageSource, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord, PlaySource,
+    Envelope, Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged,
+    PlayRecord, PlaySource,
 };
 use crate::sources::{self, MediaSource, SourceConfig};
 
@@ -146,6 +147,7 @@ pub extern "C" fn dv_items(
     library_id: *const c_char,
     page: i32,
     page_size: i32,
+    query: *const c_char,
 ) -> *mut c_char {
     guard(|| {
         let Some(h) = (unsafe { handle.as_mut() }) else {
@@ -154,7 +156,8 @@ pub extern "C" fn dv_items(
         let Some(id) = read_cstr(library_id) else {
             return reply::<Paged<MediaItem>>(Err(MediaError::Other("null library id".into())));
         };
-        reply(h.inner.items(&id, page, page_size))
+        let opts = read_query(query);
+        reply(h.inner.items(&id, page, page_size, &opts))
     })
 }
 
@@ -164,6 +167,7 @@ pub extern "C" fn dv_children(
     parent_id: *const c_char,
     page: i32,
     page_size: i32,
+    query: *const c_char,
 ) -> *mut c_char {
     guard(|| {
         let Some(h) = (unsafe { handle.as_mut() }) else {
@@ -172,7 +176,8 @@ pub extern "C" fn dv_children(
         let Some(id) = read_cstr(parent_id) else {
             return reply::<Paged<MediaItem>>(Err(MediaError::Other("null parent id".into())));
         };
-        reply(h.inner.children(&id, page, page_size))
+        let opts = read_query(query);
+        reply(h.inner.children(&id, page, page_size, &opts))
     })
 }
 
@@ -319,6 +324,13 @@ pub extern "C" fn dv_hub_sources(handle: *const HubHandle) -> *mut c_char {
     })
 }
 
+/// 筛选参数是可选 JSON；空指针或解析失败都退回默认值。
+fn read_query(ptr: *const c_char) -> ListQuery {
+    read_cstr(ptr)
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
 #[no_mangle]
 pub extern "C" fn dv_hub_libraries(handle: *const HubHandle) -> *mut c_char {
     guard(|| {
@@ -335,6 +347,7 @@ pub extern "C" fn dv_hub_items(
     library_id: *const c_char,
     page: i32,
     page_size: i32,
+    query: *const c_char,
 ) -> *mut c_char {
     guard(|| {
         let Some(h) = (unsafe { handle.as_ref() }) else {
@@ -343,7 +356,8 @@ pub extern "C" fn dv_hub_items(
         let Some(id) = read_cstr(library_id) else {
             return reply::<Paged<MediaItem>>(Err(MediaError::Other("null library id".into())));
         };
-        reply(h.inner.items(&id, page, page_size))
+        let opts = read_query(query);
+        reply(h.inner.items(&id, page, page_size, &opts))
     })
 }
 
@@ -366,6 +380,7 @@ pub extern "C" fn dv_hub_children(
     parent_id: *const c_char,
     page: i32,
     page_size: i32,
+    query: *const c_char,
 ) -> *mut c_char {
     guard(|| {
         let Some(h) = (unsafe { handle.as_ref() }) else {
@@ -374,7 +389,21 @@ pub extern "C" fn dv_hub_children(
         let Some(id) = read_cstr(parent_id) else {
             return reply::<Paged<MediaItem>>(Err(MediaError::Other("null parent id".into())));
         };
-        reply(h.inner.children(&id, page, page_size))
+        let opts = read_query(query);
+        reply(h.inner.children(&id, page, page_size, &opts))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_genres(handle: *const HubHandle, scope_id: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Vec<Genre>>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(scope_id) else {
+            return reply::<Vec<Genre>>(Err(MediaError::Other("null scope id".into())));
+        };
+        reply(h.inner.genres(&id))
     })
 }
 

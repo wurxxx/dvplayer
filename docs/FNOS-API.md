@@ -123,8 +123,36 @@ POST /v/api/v1/item/list
 ```
 
 - `guid` + `page` + `page_size` 列**当前层**；
-- `ancestor_guid` 列**全部子孙**（实测 63094 条），适合搜索与统计；
+- `ancestor_guid` 列**全部子孙**（实测 63094 条），含季/集，不适合直接铺网格；
 - `type` 是树形的：`Directory` 表示文件夹，`Video` 是文件，`Movie` / `TV` 是刮削后的条目。
+
+筛选和排序也走这个接口（实测 2026-11-20）：
+
+```json
+POST /v/api/v1/item/list
+{
+  "guid": "<媒体库 guid>",
+  "tags": { "type": ["TV"], "genres": 2 },
+  "sort_column": "sort_title",
+  "sort_type": "ASC",
+  "page": 1,
+  "page_size": 60
+}
+```
+
+| 参数 | 取值 | 说明 |
+| --- | --- | --- |
+| `tags.type` | `Movie` / `TV` / `SEASON` / `EPISODE` / `Directory` / `Video` | **数组**；不传就是全部 |
+| `tags.genres` | 数字 | **单个数字**，不是数组；传 `-1` 等于不过滤 |
+| `sort_column` | `sort_title` / `create_time` / `release_date` / `vote_average` | 名称 / 入库 / 发行 / 评分 |
+| `sort_type` | `ASC` / `DESC` | 不区分大小写 |
+
+- `guid` 和 `tags` 一起用时，过滤的是这个库的条目（`type=TV` 得到的是库里的剧，
+  不会把每一集都列出来）；
+- `genres` 的 id 来自 `GET /tag/genres`（`[{id,value}]`，value 是 TMDB 英文名），
+  某个库实际有哪些 genre 看 `GET /tag/list?guid=<库>` 的 `data.genres`；
+- 排序不传就按服务器默认（入库时间倒序）返回。
+
 
 ### 4.2.1 搜索（全文）
 

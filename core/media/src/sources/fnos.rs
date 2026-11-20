@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::error::{compact_json, percent_decode, percent_encode, ApiEnvelope, MediaError, Result};
 use crate::models::{
-    AudioTrack, HttpHeader, ImageSource, MediaDetail, MediaItem, MediaKind, MediaLibrary, Paged,
-    PlayRecord, PlaySource, SubtitleTrack,
+    AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
+    MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
 use crate::sources::MediaSource;
 
@@ -19,6 +19,17 @@ fn md5_hex(value: &str) -> String {
     let mut hasher = Md5::new();
     hasher.update(value.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+/// 界面的排序字段 → 飞牛的 `sort_column`。
+fn fnos_sort_column(sort: &str) -> Option<&'static str> {
+    match sort {
+        "name" => Some("sort_title"),
+        "added" => Some("create_time"),
+        "release" => Some("release_date"),
+        "rating" => Some("vote_average"),
+        _ => None,
+    }
 }
 
 /// authx 签名：md5(SALT_path_nonce_ts_bodyHash_APIKEY)
@@ -177,15 +188,78 @@ impl FnOsSource {
             .collect())
     }
 
-    pub fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        self.list_items("guid", library_id, page, page_size)
+    pub fn items(
+        &self,
+        library_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        self.list_items("guid", library_id, page, page_size, query)
     }
 
-    pub fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        self.list_items("parent_guid", parent_id, page, page_size)
+    pub fn children(
+        &self,
+        parent_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        self.list_items("parent_guid", parent_id, page, page_size, query)
     }
 
-    fn list_items(&self, key: &str, id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+    /// 这个库里实际出现过的风格（`/tag/list` 给 id，`/tag/genres` 给名字）。
+    pub fn genres(&self, scope_id: &str) -> Result<Vec<Genre>> {
+        #[derive(Deserialize)]
+        struct GenreDto {
+            id: i64,
+            value: String,
+        }
+
+        #[derive(Deserialize)]
+        struct TagListDto {
+            #[serde(default)]
+            genres: Vec<i64>,
+        }
+
+        let all: ApiEnvelope<Vec<GenreDto>> =
+            self.send(Method::GET, "/tag/genres", &BTreeMap::new(), None)?;
+
+        let mut params = BTreeMap::new();
+        params.insert("guid".to_string(), scope_id.to_string());
+        let list: ApiEnvelope<TagListDto> = self.send(Method::GET, "/tag/list", &params, None)?;
+
+        let names: std::collections::HashMap<i64, String> = all
+            .data
+            .unwrap_or_default()
+            .into_iter()
+            .map(|g| (g.id, g.value))
+            .collect();
+
+        let Some(tags) = list.data else {
+            return Ok(Vec::new());
+        };
+
+        Ok(tags
+            .genres
+            .into_iter()
+            .filter_map(|id| {
+                names.get(&id).map(|title| Genre {
+                    id: id.to_string(),
+                    title: title.clone(),
+                })
+            })
+            .collect())
+    }
+
+    fn list_items(
+        &self,
+        key: &str,
+        id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
         #[derive(Deserialize)]
         struct ListDto {
             #[serde(default)]
@@ -198,6 +272,43 @@ impl FnOsSource {
         body.insert(key.into(), serde_json::Value::String(id.into()));
         body.insert("page".into(), serde_json::Value::from(page));
         body.insert("page_size".into(), serde_json::Value::from(page_size));
+
+        // 类型过滤：界面的「剧集 / 电影 / 文件夹」。
+        let types: Vec<&str> = match query.kinds.as_slice() {
+            [] => Vec::new(),
+            kinds => kinds
+                .iter()
+                .flat_map(|kind| match kind.as_str() {
+                    "tv" => vec!["TV"],
+                    "movie" => vec!["Movie"],
+                    "folder" => vec!["Directory"],
+                    _ => Vec::new(),
+                })
+                .collect(),
+        };
+
+        // 风格是 TMDB genre id，接口要数字，传不进去就不带这个条件。
+        let genre = query.genre.as_deref().and_then(|g| g.parse::<i64>().ok());
+
+        if !types.is_empty() || genre.is_some() {
+            let mut tags = serde_json::Map::new();
+            if !types.is_empty() {
+                tags.insert("type".into(), serde_json::json!(types));
+            }
+            if let Some(id) = genre {
+                tags.insert("genres".into(), serde_json::Value::from(id));
+            }
+            body.insert("tags".into(), serde_json::Value::Object(tags));
+        }
+
+        if let Some(column) = query.sort.as_deref().and_then(fnos_sort_column) {
+            body.insert("sort_column".into(), serde_json::Value::from(column));
+            body.insert(
+                "sort_type".into(),
+                serde_json::Value::from(if query.descending { "DESC" } else { "ASC" }),
+            );
+        }
+
         let body = compact_json(&body)?;
 
         let env: ApiEnvelope<ListDto> =
@@ -1063,12 +1174,28 @@ impl MediaSource for FnOsSource {
         FnOsSource::libraries(self)
     }
 
-    fn items(&self, library_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        FnOsSource::items(self, library_id, page, page_size)
+    fn items(
+        &self,
+        library_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        FnOsSource::items(self, library_id, page, page_size, query)
     }
 
-    fn children(&self, parent_id: &str, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
-        FnOsSource::children(self, parent_id, page, page_size)
+    fn children(
+        &self,
+        parent_id: &str,
+        page: i32,
+        page_size: i32,
+        query: &ListQuery,
+    ) -> Result<Paged<MediaItem>> {
+        FnOsSource::children(self, parent_id, page, page_size, query)
+    }
+
+    fn genres(&self, scope_id: &str) -> Result<Vec<Genre>> {
+        FnOsSource::genres(self, scope_id)
     }
 
     fn search(&self, query: &str) -> Result<Vec<MediaItem>> {

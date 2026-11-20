@@ -2,6 +2,7 @@
 //!
 //!   FN_USER=.. FN_PASS=.. cargo run -p dvplayer-media --example children <itemId>
 
+use dvplayer_media::models::ListQuery;
 use dvplayer_media::sources::FnOsSource;
 
 fn main() {
@@ -13,7 +14,7 @@ fn main() {
     let mut source = FnOsSource::new("probe".into(), "probe".into(), base, user, pass);
     source.login().expect("login");
 
-    match source.children(&id, 1, 200) {
+    match source.children(&id, 1, 200, &ListQuery::default()) {
         Ok(page) => {
             println!("total={} items={}", page.total, page.items.len());
             for item in page.items.iter().take(12) {

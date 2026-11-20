@@ -86,17 +86,29 @@ public sealed class MediaCore : IDisposable
         return Read(ptr, root => root.Deserialize<List<MediaLibraryDto>>(Json) ?? new());
     }
 
-    public ApiResult<PagedDto<MediaItemDto>> Items(string libraryId, int page, int pageSize)
+    public ApiResult<PagedDto<MediaItemDto>> Items(
+        string libraryId, int page, int pageSize, ListQuery? query = null)
     {
-        var ptr = dv_hub_items(_handle, libraryId, page, pageSize);
+        var ptr = dv_hub_items(_handle, libraryId, page, pageSize, QueryJson(query));
         return Read(ptr, root => root.Deserialize<PagedDto<MediaItemDto>>(Json)!);
     }
 
-    public ApiResult<PagedDto<MediaItemDto>> Children(string parentId, int page, int pageSize)
+    public ApiResult<PagedDto<MediaItemDto>> Children(
+        string parentId, int page, int pageSize, ListQuery? query = null)
     {
-        var ptr = dv_hub_children(_handle, parentId, page, pageSize);
+        var ptr = dv_hub_children(_handle, parentId, page, pageSize, QueryJson(query));
         return Read(ptr, root => root.Deserialize<PagedDto<MediaItemDto>>(Json)!);
     }
+
+    /// <summary>这个库里可用的风格（飞牛是 TMDB genre，Emby 是 Genres 名）。</summary>
+    public ApiResult<List<GenreDto>> Genres(string scopeId)
+    {
+        var ptr = dv_hub_genres(_handle, scopeId);
+        return Read(ptr, root => root.Deserialize<List<GenreDto>>(Json) ?? new());
+    }
+
+    private static string QueryJson(ListQuery? query) =>
+        query is null ? "" : JsonSerializer.Serialize(query, Json);
 
     /// <summary>跨源关键词搜索。返回平铺的条目，集/文件由界面按父级归并。</summary>
     public ApiResult<List<MediaItemDto>> Search(string query)
@@ -284,14 +296,21 @@ public sealed class MediaCore : IDisposable
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string libraryId,
         int page,
-        int pageSize);
+        int pageSize,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string query);
 
     [DllImport(Lib, EntryPoint = "dv_hub_children", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_children(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string parentId,
         int page,
-        int pageSize);
+        int pageSize,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string query);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_genres", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_genres(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string scopeId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_records", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_records(IntPtr handle);
@@ -345,6 +364,23 @@ public sealed record MediaLibraryDto(
     string Category);
 
 public sealed record PagedDto<T>(List<T> Items, int Total, int Page, int PageSize);
+
+/// <summary>列表筛选与排序。字段名与核心的 ListQuery 对齐（camelCase）。</summary>
+public sealed record ListQuery
+{
+    /// <summary>tv / movie / folder；空表示不按类型过滤。</summary>
+    public List<string> Kinds { get; init; } = new();
+
+    /// <summary>风格 id，来自 Genres()。</summary>
+    public string? Genre { get; init; }
+
+    /// <summary>name / added / release / rating。</summary>
+    public string? Sort { get; init; }
+
+    public bool Descending { get; init; }
+}
+
+public sealed record GenreDto(string Id, string Title);
 
 public sealed record MediaItemDto(
     string Id,
