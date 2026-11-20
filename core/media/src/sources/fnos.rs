@@ -1127,6 +1127,34 @@ impl FnOsSource {
             .collect())
     }
 
+    /// 演员作品：`GET /item/list?person_guid=<guid>`（和库列表同一个端点，
+    /// 只是多带一个 person_guid 过滤）。
+    pub fn person_works(&self, person_id: &str) -> Result<Vec<MediaItem>> {
+        #[derive(Deserialize, Default)]
+        struct ListDto {
+            #[serde(default)]
+            list: Option<Vec<ItemDto>>,
+        }
+
+        // 端点仍是 `POST /item/list`，只是把过滤条件换成 person_guid
+        // （GET + query 会返回 404 Not Found）。
+        let body = compact_json(&serde_json::json!({ "person_guid": person_id }))?;
+        let env: ApiEnvelope<ListDto> =
+            self.send(Method::POST, "/item/list", &BTreeMap::new(), Some(&body))?;
+
+        let data = env.data.ok_or_else(|| MediaError::Api {
+            code: env.code,
+            msg: env.msg.unwrap_or_else(|| "no data".into()),
+        })?;
+
+        Ok(data
+            .list
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| self.map_item(d))
+            .collect())
+    }
+
     /// 海报地址：图片接口只认 Authorization 头，调用方要带着头去取字节。
     pub fn image_source(&self, path: &str) -> Result<ImageSource> {
         if path.is_empty() {
@@ -1525,6 +1553,10 @@ impl MediaSource for FnOsSource {
 
     fn people(&self, item_id: &str) -> Result<Vec<Person>> {
         FnOsSource::people(self, item_id)
+    }
+
+    fn person_works(&self, person_id: &str) -> Result<Vec<MediaItem>> {
+        FnOsSource::person_works(self, person_id)
     }
 
     fn image_source(&self, path: &str) -> Result<ImageSource> {

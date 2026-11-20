@@ -216,7 +216,8 @@
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <StackPanel Width="96" Margin="0,0,16,4">
+                  <StackPanel Width="96" Margin="0,0,16,4" Cursor="Hand"
+                              Tag="{Binding PersonId}" MouseLeftButtonUp="OnCastClick">
                     <Border Height="118" CornerRadius="10" Background="{Binding Background}"
                             SnapsToDevicePixels="True">
                       <Grid ClipToBounds="True">

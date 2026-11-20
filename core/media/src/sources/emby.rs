@@ -516,6 +516,24 @@ impl EmbySource {
             .collect())
     }
 
+    /// 某个演员参演的作品：`/Items?PersonIds=<id>&Recursive=true`。
+    pub fn person_works(&self, person_id: &str) -> Result<Vec<MediaItem>> {
+        let user = self.user_id()?;
+        let query = vec![
+            ("PersonIds", person_id.to_string()),
+            ("Recursive", "true".to_string()),
+            ("IncludeItemTypes", "Movie,Series".to_string()),
+            ("Fields", LIST_FIELDS.to_string()),
+            ("SortBy", "ProductionYear,SortName".to_string()),
+            ("SortOrder", "Descending".to_string()),
+            ("Limit", "200".to_string()),
+        ];
+
+        let page: ItemQueryDto = self.get(&format!("/Users/{user}/Items"), &query)?;
+
+        Ok(page.items.iter().map(|d| self.map_item(d)).collect())
+    }
+
     /// 详情页「媒体信息」：一次 `PlaybackInfo` 就带全部轨道属性。
     pub fn media_info(&self, item_id: &str) -> Result<MediaInfo> {
         let item = self.item(item_id)?;
@@ -953,6 +971,10 @@ impl MediaSource for EmbySource {
 
     fn people(&self, item_id: &str) -> Result<Vec<Person>> {
         EmbySource::people(self, item_id)
+    }
+
+    fn person_works(&self, person_id: &str) -> Result<Vec<MediaItem>> {
+        EmbySource::person_works(self, person_id)
     }
 
     fn image_source(&self, path: &str) -> Result<ImageSource> {

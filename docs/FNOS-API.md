@@ -363,6 +363,8 @@ GET /v/api/v1/play/list
 | `POST /v/api/v1/subtitle/download` | 下字幕 |
 | `GET /v/api/v1/movie/<guid>` | 影片详情 |
 | `POST /v/api/v1/person/list/<guid>` | 影片演员；本机库实测返回 `{"list":[],"total":0}`，刮削没存人 |
+| `GET /v/api/v1/person/<guid>` | 人物详情（姓名 / 简介 / 头像 `profile`），**不含作品列表** |
+| `POST /v/api/v1/item/list` body `{"person_guid":"<guid>"}` | 这个人的全部作品（GET + query 会 404） |
 | `GET /v/api/v1/stream/list/<media_guid>` | 文件媒体信息（界面「文件媒体信息」弹窗的数据源）：`video_stream` / `audio_streams`，字段是 ffprobe 那套，码率叫 `bps`、帧率是 `"30 fps"` 字符串 |
 
 搜索用 `GET /v/api/v1/search/list?q=`（见 §4.2.1），`item/list` 的关键词参数无效。

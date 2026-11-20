@@ -178,6 +178,13 @@ public sealed class MediaCore : IDisposable
         return Read(ptr, root => root.Deserialize<MediaInfoDto>(Json)!);
     }
 
+    /// <summary>某个演职人员参与过的作品。</summary>
+    public ApiResult<List<MediaItemDto>> PersonWorks(string personId)
+    {
+        var ptr = dv_hub_person_works(_handle, personId);
+        return Read(ptr, root => root.Deserialize<List<MediaItemDto>>(Json) ?? new());
+    }
+
     /// <summary>演职人员（演员 / 导演 / 编剧）。</summary>
     public ApiResult<List<PersonDto>> People(string itemId)
     {
@@ -399,6 +406,11 @@ public sealed class MediaCore : IDisposable
     private static extern IntPtr dv_hub_detail(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_person_works", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_person_works(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string personId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_people", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_people(

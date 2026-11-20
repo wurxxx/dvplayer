@@ -54,6 +54,18 @@ public partial class SeriesPage : Page
     /// <summary>截图巡检用：往下滚一段，把集行露出来。</summary>
     public void ScrollByForShot(double offset) => PageScroll.ScrollToVerticalOffset(offset);
 
+    /// <summary>截图巡检用：取第一个有 id 的演职人员。</summary>
+    public (string Id, string Name)? FirstPersonForShot()
+    {
+        if (CastList.ItemsSource is not List<CastCard> cards)
+        {
+            return null;
+        }
+
+        var card = cards.FirstOrDefault(c => !string.IsNullOrEmpty(c.PersonId));
+        return card is null ? null : (card.PersonId, card.Name);
+    }
+
     /// <summary>截图巡检用：点一下集行的右箭头（验证平滑滚动动画）。</summary>
     public void ScrollEpisodeRowForShot() => SmoothScroll.ScrollBy(EpisodeScroller, 640);
 
@@ -595,6 +607,7 @@ public partial class SeriesPage : Page
 
         var cards = people.Select(person => new CastCard
         {
+            PersonId = person.Id,
             Name = person.Name,
             Role = person.Role ?? "",
             Job = person.Job ?? "",
@@ -854,8 +867,24 @@ public partial class SeriesPage : Page
         public bool Active { get; set; }
     }
 
+    /// <summary>点头像进这个人的作品页。</summary>
+    private void OnCastClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        var name = (sender as FrameworkElement)?.DataContext is CastCard card
+            ? card.Name
+            : "演职人员";
+
+        NavigationService?.Navigate(new PersonPage(id, name));
+    }
+
     private sealed class CastCard : CardVisual
     {
+        public string PersonId { get; init; } = "";
         public string Name { get; init; } = "";
         public string Role { get; init; } = "";
         public string Job { get; init; } = "";

@@ -1373,11 +1373,12 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
             return;
         }
 
-        // 网格卡片、库分组海报、继续观看卡片共用这个处理器。
-        // 只有「继续观看」是续播，其余一律进详情页——电影 / 单集在详情页里播。
-        if (_continueCards.Any(c => c.ItemId == id))
+        // 网格卡片、库分组海报、搜索结果、继续观看卡片共用这个处理器。
+        // 按卡片类型判断，不能按 id 查「是否在继续观看里」——搜索同一部片
+        // 时也会命中，结果点搜索结果就变成直接起播了。
+        if (sender is FrameworkElement { DataContext: RecordCard record })
         {
-            await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+            await PlayWindow.OpenAsync(Window.GetWindow(this), record.ItemId);
             return;
         }
 

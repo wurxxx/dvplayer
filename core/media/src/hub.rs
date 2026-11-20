@@ -186,6 +186,18 @@ impl MediaHub {
         entry.source.media_info(raw)
     }
 
+    /// 某个演职人员的作品。
+    pub fn person_works(&self, person_id: &str) -> Result<Vec<MediaItem>> {
+        let (entry, raw) = self.route(person_id)?;
+        let mut items = entry.source.person_works(raw)?;
+
+        for item in &mut items {
+            item.poster_path = qualify_opt(&entry.id, item.poster_path.take());
+        }
+
+        Ok(items)
+    }
+
     /// 演职人员；头像路径也要加源前缀，界面才知道去哪取图。
     pub fn people(&self, item_id: &str) -> Result<Vec<Person>> {
         let (entry, raw) = self.route(item_id)?;
@@ -193,6 +205,9 @@ impl MediaHub {
 
         for person in &mut people {
             person.image_path = qualify_opt(&entry.id, person.image_path.take());
+            if !person.id.is_empty() {
+                person.id = qualify(&entry.id, &person.id);
+            }
         }
 
         Ok(people)

@@ -423,6 +423,22 @@ pub extern "C" fn dv_hub_detail(handle: *const HubHandle, item_id: *const c_char
 }
 
 #[no_mangle]
+pub extern "C" fn dv_hub_person_works(
+    handle: *const HubHandle,
+    person_id: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Vec<MediaItem>>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(person_id) else {
+            return reply::<Vec<MediaItem>>(Err(MediaError::Other("null person id".into())));
+        };
+        reply(h.inner.person_works(&id))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn dv_hub_people(
     handle: *const HubHandle,
     item_id: *const c_char,

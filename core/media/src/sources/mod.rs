@@ -111,6 +111,11 @@ pub trait MediaSource: Send + Sync {
     /// 取播放源：直链、请求头、续播点、轨道。
     fn play_source(&self, item_id: &str) -> Result<PlaySource>;
 
+    /// 某个演职员参与过的作品。
+    fn person_works(&self, _person_id: &str) -> Result<Vec<MediaItem>> {
+        Ok(Vec::new())
+    }
+
     /// 演职人员（演员 / 导演 / 编剧）。没有这个概念就返回空列表。
     fn people(&self, _item_id: &str) -> Result<Vec<Person>> {
         Ok(Vec::new())
