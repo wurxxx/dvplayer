@@ -143,9 +143,15 @@ public partial class MainWindow : FluentWindow
         Trace.Write("player bounds (fresh) " + player.DescribeBounds());
         UiCapture.SaveDesktop(Path.Combine(dir, "desktop-early.png"));
 
-        // 回归：把主窗口点回前台，视频层不能沉到它后面。
-        Activate();
+        // 回归：最小化主窗口，播放窗是独立窗口，应该继续放着（视频 + 控制条都在）。
+        WindowState = WindowState.Minimized;
+        await Task.Delay(1500);
+        Trace.Write("main minimized, player bounds " + player.DescribeBounds());
+        UiCapture.SaveDesktop(Path.Combine(dir, "desktop-main-min.png"));
+        WindowState = WindowState.Normal;
         await Task.Delay(1200);
+        Activate();
+        await Task.Delay(800);
 
         // --play-end：跳到片尾，验证播完自动接下一集。
         if (ArgumentAfter("--play-end") is not null)

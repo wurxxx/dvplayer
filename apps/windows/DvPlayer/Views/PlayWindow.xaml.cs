@@ -82,7 +82,7 @@ public partial class PlayWindow : Window
     private bool _maximized;
     private Rect _windowedBounds;
     private Rect _maximizedFrom;
-    private Window? _ownerWindow;
+    private Window? _mainWindow;
     private bool _windowPlaced;
 
     private Point _pressPoint;
@@ -226,9 +226,13 @@ public partial class PlayWindow : Window
     }
 
     /// <summary>
-    /// 先把视频层挂到主窗口名下并显示，再让浮层认视频层当 Owner：
-    /// 「主窗口 ← 视频 ← 浮层」是一条固定的所有权链，z 序不用每次去抢。
-    /// 任务栏里露出来的也是视频窗口（缩略图有画面），浮层不进任务栏。
+    /// 先把视频层显示出来，再让浮层认视频层当 Owner：「视频 ← 浮层」是一条
+    /// 固定的所有权链，浮层永远在视频上面，z 序不用抢。任务栏里露出来的是
+    /// 视频窗口（缩略图有画面），浮层不进任务栏。
+    ///
+    /// 注意**不要**让视频层认主窗口当 Owner：那样最小化媒体库会把正在看的
+    /// 播放窗口一起收进任务栏。库和播放器是两个独立窗口，最小化库就该继续看；
+    /// 只有当主窗口关掉（整个应用退出）时，才把播放器一起关掉。
     /// </summary>
     public void AttachSurface(Window? owner)
     {
@@ -237,26 +241,23 @@ public partial class PlayWindow : Window
             return;
         }
 
-        if (owner is { IsVisible: true })
-        {
-            _surface.Owner = owner;
-        }
-
         _surface.Title = Title;
         _surface.Show();
         _surface.Activated += OnSurfaceActivated;
         _surface.StateChanged += OnSurfaceStateChanged;
         Owner = _surface;
 
-        // 主窗口最小化时，视频层会被系统一起收起，但分层浮层不会 —— 得自己盯着。
-        _ownerWindow = _surface.Owner;
-        if (_ownerWindow is not null)
+        // 主窗口关掉就跟着关（否则 App 会以为还有窗口活着而不退出）。
+        _mainWindow = owner;
+        if (_mainWindow is not null)
         {
-            _ownerWindow.StateChanged += OnSurfaceStateChanged;
+            _mainWindow.Closed += OnMainWindowClosed;
         }
 
         HealWindowPair();
     }
+
+    private void OnMainWindowClosed(object? sender, EventArgs e) => Close();
 
     private void OnSurfaceStateChanged(object? sender, EventArgs e) => HealWindowPair();
 
@@ -271,10 +272,9 @@ public partial class PlayWindow : Window
             return;
         }
 
-        var ownerMinimized = _ownerWindow is { WindowState: WindowState.Minimized };
         var surfaceGone = _surface.WindowState == WindowState.Minimized || !_surface.IsVisible;
 
-        if (ownerMinimized || surfaceGone)
+        if (surfaceGone)
         {
             if (IsVisible)
             {
@@ -1720,10 +1720,10 @@ public partial class PlayWindow : Window
         _ipc?.Dispose();
         _mpv.Dispose();
 
-        if (_ownerWindow is not null)
+        if (_mainWindow is not null)
         {
-            _ownerWindow.StateChanged -= OnSurfaceStateChanged;
-            _ownerWindow = null;
+            _mainWindow.Closed -= OnMainWindowClosed;
+            _mainWindow = null;
         }
 
         if (_surface is not null)
@@ -2019,14 +2019,14 @@ public partial class PlayWindow : Window
         ToggleMaximize();
         await Task.Delay(1200);
 
-        // 4) 主窗口最小化（用户实际遇到的那种）：视频层会被系统收起，
-        //    分层浮层不会，得靠自愈把它藏掉。
-        if (_ownerWindow is not null)
+        // 4) 主窗口最小化：播放窗是独立窗口，应该继续在桌面上放着，不能跟着收起
+        if (_mainWindow is not null)
         {
-            _ownerWindow.WindowState = WindowState.Minimized;
+            _mainWindow.WindowState = WindowState.Minimized;
             await Task.Delay(1800);
+            Trace.Write($"min test main minimized player visible={IsVisible} " + DescribeBounds());
             UiCapture.SaveDesktop(Path.Combine(dir, "desktop-main-min.png"));
-            _ownerWindow.WindowState = WindowState.Normal;
+            _mainWindow.WindowState = WindowState.Normal;
             await Task.Delay(1800);
             UiCapture.SaveDesktop(Path.Combine(dir, "desktop-main-restore.png"));
         }
