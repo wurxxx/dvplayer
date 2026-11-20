@@ -208,6 +208,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     private let onClosed: () -> Void
 
     private var keyMonitor: Any?
+    private var wheelMonitor: Any?
+    private var lastWheelAt = Date.distantPast
     private var fullscreenObservers: [NSObjectProtocol] = []
     private var closeRequested = false
 
@@ -242,6 +244,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
         buildContentView()
         installKeyMonitor()
+        installWheelMonitor()
         observeFullscreen()
     }
 
@@ -305,6 +308,19 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window === self.window else { return event }
             return self.handleKey(event) ? nil : event
+        }
+    }
+
+    /// 画面上滚轮调音量，和 Windows 的 `OnSurfaceWheel` 一样（±2，向上加）。
+    /// 触控板会连着来几十个小事件，按时间节流，别一下拉满。
+    private func installWheelMonitor() {
+        wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            guard abs(event.scrollingDeltaY) > 0.5 else { return nil }
+            guard Date().timeIntervalSince(self.lastWheelAt) > 0.08 else { return nil }
+            self.lastWheelAt = Date()
+            self.session.setVolume(self.session.volume + (event.scrollingDeltaY > 0 ? 2 : -2))
+            return nil
         }
     }
 
@@ -381,6 +397,10 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
+        }
+        if let wheelMonitor {
+            NSEvent.removeMonitor(wheelMonitor)
+            self.wheelMonitor = nil
         }
         for observer in fullscreenObservers {
             NotificationCenter.default.removeObserver(observer)
