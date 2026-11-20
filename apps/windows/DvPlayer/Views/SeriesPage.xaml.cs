@@ -789,7 +789,7 @@ public partial class SeriesPage : Page
             CornerRadius = new CornerRadius(12),
             Padding = new Thickness(18, 16, 18, 16),
             Margin = new Thickness(0, 0, 18, 18),
-            Width = 380,
+            Width = 320,
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = body,
         };

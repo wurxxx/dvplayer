@@ -11,7 +11,9 @@ use crate::models::{
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
-use crate::sources::{pick_bool, pick_f64, pick_i32, pick_i64, pick_str, MediaSource};
+use crate::sources::{
+    job_label, language_label, pick_bool, pick_f64, pick_i32, pick_i64, pick_str, MediaSource,
+};
 
 const API_PREFIX: &str = "/v/api/v1";
 const SIGN_SALT: &str = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh";
@@ -1046,9 +1048,8 @@ impl FnOsSource {
                     .map(|a| AudioInfo {
                         title: pick_str(a, &["title"]),
                         // 飞牛没识别出语言时写 `und`，界面显示「--」更清楚。
-                        language: pick_str(a, &["language"]).filter(|l| {
-                            !l.eq_ignore_ascii_case("und") && !l.eq_ignore_ascii_case("unknown")
-                        }),
+                        language: pick_str(a, &["language"])
+                            .and_then(|l| language_label(&l)),
                         codec: pick_str(a, &["codec_name", "codec"]).map(|c| c.to_uppercase()),
                         profile: pick_str(a, &["profile"]),
                         layout: pick_str(a, &["channel_layout"]),
@@ -1107,7 +1108,10 @@ impl FnOsSource {
             .iter()
             .filter_map(|p| {
                 let name = pick_str(p, &["name", "person_name", "title"])?;
-                let image = pick_str(p, &["poster", "avatar", "image", "thumb", "poster_path"])
+                let image = pick_str(
+                    p,
+                    &["profile_path", "poster", "avatar", "image", "thumb", "poster_path"],
+                )
                     // 外部完整地址走不了 sys/img，丢掉。
                     .filter(|path| !path.starts_with("http"));
 
@@ -1115,7 +1119,8 @@ impl FnOsSource {
                     id: pick_str(p, &["guid", "person_guid", "id"]).unwrap_or_default(),
                     name,
                     role: pick_str(p, &["character", "role", "actor_role"]),
-                    job: pick_str(p, &["job", "type", "position", "department"]),
+                    job: pick_str(p, &["job", "type", "position", "department"])
+                        .and_then(|job| job_label(&job)),
                     image_path: image,
                 })
             })

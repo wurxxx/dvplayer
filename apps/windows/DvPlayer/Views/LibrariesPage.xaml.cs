@@ -1373,39 +1373,12 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
             return;
         }
 
-        // 网格里的卡片、横向海报行、继续观看卡片共用这个处理器；
-        // 只有网格卡片带 Kind，其它卡片都按可播放处理是不对的，
-        // 所以这里先查网格数据，找不到再看行卡片。
-        var card = _visible.FirstOrDefault(c => c.Id == id);
-        if (card is not null)
-        {
-            if (card.IsPlayable)
-            {
-                await PlayWindow.OpenAsync(Window.GetWindow(this), id);
-                return;
-            }
-
-            NavigationService?.Navigate(new SeriesPage(id));
-            return;
-        }
-
-        var record = _continueCards.FirstOrDefault(c => c.ItemId == id);
-        if (record is not null)
+        // 网格卡片、库分组海报、继续观看卡片共用这个处理器。
+        // 只有「继续观看」是续播，其余一律进详情页——电影 / 单集在详情页里播。
+        if (_continueCards.Any(c => c.ItemId == id))
         {
             await PlayWindow.OpenAsync(Window.GetWindow(this), id);
             return;
-        }
-
-        // 库分组里的海报：先看详情，能播就直接播。
-        var core = AppServices.Instance.Core;
-        if (core is not null)
-        {
-            var detail = await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(true);
-            if (detail is { Ok: true, Data: not null } && MediaText.IsPlayable(detail.Data.Kind))
-            {
-                await PlayWindow.OpenAsync(Window.GetWindow(this), id);
-                return;
-            }
         }
 
         NavigationService?.Navigate(new SeriesPage(id));

@@ -149,6 +149,62 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
     }
 }
 
+// —— 条目标签的中文化 ——
+//
+// 服务器给的是英文职位和 ISO 639 语言代码，界面统一显示中文；
+// 认不出来的原样返回，别把有用信息吞掉。
+
+/// `Actor` / `Director` … → 演员 / 导演 / 编剧。
+pub(crate) fn job_label(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    let label = match value.to_ascii_lowercase().as_str() {
+        "actor" | "actress" | "cast" => "演员",
+        "director" | "directing" => "导演",
+        "writer" | "screenplay" | "writing" => "编剧",
+        "producer" | "production" => "制片",
+        "gueststar" => "客串",
+        "composer" | "sound" => "音乐",
+        "editor" | "editing" => "剪辑",
+        "camera" | "cinematography" => "摄影",
+        _ => return Some(value.to_string()),
+    };
+
+    Some(label.into())
+}
+
+/// `chi` / `eng` / `jpn` … → 中文 / 英语 / 日语；`und` 视为没识别出来。
+pub(crate) fn language_label(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    let label = match value.to_ascii_lowercase().as_str() {
+        "und" | "unknown" | "unk" => return None,
+        "chi" | "zho" | "zh" | "chs" | "cht" => "中文",
+        "eng" | "en" => "英语",
+        "jpn" | "ja" => "日语",
+        "kor" | "ko" => "韩语",
+        "fra" | "fre" | "fr" => "法语",
+        "deu" | "ger" | "de" => "德语",
+        "spa" | "es" => "西班牙语",
+        "rus" | "ru" => "俄语",
+        "ita" | "it" => "意大利语",
+        "por" | "pt" => "葡萄牙语",
+        "tha" | "th" => "泰语",
+        "hin" | "hi" => "印地语",
+        "ara" | "ar" => "阿拉伯语",
+        "cmn" => "中文",
+        _ => return Some(value.to_string()),
+    };
+
+    Some(label.into())
+}
+
 // —— ffprobe 风格字段的宽松读取 ——
 //
 // 各家服务器的流信息字段名和类型都不统一（`bit_rate` 有时是数字有时是字符串，

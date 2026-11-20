@@ -582,9 +582,8 @@ public partial class RecordsPage : Page
             return;
         }
 
-        // 收藏里可能是剧集 / 文件夹，先看详情再决定播放还是下钻。
-        if (_favorites.FirstOrDefault(f => f.Id == id) is { } favorite &&
-            !MediaText.IsPlayable(favorite.Kind))
+        // 收藏的是影片 / 剧集本身，进详情；观看记录才是续播。
+        if (_favorites.Any(f => f.Id == id))
         {
             NavigationService?.Navigate(new SeriesPage(id));
             return;

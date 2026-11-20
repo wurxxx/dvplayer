@@ -271,23 +271,18 @@ public partial class SearchPage : Page
         ResultGrid.ItemsSource = null;
     }
 
-    private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    /// <summary>
+    /// 搜索结果一律进详情：单集 / 电影也在详情页里播，
+    /// 只有「继续观看」这类带进度的地方才直接续播。
+    /// </summary>
+    private void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
         {
             return;
         }
 
-        var cards = ResultGrid.ItemsSource as List<SearchCard>;
-        var card = cards?.FirstOrDefault(c => c.Id == id);
-
-        if (card is not null && !MediaText.IsPlayable(card.Kind))
-        {
-            NavigationService?.Navigate(new SeriesPage(id));
-            return;
-        }
-
-        await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+        NavigationService?.Navigate(new SeriesPage(id));
     }
 
 

@@ -75,6 +75,7 @@ public static class PosterLoader
             var source = await Task.Run(() => core.ImageSource(posterPath)).ConfigureAwait(false);
             if (!source.Ok || source.Data is null)
             {
+                Trace.Write($"poster src fail {posterPath} {source.Error}");
                 return null;
             }
 
@@ -95,6 +96,7 @@ public static class PosterLoader
                 using var response = await Http.SendAsync(request).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
+                    Trace.Write($"poster http {(int)response.StatusCode} {posterPath}");
                     return null;
                 }
 
@@ -113,9 +115,10 @@ public static class PosterLoader
 
             return bitmap;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // 海报失败不影响主流程，调用方回退到渐变占位。
+            Trace.Write($"poster err {posterPath} {ex.Message}");
             return null;
         }
         finally
@@ -151,8 +154,9 @@ public static class PosterLoader
             image.Freeze();
             return image;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Trace.Write($"poster decode {ex.GetType().Name} {ex.Message}");
             return null;
         }
     }

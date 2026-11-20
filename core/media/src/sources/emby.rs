@@ -20,7 +20,7 @@ use crate::models::{
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
-use crate::sources::MediaSource;
+use crate::sources::{job_label, language_label, MediaSource};
 
 const TICKS_PER_SECOND: i64 = 10_000_000;
 const CLIENT_VERSION: &str = "0.1.0";
@@ -511,15 +511,7 @@ impl EmbySource {
                 id: p.id,
                 name: p.name,
                 role: p.role.filter(|r| !r.is_empty()),
-                // Emby 的 Type 是英文：Actor / Director / Writer。
-                job: p.kind.map(|k| match k.as_str() {
-                    "Actor" => "演员".to_string(),
-                    "Director" => "导演".to_string(),
-                    "Writer" => "编剧".to_string(),
-                    "Producer" => "制片".to_string(),
-                    "GuestStar" => "客串".to_string(),
-                    other => other.to_string(),
-                }),
+                job: p.kind.as_deref().and_then(job_label),
             })
             .collect())
     }
@@ -583,7 +575,10 @@ impl EmbySource {
                     .clone()
                     .or_else(|| a.display_title.clone())
                     .filter(|s| !s.is_empty()),
-                language: a.language.clone().filter(|s| !s.is_empty()),
+                language: a
+                    .language
+                    .as_deref()
+                    .and_then(language_label),
                 codec: a.codec.clone().filter(|s| !s.is_empty()).map(|c| c.to_uppercase()),
                 profile: a.profile.clone().filter(|s| !s.is_empty()),
                 layout: a.channel_layout.clone().filter(|s| !s.is_empty()),
