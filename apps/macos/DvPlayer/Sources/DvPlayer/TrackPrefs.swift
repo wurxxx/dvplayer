@@ -27,6 +27,44 @@ enum TrackPrefs {
         return value.subtitle
     }
 
+    /// 语言 / 标题看起来是中文轨（`zh`、`chi`、`简中`、`中英` 这些都算）。
+    static func isChinese(_ language: String?, _ title: String?) -> Bool {
+        let lang = (language ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        if lang == "中文" { return true }
+
+        if !lang.isEmpty,
+           ["zh", "chi", "zho", "chs", "cht", "cmn", "yue"].contains(where: { lang.hasPrefix($0) }) {
+            return true
+        }
+
+        let text = (title ?? "").lowercased()
+        guard !text.isEmpty else { return false }
+        return ChineseHints.contains(where: { text.contains($0) })
+    }
+
+    /// 简体字幕：`Simplified Chinese` / `简` / `chs` / `zh-CN` 都算。
+    static func isSimplified(_ language: String?, _ title: String?) -> Bool {
+        let text = (title ?? "").lowercased()
+        let lang = (language ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        return text.contains("simplified") || text.contains("简")
+            || lang.contains("hans")
+            || ["chs", "cn", "zh-cn", "zh-hans"].contains(lang)
+    }
+
+    /// 繁体字幕：`Traditional Chinese` / `繁` / `cht` / `zh-TW` 都算。
+    static func isTraditional(_ language: String?, _ title: String?) -> Bool {
+        let text = (title ?? "").lowercased()
+        let lang = (language ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        return text.contains("traditional") || text.contains("繁")
+            || lang.contains("hant")
+            || ["cht", "zh-tw", "zh-hk", "zh-hant"].contains(lang)
+    }
+
+    private static let ChineseHints = [
+        "中文", "简体", "繁体", "简中", "繁中", "中字", "中英", "双语",
+        "chinese", "mandarin", "cantonese", "chs", "cht",
+    ]
+
     static func setAudio(_ itemId: String, _ index: Int?) {
         let current = map[itemId] ?? (unset, unset)
         map[itemId] = (index ?? unset, current.subtitle)

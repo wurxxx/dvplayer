@@ -787,8 +787,9 @@ public partial class SeriesPage : Page
         }
 
         var key = _playTargetId ?? _itemId;
-        var selected = TrackPrefs.Subtitle(key)
-            ?? (subs.FindIndex(s => s.IsDefault) is var index && index >= 0 ? index : TrackPrefs.SubtitleOff);
+
+        // 手动选过听手动；没选过优先中文字幕（没有中文再看服务器默认轨）。
+        var selected = TrackPrefs.ResolveSubtitle(key, subs);
 
         var choices = new List<(string Label, bool Selected, int Value)>
         {
@@ -798,8 +799,7 @@ public partial class SeriesPage : Page
         choices.AddRange(subs.Select((s, i) => (
             Label: string.Join("  ", new[]
                 {
-                    s.Language,
-                    s.Title,
+                    TrackPrefs.SubtitleName(s),
                     s.Codec,
                     s.IsBitmap ? "图形" : null,
                     s.IsExternal ? "外挂" : null,
@@ -877,13 +877,12 @@ public partial class SeriesPage : Page
 
         if (subs.Count > 0)
         {
-            var index = TrackPrefs.Subtitle(_playTargetId ?? _itemId);
-            SubtitleLabel.Text = index is null or TrackPrefs.SubtitleOff
-                ? "字幕"
-                : "字幕：" + (subs.ElementAtOrDefault((int)index)?.Language ?? "已选");
-            SubtitleButton.ToolTip = index is null or TrackPrefs.SubtitleOff
-                ? "选择字幕"
-                : "更换字幕";
+            var index = TrackPrefs.ResolveSubtitle(_playTargetId ?? _itemId, subs);
+            var subtitle = index == TrackPrefs.SubtitleOff ? null : subs.ElementAtOrDefault(index);
+            SubtitleLabel.Text = subtitle is null
+                ? "字幕：关"
+                : "字幕：" + TrackPrefs.SubtitleName(subtitle);
+            SubtitleButton.ToolTip = subtitle is null ? "选择字幕" : "更换字幕";
         }
     }
 

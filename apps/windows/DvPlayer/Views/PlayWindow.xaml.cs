@@ -1079,6 +1079,15 @@ public partial class PlayWindow : Window
                     ? _subtitleTracks[subtitle].Id
                     : "auto");
         }
+        else if (_subtitleTracks.FirstOrDefault(t => TrackPrefs.IsChinese(t.Language, t.Title))
+                 is { } chinese)
+        {
+            // 详情页没来得及读媒体信息就起播（续播、从播放页切集）时的兜底：
+            // 有中文字幕就自动打开，不用用户每次手动选。
+            _ipc.Command("set_property", "sid", chinese.Id);
+            Trace.Write($"subtitle auto zh id={chinese.Id} lang={chinese.Language} " +
+                        $"title={chinese.Title}");
+        }
     }
 
     private void UpdatePositionUi()

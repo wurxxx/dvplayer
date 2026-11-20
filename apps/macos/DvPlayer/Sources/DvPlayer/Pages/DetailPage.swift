@@ -489,10 +489,38 @@ struct DetailPage: View {
         return max(0, info.audios.firstIndex(where: { $0.isDefault == true }) ?? 0)
     }
 
-    /// 没选过就用默认字幕；一条都没有默认的就当关闭。
+    /// 没选过就先挑简体中文、再任意中文，其次服务器默认轨；都没有就当关闭。
     private func effectiveSubtitleIndex(_ info: MediaInfo) -> Int {
         if let saved = TrackPrefs.subtitle(trackKey) { return saved }
+
+        let simplified = info.subtitles.firstIndex(where: {
+            TrackPrefs.isSimplified($0.language, $0.title)
+        })
+
+        let chinese = info.subtitles.firstIndex(where: {
+            TrackPrefs.isChinese($0.language, $0.title)
+        })
+
+        if let index = simplified ?? chinese {
+            return index
+        }
+
         return info.subtitles.firstIndex(where: { $0.isDefault == true }) ?? TrackPrefs.subtitleOff
+    }
+
+    /// 字幕按钮 / 菜单里的名字：中文轨映射成中文名，别露出 Simplified Chinese。
+    private func subtitleName(_ subtitle: SubtitleInfo) -> String {
+        let title = (subtitle.title ?? "").trimmingCharacters(in: .whitespaces)
+
+        if TrackPrefs.isSimplified(subtitle.language, title) { return "简体中文" }
+        if TrackPrefs.isTraditional(subtitle.language, title) { return "繁体中文" }
+
+        if TrackPrefs.isChinese(subtitle.language, title) {
+            let hasCjk = title.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+            return hasCjk ? title : "中文"
+        }
+
+        return subtitle.language ?? subtitle.codec ?? "默认"
     }
 
     private var audioLabel: String {
@@ -510,8 +538,7 @@ struct DetailPage: View {
         let index = effectiveSubtitleIndex(info)
         if index == TrackPrefs.subtitleOff { return "字幕：关" }
         guard info.subtitles.indices.contains(index) else { return "字幕" }
-        let subtitle = info.subtitles[index]
-        return "字幕：" + (subtitle.language ?? subtitle.title ?? subtitle.codec ?? "默认")
+        return "字幕：" + subtitleName(info.subtitles[index])
     }
 
     private func audioChoices(_ info: MediaInfo) -> [TrackChoice] {
@@ -553,14 +580,13 @@ struct DetailPage: View {
 
         choices.append(contentsOf: info.subtitles.enumerated().map { index, subtitle in
             var parts: [String] = []
-            if let language = subtitle.language, !language.isEmpty { parts.append(language) }
             if let codec = subtitle.codec, !codec.isEmpty { parts.append(codec) }
             if let format = subtitle.format, !format.isEmpty { parts.append(format) }
             if subtitle.isBitmap == true { parts.append("图形") }
             if subtitle.isExternal == true { parts.append("外挂") }
 
             return TrackChoice(id: index,
-                               label: subtitle.title ?? "字幕 \(index + 1)",
+                               label: subtitleName(subtitle),
                                detail: parts.joined(separator: " · "),
                                selected: index == current) {
                 TrackPrefs.setSubtitle(trackKey, index)

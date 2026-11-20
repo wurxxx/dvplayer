@@ -67,6 +67,10 @@
 - **集号会漏**：飞牛这一季就丢了第 6 集的 `episodeNumber`。直接按「顺序补号」会和
   第 1 集撞成两个 E01，现在用「没被占用的最小号码」补。分页补集时要把已经用掉的
   集号传进 `makeRows(_:used:)`，否则第二页会再从 1 补出一个 E01。
+- **中文字幕不能只看语言字段**：飞牛适配器把 `language` 映射成了「中文」，
+  而字幕轨 `title` 常常还是英文的 `Simplified Chinese` / `Traditional Chinese`，
+  mpv 那边又可能给 `cmn-Hans`。判断中文要同时看 language 前缀（`zh` / `chi` / `cmn` / `yue`…）、
+  `hans` / `hant`、以及标题里的 `Chinese` / `简` / `繁`。
 - **详情页慢在两次 `/item/list`**：`detail` 只要 15–20ms，演职 20ms；季列表 0.5–2s、
   第一页集 0.5–3s，服务端波动很大且和 `page_size` 不完全成正比。所以别等全部数据
   再上屏：详情一到就画头部，集列表先取一页（`episodePageSize = 80`）铺出来，剩下的
