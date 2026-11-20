@@ -87,6 +87,7 @@ public sealed class MpvProcess : IDisposable
         }
 
         OpenLog();
+        WriteLog("args: " + string.Join(" ", psi.ArgumentList));
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => WriteLog(e.Data);
@@ -171,6 +172,7 @@ public sealed class MpvProcess : IDisposable
         yield return $"--wid={wid.ToInt64()}";           // 挂进壳的 HWND
         yield return "--osc=no";                         // UI 由壳提供
         yield return "--keep-open=yes";                  // 播完留住最后一帧，别闪回桌面
+
         yield return $"--input-ipc-server=\\\\.\\pipe\\{pipeName}";
         yield return "--input-default-bindings=no";      // 快捷键归壳，mpv 不抢键盘
         yield return "--input-vo-keyboard=no";

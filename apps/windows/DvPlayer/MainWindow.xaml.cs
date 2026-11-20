@@ -159,17 +159,23 @@ public partial class MainWindow : FluentWindow
         UiCapture.SaveDesktop(Path.Combine(dir, "desktop-main-min.png"));
         WindowState = WindowState.Normal;
         await Task.Delay(1200);
+
+        // 播放窗现在是独立窗口，库拿回前台会把它盖住；巡检要看播放窗，再点回它。
         Activate();
+        await Task.Delay(600);
+        player.Activate();
         await Task.Delay(800);
 
-        // --play-end：跳到片尾，验证播完自动接下一集。
+        // --play-end：跳到片尾，验证剧集接下一集、电影回到开头（窗口都不关）。
         if (ArgumentAfter("--play-end") is not null)
         {
             player.SkipToEndForShot();
             await Task.Delay(22000);
+            Trace.Write("eof state " + player.DescribePlaybackState());
             player.ShowChromeForShot();
             await Task.Delay(600);
             UiCapture.SaveScreen(player, Path.Combine(dir, "play-next.png"));
+            UiCapture.SaveDesktop(Path.Combine(dir, "desktop-end.png"));
             player.Close();
             return;
         }

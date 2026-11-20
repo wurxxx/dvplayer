@@ -74,6 +74,8 @@ public partial class PlayWindow : Window
     private int _sinceReport;
     private bool _chromeVisible = true;
     private bool _hardwareDecode = true;
+    private bool _muted;
+    private double _speed = 1;
 
     /// <summary>视频层，跟这个窗口保持同一矩形。</summary>
     private PlayerSurfaceWindow? _surface;
@@ -891,7 +893,17 @@ public partial class PlayWindow : Window
             ipc.Observe(name);
         }
 
+        // 换集 / 片尾倒回都会重启 mpv，声音和倍速得自己带过去。
         ipc.Command("set_property", "volume", (int)Math.Round(Volume.Value));
+        if (_speed > 0 && Math.Abs(_speed - 1) > 0.001)
+        {
+            ipc.Command("set_property", "speed", _speed);
+        }
+
+        if (_muted)
+        {
+            ipc.Command("set_property", "mute", true);
+        }
         LoadingPanel.Visibility = Visibility.Collapsed;
     }
 
@@ -921,7 +933,8 @@ public partial class PlayWindow : Window
                     break;
 
                 case "mute" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
-                    TopMuteGlyph.Visibility = value.GetBoolean() ? Visibility.Visible : Visibility.Collapsed;
+                    _muted = value.GetBoolean();
+                    TopMuteGlyph.Visibility = _muted ? Visibility.Visible : Visibility.Collapsed;
                     break;
 
                 case "cache-speed" when value.ValueKind == JsonValueKind.Number:
@@ -935,6 +948,7 @@ public partial class PlayWindow : Window
 
                 case "speed" when value.ValueKind == JsonValueKind.Number:
                     _lastSpeed = value.GetDouble();
+                    _speed = _lastSpeed;
                     SpeedGlyph.Text = $"{_lastSpeed:0.##}×";
                     break;
 
@@ -959,16 +973,20 @@ public partial class PlayWindow : Window
         });
     }
 
-    /// <summary>播完自动接下一集；已经是最后一集就关窗口。</summary>
+    /// <summary>
+    /// 播完：剧集接下一集；最后一集或电影（没有选集）就直接关窗口。
+    /// </summary>
     private void AdvanceOrClose()
     {
         var index = _playlist.FindIndex(episode => episode.Id == _itemId);
         if (index >= 0 && index + 1 < _playlist.Count)
         {
+            Trace.Write($"eof {_itemId} -> next {_playlist[index + 1].Id}");
             _ = SwitchToAsync(_playlist[index + 1].Id);
             return;
         }
 
+        Trace.Write($"eof {_itemId} -> close (playlist={_playlist.Count})");
         Close();
     }
 
@@ -2203,6 +2221,11 @@ public partial class PlayWindow : Window
             UiCapture.SaveDesktop(Path.Combine(dir, "desktop-main-restore.png"));
         }
     }
+
+    /// <summary>截图巡检用：片尾行为（接下一集 / 回到开头）看这一行。</summary>
+    public string DescribePlaybackState() =>
+        $"item={_itemId} pos={_position:0} dur={EffectiveDuration:0} eof={_eof} " +
+        $"paused={_paused} playlist={_playlist.Count} visible={IsVisible}";
 
     /// <summary>截图巡检用：打一行几何信息，排查两个窗口没对齐。</summary>
     public string DescribeBounds()
