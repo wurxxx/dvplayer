@@ -144,6 +144,14 @@ public partial class MainWindow : FluentWindow
             await Task.Delay((tag == "search" ? 15000 : tag == "libraries" ? 9000 : 5000)
                              + extraDelay * 1000);
 
+            // --edit-source：服务器页打开第一个源的编辑表单。
+            if (Environment.GetCommandLineArgs().Contains("--edit-source") &&
+                ContentFrame.Content is SourcesPage sourcesPage)
+            {
+                sourcesPage.EditFirstSourceForShot();
+                await Task.Delay(400);
+            }
+
             // --inline-search <关键词>：截图时停在页内搜索结果。
             var inlineQuery = ArgumentAfter("--inline-search");
             if (inlineQuery is not null && ContentFrame.Content is LibrariesPage searchShot)

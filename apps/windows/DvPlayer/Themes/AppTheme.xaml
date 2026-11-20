@@ -32,6 +32,45 @@
   <FontFamily x:Key="DisplayFont">Segoe UI Variable Display, Segoe UI Semibold, Microsoft YaHei UI</FontFamily>
   <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
 
+  <!-- 按 Alt 会激活焦点视觉，在深色界面里会多出一圈虚线/边框。
+       这里统一关掉；键盘操作靠高亮背景本身足够辨认。 -->
+  <Style TargetType="Page">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="ScrollViewer">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="ListBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="ListBoxItem">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="ItemsControl">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="RadioButton">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="ToggleButton">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="TextBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="PasswordBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="ComboBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+  <Style TargetType="Slider">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+  </Style>
+
   <!-- 页面标题 -->
   <Style x:Key="PageTitle" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
@@ -54,6 +93,7 @@
 
   <!-- 侧栏分组标题（不可点） -->
   <Style x:Key="NavGroupLabel" TargetType="ListBoxItem">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Focusable" Value="False" />
     <Setter Property="IsHitTestVisible" Value="False" />
     <Setter Property="Template">
@@ -67,6 +107,7 @@
 
   <!-- 侧栏导航项 -->
   <Style x:Key="NavItem" TargetType="ListBoxItem">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Margin" Value="10,2" />
     <Setter Property="Padding" Value="12,10" />
     <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
@@ -106,6 +147,7 @@
 
   <!-- 普通按钮 -->
   <Style x:Key="GhostButton" TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="BorderThickness" Value="1" />
@@ -133,6 +175,7 @@
   </Style>
 
   <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#1A1200" />
     <Setter Property="BorderThickness" Value="0" />
@@ -162,6 +205,7 @@
   </Style>
 
   <Style x:Key="InputPassword" TargetType="PasswordBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
@@ -188,6 +232,7 @@
   </Style>
 
   <Style x:Key="Input" TargetType="TextBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
@@ -216,6 +261,7 @@
 
   <!-- 播放器 -->
   <Style x:Key="PlayerButton" TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#E6FFFFFF" />
     <Setter Property="Cursor" Value="Hand" />
@@ -238,6 +284,7 @@
   </Style>
 
   <Style x:Key="SeekBar" TargetType="Slider">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Height" Value="18" />
     <Setter Property="Template">
       <Setter.Value>
@@ -283,6 +330,7 @@
 
 <!-- 顶栏里的图标按钮：加号 / 刷新 / 更多 -->
   <Style x:Key="ToolButton" TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
     <Setter Property="Cursor" Value="Hand" />
@@ -314,6 +362,7 @@
   </Style>
 
   <Style x:Key="SegmentItem" TargetType="RadioButton">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
     <Setter Property="FontSize" Value="13" />
     <Setter Property="Cursor" Value="Hand" />
@@ -350,6 +399,7 @@
 
   <!-- 开关 -->
   <Style x:Key="Switch" TargetType="ToggleButton">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Width" Value="44" />
     <Setter Property="Height" Value="26" />
     <Setter Property="Cursor" Value="Hand" />
@@ -395,6 +445,7 @@
   </Style>
 
   <Style x:Key="SearchBoxInput" TargetType="TextBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
@@ -421,6 +472,7 @@
 
   <!-- 横向列表两侧的滚动箭头：默认隐藏，鼠标进入这一行才淡入 -->
   <Style x:Key="ScrollArrow" TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Width" Value="34" />
     <Setter Property="Height" Value="34" />
     <Setter Property="Background" Value="#99000000" />

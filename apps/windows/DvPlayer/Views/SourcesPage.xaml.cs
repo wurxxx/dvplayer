@@ -18,6 +18,9 @@ public partial class SourcesPage : Page
         Unloaded += OnUnloaded;
     }
 
+    /// <summary>正在编辑的源；null 表示是新增。</summary>
+    private string? _editingId;
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
@@ -35,24 +38,44 @@ public partial class SourcesPage : Page
     private void OnConnectionChanged(object? sender, EventArgs e) =>
         Dispatcher.BeginInvoke(RefreshSources);
 
-    /// <summary>类型下拉由核心给出；核心没加载时至少保留飞牛。</summary>
+    /// <summary>类型按钮按核心支持的种类启用；核心没加载时至少保留飞牛。</summary>
     private void FillKinds()
     {
-        if (KindBox.Items.Count > 0)
-        {
-            return;
-        }
-
         var kinds = MediaCore.SupportedKinds();
         if (kinds.Count == 0)
         {
             kinds = new List<string> { "fnos" };
         }
 
-        KindBox.ItemsSource = kinds
-            .Select(k => new KindOption(k, MediaText.SourceKindLabel(k)))
-            .ToList();
-        KindBox.SelectedIndex = 0;
+        KindFnos.IsEnabled = kinds.Contains("fnos");
+        KindEmby.IsEnabled = kinds.Contains("emby");
+        KindJellyfin.IsEnabled = kinds.Contains("jellyfin");
+
+        if (KindFnos.IsEnabled)
+        {
+            KindFnos.IsChecked = true;
+        }
+        else if (KindEmby.IsEnabled)
+        {
+            KindEmby.IsChecked = true;
+        }
+        else if (KindJellyfin.IsEnabled)
+        {
+            KindJellyfin.IsChecked = true;
+        }
+    }
+
+    /// <summary>当前选中的类型。</summary>
+    private string SelectedKind() =>
+        KindEmby.IsChecked == true ? "emby"
+        : KindJellyfin.IsChecked == true ? "jellyfin"
+        : "fnos";
+
+    private void SelectKind(string kind)
+    {
+        KindFnos.IsChecked = kind == "fnos";
+        KindEmby.IsChecked = kind == "emby";
+        KindJellyfin.IsChecked = kind == "jellyfin";
     }
 
     private void RefreshSources()
@@ -106,13 +129,77 @@ public partial class SourcesPage : Page
     {
         if (AddPanel.Visibility == Visibility.Visible)
         {
-            AddPanel.Visibility = Visibility.Collapsed;
-            AddStatus.Text = "";
+            CloseAddPanel();
             return;
         }
 
+        ResetAddPanel();
         AddPanel.Visibility = Visibility.Visible;
         NameBox.Focus();
+    }
+
+    /// <summary>收起表单并回到「新增」状态。</summary>
+    private void CloseAddPanel()
+    {
+        AddPanel.Visibility = Visibility.Collapsed;
+        AddStatus.Text = "";
+        _editingId = null;
+        ResetAddPanel();
+    }
+
+    private void ResetAddPanel()
+    {
+        AddTitle.Text = "添加服务器";
+        AddSubmitButton.Content = "添加并连接";
+        AddStatus.Text = "";
+        SelectKind("fnos");
+    }
+
+    /// <summary>截图巡检用：打开第一个源的编辑表单。</summary>
+    public void EditFirstSourceForShot()
+    {
+        var first = AppServices.Instance.Settings.Sources.FirstOrDefault();
+        if (first is not null)
+        {
+            StartEdit(first.Id, scrollIntoView: false);
+        }
+    }
+
+    private void OnEditClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string id })
+        {
+            StartEdit(id, scrollIntoView: true);
+        }
+    }
+
+    /// <summary>编辑：把现有源填回表单，密码留空表示不改。</summary>
+    private void StartEdit(string id, bool scrollIntoView)
+    {
+        var source = AppServices.Instance.Settings.Sources.FirstOrDefault(s => s.Id == id);
+        if (source is null)
+        {
+            return;
+        }
+
+        _editingId = id;
+        AddPanel.Visibility = Visibility.Visible;
+        AddTitle.Text = "编辑服务器";
+        AddSubmitButton.Content = "保存并连接";
+
+        SelectKind(source.Kind);
+
+        NameBox.Text = source.Name;
+        BaseBox.Text = source.Base;
+        UserBox.Text = source.Username;
+        PassBox.Password = string.Empty;
+        AddStatus.Text = "密码留空表示不修改。";
+
+        NameBox.Focus();
+        if (scrollIntoView)
+        {
+            AddPanel.BringIntoView();
+        }
     }
 
     private async void OnReconnectClick(object sender, RoutedEventArgs e)
@@ -169,7 +256,7 @@ public partial class SourcesPage : Page
         var baseUri = BaseBox.Text.Trim();
         var user = UserBox.Text.Trim();
         var pass = PassBox.Password;
-        var kind = (KindBox.SelectedItem as KindOption)?.Kind ?? "fnos";
+        var kind = SelectedKind();
 
         if (!Uri.TryCreate(baseUri, UriKind.Absolute, out _))
         {
@@ -178,8 +265,11 @@ public partial class SourcesPage : Page
         }
 
         // Emby / Jellyfin 支持只填 API Key：用户名留空，密码框里放 Key。
+        // 编辑时允许两项都留空（表示沿用原凭据）。
         var apiKeyOnly = kind is "emby" or "jellyfin";
-        if (string.IsNullOrEmpty(user) && (!apiKeyOnly || string.IsNullOrEmpty(pass)))
+        var editingExisting = _editingId is not null;
+        if (!editingExisting &&
+            string.IsNullOrEmpty(user) && (!apiKeyOnly || string.IsNullOrEmpty(pass)))
         {
             AddStatus.Text = apiKeyOnly
                 ? "请填写用户名，或只填 API Key（密码框）。"
@@ -187,17 +277,34 @@ public partial class SourcesPage : Page
             return;
         }
 
+        var settings = AppServices.Instance.Settings;
+        var editing = _editingId is null
+            ? null
+            : settings.Sources.FirstOrDefault(s => s.Id == _editingId);
+
+        // 编辑时密码留空 = 沿用原来的密码。
+        var effectivePass = string.IsNullOrEmpty(pass) && editing is not null
+            ? editing.Password
+            : pass;
+
+        if (editing is null && string.IsNullOrEmpty(effectivePass))
+        {
+            AddStatus.Text = "请填写密码或 API Key。";
+            return;
+        }
+
         var config = new SourceConfig(
-            "src-" + Guid.NewGuid().ToString("N")[..8],
+            editing?.Id ?? "src-" + Guid.NewGuid().ToString("N")[..8],
             name,
             kind,
             baseUri,
             user,
-            pass);
+            effectivePass);
 
-        // 同一地址同一账号不重复加，按最新提交的为准。
-        var settings = AppServices.Instance.Settings;
-        settings.Sources.RemoveAll(s => s.Base == baseUri && s.Username == user);
+        // 同一地址同一账号不重复加，按最新提交的为准（编辑自己不算重复）。
+        settings.Sources.RemoveAll(s =>
+            s.Id != config.Id && s.Base == baseUri && s.Username == user);
+        settings.Sources.RemoveAll(s => s.Id == config.Id);
         settings.Sources.Add(config);
         settings.LastSourceId = config.Id;
         settings.Save();
@@ -207,11 +314,12 @@ public partial class SourcesPage : Page
 
         if (ok)
         {
-            AddStatus.Text = "已连接：" + name;
+            var wasEditing = _editingId is not null;
             PassBox.Password = string.Empty;
-            AddPanel.Visibility = Visibility.Collapsed;
-            AddStatus.Text = "";
-            StatusText.Text = "已添加并连接：" + name;
+            CloseAddPanel();
+            StatusText.Text = wasEditing
+                ? "已保存并连接：" + name
+                : "已添加并连接：" + name;
         }
         else
         {
@@ -246,7 +354,4 @@ public partial class SourcesPage : Page
         public string StatusText { get; init; } = "";
         public Brush? StatusBrush { get; init; }
     }
-
-    /// <summary>下拉项：核心里是 kind，界面上显示中文名。</summary>
-    private sealed record KindOption(string Kind, string Label);
 }

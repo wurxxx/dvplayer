@@ -63,12 +63,18 @@
                                  Foreground="{StaticResource FaintBrush}" Margin="0,3,0,0" />
                     </StackPanel>
 
-                    <Button Grid.Column="2" Style="{StaticResource ToolButton}"
-                            Tag="{Binding Id}" Click="OnRemoveClick"
-                            VerticalAlignment="Top" ToolTip="删除这个源">
-                      <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="12" />
-                    </Button>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
+                      <Button Style="{StaticResource ToolButton}" Tag="{Binding Id}"
+                              Click="OnEditClick" ToolTip="编辑这个源">
+                        <TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="12" />
+                      </Button>
+                      <Button Style="{StaticResource ToolButton}" Tag="{Binding Id}"
+                              Click="OnRemoveClick" Margin="2,0,0,0" ToolTip="删除这个源">
+                        <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="12" />
+                      </Button>
+                    </StackPanel>
                   </Grid>
 
                   <TextBlock Text="{Binding Base}" FontSize="11.5"
@@ -97,16 +103,23 @@
         <Border x:Name="AddPanel" Style="{StaticResource PanelCard}" Width="480"
                 HorizontalAlignment="Left" Visibility="Collapsed" Margin="0,4,0,0">
           <StackPanel>
-            <TextBlock Text="添加服务器" Style="{StaticResource SectionTitle}" />
+            <TextBlock x:Name="AddTitle" Text="添加服务器" Style="{StaticResource SectionTitle}" />
             <TextBlock Text="Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。"
                        Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap" />
 
             <TextBlock Text="类型" Style="{StaticResource FieldLabel}" />
-            <ComboBox x:Name="KindBox" Height="34" FontSize="13"
-                      DisplayMemberPath="Label"
-                      Background="{StaticResource SurfaceHoverBrush}"
-                      Foreground="{StaticResource TextBrush}"
-                      BorderBrush="{StaticResource LineBrush}" />
+            <!-- 类型只有三种，用分段按钮比下拉框更贴合这套深色界面 -->
+            <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Left"
+                    Background="{StaticResource SurfaceHoverBrush}">
+              <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="KindFnos" Content="飞牛影视" GroupName="Kind"
+                             Style="{StaticResource SegmentItem}" IsChecked="True" />
+                <RadioButton x:Name="KindEmby" Content="Emby" GroupName="Kind"
+                             Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
+                <RadioButton x:Name="KindJellyfin" Content="Jellyfin" GroupName="Kind"
+                             Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
+              </StackPanel>
+            </Border>
 
             <TextBlock Text="名称" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="NameBox" Text="飞牛影视" Style="{StaticResource Input}" />
@@ -121,7 +134,7 @@
             <PasswordBox x:Name="PassBox" Style="{StaticResource InputPassword}" />
 
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
-              <Button Content="添加并连接" Click="OnAddClick"
+              <Button x:Name="AddSubmitButton" Content="添加并连接" Click="OnAddClick"
                       Style="{StaticResource AccentButton}" />
               <Button Content="取消" Click="OnAddToggleClick" Margin="10,0,0,0"
                       Style="{StaticResource GhostButton}" />
