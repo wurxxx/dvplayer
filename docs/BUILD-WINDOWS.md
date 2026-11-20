@@ -129,6 +129,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--hover` | 媒体库页把 Hero 左右箭头显示出来，检查位置与样式 |
 | `--scroll <像素>` | 把服务器首页往下滚再截，检查分组标题与横向海报行 |
 | `--timing` | 把首页各阶段耗时写到 `%TEMP%\dvplayer\startup.log`，排查加载慢用 |
+| `--window-test` | 单独自检窗口按钮：依次点最小化 / 最大化 / 关闭，结果写 `%TEMP%\dvplayer\window-test.log` |
 | `--favorites` | 媒体库页 / 记录页切到「收藏」分段再截，检查空态与海报网格 |
 | `--inline-search <关键词>` | 媒体库页切到页内搜索并填好关键词 |
 | `--edit-source` | 服务器页打开第一个源的编辑表单 |

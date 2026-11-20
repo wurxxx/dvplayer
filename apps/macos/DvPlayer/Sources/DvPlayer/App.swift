@@ -51,6 +51,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.windows.first(where: { $0.contentView != nil })?.makeKeyAndOrderFront(nil)
         }
 
+        // 自检：`DVPLAYER_WINDOWTEST=1` 依次点一下三个窗口按钮，验证
+        // 关闭 / 最小化 / 缩放真的能用（远程时没法手动点）。
+        if ProcessInfo.processInfo.environment["DVPLAYER_WINDOWTEST"] == "1" {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                Self.runWindowTest()
+            }
+        }
+
         // 截图巡检：`DVPLAYER_SHOT=/路径/xx.png` 打开后截一张壳自己（不需要屏幕录制权限），
         // 配上 `DVPLAYER_EXIT=1` 截完就退，方便脚本跑。
         let env = ProcessInfo.processInfo.environment
@@ -76,6 +85,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if env["DVPLAYER_EXIT"] == "1" {
                 NSApp.terminate(nil)
             }
+        }
+    }
+
+    /// 依次点窗口左上角的三个圆点（关闭 / 最小化 / 缩放），把结果打到日志。
+    @MainActor
+    static func runWindowTest() {
+        guard let window = NSApp.windows.first(where: {
+            $0.isVisible && $0.level == .normal && $0.contentView != nil
+        }) else {
+            NSLog("[WindowTest] 找不到窗口")
+            NSApp.terminate(nil)
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+
+        /// 圆点在侧栏左上角：靠左 18、靠上 16，直径 12、间距 8 → 圆心 24 / 44 / 64，y 22。
+        func click(_ x: CGFloat) {
+            let point = NSPoint(x: x, y: window.frame.height - 22)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil,
+                    eventNumber: 0, clickCount: 1,
+                    pressure: type == .leftMouseDown ? 1 : 0) else { continue }
+                window.sendEvent(event)
+            }
+        }
+
+        Task { @MainActor in
+            let start = window.frame
+            NSLog("[WindowTest] 起始 frame=\(start) mini=\(window.isMiniaturized)")
+
+            click(44)
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            NSLog("[WindowTest] 点最小化 → mini=\(window.isMiniaturized)")
+
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+
+            click(64)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            NSLog("[WindowTest] 点缩放 → frame=\(window.frame)")
+
+            if window.frame != start {
+                click(64)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+
+            click(24)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            NSLog("[WindowTest] 点关闭 → visible=\(window.isVisible)")
+
+            exit(0)
         }
     }
 

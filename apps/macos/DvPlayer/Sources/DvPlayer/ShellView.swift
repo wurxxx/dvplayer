@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import DvCore
 
@@ -228,6 +229,7 @@ private struct SidebarItem: View {
 /// 始终有颜色，鼠标移上去浮出符号，行为和系统一致。
 struct WindowControls: View {
     @State private var hovering = false
+    @State private var active = true
 
     var body: some View {
         HStack(spacing: 8) {
@@ -236,6 +238,13 @@ struct WindowControls: View {
             dot(color: 0x28C840, glyph: "plus") { window?.performZoom(nil) }
         }
         .onHover { hovering = $0 }
+        // 窗口不在前台时和系统红绿灯一样变灰，别一直红黄绿地亮着。
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            active = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            active = false
+        }
     }
 
     private var window: NSWindow? {
@@ -248,10 +257,10 @@ struct WindowControls: View {
                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Circle()
-                .fill(Color(hex: color))
+                .fill(Color(hex: active ? color : 0x4A4A52))
                 .frame(width: 12, height: 12)
                 .overlay {
-                    if hovering {
+                    if hovering && active {
                         Image(systemName: glyph)
                             .font(.system(size: 7, weight: .bold))
                             .foregroundStyle(Color.black.opacity(0.6))

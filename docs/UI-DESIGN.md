@@ -54,6 +54,12 @@
 
 ## 3. 控件约定
 
+- **窗口 chrome**：不要标题栏。`FluentWindow` 打开 `ExtendsContentIntoTitleBar`，
+  内容从窗口最顶上开始，最小化 / 最大化 / 关闭自己画在
+  右上角（`CaptionButton` / `CloseCaptionButton`，46×32，悬停 `#2B2B35`、
+  关闭悬停 `#C42B1C`）。顶部 36px 当标题栏用：拖动移窗、双击最大化。
+  页面工具条因此从 40px 起，右上角的控件（首页刷新、记录页分段、搜索框、
+  服务器页按钮）要给三个按钮让出位置，别让它们压在按钮底下；
 - **圆角**：卡片 12、按钮 / 输入框 / 下拉框 9、小角标 5–6；
 - **焦点框**：主题层把所有 `FocusVisualStyle` 设为 `{x:Null}`。按 Alt
   不会再多出一圈虚线框，键盘操作靠选中背景辨认；
@@ -151,7 +157,12 @@
 
 ```powershell
 DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
+DvPlayer.exe --window-test
 ```
 
 五个页面各截一张，参数见 [BUILD-WINDOWS.md](BUILD-WINDOWS.md#无桌面环境的-ui-回归)。
 改色板或字号后至少看一眼 `libraries` / `records` / `settings` 三张。
+
+`--window-test` 依次点最小化 / 最大化 / 关闭，把结果写进
+`%TEMP%\dvplayer\window-test.log`（没人能手动点按钮时这样核对），
+进程应当在最后一步直接退出。

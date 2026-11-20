@@ -4,7 +4,7 @@
       xmlns:controls="clr-namespace:DvPlayer.Controls"
       Background="{StaticResource BgBrush}">
 
-  <Grid Margin="32,24,32,0">
+  <Grid Margin="32,40,32,0">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />

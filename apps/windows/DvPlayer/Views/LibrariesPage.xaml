@@ -446,7 +446,7 @@
     </StackPanel>
 
     <!-- 媒体库内容（原网格视图） -->
-    <Grid x:Name="BrowseRoot" Margin="32,16,32,0" Visibility="Collapsed">
+    <Grid x:Name="BrowseRoot" Margin="32,40,32,0" Visibility="Collapsed">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -699,7 +699,9 @@
           </StackPanel>
         </Border>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+        <!-- 右侧留出无标题栏的三个窗口按钮（46×3），不然刷新会压在关闭下面 -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Margin="0,0,148,0">
           <Button Style="{StaticResource ToolButton}" Click="OnRefreshClick" ToolTip="刷新">
             <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="15" />
           </Button>

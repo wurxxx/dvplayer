@@ -7,7 +7,8 @@
   <ScrollViewer VerticalScrollBarVisibility="Hidden">
     <StackPanel>
 
-      <Grid Margin="40,18,40,0">
+      <!-- 右边留出窗口按钮的位置，长名字不会被关闭按钮压住 -->
+      <Grid Margin="40,18,188,0">
         <Button x:Name="BackButton" Style="{StaticResource PlayerButton}"
                 HorizontalAlignment="Left" Click="OnBackClick" ToolTip="返回（Esc）">
           <TextBlock Text="&#xE72B;" FontFamily="{StaticResource IconFont}"

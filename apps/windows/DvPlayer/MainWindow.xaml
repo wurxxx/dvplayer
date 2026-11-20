@@ -6,22 +6,18 @@
                  Width="1440" Height="900"
                  MinWidth="1080" MinHeight="680"
                  WindowStartupLocation="CenterScreen"
-                 Background="{StaticResource BgBrush}">
+                 Background="{StaticResource BgBrush}"
+                 ExtendsContentIntoTitleBar="True"
+                 StateChanged="OnWindowStateChanged"
+                 PreviewMouseLeftButtonDown="OnWindowMouseDown">
 
+  <!-- 没有标题栏：内容从窗口最顶上开始，
+       最小化 / 最大化 / 关闭三个按钮自己画在右上角。 -->
   <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="36" />
-      <RowDefinition Height="*" />
-    </Grid.RowDefinitions>
-
-    <ui:TitleBar Grid.Row="0" Title="DV Player"
-                 ShowMaximize="True" ShowMinimize="True" ShowClose="True" />
-
-    <Grid Grid.Row="1">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="216" />
-        <ColumnDefinition Width="*" />
-      </Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="216" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
 
     <!-- 侧栏：品牌 / 导航 / 连接状态，入口平铺 -->
     <Border Grid.Column="0" Background="{StaticResource SidebarBrush}"
@@ -128,6 +124,25 @@
     <!-- 内容区 -->
     <Frame x:Name="ContentFrame" Grid.Column="1" NavigationUIVisibility="Hidden"
            Background="{StaticResource BgBrush}" />
-    </Grid>
+
+    <!-- 窗口按钮：无标题栏时自己画，46×32 和系统字幕按钮同尺寸 -->
+    <StackPanel x:Name="CaptionButtons" Grid.Column="1"
+                Orientation="Horizontal"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Panel.ZIndex="50">
+      <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}"
+              Click="OnMinimizeClick" ToolTip="最小化">
+        <TextBlock Text="&#xE921;" FontFamily="{StaticResource IconFont}" FontSize="10" />
+      </Button>
+      <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton}"
+              Click="OnMaximizeClick" ToolTip="最大化">
+        <TextBlock x:Name="MaximizeGlyph" Text="&#xE922;" FontFamily="{StaticResource IconFont}"
+                   FontSize="10" />
+      </Button>
+      <Button x:Name="CloseButton" Style="{StaticResource CloseCaptionButton}"
+              Click="OnCloseClick" ToolTip="关闭">
+        <TextBlock Text="&#xE8BB;" FontFamily="{StaticResource IconFont}" FontSize="10" />
+      </Button>
+    </StackPanel>
   </Grid>
 </ui:FluentWindow>

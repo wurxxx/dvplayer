@@ -1,8 +1,12 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Shell;
 using DvPlayer.Services;
 using DvPlayer.Views;
 using Wpf.Ui.Controls;
@@ -19,6 +23,14 @@ public partial class MainWindow : FluentWindow
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // --window-test：没人能手动点按钮，自检一遍最小化 / 最大化 / 关闭，
+        // 结果写到 %TEMP%\dvplayer\window-test.log，供远程核对。
+        if (Environment.GetCommandLineArgs().Contains("--window-test"))
+        {
+            await RunWindowTestAsync();
+            return;
+        }
+
         var shotDir = ScreenshotDir();
         var start = StartTag();
 
@@ -843,4 +855,235 @@ public partial class MainWindow : FluentWindow
 
         ContentFrame.Navigate(page);
     }
+
+    // ── 无标题栏窗口 ────────────────────────────────────────────────────────
+    // 没有标题栏：内容从窗口最顶上开始，右上角只浮三个
+    // 自绘按钮（最小化 / 最大化 / 关闭）。拖动和双击缩放落在最上面一条上，
+    // 和系统标题栏的手感一致。
+
+    private const double CaptionDragHeight = 36;
+
+    /// <summary>
+    /// 无标题栏靠 WindowChrome：把整块客户区铺满窗口，系统只留 4px 的缩放边。
+    /// 这里自己设一遍、不调用 base —— WPF-UI 的实现带 DWM 合成检查，在没有
+    /// 桌面合成的会话里会跳过，窗口就退回系统标题栏。
+    /// </summary>
+    protected override void SetWindowChrome()
+    {
+        try
+        {
+            WindowChrome.SetWindowChrome(this, new WindowChrome
+            {
+                CaptionHeight = 0,
+                CornerRadius = default,
+                GlassFrameThickness = new Thickness(0.00001),
+                ResizeBorderThickness = ResizeMode == ResizeMode.NoResize
+                    ? default
+                    : new Thickness(4),
+                UseAeroCaptionButtons = false,
+            });
+        }
+        catch (COMException)
+        {
+            // 和 WPF-UI 一致：设不上就算了，至少页面还能用。
+        }
+    }
+
+    private void OnWindowMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        // 只有窗口最上面一条当标题栏；页面里的点击照常往下走。
+        if (e.GetPosition(this).Y > CaptionDragHeight)
+        {
+            return;
+        }
+
+        // 按钮、输入框这些自己处理点击，别被拖动吃掉。
+        if (IsInteractive(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        if (e.ClickCount == 2)
+        {
+            ToggleMaximize();
+            return;
+        }
+
+        if (WindowState == WindowState.Maximized)
+        {
+            RestoreFromDrag(e);
+        }
+
+        try
+        {
+            DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+            // 鼠标已经抬起（快速点击）时 DragMove 会抛，忽略即可。
+        }
+    }
+
+    /// <summary>最大化状态下拖标题栏：先还原，并让光标留在标题栏上的相对位置。</summary>
+    private void RestoreFromDrag(MouseButtonEventArgs e)
+    {
+        var ratio = e.GetPosition(this).X / Math.Max(1, ActualWidth);
+        var restoreWidth = RestoreBounds.Width;
+        var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        var screen = PointToScreen(e.GetPosition(this));
+
+        WindowState = WindowState.Normal;
+        Left = screen.X / dpi - restoreWidth * ratio;
+        Top = Math.Max(0, screen.Y / dpi - CaptionDragHeight / 2);
+    }
+
+    private static bool IsInteractive(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is ButtonBase or TextBoxBase or ComboBox or ScrollBar
+                or Slider or ListBoxItem or TabItem)
+            {
+                return true;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return false;
+    }
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+    }
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e) => ToggleMaximize();
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    private void ToggleMaximize() =>
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+
+    private void OnWindowStateChanged(object sender, EventArgs e)
+    {
+        if (MaximizeGlyph is null)
+        {
+            return;
+        }
+
+        var maximized = WindowState == WindowState.Maximized;
+        MaximizeGlyph.Text = maximized ? "\uE923" : "\uE922";
+        MaximizeButton.ToolTip = maximized ? "还原" : "最大化";
+    }
+
+    /// <summary>
+    /// 依次点三个窗口按钮，把状态写进 `%TEMP%\dvplayer\window-test.log`。
+    /// 走的是真实的 Click 事件，验证 XAML 里的接线和 WindowState 行为；
+    /// 最后点关闭，进程应该直接退出（日志停在「点关闭」）。
+    /// </summary>
+    private async Task RunWindowTestAsync()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "dvplayer", "window-test.log");
+
+        void Log(string line)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.AppendAllText(path, line + Environment.NewLine);
+            }
+            catch
+            {
+                // 自检写日志失败不影响结论。
+            }
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+            // 没有旧日志就算了。
+        }
+
+        await Task.Delay(800);
+        var chrome = WindowChrome.GetWindowChrome(this);
+        Log($"起始 state={WindowState} size={ActualWidth:0}x{ActualHeight:0} 工作区={SystemParameters.WorkArea}");
+        Log($"chrome 标题区={chrome?.CaptionHeight} 缩放边={chrome?.ResizeBorderThickness} " +
+            $"系统按钮={chrome?.UseAeroCaptionButtons}");
+
+        // 客户区应该约等于整个窗口（只差 4px 缩放边），否则说明还有系统标题栏。
+        var normalHwnd = new WindowInteropHelper(this).Handle;
+        GetWindowRect(normalHwnd, out var normalWindow);
+        GetClientRect(normalHwnd, out var normalClient);
+        Log($"普通矩形={normalWindow.Left},{normalWindow.Top} " +
+            $"{normalWindow.Right - normalWindow.Left}x{normalWindow.Bottom - normalWindow.Top} " +
+            $"客户区={normalClient.Right}x{normalClient.Bottom}");
+
+        MinimizeButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await Task.Delay(900);
+        Log($"点最小化 → state={WindowState}");
+        WindowState = WindowState.Normal;
+        await Task.Delay(700);
+
+        MaximizeButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await Task.Delay(900);
+        Log($"点最大化 → state={WindowState} size={ActualWidth:0}x{ActualHeight:0} " +
+            $"图标={(MaximizeGlyph.Text == "\uE923" ? "还原" : "最大化")} 提示={MaximizeButton.ToolTip}");
+
+        // 最大化时窗口会比工作区大出系统边框的厚度；FluentWindow 的模板里
+        // ClientAreaBorder 会用内边距把内容收回工作区。这里把两边都量出来，
+        // 确认内容原点落在边距内、右上角的按钮没有被裁到屏幕外。
+        var hwnd = new WindowInteropHelper(this).Handle;
+        GetWindowRect(hwnd, out var windowRect);
+        GetClientRect(hwnd, out var clientRect);
+        var area = SystemParameters.WorkArea;
+        Log($"最大化矩形={windowRect.Left},{windowRect.Top} " +
+            $"{windowRect.Right - windowRect.Left}x{windowRect.Bottom - windowRect.Top} " +
+            $"客户区={clientRect.Right}x{clientRect.Bottom} " +
+            $"工作区={area.Left:0},{area.Top:0} {area.Width:0}x{area.Height:0}");
+
+        if (Content is FrameworkElement contentRoot)
+        {
+            var origin = contentRoot.TransformToAncestor(this).Transform(new Point(0, 0));
+            Log($"内容原点={origin.X:0},{origin.Y:0} 尺寸={contentRoot.ActualWidth:0}x{contentRoot.ActualHeight:0}");
+        }
+
+        // 顺便把最大化时的界面存一张，看看按钮有没有被裁掉。
+        UiCapture.Save(this, Path.Combine(Path.GetDirectoryName(path)!, "window-test.png"));
+
+        MaximizeButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await Task.Delay(700);
+        Log($"再点一次 → state={WindowState} " +
+            $"图标={(MaximizeGlyph.Text == "\uE923" ? "还原" : "最大化")}");
+
+        Log("点关闭 → 这行之后进程应该直接退出");
+        CloseButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await Task.Delay(1500);
+        Log("关闭没生效：进程还在");
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Win32Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out Win32Rect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hwnd, out Win32Rect rect);
 }
