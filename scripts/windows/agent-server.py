@@ -85,9 +85,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/agent/task":
             if not self._authed():
+                print("[task] 403 bad token", flush=True)
                 self._reply(403, b"forbidden")
                 return
             task = read_json(TASK_PATH, {"id": 0, "ps": ""})
+            if int(task.get("id", 0)) != int(getattr(self.server, "last_task_id", 0)):
+                self.server.last_task_id = int(task.get("id", 0))
+                print("[task] served #%s" % task.get("id"), flush=True)
             self._reply(200, json.dumps(task).encode("utf-8"), "application/json")
             return
         if path == "/agent/ping":
@@ -102,6 +106,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._reply(404, b"not found")
             return
         if not self._authed():
+            print("[post] 403 %s" % path, flush=True)
             self._reply(403, b"forbidden")
             return
 

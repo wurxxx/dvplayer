@@ -109,7 +109,9 @@ public partial class MainWindow : FluentWindow
         foreach (var tag in ScreenshotPages())
         {
             SelectNav(tag);
-            await Task.Delay(5000);
+
+            // 搜索页第一次要跨库拉索引，比其它页慢。
+            await Task.Delay(tag == "search" ? 15000 : 5000);
             UiCapture.Save(this, Path.Combine(dir, tag + ".png"));
         }
 

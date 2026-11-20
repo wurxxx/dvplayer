@@ -41,9 +41,11 @@ function New-Client {
 
 function Send-Text([string]$Path, [string]$Text) {
     try {
-        $wc = New-Client
-        $wc.UploadString("$server$Path?token=$token", "POST", $Text) | Out-Null
-    } catch { }
+        Invoke-RestMethod -Uri "$server${Path}?token=$token" -Method Post -Body $Text `
+            -ContentType "text/plain; charset=utf-8" -UseBasicParsing -TimeoutSec 20 | Out-Null
+    } catch {
+        Write-Host ("send failed " + $Path + ": " + $_.Exception.Message)
+    }
 }
 
 function Send-File([string]$Path, [string]$Name) {
