@@ -168,13 +168,11 @@ impl FnOsSource {
             category: Option<String>,
         }
 
-        let env: ApiEnvelope<Vec<LibraryDto>> =
+        let env: ApiEnvelope<Option<Vec<LibraryDto>>> =
             self.send(Method::GET, "/mediadb/list", &BTreeMap::new(), None)?;
 
-        let list = env.data.ok_or_else(|| MediaError::Api {
-            code: env.code,
-            msg: env.msg.unwrap_or_else(|| "no data".into()),
-        })?;
+        // 空库时飞牛给 `data: null`，不能当成解析失败。
+        let list = env.data.flatten().unwrap_or_default();
 
         Ok(list
             .into_iter()
@@ -219,10 +217,10 @@ impl FnOsSource {
         #[derive(Deserialize)]
         struct TagListDto {
             #[serde(default)]
-            genres: Vec<i64>,
+            genres: Option<Vec<i64>>,
         }
 
-        let all: ApiEnvelope<Vec<GenreDto>> =
+        let all: ApiEnvelope<Option<Vec<GenreDto>>> =
             self.send(Method::GET, "/tag/genres", &BTreeMap::new(), None)?;
 
         let mut params = BTreeMap::new();
@@ -231,6 +229,7 @@ impl FnOsSource {
 
         let names: std::collections::HashMap<i64, String> = all
             .data
+            .flatten()
             .unwrap_or_default()
             .into_iter()
             .map(|g| (g.id, g.value))
@@ -242,6 +241,7 @@ impl FnOsSource {
 
         Ok(tags
             .genres
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|id| {
                 names.get(&id).map(|title| Genre {
@@ -265,7 +265,7 @@ impl FnOsSource {
             #[serde(default)]
             total: i64,
             #[serde(default)]
-            list: Vec<ItemDto>,
+            list: Option<Vec<ItemDto>>,
         }
 
         let mut body = serde_json::Map::new();
@@ -321,7 +321,12 @@ impl FnOsSource {
 
         Ok(Paged {
             total: data.total,
-            items: data.list.into_iter().map(|d| self.map_item(d)).collect(),
+            items: data
+                .list
+                .unwrap_or_default()
+                .into_iter()
+                .map(|d| self.map_item(d))
+                .collect(),
             page,
             page_size,
         })
@@ -337,11 +342,12 @@ impl FnOsSource {
         let mut params = BTreeMap::new();
         params.insert("q".to_string(), q.to_string());
 
-        let env: ApiEnvelope<Vec<ItemDto>> =
+        let env: ApiEnvelope<Option<Vec<ItemDto>>> =
             self.send(Method::GET, "/search/list", &params, None)?;
 
         Ok(env
             .data
+            .flatten()
             .unwrap_or_default()
             .into_iter()
             .map(|d| self.map_item(d))
@@ -349,10 +355,10 @@ impl FnOsSource {
     }
 
     pub fn records(&self) -> Result<Vec<PlayRecord>> {
-        let env: ApiEnvelope<Vec<ItemDto>> =
+        let env: ApiEnvelope<Option<Vec<ItemDto>>> =
             self.send(Method::GET, "/play/list", &BTreeMap::new(), None)?;
 
-        let list = env.data.unwrap_or_default();
+        let list = env.data.flatten().unwrap_or_default();
         Ok(list
             .into_iter()
             .map(|d| {
@@ -401,7 +407,7 @@ impl FnOsSource {
             #[serde(default)]
             total: i64,
             #[serde(default)]
-            list: Vec<ItemDto>,
+            list: Option<Vec<ItemDto>>,
         }
 
         let body = compact_json(&serde_json::json!({
@@ -423,7 +429,12 @@ impl FnOsSource {
 
         Ok(Paged {
             total: data.total,
-            items: data.list.into_iter().map(|d| self.map_item(d)).collect(),
+            items: data
+                .list
+                .unwrap_or_default()
+                .into_iter()
+                .map(|d| self.map_item(d))
+                .collect(),
             page,
             page_size,
         })
