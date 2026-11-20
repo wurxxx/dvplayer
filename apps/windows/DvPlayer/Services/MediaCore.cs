@@ -123,6 +123,13 @@ public sealed class MediaCore : IDisposable
         return Read(ptr, root => root.Deserialize<List<PlayRecordDto>>(Json) ?? new());
     }
 
+    /// <summary>跨源收藏列表。</summary>
+    public ApiResult<PagedDto<MediaItemDto>> Favorites(int page, int pageSize)
+    {
+        var ptr = dv_hub_favorites(_handle, page, pageSize);
+        return Read(ptr, root => root.Deserialize<PagedDto<MediaItemDto>>(Json)!);
+    }
+
     public ApiResult<bool> ReportProgress(string itemId, long position, long duration)
     {
         var ptr = dv_hub_report_progress(_handle, itemId, position, duration);
@@ -335,6 +342,12 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_hub_records", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_records(IntPtr handle);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_favorites", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_favorites(
+        IntPtr handle,
+        int page,
+        int pageSize);
 
     [DllImport(Lib, EntryPoint = "dv_hub_report_progress", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_report_progress(

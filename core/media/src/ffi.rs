@@ -505,6 +505,20 @@ pub extern "C" fn dv_hub_remove_record(
 }
 
 #[no_mangle]
+pub extern "C" fn dv_hub_favorites(
+    handle: *const HubHandle,
+    page: i32,
+    page_size: i32,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Paged<MediaItem>>(Err(MediaError::Other("null handle".into())));
+        };
+        reply(h.inner.favorites(page, page_size))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn dv_hub_records(handle: *const HubHandle) -> *mut c_char {
     guard(|| {
         let Some(h) = (unsafe { handle.as_ref() }) else {

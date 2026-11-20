@@ -394,6 +394,41 @@ impl FnOsSource {
         self.write_ok(method, "/item/favorite", item_id)
     }
 
+    /// 收藏列表：`POST /favorite/list`，返回结构和 `item/list` 一样。
+    pub fn favorites(&self, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        #[derive(Deserialize)]
+        struct ListDto {
+            #[serde(default)]
+            total: i64,
+            #[serde(default)]
+            list: Vec<ItemDto>,
+        }
+
+        let body = compact_json(&serde_json::json!({
+            "page": page,
+            "page_size": page_size,
+        }))?;
+
+        let env: ApiEnvelope<ListDto> = self.send(
+            Method::POST,
+            "/favorite/list",
+            &BTreeMap::new(),
+            Some(&body),
+        )?;
+
+        let data = env.data.ok_or_else(|| MediaError::Api {
+            code: env.code,
+            msg: env.msg.unwrap_or_else(|| "no data".into()),
+        })?;
+
+        Ok(Paged {
+            total: data.total,
+            items: data.list.into_iter().map(|d| self.map_item(d)).collect(),
+            page,
+            page_size,
+        })
+    }
+
     /// 标记已观看 / 未观看。走 `/item/watched`，不碰播放进度。
     pub fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {
         let method = if watched { Method::POST } else { Method::DELETE };
@@ -1248,6 +1283,10 @@ impl MediaSource for FnOsSource {
 
     fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
         FnOsSource::set_favorite(self, item_id, favorite)
+    }
+
+    fn favorites(&self, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        FnOsSource::favorites(self, page, page_size)
     }
 
     fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {

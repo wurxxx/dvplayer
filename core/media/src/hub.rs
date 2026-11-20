@@ -212,6 +212,38 @@ impl MediaHub {
         entry.source.remove_play_record(raw)
     }
 
+    /// 合并所有源的收藏列表。
+    pub fn favorites(&self, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        let mut items = Vec::new();
+        let mut total = 0i64;
+        let mut last_error = None;
+
+        for entry in &self.entries {
+            match entry.source.favorites(page, page_size) {
+                Ok(paged) => {
+                    total += paged.total;
+                    let mut list = paged.items;
+                    qualify_items(&entry.id, &mut list);
+                    items.extend(list);
+                }
+                Err(err) => last_error = Some(err),
+            }
+        }
+
+        if items.is_empty() {
+            if let Some(err) = last_error {
+                return Err(err);
+            }
+        }
+
+        Ok(Paged {
+            items,
+            total,
+            page,
+            page_size,
+        })
+    }
+
     /// 合并所有源的播放记录，按最近播放倒序。
     pub fn records(&self) -> Result<Vec<PlayRecord>> {
         let mut merged = self.collect(

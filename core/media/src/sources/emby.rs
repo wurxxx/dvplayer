@@ -714,6 +714,30 @@ impl EmbySource {
         .map(|_| ())
     }
 
+    /// 收藏列表：`Filters=IsFavorite`，跨库递归。
+    pub fn favorites(&self, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        let user = self.user_id()?;
+        let start = ((page.max(1) - 1) * page_size.max(1)).to_string();
+        let query = vec![
+            ("Recursive", "true".to_string()),
+            ("Filters", "IsFavorite".to_string()),
+            ("StartIndex", start),
+            ("Limit", page_size.to_string()),
+            ("Fields", LIST_FIELDS.to_string()),
+            ("EnableImages", "true".to_string()),
+            ("ImageTypeLimit", "1".to_string()),
+            ("EnableImageTypes", "Primary,Backdrop".to_string()),
+        ];
+
+        let dto: ItemQueryDto = self.get(&format!("/Users/{user}/Items"), &query)?;
+        Ok(Paged {
+            total: dto.total_record_count,
+            items: dto.items.iter().map(|d| self.map_item(d)).collect(),
+            page,
+            page_size,
+        })
+    }
+
     /// 标记已观看 / 未观看。
     pub fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {
         let user = self.user_id()?;
@@ -803,6 +827,10 @@ impl MediaSource for EmbySource {
 
     fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
         EmbySource::set_favorite(self, item_id, favorite)
+    }
+
+    fn favorites(&self, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        EmbySource::favorites(self, page, page_size)
     }
 
     fn set_watched(&self, item_id: &str, watched: bool) -> Result<()> {

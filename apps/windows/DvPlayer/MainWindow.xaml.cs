@@ -175,11 +175,18 @@ public partial class MainWindow : FluentWindow
             }
 
             // --favorites：截图时停在「收藏」分段，检查空态和顶栏。
-            if (Environment.GetCommandLineArgs().Contains("--favorites") &&
-                ContentFrame.Content is LibrariesPage favPage)
+            if (Environment.GetCommandLineArgs().Contains("--favorites"))
             {
-                favPage.ShowFavoritesForShot();
-                await Task.Delay(600);
+                if (ContentFrame.Content is LibrariesPage favPage)
+                {
+                    favPage.ShowFavoritesForShot();
+                    await Task.Delay(600);
+                }
+                else if (ContentFrame.Content is RecordsPage recordsPage)
+                {
+                    recordsPage.ShowFavoritesForShot();
+                    await Task.Delay(3000);
+                }
             }
 
             if (previewHover && ContentFrame.Content is LibrariesPage hoverPage)

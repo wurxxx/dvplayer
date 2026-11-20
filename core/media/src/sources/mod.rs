@@ -84,6 +84,11 @@ pub trait MediaSource: Send + Sync {
         Err(MediaError::Other("这个服务器不支持收藏".into()))
     }
 
+    /// 收藏列表。没有收藏概念的源返回空页。
+    fn favorites(&self, page: i32, page_size: i32) -> Result<Paged<MediaItem>> {
+        Ok(Paged::empty(page, page_size))
+    }
+
     /// 标记已观看 / 未观看。
     fn set_watched(&self, _item_id: &str, _watched: bool) -> Result<()> {
         Err(MediaError::Other("这个服务器不支持标记观看状态".into()))

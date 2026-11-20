@@ -16,6 +16,9 @@ public partial class RecordsPage : Page
     private const double BarMax = 248;
 
     private List<PlayRecordDto> _records = new();
+    private List<MediaItemDto> _favorites = new();
+    private bool _favoritesLoaded;
+    private bool _loadingFavorites;
 
     public RecordsPage()
     {
@@ -23,6 +26,9 @@ public partial class RecordsPage : Page
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
+
+    /// <summary>截图巡检用：停在「收藏」分段。</summary>
+    public void ShowFavoritesForShot() => FavoriteSegment.IsChecked = true;
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
@@ -62,6 +68,52 @@ public partial class RecordsPage : Page
             .ToList();
 
         FillLists();
+
+        // 收藏单独拉，不挡「通用 / 观看」先出来。
+        _ = LoadFavoritesAsync();
+    }
+
+    /// <summary>收藏列表：飞牛 `favorite/list`，Emby `Filters=IsFavorite`。</summary>
+    private async Task LoadFavoritesAsync(bool force = false)
+    {
+        if (_loadingFavorites || (_favoritesLoaded && !force))
+        {
+            return;
+        }
+
+        if (AppServices.Instance.Core is not { } core)
+        {
+            return;
+        }
+
+        _loadingFavorites = true;
+        try
+        {
+            var result = await Task.Run(() => core.Favorites(1, 200)).ConfigureAwait(true);
+            if (!result.Ok || result.Data is null)
+            {
+                StatusText.Text = "读取收藏失败：" + (result.Error ?? "未知错误");
+                return;
+            }
+
+            _favorites = result.Data.Items;
+            _favoritesLoaded = true;
+            FillFavorites();
+            UpdateStatusText();
+        }
+        finally
+        {
+            _loadingFavorites = false;
+        }
+    }
+
+    private void FillFavorites()
+    {
+        var cards = _favorites.Select(ToFavoriteCard).ToList();
+        FavoriteList.ItemsSource = cards;
+        FavoriteScroll.Visibility = cards.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FavoritePanel.Visibility = cards.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+        _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
     private void FillLists()
@@ -107,11 +159,24 @@ public partial class RecordsPage : Page
         ContinueGroups.ItemsSource = groups;
         ContinueEmpty.Visibility = groups.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
+        UpdateStatusText();
+
+        _ = Task.WhenAll(all.Select(x => x.Card).Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    private void UpdateStatusText()
+    {
+        if (FavoriteSegment.IsChecked == true)
+        {
+            StatusText.Text = _favorites.Count == 0
+                ? "还没有收藏。"
+                : $"共 {_favorites.Count} 个收藏";
+            return;
+        }
+
         StatusText.Text = _records.Count == 0
             ? "还没有播放记录。"
             : $"{_records.Count} 条记录 · 继续上次看到的位置";
-
-        _ = Task.WhenAll(all.Select(x => x.Card).Select(c => c.ApplyPosterAsync(c.PosterPath)));
     }
 
     private const double ScrollStep = 262;
@@ -188,6 +253,21 @@ public partial class RecordsPage : Page
         }
     }
 
+    private static FavoriteCard ToFavoriteCard(MediaItemDto item)
+    {
+        var title = MediaText.Clean(item.Title);
+        var card = new FavoriteCard
+        {
+            Id = item.Id,
+            Title = title,
+            Sub = MediaText.Describe(item),
+            PosterPath = item.PosterPath,
+            Initial = Palette.InitialOf(title),
+        };
+        card.UseGradient(item.Id + title);
+        return card;
+    }
+
     private static RecordCard ToCard(PlayRecordDto record)
     {
         var progress = record.DurationSeconds <= 0
@@ -248,15 +328,35 @@ public partial class RecordsPage : Page
         WatchPanel.Visibility = WatchSegment.IsChecked == true
             ? Visibility.Visible
             : Visibility.Collapsed;
-        FavoritePanel.Visibility = FavoriteSegment.IsChecked == true
+        var favorites = FavoriteSegment.IsChecked == true;
+        FavoritePanel.Visibility = favorites && _favorites.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+        FavoriteScroll.Visibility = favorites && _favorites.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        UpdateStatusText();
+
+        // 每次切到收藏都重新拉一次：刚在卡片右键里收藏 / 取消的会立刻反映。
+        if (favorites)
+        {
+            _ = LoadFavoritesAsync(force: true);
+        }
     }
 
     private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
         {
+            return;
+        }
+
+        // 收藏里可能是剧集 / 文件夹，先看详情再决定播放还是下钻。
+        if (_favorites.FirstOrDefault(f => f.Id == id) is { } favorite &&
+            !MediaText.IsPlayable(favorite.Kind))
+        {
+            NavigationService?.Navigate(new SeriesPage(id));
             return;
         }
 
@@ -269,6 +369,15 @@ public partial class RecordsPage : Page
         return t.TotalHours >= 1
             ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
             : $"{t.Minutes:00}:{t.Seconds:00}";
+    }
+
+    private sealed class FavoriteCard : CardVisual
+    {
+        public string Id { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Sub { get; init; } = "";
+        public string Initial { get; init; } = "";
+        public string? PosterPath { get; init; }
     }
 
     private sealed class RecordCard : CardVisual
