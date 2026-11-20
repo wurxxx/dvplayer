@@ -24,7 +24,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
 
     /// <summary>网格卡片之间的横向间距。列宽按可用宽度算，卡片跟着缩放宽。</summary>
     private const double CardGap = 16;
-    private const double MinCardWidth = 160;
+    private const double MinCardWidth = 175;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -898,7 +898,7 @@ public partial class LibrariesPage : Page, INotifyPropertyChanged
     public void ScrollOverview(double offset) => OverviewRoot.ScrollToVerticalOffset(offset);
 
     /// <summary>
-    /// 按可用宽度算列数与卡片宽度：卡片在 160–215 之间缩放，
+    /// 按可用宽度算列数与卡片宽度：卡片大约在 175–222 之间缩放，
     /// 宽度再涨到能塞下一列时，卡片缩回去、列数 +1。
     /// </summary>
     private void UpdateCardSize(double available)
