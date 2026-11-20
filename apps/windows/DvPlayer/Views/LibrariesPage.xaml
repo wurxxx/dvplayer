@@ -280,9 +280,6 @@
       </Grid>
 
       <StackPanel Grid.Row="1" Margin="0,8,0,6">
-        <TextBlock x:Name="BrowseStatus" Style="{StaticResource Caption}"
-                   Margin="0,0,0,10" TextWrapping="Wrap" />
-
         <StackPanel x:Name="Breadcrumb" Orientation="Horizontal" Visibility="Collapsed"
                     Margin="0,0,0,12">
           <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
@@ -325,6 +322,9 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
         </ScrollViewer>
+
+        <TextBlock x:Name="BrowseStatus" Style="{StaticResource Caption}"
+                   Margin="0,10,0,0" TextWrapping="Wrap" />
       </StackPanel>
 
       <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">

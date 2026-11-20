@@ -115,6 +115,20 @@ public partial class MainWindow : FluentWindow
             UiCapture.Save(this, Path.Combine(dir, tag + ".png"));
         }
 
+        // --browse：再进第一个库的网格，验证库内列表 / 过滤器。
+        if (Environment.GetCommandLineArgs().Contains("--browse"))
+        {
+            ContentFrame.Navigate(new LibrariesPage());
+            await Task.Delay(6000);
+
+            if (ContentFrame.Content is LibrariesPage page)
+            {
+                await page.ShowFirstLibraryAsync();
+                await Task.Delay(8000);
+                UiCapture.Save(this, Path.Combine(dir, "library-browse.png"));
+            }
+        }
+
         Application.Current.Shutdown();
     }
 

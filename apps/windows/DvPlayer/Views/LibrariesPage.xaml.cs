@@ -22,6 +22,7 @@ public partial class LibrariesPage : Page
 
     private List<MediaLibraryDto> _libraries = new();
     private List<LibraryCardItem> _libraryCards = new();
+    private Task? _overviewTask;
 
     private string? _heroItemId;
     private string _heroKind = "";
@@ -64,7 +65,22 @@ public partial class LibrariesPage : Page
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
         AppServices.Instance.ConnectionChanged += OnConnectionChanged;
 
-        await LoadOverviewAsync().ConfigureAwait(true);
+        _overviewTask = LoadOverviewAsync();
+        await _overviewTask.ConfigureAwait(true);
+    }
+
+    /// <summary>截图巡检用：等首页数据就绪后直接进第一个库的网格。</summary>
+    public async Task ShowFirstLibraryAsync()
+    {
+        if (_overviewTask is not null)
+        {
+            await _overviewTask.ConfigureAwait(true);
+        }
+
+        if (_libraries.Count > 0)
+        {
+            await ShowLibraryAsync(_libraries[0].Id).ConfigureAwait(true);
+        }
     }
 
     // —— 源首页 ——

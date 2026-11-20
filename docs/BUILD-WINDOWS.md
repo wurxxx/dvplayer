@@ -115,6 +115,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | --- | --- |
 | `--screenshot <dir> [页面...]` | 只截指定页（`home` / `libraries` / `sources` / `records` / `search` / `settings`） |
 | `--search-text <关键词>` | 搜索页带一个查询启动，用来截结果网格 |
+| `--browse` | 巡检完再进第一个媒体库的网格，多截一张 `library-browse.png` |
 | `--series <id>[,<id>...]` | 额外截剧集详情页（`series.png` / `series-N.png`） |
 | `--series-season <n>` | 详情页默认展开第 n 季（验证季切换） |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
