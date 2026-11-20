@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -31,7 +32,37 @@ public partial class LibrariesPage : Page
     private int _heroIndex;
     private int _heroVersion;
 
+    /// <summary>已经落到背景上的那一张，避免重复淡入同一张图。</summary>
+    private string? _shownHeroId;
+    private string? _shownHeroPath;
+
     private readonly DispatcherTimer _heroTimer = new() { Interval = TimeSpan.FromSeconds(7) };
+
+    // —— 启动计时（--timing 时写日志，定位首页为什么慢）——
+    private static readonly System.Diagnostics.Stopwatch StartupClock =
+        System.Diagnostics.Stopwatch.StartNew();
+
+    private static bool Timing => Environment.GetCommandLineArgs().Contains("--timing");
+
+    private static void Trace(string stage)
+    {
+        if (!Timing)
+        {
+            return;
+        }
+
+        try
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "dvplayer");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "startup.log"),
+                $"{StartupClock.ElapsedMilliseconds,6} ms  {stage}{Environment.NewLine}");
+        }
+        catch
+        {
+            // 计时失败不影响首页。
+        }
+    }
 
     private string? _libraryId;
     private string _libraryTitle = "";
@@ -65,7 +96,16 @@ public partial class LibrariesPage : Page
 
     private void OnConnectionChanged(object? sender, EventArgs e) =>
         // 登录在后台线程完成，重新拉数据必须回到 UI 线程。
-        Dispatcher.BeginInvoke(() => OnLoaded(this, new RoutedEventArgs()));
+        Dispatcher.BeginInvoke(() =>
+        {
+            // 页面已经被别的页替换，或者连接状态没变，就别再拉一遍。
+            if (!IsVisible || (_loaded && ConnectionSignature() == _loadedSignature))
+            {
+                return;
+            }
+
+            OnLoaded(this, new RoutedEventArgs());
+        });
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -73,9 +113,24 @@ public partial class LibrariesPage : Page
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
         AppServices.Instance.ConnectionChanged += OnConnectionChanged;
 
+        Trace("OnLoaded");
+
+        // Loaded 会跟着导航重复触发，已经按同样的连接状态拉过就不再拉。
+        if (_loaded && ConnectionSignature() == _loadedSignature)
+        {
+            return;
+        }
+
         _overviewTask = LoadOverviewAsync();
         await _overviewTask.ConfigureAwait(true);
     }
+
+    private bool _loaded;
+    private string _loadedSignature = "";
+
+    /// <summary>连接状态的指纹：源和连没连上，变了才需要重新拉。</summary>
+    private static string ConnectionSignature() => string.Join("|",
+        AppServices.Instance.Connections.Select(c => $"{c.Id}:{c.Ok}"));
 
     /// <summary>截图巡检用：等首页数据就绪后直接进第一个库的网格。</summary>
     public async Task ShowFirstLibraryAsync()
@@ -93,10 +148,40 @@ public partial class LibrariesPage : Page
 
     // —— 源首页 ——
 
+    private bool _loading;
+    private int _loadVersion;
+
+    /// <summary>上次首页的数据。启动先把它画出来，实时数据回来再替换。</summary>
+    private HomeSnapshot? _snapshot;
+
+    /// <summary>
+    /// 首页一次性要拉库列表、每库一页、播放记录、Hero 详情和一堆海报。
+    /// 分两段跑：先把手上的东西画出来，Hero 详情和海报在后台补。
+    /// </summary>
     private async Task LoadOverviewAsync()
     {
+        // Loaded 和 ConnectionChanged 会连着触发好几次，重复加载会让首页更慢。
+        if (_loading)
+        {
+            return;
+        }
+
+        _loading = true;
+        var version = ++_loadVersion;
+        try
+        {
+            await LoadOverviewCoreAsync(version).ConfigureAwait(true);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadOverviewCoreAsync(int version)
+    {
         var services = AppServices.Instance;
-        if (!services.IsConnected)
+        if (!services.IsConnected || !IsVisible)
         {
             SourceTitle.Text = "媒体库";
             StatusText.Text = "未连接媒体源，先去「媒体源」添加。";
@@ -124,14 +209,29 @@ public partial class LibrariesPage : Page
         _heroTimer.Stop();
         _heroPool.Clear();
 
+        // 先用上次的数据把首屏铺满（海报有磁盘缓存，秒开），再去拉实时数据。
+        _snapshot = ReadSnapshot(sourceId);
+        if (_snapshot is not null)
+        {
+            ApplySnapshot(_snapshot);
+            Trace("缓存首屏");
+        }
+
         var librariesResult = await Task.Run(core.Libraries).ConfigureAwait(true);
+        Trace($"libraries: {librariesResult.Data?.Count ?? 0} 个");
         if (!librariesResult.Ok || librariesResult.Data is null)
         {
-            StatusText.Text = "读取媒体库失败：" + (librariesResult.Error ?? "未知错误");
+            if (_snapshot is null)
+            {
+                StatusText.Text = "读取媒体库失败：" + (librariesResult.Error ?? "未知错误");
+            }
+
             return;
         }
 
         _libraries = librariesResult.Data;
+        _loaded = true;
+        _loadedSignature = ConnectionSignature();
         if (sourceOk)
         {
             var mine = _libraries.Where(l => l.SourceId == sourceId).ToList();
@@ -143,7 +243,85 @@ public partial class LibrariesPage : Page
 
         LibrariesCount.Text = $"{_libraries.Count} 个";
 
-        _libraryCards = _libraries
+        // 各库首页和播放记录同时发：记录不依赖库列表，没必要排在后面。
+        var recordsTask = Task.Run(core.Records);
+        var pages = await Task.WhenAll(_libraries.Select(library => Task.Run(() =>
+        {
+            var page = core.Items(library.Id, 1, PreviewPerLibrary);
+            return (Library: library, Page: page);
+        }))).ConfigureAwait(true);
+
+        if (version != _loadVersion || !IsVisible)
+        {
+            return;
+        }
+
+        Trace("items 全部回来");
+
+        _libraryCards = BuildLibraryCards(_libraries);
+
+        var snapshots = pages
+            .Where(p => p.Page.Ok && p.Page.Data is not null)
+            .Select(p => new LibrarySnapshot
+            {
+                Library = p.Library,
+                Items = p.Page.Data!.Items,
+                Total = p.Page.Data.Total,
+            })
+            .ToList();
+
+        var sections = BuildSections(snapshots);
+
+        // 缓存里已经有详情版的 Hero 就先留着，别退回列表海报再闪一下。
+        if (_heroPool.Count == 0)
+        {
+            ApplyHeroPool(null, snapshots);
+        }
+
+        LibraryCards.ItemsSource = _libraryCards;
+        Sections.ItemsSource = sections;
+        StatusText.Text = "";
+        Trace("sections 画完");
+
+        if (_heroPool.Count > 0)
+        {
+            await ShowHeroAsync(0).ConfigureAwait(true);
+            Trace("hero 首帧（列表海报）");
+        }
+        else if (_libraries.Count > 0)
+        {
+            HeroTitle.Text = _libraries[0].Title;
+            HeroMeta.Text = "";
+            HeroOverview.Text = "这个库里还没有条目。";
+        }
+
+        // 详情补齐横版图和简介，不挡首屏。
+        _ = UpgradeHeroAsync(snapshots, sourceId, version);
+
+        // 继续观看（当前源的全部记录，取前 12 条未看完的）
+        var recordsResult = await recordsTask.ConfigureAwait(true);
+        if (recordsResult.Ok && recordsResult.Data is not null)
+        {
+            ApplyRecords(recordsResult.Data, sourceId, sourceOk);
+            Trace("records 画完");
+        }
+
+        // 库卡片与分组里的海报最后补，先把结构画出来。
+        var all = sections.SelectMany(s2 => s2.Items).ToList();
+        await Task.WhenAll(all.Select(c => c.ApplyPosterAsync(c.PosterPath))).ConfigureAwait(true);
+        await Task.WhenAll(_libraryCards
+            .SelectMany(c => c.Arts)
+            .Where(a => !string.IsNullOrWhiteSpace(a.Path))
+            .Select(a => a.ApplyPosterAsync(a.Path))).ConfigureAwait(true);
+        Trace("首屏海报下载完成");
+
+        WriteSnapshot(sourceId, snapshots, _heroPool, recordsResult.Data);
+    }
+
+    // —— 首页数据装配（缓存和实时共用）——
+
+    private static List<LibraryCardItem> BuildLibraryCards(IEnumerable<MediaLibraryDto> libraries) =>
+        libraries
             .Select(library =>
             {
                 var card = new LibraryCardItem
@@ -157,34 +335,24 @@ public partial class LibrariesPage : Page
             })
             .ToList();
 
-        // 每个库取一页做预览。库多的时候这是 N 次请求，但都是一页，不影响体感。
+    private List<LibrarySection> BuildSections(IReadOnlyList<LibrarySnapshot> pages)
+    {
         var sections = new List<LibrarySection>();
-        var libraryTotals = new Dictionary<string, int>();
-        foreach (var library in _libraries)
+        foreach (var page in pages)
         {
-            var id = library.Id;
-            var title = library.Title;
-            var page = await Task.Run(() => core.Items(id, 1, PreviewPerLibrary)).ConfigureAwait(true);
-            if (!page.Ok || page.Data is null)
-            {
-                continue;
-            }
-
             sections.Add(new LibrarySection
             {
-                Id = id,
-                Title = title,
-                CountLabel = $"{page.Data.Total}",
-                Items = page.Data.Items.Select(ToCard).ToList(),
+                Id = page.Library.Id,
+                Title = page.Library.Title,
+                CountLabel = $"{page.Total}",
+                Items = page.Items.Select(ToCard).ToList(),
             });
 
-            libraryTotals[id] = page.Data.Total;
-
             // 「我的媒体」用最近入库的三张海报拼图，和列表顺序一致。
-            var card = _libraryCards.FirstOrDefault(c => c.Id == id);
-            if (card is not null)
+            var card = _libraryCards.FirstOrDefault(c => c.Id == page.Library.Id);
+            if (card is not null && card.Arts.Count == 0)
             {
-                foreach (var item in page.Data.Items
+                foreach (var item in page.Items
                              .Where(i => !string.IsNullOrWhiteSpace(i.PosterPath))
                              .Take(3))
                 {
@@ -199,96 +367,289 @@ public partial class LibrariesPage : Page
             }
         }
 
-        LibraryCards.ItemsSource = _libraryCards;
-        Sections.ItemsSource = sections;
-        StatusText.Text = "";
-
-        // Hero 随机推荐：随机翻页、优先刮削过的条目，凑几张有横版图的。
-        var heroDetails = new List<MediaDetailDto>();
-        foreach (var (libId, total) in libraryTotals)
-        {
-            heroDetails.AddRange(await SampleHeroDetailsAsync(core, libId, total, 8).ConfigureAwait(true));
-        }
-
-        // 有横版图的排前面：竖版海报裁成横幅会放大、也不好看。
-        _heroPool.AddRange(heroDetails
-            .DistinctBy(d => d.Id)
-            .Where(d => !string.IsNullOrWhiteSpace(d.BackdropPath) ||
-                        !string.IsNullOrWhiteSpace(d.PosterPath))
-            .OrderBy(d => string.IsNullOrWhiteSpace(d.BackdropPath) ? 1 : 0)
-            .ThenBy(d => string.IsNullOrWhiteSpace(d.Overview) ? 1 : 0)
-            .ThenByDescending(d => d.Rating ?? 0)
-            .Take(8)
-            .Select(ToHero));
-
-        // 一个横版图都没有时，退回第一张海报，至少不空着。
-        if (_heroPool.Count == 0)
-        {
-            var first = sections.SelectMany(s2 => s2.Items).FirstOrDefault();
-            var library = _libraries.FirstOrDefault();
-            if (first is not null)
-            {
-                _heroPool.Add(new HeroItem
-                {
-                    Id = first.Id,
-                    Kind = first.Kind,
-                    Title = first.Title,
-                    Meta = first.Sub,
-                    Overview = "",
-                    Chips = new List<string>(),
-                    BackdropPath = first.PosterPath,
-                });
-            }
-            else if (library is not null)
-            {
-                HeroTitle.Text = library.Title;
-                HeroMeta.Text = "";
-                HeroOverview.Text = "这个库里还没有条目。";
-            }
-        }
-
-        if (_heroPool.Count > 0)
-        {
-            await ShowHeroAsync(0).ConfigureAwait(true);
-            if (_heroPool.Count > 1)
-            {
-                _heroTimer.Start();
-            }
-        }
-
-        // 继续观看（当前源的全部记录，取前 12 条未看完的）
-        var recordsResult = await Task.Run(core.Records).ConfigureAwait(true);
-        if (recordsResult.Ok && recordsResult.Data is not null)
-        {
-            var continuing = recordsResult.Data
-                .Where(r => !sourceOk || r.SourceId == sourceId)
-                .Where(r => r.DurationSeconds <= 0 || r.PositionSeconds < r.DurationSeconds * 0.98)
-                .OrderByDescending(r => r.LastPlayed ?? 0)
-                .Take(12)
-                .ToList();
-
-            var cards = continuing.Select(ToRecordCard).ToList();
-            ContinueRow.ItemsSource = cards;
-            ContinueEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            ContinueCount.Text = cards.Count == 0 ? "" : $"{cards.Count} ›";
-
-            _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
-        }
-
-
-        // 库卡片与分组里的海报最后补，先把结构画出来。
-        var all = sections.SelectMany(s => s.Items).ToList();
-        await Task.WhenAll(all.Select(c => c.ApplyPosterAsync(c.PosterPath)));
-        await Task.WhenAll(_libraryCards
-            .SelectMany(c => c.Arts)
-            .Where(a => !string.IsNullOrWhiteSpace(a.Path))
-            .Select(a => a.ApplyPosterAsync(a.Path)));
+        return sections;
     }
 
-    // —— Hero 轮播 ——
+    /// <summary>
+    /// Hero 候选：有详情就用详情（横版图 + 简介），没有就用列表里的海报顶一下。
+    /// </summary>
+    private void ApplyHeroPool(IReadOnlyList<MediaDetailDto>? details, IReadOnlyList<LibrarySnapshot> pages)
+    {
+        _heroPool.Clear();
 
-    /// <summary>随机翻一页，挑几条（跳过未刮削目录）取详情，供 Hero 用。</summary>
-    private static async Task<List<MediaDetailDto>> SampleHeroDetailsAsync(
+        if (details is { Count: > 0 })
+        {
+            _heroPool.AddRange(details
+                .Where(d => !string.IsNullOrWhiteSpace(d.BackdropPath) ||
+                            !string.IsNullOrWhiteSpace(d.PosterPath))
+                // 有横版图的排前面：竖版海报裁成横幅会放大、也不好看。
+                .OrderBy(d => string.IsNullOrWhiteSpace(d.BackdropPath) ? 1 : 0)
+                .ThenBy(d => string.IsNullOrWhiteSpace(d.Overview) ? 1 : 0)
+                .ThenByDescending(d => d.Rating ?? 0)
+                .Take(8)
+                .Select(ToHero));
+            return;
+        }
+
+        _heroPool.AddRange(pages
+            .SelectMany(p => p.Items)
+            .Where(item => !string.IsNullOrWhiteSpace(item.PosterPath))
+            .Take(8)
+            .Select(ToHeroFromItem));
+    }
+
+    private void ApplyRecords(IReadOnlyList<PlayRecordDto> records, string? sourceId, bool sourceOk)
+    {
+        var continuing = records
+            .Where(r => !sourceOk || r.SourceId == sourceId)
+            .Where(r => r.DurationSeconds <= 0 || r.PositionSeconds < r.DurationSeconds * 0.98)
+            .OrderByDescending(r => r.LastPlayed ?? 0)
+            .Take(12)
+            .ToList();
+
+        var cards = continuing.Select(ToRecordCard).ToList();
+        ContinueRow.ItemsSource = cards;
+        ContinueEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ContinueCount.Text = cards.Count == 0 ? "" : $"{cards.Count} ›";
+
+        _ = Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
+    }
+
+    /// <summary>把上次的首页贴上去，不等网络。</summary>
+    private void ApplySnapshot(HomeSnapshot snapshot)
+    {
+        if (snapshot.Pages.Count == 0)
+        {
+            return;
+        }
+
+        _libraries = snapshot.Pages.Select(p => p.Library).ToList();
+        LibrariesCount.Text = $"{_libraries.Count} 个";
+        _libraryCards = BuildLibraryCards(_libraries);
+        LibraryCards.ItemsSource = _libraryCards;
+        Sections.ItemsSource = BuildSections(snapshot.Pages);
+        StatusText.Text = "";
+
+        ApplyHeroPool(snapshot.Heroes, snapshot.Pages);
+        if (_heroPool.Count > 0)
+        {
+            _ = ShowHeroAsync(0);
+        }
+
+        ApplyRecords(snapshot.Records, snapshot.SourceId, sourceOk: true);
+    }
+
+    // —— 首页快照 ——
+
+    private static readonly System.Text.Json.JsonSerializerOptions SnapshotJson = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private static string SnapshotPath(string? sourceId)
+    {
+        var safe = new string((sourceId ?? "none")
+            .Select(c => char.IsLetterOrDigit(c) ? c : '_')
+            .ToArray());
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "dvplayer",
+            $"home-{safe}.json");
+    }
+
+    private static HomeSnapshot? ReadSnapshot(string? sourceId)
+    {
+        try
+        {
+            var file = SnapshotPath(sourceId);
+            if (!File.Exists(file))
+            {
+                return null;
+            }
+
+            return System.Text.Json.JsonSerializer.Deserialize<HomeSnapshot>(
+                File.ReadAllText(file), SnapshotJson);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void WriteSnapshot(
+        string? sourceId, IReadOnlyList<LibrarySnapshot> pages,
+        IReadOnlyList<HeroItem> heroes, IReadOnlyList<PlayRecordDto>? records)
+    {
+        try
+        {
+            var snapshot = new HomeSnapshot
+            {
+                SourceId = sourceId ?? "",
+                Pages = pages.ToList(),
+                Records = records?.ToList() ?? ReadSnapshot(sourceId)?.Records ?? new List<PlayRecordDto>(),
+                SavedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            };
+
+            // Hero 只存详情形式的条目才有简介；占位海报也一样能画，存下来省一趟网络。
+            snapshot.Heroes = heroes
+                .Select(h => new MediaDetailDto(
+                    h.Id, h.Title, h.Kind, null, h.Overview, h.BackdropPath, h.BackdropPath,
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null))
+                .ToList();
+
+            var file = SnapshotPath(sourceId);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(snapshot, SnapshotJson));
+        }
+        catch
+        {
+            // 快照失败不影响首页。
+        }
+    }
+
+    /// <summary>
+    /// 后台把 Hero 候选补成详情（横版图 / 简介 / 评分）。
+    /// 完成后若是同一条目就原地换成高清图，否则换成第一条有横版图的。
+    /// </summary>
+    private async Task UpgradeHeroAsync(
+        IReadOnlyList<LibrarySnapshot> pages, string? sourceId, int version)
+    {
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        var ids = pages
+            .SelectMany(p => p.Items)
+            .Where(item => !string.Equals(item.Kind, "folder", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Id)
+            .Distinct()
+            .Take(6)
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            // 第一页全是未刮削目录，直接去随机页碰运气。
+            _ = ResampleHeroAsync(pages, sourceId, version);
+            return;
+        }
+
+        using var gate = new SemaphoreSlim(6);
+        var details = await Task.WhenAll(ids.Select(async id =>
+        {
+            await gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                return await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(true);
+
+        if (version != _loadVersion || !IsVisible)
+        {
+            return;
+        }
+
+        var list = details
+            .Where(d => d.Ok && d.Data is not null)
+            .Select(d => d.Data!)
+            .ToList();
+
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        Trace("hero 详情补齐");
+
+        var currentId = _heroPool.Count > 0
+            ? _heroPool[Math.Clamp(_heroIndex, 0, _heroPool.Count - 1)].Id
+            : null;
+
+        ApplyHeroPool(list, pages);
+        if (_heroPool.Count == 0)
+        {
+            return;
+        }
+
+        // 同一条目就原地换成横版高清图，圆点位置尽量不动。
+        var target = currentId is null ? 0 : _heroPool.FindIndex(h => h.Id == currentId);
+        if (target < 0)
+        {
+            target = 0;
+        }
+
+        await ShowHeroAsync(target).ConfigureAwait(true);
+        if (_heroPool.Count > 1)
+        {
+            _heroTimer.Start();
+        }
+
+        // Hero 详情写回快照，下次启动直接就是横版图。
+        WriteSnapshot(sourceId, pages, _heroPool, null);
+
+        // 第一页大多是没刮削的目录，只有竖版海报。后台再随机翻一页找横版图，
+        // 慢一点没关系，横幅已经能看了。
+        var hasBackdrop = list.Any(d =>
+            !string.IsNullOrWhiteSpace(d.BackdropPath) && d.BackdropPath != d.PosterPath);
+        if (!hasBackdrop)
+        {
+            _ = ResampleHeroAsync(pages, sourceId, version);
+        }
+    }
+
+    /// <summary>随机翻页找有横版图的条目，找到了再把 Hero 换过去。</summary>
+    private async Task ResampleHeroAsync(
+        IReadOnlyList<LibrarySnapshot> pages, string? sourceId, int version)
+    {
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        var details = new List<MediaDetailDto>();
+        foreach (var page in pages)
+        {
+            details.AddRange(await SampleRandomPageDetailsAsync(
+                core, page.Library.Id, page.Total, 8).ConfigureAwait(true));
+        }
+
+        if (version != _loadVersion || !IsVisible)
+        {
+            return;
+        }
+
+        var picked = details
+            .Where(d => !string.IsNullOrWhiteSpace(d.BackdropPath) && d.BackdropPath != d.PosterPath)
+            .ToList();
+
+        if (picked.Count == 0)
+        {
+            return;
+        }
+
+        Trace("hero 换到横版图");
+
+        ApplyHeroPool(picked, pages);
+        await ShowHeroAsync(0).ConfigureAwait(true);
+        if (_heroPool.Count > 1)
+        {
+            _heroTimer.Start();
+        }
+
+        WriteSnapshot(sourceId, pages, _heroPool, null);
+    }
+
+    /// <summary>随机翻一页，挑几条非目录条目取详情。</summary>
+    private static async Task<List<MediaDetailDto>> SampleRandomPageDetailsAsync(
         MediaCore core, string libraryId, int total, int take)
     {
         const int pageSize = 100;
@@ -316,10 +677,10 @@ public partial class LibrariesPage : Page
         using var gate = new SemaphoreSlim(6);
         var details = await Task.WhenAll(ids.Select(async id =>
         {
-            await gate.WaitAsync().ConfigureAwait(true);
+            await gate.WaitAsync().ConfigureAwait(false);
             try
             {
-                return await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(true);
+                return await Task.Run(() => core.ItemDetail(id)).ConfigureAwait(false);
             }
             finally
             {
@@ -332,6 +693,19 @@ public partial class LibrariesPage : Page
             .Select(d => d.Data!)
             .ToList();
     }
+
+    private static HeroItem ToHeroFromItem(MediaItemDto item) => new()
+    {
+        Id = item.Id,
+        Kind = item.Kind,
+        Title = MediaText.Clean(item.Title),
+        Meta = MediaText.Describe(item),
+        Overview = "",
+        Chips = new List<string>(),
+        BackdropPath = item.PosterPath,
+    };
+
+    // —— Hero 轮播 ——
 
     private static HeroItem ToHero(MediaDetailDto item) => new()
     {
@@ -404,9 +778,22 @@ public partial class LibrariesPage : Page
         HeroPrev.IsEnabled = count > 1;
         HeroNext.IsEnabled = count > 1;
 
-        var bitmap = await PosterLoader.LoadAsync(hero.BackdropPath, 1280).ConfigureAwait(true);
-        if (version != _heroVersion || bitmap is null)
+        // 同一张图已经在背景上了，就不必再淡入一次（实时数据回来时会走这里）。
+        if (hero.Id == _shownHeroId && hero.BackdropPath == _shownHeroPath &&
+            HeroBackdrop.Background is ImageBrush)
         {
+            return;
+        }
+
+        var bitmap = await PosterLoader.LoadAsync(hero.BackdropPath, 1280).ConfigureAwait(true);
+        if (version != _heroVersion)
+        {
+            return;
+        }
+
+        if (bitmap is null)
+        {
+            // 图没下来就留着上一张，别把横幅刷成空的。
             return;
         }
 
@@ -428,6 +815,8 @@ public partial class LibrariesPage : Page
 
         // 动画结束把图落到下层，下一次还能从 0 淡入。
         HeroBackdrop.Background = brush;
+        _shownHeroId = hero.Id;
+        _shownHeroPath = hero.BackdropPath;
         HeroFade.BeginAnimation(OpacityProperty, null);
         HeroFade.Opacity = 0;
     }
@@ -1086,6 +1475,22 @@ public partial class LibrariesPage : Page
             : new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
 
         public Brush Fill { get; }
+    }
+
+    private sealed class HomeSnapshot
+    {
+        public string SourceId { get; set; } = "";
+        public List<LibrarySnapshot> Pages { get; set; } = new();
+        public List<MediaDetailDto> Heroes { get; set; } = new();
+        public List<PlayRecordDto> Records { get; set; } = new();
+        public long SavedAt { get; set; }
+    }
+
+    private sealed class LibrarySnapshot
+    {
+        public MediaLibraryDto Library { get; set; } = null!;
+        public List<MediaItemDto> Items { get; set; } = new();
+        public int Total { get; set; }
     }
 
     private sealed class LibrarySection

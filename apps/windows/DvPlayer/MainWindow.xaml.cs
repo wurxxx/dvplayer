@@ -360,6 +360,12 @@ public partial class MainWindow : FluentWindow
 
     private void Navigate(string tag)
     {
+        // 已经在源首页了就别重建：重建会让首页把库列表、每个库、海报全再拉一遍。
+        if (tag == "libraries" && ContentFrame.Content is LibrariesPage)
+        {
+            return;
+        }
+
         Page page = tag switch
         {
             "libraries" => new LibrariesPage(),
