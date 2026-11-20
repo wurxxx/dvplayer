@@ -115,14 +115,38 @@ public partial class MainWindow : FluentWindow
         // 网络流要一会儿才出画面。
         await Task.Delay(10000);
 
+        // --play-end：跳到片尾，验证播完自动接下一集。
+        if (ArgumentAfter("--play-end") is not null)
+        {
+            player.SkipToEndForShot();
+            await Task.Delay(22000);
+            player.ShowChromeForShot();
+            await Task.Delay(600);
+            UiCapture.SaveScreen(player, Path.Combine(dir, "play-next.png"));
+            player.Close();
+            return;
+        }
+
         player.ShowChromeForShot();
         await Task.Delay(700);
+
+        // 真实画面：从桌面抓，才能同时看到视频和浮层（RTB 只有浮层）。
+        UiCapture.SaveScreen(player, Path.Combine(dir, "play-screen.png"));
+        player.SetShotBackground(true);
         UiCapture.Save(player, Path.Combine(dir, "play.png"));
 
         if (playlist is { Count: > 0 })
         {
             player.ShowEpisodesForShot();
             await Task.Delay(900);
+
+            // 透明底要等分层窗口重画一帧，立刻抓会拿到上一帧（全黑）。
+            player.SetShotBackground(false);
+            await Task.Delay(500);
+            UiCapture.SaveScreen(player, Path.Combine(dir, "play-episodes-screen.png"));
+
+            player.SetShotBackground(true);
+            await Task.Delay(300);
             UiCapture.Save(player, Path.Combine(dir, "play-episodes.png"));
             player.ShowEpisodesForShot();
             await Task.Delay(300);

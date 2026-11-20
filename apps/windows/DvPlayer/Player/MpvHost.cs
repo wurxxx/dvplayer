@@ -53,15 +53,27 @@ public sealed class MpvHost : HwndHost
             return;
         }
 
-        _mpvChild = GetWindow(_hwnd, GW_CHILD);
-        if (_mpvChild != IntPtr.Zero)
+        EnsureMpvChild();
+        ResizeMpvChild();
+    }
+
+    /// <summary>找到 mpv 建出来的子窗口，并让它永远不抢键盘焦点。</summary>
+    private void EnsureMpvChild()
+    {
+        if (_mpvChild != IntPtr.Zero || _hwnd == IntPtr.Zero)
         {
-            // 别让点视频把键盘焦点抢走：壳要一直能收到 Space / F11 / 方向键。
-            var ex = GetWindowLongPtr(_mpvChild, GWL_EXSTYLE).ToInt64();
-            SetWindowLongPtr(_mpvChild, GWL_EXSTYLE, new IntPtr(ex | WS_EX_NOACTIVATE));
+            return;
         }
 
-        ResizeMpvChild();
+        _mpvChild = GetWindow(_hwnd, GW_CHILD);
+        if (_mpvChild == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // 别让点视频把键盘焦点抢走：壳要一直能收到 Space / F11 / 方向键。
+        var ex = GetWindowLongPtr(_mpvChild, GWL_EXSTYLE).ToInt64();
+        SetWindowLongPtr(_mpvChild, GWL_EXSTYLE, new IntPtr(ex | WS_EX_NOACTIVATE));
     }
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
@@ -143,11 +155,7 @@ public sealed class MpvHost : HwndHost
                 return new IntPtr(1);   // mpv 自己画，别擦成白闪
 
             case WM_SIZE:
-                if (self._mpvChild == IntPtr.Zero)
-                {
-                    self._mpvChild = GetWindow(hwnd, GW_CHILD);
-                }
-
+                self.EnsureMpvChild();
                 self.ResizeMpvChild();
                 return IntPtr.Zero;
 

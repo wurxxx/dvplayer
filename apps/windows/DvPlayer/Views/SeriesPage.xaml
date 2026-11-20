@@ -113,8 +113,16 @@
 
                 <Button x:Name="SubtitleButton" Style="{StaticResource HeroCircleButton}"
                         Click="OnSubtitleClick" Visibility="Collapsed" ToolTip="选择字幕">
-                  <TextBlock Text="&#xE8D4;" FontFamily="{StaticResource IconFont}"
-                             FontSize="16" Foreground="#141419" />
+                  <Viewbox Width="19" Height="17">
+                    <Canvas Width="20" Height="18">
+                      <Rectangle Canvas.Left="1" Canvas.Top="2" Width="18" Height="14"
+                                 RadiusX="3.5" RadiusY="3.5" Stroke="#141419" StrokeThickness="1.6" />
+                      <Rectangle Canvas.Left="4.2" Canvas.Top="10" Width="6.4" Height="3.2"
+                                 RadiusX="1.2" RadiusY="1.2" Fill="#141419" />
+                      <Rectangle Canvas.Left="12.4" Canvas.Top="10" Width="3.4" Height="3.2"
+                                 RadiusX="1.2" RadiusY="1.2" Fill="#141419" />
+                    </Canvas>
+                  </Viewbox>
                 </Button>
               </StackPanel>
 

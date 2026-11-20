@@ -141,7 +141,8 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--person-first` | 从详情页点第一个演员进作品页，额外截 `person.png` |
 | `--person-index <n>` | 配合 `--person-first`：取第 n 个有 id 的演职人员（0 起） |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
-| `--play-shot <dir>` | 播放页巡检：依次截图 `play.png` / `play-episodes.png` / `play-audio.png` / `play-more.png` / `play-info.png`（浮层、选集、两个菜单、媒体信息） |
+| `--play-shot <dir>` | 播放页巡检：依次截图 `play.png` / `play-episodes.png` / `play-audio.png` / `play-more.png` / `play-info.png`（浮层、选集、两个菜单、媒体信息），另有 `play-screen.png` / `play-episodes-screen.png` 是从桌面抓的真实画面（含视频） |
+| `--play-end` | 配合 `--play-shot`：跳到片尾前 4 秒，20 秒后截 `play-next.png`，验证播完自动接下一集 |
 | `--play first` | 配合 `--play-series`：直接播这个剧的第一集，不用先查集 id |
 | `--play-series <剧 id>` | 给播放页的「选集」拼列表（剧 → 第一个季 → 集），片名也用它拼 |
 
@@ -168,8 +169,10 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 >   -Arguments "--play first --play-series fnos-1:<剧 id> --play-shot D:\dvplayer\tmp\play"
 > ```
 >
-> mpv 子窗口的画面在 `RenderTargetBitmap` 里是黑的，所以这几张只能看浮层布局；
-> 真实画面与交互还是要人眼过一遍。
+> 播放页现在是两个窗口：视频在 `PlayerSurfaceWindow`（黑窗），控制条是
+> `PlayWindow`（透明浮层）。`RenderTargetBitmap` 只截得到浮层，所以巡检会
+> 额外用 `UiCapture.SaveScreen` 从桌面 BitBlt 一张 `play-screen.png`，
+> 那张才是用户看到的样子（视频 + 浮层）。桌面抓图要求进程在 Session 2 里跑。
 
 > 注意：PowerShell 5.1 按 ANSI 读 `.ps1`，带中文的脚本必须存成 **UTF-8 with BOM**，
 > 否则解析直接报「字符串缺少终止符」。仓库里的 `run-session2.ps1` 已经带 BOM。

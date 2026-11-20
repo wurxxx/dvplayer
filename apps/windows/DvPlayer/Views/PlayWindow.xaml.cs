@@ -1,9 +1,11 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using DvPlayer.Player;
@@ -20,11 +22,14 @@ public sealed record PlayEpisode(
     string? Title = null);
 
 /// <summary>
-/// 播放窗口：一个 <see cref="MpvHost"/> + 浮层控制条（。
+/// 播放窗口：逐像素透明的浮层控制条，视频在下面那个
+/// <see cref="PlayerSurfaceWindow"/> 里。
 ///
-/// 视频画面完全由 mpv 渲染（<c>--wid</c> 挂进来），壳只负责浮层、快捷键、
-/// 轨道选择、选集和进度回写。构造函数只认 <see cref="PlaySourceDto"/>，
-/// 所以飞牛、Emby 以及以后任何源都走同一个窗口。
+/// 为什么要分两个窗口：WPF 的 <see cref="MpvHost"/> 是 HwndHost，原生子窗口
+/// 永远压在同一个窗口的 WPF 内容上面，控制条画在自己窗口里根本看不见
+/// （airspace）。所以视频沉底，这个窗口只画浮层，两者保持同一矩形。
+///
+/// 点画面暂停、双击全屏、滚轮调音量都在这一层处理，键盘焦点也在这里。
 /// </summary>
 public partial class PlayWindow : Window
 {
@@ -64,6 +69,18 @@ public partial class PlayWindow : Window
     private bool _chromeVisible = true;
     private bool _hardwareDecode = true;
 
+    /// <summary>视频层，跟这个窗口保持同一矩形。</summary>
+    private PlayerSurfaceWindow? _surface;
+
+    private bool _fullscreen;
+    private Rect _windowedBounds;
+    private bool _windowPlaced;
+
+    private Point _pressPoint;
+
+    /// <summary>双击里的第一次点击已经切过暂停，双击时要还原。</summary>
+    private bool _clickToggledPause;
+
     public PlayWindow(
         PlaySourceDto source,
         double? startSeconds = null,
@@ -82,7 +99,8 @@ public partial class PlayWindow : Window
         ApplySourceToUi(source);
         DurationText.Text = Format(source.DurationSeconds);
 
-        Host.HostReady += OnHostReady;
+        _surface = new PlayerSurfaceWindow();
+        _surface.Host.HostReady += OnHostReady;
         Loaded += OnLoaded;
         Closing += OnClosing;
 
@@ -170,11 +188,309 @@ public partial class PlayWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (_surface is null)
+        {
+            return;
+        }
+
+        // 先把视频层摆到同一个矩形再显示，避免它先在 (-10000,-10000) 冒一下。
+        SyncSurface();
+        if (!_surface.IsVisible)
+        {
+            _surface.Show();
+        }
+
+        PushSurfaceBelow();
+
         if (_hwnd != IntPtr.Zero)
         {
             StartMpv();
         }
     }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+
+        (PresentationSource.FromVisual(this) as HwndSource)?.AddHook(WindowProc);
+
+        if (!_windowPlaced)
+        {
+            _windowPlaced = true;
+            PlaceInitialWindow();
+        }
+
+        LocationChanged += (_, _) => SyncSurface();
+        SizeChanged += (_, _) => SyncSurface();
+        Activated += (_, _) => PushSurfaceBelow();
+    }
+
+    // —— 窗口尺寸 / 全屏 / 视频层同步 ——
+
+    /// <summary>默认开成 16:9 的窗口，屏幕放不下就缩到九成高。</summary>
+    private void PlaceInitialWindow()
+    {
+        var area = MonitorBounds();
+        var width = Math.Min(1280, area.Width * 0.88);
+        var height = width * 9 / 16;
+
+        if (height > area.Height * 0.9)
+        {
+            height = area.Height * 0.9;
+            width = height * 16 / 9;
+        }
+
+        var bounds = new Rect(
+            area.Left + (area.Width - width) / 2,
+            area.Top + (area.Height - height) / 2,
+            width,
+            height);
+
+        ApplyBounds(bounds);
+        _windowedBounds = bounds;
+        SyncSurface();
+    }
+
+    private void ApplyBounds(Rect bounds)
+    {
+        Left = bounds.Left;
+        Top = bounds.Top;
+        Width = bounds.Width;
+        Height = bounds.Height;
+    }
+
+    /// <summary>视频层始终铺满浮层窗口的客户区。</summary>
+    private void SyncSurface()
+    {
+        if (_surface is null)
+        {
+            return;
+        }
+
+        if (Math.Abs(_surface.Left - Left) > 0.5 || Math.Abs(_surface.Top - Top) > 0.5)
+        {
+            _surface.Left = Left;
+            _surface.Top = Top;
+        }
+
+        if (Math.Abs(_surface.Width - Width) > 0.5 || Math.Abs(_surface.Height - Height) > 0.5)
+        {
+            _surface.Width = Math.Max(1, Width);
+            _surface.Height = Math.Max(1, Height);
+        }
+    }
+
+    /// <summary>把视频层塞到这个窗口正下方（不抢激活）。</summary>
+    private void PushSurfaceBelow()
+    {
+        if (_surface is null)
+        {
+            return;
+        }
+
+        var play = new WindowInteropHelper(this).Handle;
+        var surface = new WindowInteropHelper(_surface).Handle;
+        if (play == IntPtr.Zero || surface == IntPtr.Zero)
+        {
+            return;
+        }
+
+        SetWindowPos(surface, play, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
+    private void ToggleFullscreen()
+    {
+        if (_fullscreen)
+        {
+            ExitFullscreen();
+        }
+        else
+        {
+            EnterFullscreen();
+        }
+    }
+
+    private void EnterFullscreen()
+    {
+        if (_fullscreen)
+        {
+            return;
+        }
+
+        _windowedBounds = new Rect(Left, Top, Width, Height);
+        _fullscreen = true;
+        ApplyBounds(MonitorBounds());
+        UpdateFullscreenGlyph();
+        ShowChrome();
+    }
+
+    private void ExitFullscreen()
+    {
+        if (!_fullscreen)
+        {
+            return;
+        }
+
+        _fullscreen = false;
+        ApplyBounds(_windowedBounds.Width > 320 ? _windowedBounds : MonitorLessRect());
+        UpdateFullscreenGlyph();
+        ShowChrome();
+    }
+
+    private void UpdateFullscreenGlyph()
+    {
+        // E740 = 进全屏，E73F = 退出全屏。
+        FullscreenGlyph.Text = _fullscreen ? "\uE73F" : "\uE740";
+        FullscreenButton.ToolTip = _fullscreen
+            ? "退出全屏（F11 / 双击画面 / Esc）"
+            : "全屏（F11 / 双击画面）";
+    }
+
+    private Rect MonitorLessRect()
+    {
+        var area = MonitorBounds();
+        return new Rect(
+            area.Left + area.Width * 0.06,
+            area.Top + area.Height * 0.06,
+            area.Width * 0.88,
+            area.Height * 0.88);
+    }
+
+    /// <summary>当前窗口所在显示器的整块区域（含任务栏），换算成 DIP。</summary>
+    private Rect MonitorBounds()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        var monitor = MonitorFromWindow(handle == IntPtr.Zero ? IntPtr.Zero : handle, 1);
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+        {
+            return new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX <= 0 ? 1 : dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY <= 0 ? 1 : dpi.DpiScaleY;
+
+        return new Rect(
+            info.rcMonitor.Left / scaleX,
+            info.rcMonitor.Top / scaleY,
+            (info.rcMonitor.Right - info.rcMonitor.Left) / scaleX,
+            (info.rcMonitor.Bottom - info.rcMonitor.Top) / scaleY);
+    }
+
+    /// <summary>无边框窗口自己算边角：靠近边缘 6px 就交给系统改窗口大小。</summary>
+    private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WM_NCHITTEST || _fullscreen)
+        {
+            return IntPtr.Zero;
+        }
+
+        var value = lParam.ToInt64();
+        var screenPoint = new Point((short)(value & 0xFFFF), (short)((value >> 16) & 0xFFFF));
+        var point = PointFromScreen(screenPoint);
+
+        const double grip = 6;
+        var left = point.X <= grip;
+        var right = point.X >= ActualWidth - grip;
+        var top = point.Y <= grip;
+        var bottom = point.Y >= ActualHeight - grip;
+
+        var code = (left, right, top, bottom) switch
+        {
+            (true, _, true, _) => HTTOPLEFT,
+            (_, true, true, _) => HTTOPRIGHT,
+            (true, _, _, true) => HTBOTTOMLEFT,
+            (_, true, _, true) => HTBOTTOMRIGHT,
+            (true, _, _, _) => HTLEFT,
+            (_, true, _, _) => HTRIGHT,
+            (_, _, true, _) => HTTOP,
+            (_, _, _, true) => HTBOTTOM,
+            _ => 0,
+        };
+
+        if (code == 0)
+        {
+            return IntPtr.Zero;
+        }
+
+        handled = true;
+        return new IntPtr(code);
+    }
+
+    // —— 画面上的鼠标：单击暂停、双击全屏、滚轮音量 ——
+
+    private void OnSurfaceMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        if (e.ClickCount == 2)
+        {
+            // 双击时的第一次单击已经切过暂停，这里还原，只当全屏用。
+            if (_clickToggledPause)
+            {
+                _clickToggledPause = false;
+                TogglePause();
+            }
+
+            ToggleFullscreen();
+            e.Handled = true;
+            return;
+        }
+
+        _pressPoint = e.GetPosition(this);
+    }
+
+    private void OnSurfaceMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || e.ClickCount > 1 || _ipc is null)
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(this) - _pressPoint;
+        if (Math.Abs(delta.X) > 4 || Math.Abs(delta.Y) > 4)
+        {
+            return;
+        }
+
+        TogglePause();
+        _clickToggledPause = true;
+        ShowChrome();
+        e.Handled = true;
+    }
+
+    private void OnSurfaceWheel(object sender, MouseWheelEventArgs e)
+    {
+        ChangeVolume(e.Delta > 0 ? 2 : -2);
+        ShowChrome();
+        e.Handled = true;
+    }
+
+    /// <summary>按住顶栏空白处拖窗口（全屏时不需要）。</summary>
+    private void OnTitleBarDrag(object sender, MouseButtonEventArgs e)
+    {
+        if (_fullscreen || e.ButtonState != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        try
+        {
+            DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+            // 鼠标已经松开：忽略。
+        }
+    }
+
+    private void OnFullscreenClick(object sender, RoutedEventArgs e) => ToggleFullscreen();
 
     private void StartMpv()
     {
@@ -197,6 +513,11 @@ public partial class PlayWindow : Window
         {
             _tracksApplied = false;
             _mpv.Start(_hwnd, launch);
+
+            // mpv 的子窗口是异步建出来的：先试一次，再补一次。
+            _surface?.Host.AttachMpvChild();
+            _ = Task.Delay(800).ContinueWith(_ => Dispatcher.BeginInvoke(() =>
+                _surface?.Host.AttachMpvChild()));
         }
         catch (Exception ex)
         {
@@ -317,11 +638,24 @@ public partial class PlayWindow : Window
                     if (_eof)
                     {
                         Playback.Report(_itemId, EffectiveDuration, EffectiveDuration);
-                        Close();
+                        AdvanceOrClose();
                     }
                     break;
             }
         });
+    }
+
+    /// <summary>播完自动接下一集；已经是最后一集就关窗口。</summary>
+    private void AdvanceOrClose()
+    {
+        var index = _playlist.FindIndex(episode => episode.Id == _itemId);
+        if (index >= 0 && index + 1 < _playlist.Count)
+        {
+            _ = SwitchToAsync(_playlist[index + 1].Id);
+            return;
+        }
+
+        Close();
     }
 
     /// <summary>mpv 的轨道清单：音轨 / 字幕菜单和「按详情页的选择播放」都读它。</summary>
@@ -753,15 +1087,27 @@ public partial class PlayWindow : Window
 
     private void OnMoreClick(object sender, RoutedEventArgs e) => OpenMoreMenu();
 
-    private ContextMenu OpenMoreMenu() => OpenMenu(MoreButton, new List<(string Label, bool Selected, Action Action)>
+    private ContextMenu OpenMoreMenu()
     {
-        (
+        var choices = new List<(string Label, bool Selected, Action Action)>();
+
+        var index = _playlist.FindIndex(episode => episode.Id == _itemId);
+        if (index >= 0 && index + 1 < _playlist.Count)
+        {
+            var next = _playlist[index + 1];
+            choices.Add(($"下一集：{next.Badge}", false, () => _ = SwitchToAsync(next.Id)));
+        }
+
+        choices.Add((_fullscreen ? "退出全屏" : "全屏", _fullscreen, ToggleFullscreen));
+        choices.Add((
             _hardwareDecode ? "硬解码：开（HW / GPU）" : "硬解码：关（软解）",
             _hardwareDecode,
-            ToggleHardwareDecode),
-        ("媒体信息", MediaInfoPanel.Visibility == Visibility.Visible, ToggleMediaInfo),
-        ("打开日志目录", false, OpenLogFolder),
-    });
+            ToggleHardwareDecode));
+        choices.Add(("媒体信息", MediaInfoPanel.Visibility == Visibility.Visible, ToggleMediaInfo));
+        choices.Add(("打开日志目录", false, OpenLogFolder));
+
+        return OpenMenu(MoreButton, choices);
+    }
 
     private void ToggleHardwareDecode()
     {
@@ -1031,6 +1377,9 @@ public partial class PlayWindow : Window
 
         _ipc?.Dispose();
         _mpv.Dispose();
+
+        _surface?.Close();
+        _surface = null;
     }
 
     private void OnKeyDown(object sender, KeyEventArgs e)
@@ -1070,7 +1419,21 @@ public partial class PlayWindow : Window
                     break;
                 }
 
+                if (_fullscreen)
+                {
+                    ExitFullscreen();
+                    break;
+                }
+
                 Close();
+                break;
+
+            case Key.F11:
+                ToggleFullscreen();
+                break;
+
+            case Key.Enter:
+                ToggleFullscreen();
                 break;
 
             default:
@@ -1154,6 +1517,26 @@ public partial class PlayWindow : Window
     /// <summary>截图巡检用：把浮层强制显示出来。</summary>
     public void ShowChromeForShot() => ShowChrome();
 
+    /// <summary>截图巡检用：跳到片尾前几秒，验证自动接下一集。</summary>
+    public void SkipToEndForShot(double secondsBefore = 4)
+    {
+        if (_ipc is null || EffectiveDuration <= 0)
+        {
+            return;
+        }
+
+        _ipc.Command("set_property", "time-pos", Math.Max(0, EffectiveDuration - secondsBefore));
+    }
+
+    /// <summary>
+    /// 截图巡检用：窗口是逐像素透明的，RenderTargetBitmap 截出来背景是空的。
+    /// 垫黑只影响壳自己（视频在另一个窗口，抓不到），所以要拍真实画面时再关掉。
+    /// </summary>
+    public void SetShotBackground(bool black) =>
+        Root.Background = black
+            ? Brushes.Black
+            : new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
+
     /// <summary>截图巡检用：打开右侧选集面板。</summary>
     public void ShowEpisodesForShot() => OnEpisodesClick(this, new RoutedEventArgs());
 
@@ -1170,6 +1553,49 @@ public partial class PlayWindow : Window
         MediaInfoPanel.Visibility = Visibility.Visible;
         UpdateMediaInfoText();
     }
+
+    private const int WM_NCHITTEST = 0x0084;
+    private const int HTLEFT = 10;
+    private const int HTRIGHT = 11;
+    private const int HTTOP = 12;
+    private const int HTTOPLEFT = 13;
+    private const int HTTOPRIGHT = 14;
+    private const int HTBOTTOM = 15;
+    private const int HTBOTTOMLEFT = 16;
+    private const int HTBOTTOMRIGHT = 17;
+
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_NOOWNERZORDER = 0x0200;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hwnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
     private sealed class MpvTrack
     {
