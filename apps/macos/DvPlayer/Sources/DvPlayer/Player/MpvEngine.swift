@@ -10,6 +10,8 @@ struct RawTrack {
     let codec: String
     let isDefault: Bool
     let isExternal: Bool
+    /// 外挂文件路径（mpv 的 `external-filename`）；弹幕 ASS 靠它排除出字幕菜单。
+    let externalFilename: String?
 }
 
 /// 播放引擎：拉起 `mpv` 子进程（gpu-next + Vulkan），通过 JSON IPC 控制。
@@ -55,6 +57,10 @@ final class MpvEngine {
     private var audioId: Int64 = 0
     private var subtitleId: Int64 = 0
     private var pendingLoad: (url: String, headers: [String: String], start: Double)?
+    /// 当前挂着的弹幕 ASS 路径：从字幕菜单里排除。
+    private var secondarySubtitlePath: String?
+    /// 每次 loadfile +1：切集时把上一集还没绑完的弹幕回调丢掉。
+    private var loadGeneration = 0
     private var ready = false
     private var shuttingDown = false
     private var lastPositionEmit: TimeInterval = 0
@@ -140,6 +146,7 @@ final class MpvEngine {
         for name in Self.observed {
             ipc.observe(name)
         }
+        ipc.command(["set_property", "secondary-sub-visibility", "yes"])
         ready = true
         videoFrame = frame
 
@@ -159,6 +166,7 @@ final class MpvEngine {
         }
 
         pendingLoad = nil
+        loadGeneration += 1
         isLoaded = false
         eofSent = false
         eofReached = false
@@ -224,6 +232,56 @@ final class MpvEngine {
 
     func selectSubtitle(_ trackId: Int64) {
         ipc.command(["set_property", "sid", trackId > 0 ? String(trackId) : "no"])
+    }
+
+    /// 弹幕：`sub-add` 之后用 `secondary-sid` 让它和用户选的字幕同时显示。
+    /// `sub-add` 在 JSON IPC 里不返回轨道 id，所以加完再查一次 `track-list`，
+    /// 按 `external-filename` 找到刚加的那条。
+    func addSecondarySubtitle(_ path: String) {
+        let primary = subtitleId
+        let generation = loadGeneration
+        secondarySubtitlePath = path
+        ipc.command(["sub-add", path, "auto"])
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, generation == self.loadGeneration else { return }
+            self.bindSecondarySubtitle(path: path, primary: primary)
+        }
+    }
+
+    private func bindSecondarySubtitle(path: String, primary: Int64) {
+        ipc.command(["get_property", "track-list"]) { [weak self] reply in
+            guard let self, case .success(let value) = reply,
+                  let list = value as? [[String: Any]] else { return }
+
+            let match = list.first { item in
+                guard (item["type"] as? String) == "sub" else { return false }
+                return (item["external-filename"] as? String) == path
+            }
+            guard let id = (match?["id"] as? NSNumber)?.int64Value, id > 0 else {
+                NSLog("[Danmaku] 没找到刚加的弹幕轨道 \(path)")
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.ipc.command(["set_property", "secondary-sid", String(id)])
+                // 加弹幕时如果没有主字幕，mpv 会把它选成主字幕：退回 secondary。
+                if primary == 0 {
+                    self.ipc.command(["set_property", "sid", "no"])
+                }
+                NSLog("[Danmaku] secondary sub id=\(id) primary=\(primary)")
+            }
+        }
+    }
+
+    func clearSecondarySubtitle() {
+        ipc.command(["set_property", "secondary-sid", "no"])
+    }
+
+    /// 在线下载的字幕：直接加进来并选上（主字幕）。
+    func addPrimarySubtitle(_ path: String) {
+        ipc.command(["sub-add", path, "select"])
+        NSLog("[Play] sub-add primary \(path)")
     }
 
     /// 画面比例：`keepaspect` 控制是否保持宽高比，`panscan=1` 是裁切填满，
@@ -361,6 +419,12 @@ final class MpvEngine {
             let type = item["type"] as? String ?? ""
             guard type == "audio" || type == "sub" else { continue }
 
+            // 弹幕 ASS 只走 secondary-sid，不进字幕菜单。
+            if let filename = item["external-filename"] as? String,
+               filename.contains("DVPlayer-danmaku") || filename == secondarySubtitlePath {
+                continue
+            }
+
             let track = RawTrack(
                 id: (item["id"] as? NSNumber)?.int64Value ?? 0,
                 type: type,
@@ -368,7 +432,8 @@ final class MpvEngine {
                 language: item["lang"] as? String ?? "",
                 codec: item["codec"] as? String ?? "",
                 isDefault: (item["default"] as? Bool) ?? false,
-                isExternal: (item["external"] as? Bool) ?? false)
+                isExternal: (item["external"] as? Bool) ?? false,
+                externalFilename: item["external-filename"] as? String)
 
             if type == "audio" {
                 audio.append(track)

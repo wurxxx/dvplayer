@@ -180,6 +180,11 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_UI=sleep:15` / `sleepepisode` / `nosleep` | 设定时关闭（分钟，可带小数） |
 | `DVPLAYER_PLAY_UI=mark:intro\|outro\|clear` | 按当前位置标记片头结束 / 片尾开始 / 清除 |
 | `DVPLAYER_PLAY_UI=skipoutro` | 触发「跳过片尾」（seek 到片长 − 0.4 秒） |
+| `DVPLAYER_PLAY_UI=danmaku:on\|off` | 开关弹幕（需要弹弹play 凭据） |
+| `DVPLAYER_PLAY_UI=danmakufile:<ass>` | 直接挂一份本地弹幕 ASS（不联网，自检用） |
+| `DVPLAYER_PLAY_UI=subsearch` | 打开字幕面板并搜索 |
+| `DVPLAYER_PLAY_UI=subload:N` / `subauto` | 下载第 N 条 / 自动下载第一条 |
+| `DVPLAYER_DANDANPLAY_BASE` / `DVPLAYER_OPENSUBTITLES_BASE` | 指向本地假服务器做离线联调 |
 | `DVPLAYER_PLAY_FRAME=<png>` | 让 mpv 抓窗口帧（`screenshot-to-file ... window`，含 gpu-next 后处理） |
 | `DVPLAYER_PLAY_SHOT=<png>` / `DVPLAYER_PLAY_SHOT_DELAY=` | 截播放窗的 SwiftUI 浮层 |
 | `DVPLAYER_PLAY_SECONDS=<秒>` | 到点打印 `[PlayTest]` 状态（位置 / 时长 / 轨道 / playlist） |
@@ -204,7 +209,35 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
   片尾区间置 `showSkipOutro`，浮层右下角出「跳过片尾」，点了 seek 到片长 − 0.4 秒，
   由 EOF 走正常的接下一集 / 关窗逻辑。
 
-### 4.6 播放页的坑
+### 4.6 弹幕与在线字幕
+
+**弹幕（弹弹play）**
+
+- 按「剧名 + 集号」匹配：`/api/v2/search/episodes?anime=&episode=` → episodeId，
+  再取 `/api/v2/comment/{episodeId}?withRelated=true&chConvert=1`（XML）。
+- v2 鉴权要三个头：`X-AppId`、`X-Timestamp`、`X-Signature`，签名是
+  `Base64(SHA256(AppId + Timestamp + Path + AppSecret))`（Path 不含 query）。
+- XML 转 ASS（滚动 9 秒 / 顶部 / 底部 4 秒，按行错开避免重叠），
+  写到 `~/Library/Caches/DvPlayer/danmaku/DVPlayer-danmaku-<episodeId>.ass`，
+  再用 `sub-add` 挂上、`secondary-sid` 让弹幕和正片字幕**同时**显示。
+  弹幕轨不进字幕菜单：按 `external-filename` 过滤掉。
+- 配置在 `settings.json`：`danmakuAppId` / `danmakuAppSecret`（弹弹play 控制台申请）、
+  `danmakuEnabled`。默认关；没配凭据时打开只给一句提示，不联网。
+- 切集重新匹配；上一集晚到的绑定回调用 `loadGeneration` 丢掉。
+
+**在线字幕（OpenSubtitles）**
+
+- `openSubtitlesApiKey` 必填；`openSubtitlesUsername` / `openSubtitlesPassword`
+  可选，配了会先 `/login` 换 token，下载时带 `Authorization: Bearer`。
+- 搜索 `/subtitles`：剧集带 `type=episode` + `season_number` / `episode_number`
+  （季号从选集角标的 `S01E02` 取），电影只带标题；语言默认 `zh-cn,zh-tw,en`
+  （`subtitleLanguages` 可改）。
+- 选中一条 → `POST /downloads` 拿临时链接 → 下载到
+  `~/Library/Caches/DvPlayer/subtitles/` → `sub-add select` 直接选上。
+- 面板是右侧 380 宽的 `字幕搜索`：语言 + 发行名 + 下载数；没配 key 时面板里
+  直接写明缺什么，不弹窗。
+
+### 4.7 播放页的坑
 
 - **`--no-config` 之外还必须 `--idle=yes`**：壳是先起进程、再通过 IPC `loadfile`，
   命令行上没有文件名，不带 `--idle=yes` 时 mpv 直接打印用法退出（IPC 连不上）。
@@ -229,6 +262,12 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
 - **选集面板要落到当前集**：`ScrollViewReader` + `onAppear` / `onChange(of: itemId)`
   滚到正在播的那一集；列表用 `PlayerEpisode.list(from:season:)` 排号（和详情页
   `makeRows` 同一套「漏号用最小未占用号补」规则），否则飞牛的倒序会让 E70 排在最前。
+- **`sub-add` 在 JSON IPC 里不返回轨道 id**：命令回复是 `null`，只能加完再查
+  `track-list`，按 `external-filename` 找到刚加的那条，再设 `secondary-sid`。
+- **没有主字幕时 `sub-add auto` 会抢主字幕**：弹幕加进去后要把 `sid` 设回 `no`，
+  否则 `sid` 和 `secondary-sid` 指向同一条，画面叠两遍。
+- **弹幕 ASS 的文本要转义**：`{}` 是样式指令、`\` 是转义符，弹幕里换成全角字符；
+  换行换成空格。颜色是 ASS 的 `&HAABBGGRR`，弹弹play 给的是 `0xRRGGBB`。
 - **锁屏时 Vulkan 拿不到 swapchain**：mpv 建完 pipeline 就卡住，`--length` 也不退出。
   不是代码问题（ADR-0006 在 11-19 同一台机器上验过），自检改用 `DVPLAYER_NO_VO=1`。
 

@@ -122,6 +122,7 @@ final class PlayerSession: ObservableObject {
         case none
         case episodes
         case info
+        case subtitles
     }
 
     // —— mpv（子进程 + IPC，视频在 mpv 自己的窗口里） ——
@@ -172,6 +173,17 @@ final class PlayerSession: ObservableObject {
     /// 进度进了片尾区间，浮出「跳过片尾」。
     @Published var showSkipOutro = false
 
+    // —— 弹幕 ——
+    @Published private(set) var danmakuEnabled: Bool
+    @Published private(set) var danmakuStatus: String?
+    private var danmakuTask: Task<Void, Never>?
+    private var danmakuNoticeShown = false
+
+    // —— 在线字幕 ——
+    @Published private(set) var subtitleResults: [SubtitleResult] = []
+    @Published private(set) var subtitleSearching = false
+    @Published private(set) var subtitleError: String?
+
     // —— 由窗口控制器接上的动作 ——
     var onClose: (() -> Void)?
     var onToggleFullscreen: (() -> Void)?
@@ -203,7 +215,9 @@ final class PlayerSession: ObservableObject {
         self.seriesTitle = Self.cleanSeries(seriesTitle)
         self.hintTitle = hintTitle ?? ""
         self.title = hintTitle ?? "正在播放"
-        self.aspect = PlayerAspect(rawValue: AppSettings.load().videoAspect ?? "") ?? .fit
+        let settings = AppSettings.load()
+        self.aspect = PlayerAspect(rawValue: settings.videoAspect ?? "") ?? .fit
+        self.danmakuEnabled = settings.danmakuEnabled ?? false
         self.markers = SkipMarkerStore.marker(for: Self.cleanSeries(seriesTitle) ?? itemId)
 
         guard let engine = MpvEngine(frame: frame, startSeconds: startSeconds) else {
@@ -228,6 +242,7 @@ final class PlayerSession: ObservableObject {
             self.applyAspect()
             self.applyTrackPrefsIfNeeded()
             self.skipIntroIfNeeded()
+            self.loadDanmakuIfNeeded()
         }
         engine.onEOF = { [weak self] in
             self?.handleEOF()
@@ -280,6 +295,8 @@ final class PlayerSession: ObservableObject {
         panel = .none
         showSkipOutro = false
         markers = SkipMarkerStore.marker(for: markerKey)
+        danmakuTask?.cancel()
+        danmakuStatus = nil
 
         NSLog("[Play] open \(itemId) playlist=\(playlist.count) start=\(startSeconds.map { String($0) } ?? "resume")")
 
@@ -796,6 +813,169 @@ final class PlayerSession: ObservableObject {
         toast("跳过片尾")
     }
 
+    // MARK: - 在线字幕
+
+    /// 季号从选集角标（`S01E02`）里取；电影没有季。
+    private var seasonNumber: Int? {
+        guard let episode = playlist.first(where: { $0.id == itemId }) else { return nil }
+        let badge = episode.badge
+        guard badge.hasPrefix("S"), let e = badge.firstIndex(of: "E") else { return nil }
+        let digits = badge[badge.index(after: badge.startIndex)..<e]
+        return Int(digits)
+    }
+
+    func openSubtitleSearch() {
+        panel = .subtitles
+        showChrome()
+        searchSubtitles()
+    }
+
+    func searchSubtitles() {
+        guard !subtitleSearching else { return }
+
+        let settings = AppSettings.load()
+        let apiKey = settings.openSubtitlesApiKey ?? ""
+        guard !apiKey.isEmpty else {
+            subtitleResults = []
+            subtitleError = SubtitleError.missingApiKey.localizedDescription
+            NSLog("[Subtitles] 未配置 openSubtitlesApiKey")
+            return
+        }
+
+        subtitleSearching = true
+        subtitleError = nil
+        subtitleResults = []
+
+        let query = seriesTitle ?? title
+        let season = seasonNumber
+        let episode = episodeNumber
+        let languages = settings.subtitleLanguages ?? "zh-cn,zh-tw,en"
+        NSLog("[Subtitles] search \(query) S\(season ?? 0)E\(episode ?? 0)")
+
+        Task { [weak self] in
+            do {
+                let results = try await OpenSubtitlesService.shared.search(
+                    title: query,
+                    season: season,
+                    episode: episode,
+                    apiKey: apiKey,
+                    username: settings.openSubtitlesUsername,
+                    password: settings.openSubtitlesPassword,
+                    languages: languages)
+                guard let self else { return }
+                self.subtitleResults = results
+                self.subtitleSearching = false
+                NSLog("[Subtitles] results=\(results.count)")
+            } catch {
+                guard let self else { return }
+                self.subtitleError = error.localizedDescription
+                self.subtitleSearching = false
+                NSLog("[Subtitles] search failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func applySubtitle(_ result: SubtitleResult) {
+        let settings = AppSettings.load()
+        guard let apiKey = settings.openSubtitlesApiKey, !apiKey.isEmpty else {
+            subtitleError = SubtitleError.missingApiKey.localizedDescription
+            return
+        }
+
+        toast("正在下载字幕…")
+        Task { [weak self] in
+            do {
+                let url = try await OpenSubtitlesService.shared.download(
+                    result,
+                    apiKey: apiKey,
+                    username: settings.openSubtitlesUsername,
+                    password: settings.openSubtitlesPassword)
+                guard let self, !self.isStopped else { return }
+                self.mpv.addPrimarySubtitle(url.path)
+                self.toast("字幕已加载：\(result.languageLabel)")
+                NSLog("[Subtitles] applied \(result.languageLabel) \(url.lastPathComponent)")
+            } catch {
+                guard let self else { return }
+                self.subtitleError = error.localizedDescription
+                NSLog("[Subtitles] download failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - 弹幕
+
+    /// 选集里这一集的集号（`E02` / `S01E02` 取末尾数字）。
+    private var episodeNumber: Int? {
+        guard let episode = playlist.first(where: { $0.id == itemId }) else { return nil }
+        let digits = String(episode.badge.reversed().prefix { $0.isNumber }.reversed())
+        return Int(digits)
+    }
+
+    func setDanmaku(enabled: Bool) {
+        danmakuEnabled = enabled
+        var settings = AppSettings.load()
+        settings.danmakuEnabled = enabled
+        settings.save()
+
+        if enabled {
+            NSLog("[Danmaku] enabled")
+            let current = AppSettings.load()
+            if (current.danmakuAppId ?? "").isEmpty
+                || (current.danmakuAppSecret ?? "").isEmpty {
+                toast("弹幕需要配置弹弹play AppId / AppSecret")
+            }
+            loadDanmakuIfNeeded()
+        } else {
+            NSLog("[Danmaku] disabled")
+            danmakuTask?.cancel()
+            danmakuStatus = nil
+            mpv.clearSecondarySubtitle()
+        }
+        toast(enabled ? "弹幕：开" : "弹幕：关")
+        showChrome()
+    }
+
+    /// 按「剧名 + 集号」去弹弹play 找弹幕，写成 ASS 交给 mpv 当第二字幕。
+    /// 没配置 AppId / AppSecret 就安静跳过（日志里留一行），不打扰观看。
+    private func loadDanmakuIfNeeded() {
+        danmakuTask?.cancel()
+        guard danmakuEnabled else { return }
+        guard let series = seriesTitle, let episode = episodeNumber else { return }
+
+        let settings = AppSettings.load()
+        guard let appId = settings.danmakuAppId, !appId.isEmpty,
+              let secret = settings.danmakuAppSecret, !secret.isEmpty else {
+            NSLog("[Danmaku] 未配置 danmakuAppId / danmakuAppSecret")
+            return
+        }
+
+        let item = itemId
+        danmakuTask = Task { [weak self] in
+            do {
+                let episodeId = try await DanmakuService.shared.episodeId(
+                    anime: series, episode: episode, appId: appId, appSecret: secret)
+                try Task.checkCancellation()
+                let comments = try await DanmakuService.shared.comments(
+                    episodeId: episodeId, appId: appId, appSecret: secret)
+                try Task.checkCancellation()
+
+                guard let self, self.itemId == item else { return }
+                if let url = DanmakuAss.write(comments: comments, episodeId: episodeId) {
+                    self.mpv.addSecondarySubtitle(url.path)
+                    self.danmakuStatus = "弹幕 \(comments.count)"
+                    NSLog("[Danmaku] loaded \(comments.count) item=\(item) episodeId=\(episodeId)")
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                NSLog("[Danmaku] \(error.localizedDescription) item=\(item)")
+                guard let self, self.itemId == item, !self.danmakuNoticeShown else { return }
+                self.danmakuNoticeShown = true
+                self.toast(error.localizedDescription)
+            }
+        }
+    }
+
     private func clock(_ seconds: Double) -> String {
         let total = Int(max(0, seconds))
         if total >= 3600 {
@@ -959,6 +1139,10 @@ final class PlayerSession: ObservableObject {
 
         if let sleep = sleepLabel {
             chips.append("定时 \(sleep)")
+        }
+
+        if danmakuEnabled {
+            chips.append(danmakuStatus ?? "弹幕")
         }
 
         return chips

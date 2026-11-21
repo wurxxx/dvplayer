@@ -290,6 +290,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "skipoutro":
                 session.skipOutro()
                 NSLog("[PlayTest] skipoutro pos=\(Int(session.position))")
+            case "danmaku":
+                let on = (parts.count > 1 ? parts[1] : "on") != "off"
+                session.setDanmaku(enabled: on)
+                NSLog("[PlayTest] danmaku=\(session.danmakuEnabled) status=\(session.danmakuStatus ?? "-")")
+            case "danmakufile":
+                // 自检 / 调试：直接挂一份本地 ASS，不联网。
+                let path = parts.count > 1 ? parts[1] : ""
+                session.mpv.addSecondarySubtitle(path)
+                NSLog("[PlayTest] danmakufile=\(path)")
+            case "subsearch":
+                session.openSubtitleSearch()
+                NSLog("[PlayTest] subsearch panel=\(session.panel)")
+            case "subload":
+                let index = Int(parts.count > 1 ? parts[1] : "") ?? 0
+                if session.subtitleResults.indices.contains(index) {
+                    session.applySubtitle(session.subtitleResults[index])
+                }
+                NSLog("[PlayTest] subload=\(index) of \(session.subtitleResults.count)")
+            case "subauto":
+                // 自检：搜索 → 等结果 → 下载并挂上第一条。
+                session.openSubtitleSearch()
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if let first = session.subtitleResults.first {
+                        session.applySubtitle(first)
+                    }
+                    NSLog("[PlayTest] subauto results=\(session.subtitleResults.count)")
+                }
             default:
                 break
         }
@@ -313,6 +341,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               + "intro=\(session.markers.introEnd.map { Int($0) } ?? -1) "
               + "outro=\(session.markers.outroStart.map { Int($0) } ?? -1) "
               + "skipoutro=\(session.showSkipOutro) "
+              + "danmaku=\(session.danmakuEnabled)/\(session.danmakuStatus ?? "-") "
+              + "subOnline=\(session.subtitleResults.count)/\(session.subtitleSearching) "
+              + "subErr=\(session.subtitleError ?? "-") "
               + "error=\(session.error ?? "-")")
     }
 

@@ -71,6 +71,13 @@ struct PlayerView: View {
                     .padding(.vertical, 40)
             }
 
+            if session.panel == .subtitles {
+                subtitlesPanel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(.trailing, 74)
+                    .padding(.vertical, 40)
+            }
+
             // 片尾区间到了浮出来，不自动跳，给用户自己决定。
             if session.showSkipOutro {
                 skipOutroButton
@@ -380,6 +387,12 @@ struct PlayerView: View {
 
             Divider()
 
+            Button(session.danmakuEnabled ? "弹幕：开" : "弹幕：关") {
+                session.setDanmaku(enabled: !session.danmakuEnabled)
+            }
+
+            Divider()
+
             if let intro = session.markers.introEnd {
                 Button("清除片头标记（\(timeText(intro))）") { session.clearIntro() }
             } else {
@@ -395,6 +408,7 @@ struct PlayerView: View {
             }
 
             Divider()
+            Button("搜索字幕…") { session.openSubtitleSearch() }
             Button("媒体信息") { session.togglePanel(.info) }
             Button("截图") { session.screenshot() }
             Button(session.isFullscreen ? "退出全屏" : "全屏") {
@@ -428,6 +442,93 @@ struct PlayerView: View {
     }
 
     // MARK: - 选集 / 媒体信息
+
+    private var subtitlesPanel: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("字幕搜索")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                if session.subtitleSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if !session.subtitleResults.isEmpty {
+                    Text("\(session.subtitleResults.count) 条")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.faint)
+                }
+                Button {
+                    session.panel = .none
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.faint)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 8)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
+            if let error = session.subtitleError {
+                Text(error)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Color(hex: 0xFF6B6B))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 24)
+            } else if session.subtitleSearching {
+                Text("正在搜索…")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.faint)
+                    .padding(.vertical, 30)
+            } else if session.subtitleResults.isEmpty {
+                Text("没有结果")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.faint)
+                    .padding(.vertical, 30)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(session.subtitleResults) { result in
+                            Button {
+                                session.applySubtitle(result)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(result.languageLabel)
+                                        .font(.system(size: 13.5, weight: .semibold))
+                                        .foregroundStyle(Theme.text)
+                                    Text(result.detail)
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.faint)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(Color.white.opacity(0.05),
+                                            in: RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 10)
+                }
+            }
+        }
+        .frame(width: 380)
+        .frame(maxHeight: 580)
+        .background(Color(hex: 0x141419).opacity(0.96),
+                    in: RoundedRectangle(cornerRadius: Theme.radiusCard))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.radiusCard)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        }
+    }
 
     private var episodesPanel: some View {
         VStack(spacing: 0) {

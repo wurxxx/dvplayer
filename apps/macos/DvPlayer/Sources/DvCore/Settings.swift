@@ -15,6 +15,18 @@ public struct AppSettings: Codable, Sendable {
     /// 用可选值是为了老配置能直接解出来。
     public var videoAspect: String?
 
+    /// 弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。
+    public var danmakuEnabled: Bool?
+    public var danmakuAppId: String?
+    public var danmakuAppSecret: String?
+
+    /// 在线字幕（OpenSubtitles）。API Key 注册即得；用户名 / 密码可选，
+    /// 配了才会去换下载用的 token。
+    public var openSubtitlesApiKey: String?
+    public var openSubtitlesUsername: String?
+    public var openSubtitlesPassword: String?
+    public var subtitleLanguages: String?
+
     public init() {}
 
     public static var directory: URL {
