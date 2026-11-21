@@ -57,6 +57,10 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   Emby / Jellyfin 不再自己画三角，直接取官方素材。图标由
   `scripts/make-source-icons.py` 生成到 `Assets/sources/`（macOS 打包用仓库里同一份
   `assets/sources/`）。侧栏的状态点从名字前面挪到图标右下角：连上绿点、失败红点。
+- **Emby / Jellyfin 的报错按源类型显示**：两者共用同一份适配器，以前 Jellyfin
+  源出错也写「Emby：」。现在 `EmbySource` 带一个 `label`，Jellyfin 显示
+  「Jellyfin：…」。回归：加一个 Jellyfin 源、用户名密码都留空，状态行是
+  「连接失败：Jellyfin：用户名或 API Key 至少填一个」。
 - **网络服务器代理**：服务器表单新增「HTTP 代理（可选）」，只对飞牛 / Emby /
   Jellyfin 显示，落 `settings.json` 的 `proxy`（空 = 直连，允许只写
   `127.0.0.1:7890`）。这个源的接口请求（核心 `http_client`）、海报下载

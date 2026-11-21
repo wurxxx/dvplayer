@@ -156,6 +156,7 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
         "emby" | "jellyfin" => Some(Box::new(EmbySource::new(
             config.id.clone(),
             config.name.clone(),
+            if kind == "jellyfin" { "Jellyfin" } else { "Emby" }.to_string(),
             config.base.clone(),
             config.username.clone(),
             config.password.clone(),

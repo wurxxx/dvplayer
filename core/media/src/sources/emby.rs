@@ -39,6 +39,9 @@ OriginalTitle,MediaStreams,MediaSources,Path,Container,PrimaryImageAspectRatio,P
 pub struct EmbySource {
     pub id: String,
     pub name: String,
+    /// 界面上显示的产品名（`Emby` / `Jellyfin`）：两者共用这份实现，
+    /// 报错和提示里不能互相叫错名字。
+    label: String,
     pub base: String,
     username: String,
     password: String,
@@ -53,6 +56,7 @@ impl EmbySource {
     pub fn new(
         id: String,
         name: String,
+        label: String,
         base: String,
         username: String,
         password: String,
@@ -61,6 +65,7 @@ impl EmbySource {
         Self {
             id,
             name,
+            label,
             base: base.trim_end_matches('/').to_string(),
             username,
             password,
@@ -76,7 +81,10 @@ impl EmbySource {
             // API Key 模式：把 Key 当 token 用，再查一次当前用户拿 UserId。
             let key = self.password.trim().to_string();
             if key.is_empty() {
-                return Err(MediaError::Other("Emby：用户名或 API Key 至少填一个".into()));
+                return Err(MediaError::Other(format!(
+                    "{}：用户名或 API Key 至少填一个",
+                    self.label
+                )));
             }
             self.token = Some(key);
             self.user_id = Some(self.current_user_id()?);
@@ -111,11 +119,14 @@ impl EmbySource {
         let text = self.read_body(response)?;
         let parsed: LoginDto = serde_json::from_str(&text).map_err(|e| MediaError::Api {
             code: 0,
-            msg: format!("Emby 登录返回无法解析：{e}｜{}", truncate(&text, 160)),
+            msg: format!("{} 登录返回无法解析：{e}｜{}", self.label, truncate(&text, 160)),
         })?;
 
         if parsed.access_token.is_empty() {
-            return Err(MediaError::Other("Emby 登录失败：没有拿到 AccessToken".into()));
+            return Err(MediaError::Other(format!(
+                "{} 登录失败：没有拿到 AccessToken",
+                self.label
+            )));
         }
 
         self.token = Some(parsed.access_token);
@@ -131,7 +142,7 @@ impl EmbySource {
     fn current_user_id(&self) -> Result<String> {
         let user: UserDto = self.get("/Users/Me", &[])?;
         if user.id.is_empty() {
-            return Err(MediaError::Other("Emby：拿不到用户 id".into()));
+            return Err(MediaError::Other(format!("{}：拿不到用户 id", self.label)));
         }
         Ok(user.id)
     }
@@ -139,7 +150,7 @@ impl EmbySource {
     fn user_id(&self) -> Result<&str> {
         self.user_id
             .as_deref()
-            .ok_or_else(|| MediaError::Other("Emby 未登录".into()))
+            .ok_or_else(|| MediaError::Other(format!("{} 未登录", self.label)))
     }
 
     pub fn libraries(&self) -> Result<Vec<MediaLibrary>> {
@@ -655,7 +666,9 @@ impl EmbySource {
     pub fn image_source(&self, path: &str) -> Result<ImageSource> {
         let (item_id, kind) = path
             .split_once('/')
-            .ok_or_else(|| MediaError::Other(format!("Emby 图片路径不合法：{path}")))?;
+            .ok_or_else(|| {
+                MediaError::Other(format!("{} 图片路径不合法：{path}", self.label))
+            })?;
 
         let width = if kind.starts_with("Backdrop") { 1600 } else { 800 };
 
@@ -843,7 +856,7 @@ impl EmbySource {
         let text = self.send(Method::GET, path, query, None)?;
         serde_json::from_str(&text).map_err(|e| MediaError::Api {
             code: 0,
-            msg: format!("Emby 返回无法解析：{e}｜{}", truncate(&text, 160)),
+            msg: format!("{} 返回无法解析：{e}｜{}", self.label, truncate(&text, 160)),
         })
     }
 
@@ -855,7 +868,7 @@ impl EmbySource {
         let text = self.send(Method::POST, path, &[], Some(body))?;
         serde_json::from_str(&text).map_err(|e| MediaError::Api {
             code: 0,
-            msg: format!("Emby 返回无法解析：{e}｜{}", truncate(&text, 160)),
+            msg: format!("{} 返回无法解析：{e}｜{}", self.label, truncate(&text, 160)),
         })
     }
 
@@ -1317,6 +1330,7 @@ mod tests {
     fn source() -> EmbySource {
         EmbySource::new(
             "emby-1".into(),
+            "Emby".into(),
             "Emby".into(),
             "http://127.0.0.1:8096".into(),
             String::new(),

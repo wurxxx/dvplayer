@@ -162,6 +162,8 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   图标文件是仓库 `assets/sources/` 下同一份（`scripts/make-source-icons.py` 生成，
   两端共用），`build.sh` 拷进 `Contents/Resources/sources/`，代码走
   `SourceIcon`。侧栏的连接状态点叠在图标右下角。
+- Emby / Jellyfin 的报错按源类型显示：两者共用同一份适配器，现在 `EmbySource`
+  带 `label`，Jellyfin 源报「Jellyfin：…」，不再自称 Emby。
 - 网络服务器的 HTTP 代理存在 `SourceConfig.proxy`：核心接口请求走
   `http_client`，海报走 `PosterStore` 里按代理缓存的 `URLSession`
   （`connectionProxyDictionary`），播放通过 mpv 的 `http-proxy` 属性设置。
