@@ -286,7 +286,7 @@ struct SettingsPage: View {
                 .padding(.horizontal, 32)
                 .padding(.top, 20)
                 .padding(.bottom, 32)
-                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: 880, alignment: .leading)
             }
         }
         .onChange(of: state.settings.resumePlayback) { _ in state.settings.save() }
