@@ -547,8 +547,8 @@ public partial class SeriesPage : Page
         }
 
         RangeRow.Visibility = _rangeChips.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-        RangeList.ItemsSource = null;
-        RangeList.ItemsSource = _rangeChips;
+        RangeRow.ItemsSource = null;
+        RangeRow.ItemsSource = _rangeChips;
     }
 
     private async void OnRangeClick(object sender, MouseButtonEventArgs e)
@@ -591,27 +591,6 @@ public partial class SeriesPage : Page
         }
 
         ScrollEpisodeRowTo(chip.From);
-        ScrollRangeRowToActive();
-    }
-
-    /// <summary>快捷选集行本身也可能比窗口宽：把高亮段滚进画面。</summary>
-    private void ScrollRangeRowToActive()
-    {
-        var index = _rangeChips.FindIndex(c => c.Active);
-        if (index < 0 || RangeRow.Visibility != Visibility.Visible)
-        {
-            return;
-        }
-
-        RangeList.UpdateLayout();
-        if (RangeList.ItemContainerGenerator.ContainerFromIndex(index) is not FrameworkElement chip)
-        {
-            return;
-        }
-
-        var point = chip.TransformToAncestor(RangeRow).Transform(new Point(0, 0));
-        var target = RangeRow.HorizontalOffset + point.X - 24;
-        RangeRow.ScrollToHorizontalOffset(Math.Max(0, target));
     }
 
     /// <summary>把某一集滚到横向选集行的最左边。</summary>

@@ -427,36 +427,14 @@ struct DetailPage: View {
         max(1, (max(number, 1) - 1) / episodeRangeSize * episodeRangeSize + 1)
     }
 
+    /// 段按钮铺成自动换行的多行：一行放不下时能点回前面那几段
+    /// （横向滚动的行没有箭头，滚不过去就再也点不回来）。
     private var episodeRangeChips: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(episodeRanges, id: \.from) { range in
-                        let active = range.from == activeRangeStart
-                        Button {
-                            jump(toRange: range.from, to: range.to)
-                        } label: {
-                            Text("\(range.from)-\(range.to)")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(active ? Theme.accent : Theme.muted)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 5)
-                                .background(active ? Theme.accent.opacity(0.16) : Theme.surface,
-                                            in: RoundedRectangle(cornerRadius: 7))
-                        }
-                        .buttonStyle(.plain)
-                        .help("跳到第 \(range.from)-\(range.to) 集")
-                        .id(range.from)
-                    }
-                }
-                .padding(.vertical, 1)
-            }
-            .onChange(of: selectedRangeStart) { value in
-                guard value > 0 else { return }
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo(rangeStart(value), anchor: .center)
-                }
-            }
+        FlowChips(items: episodeRanges.map { ("\($0.from)", "\($0.from)-\($0.to)") },
+                  active: "\(activeRangeStart)") { id in
+            guard let from = Int(id) else { return }
+            let to = min(from + episodeRangeSize - 1, max(episodeTotal, from))
+            jump(toRange: from, to: to)
         }
     }
 

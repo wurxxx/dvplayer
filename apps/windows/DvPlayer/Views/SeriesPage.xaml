@@ -207,14 +207,14 @@
                      Margin="14,3,0,0" VerticalAlignment="Center" />
         </StackPanel>
 
-        <!-- 集数多时按 30 集一段给一排快捷入口：1-30 / 31-60 …，点一下滚到那一段 -->
-        <controls:HorizontalRow x:Name="RangeRow" Margin="0,12,0,0" Visibility="Collapsed">
-          <ItemsControl x:Name="RangeList">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <StackPanel Orientation="Horizontal" />
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
+        <!-- 集数多时按 30 集一段铺快捷入口：1-30 / 31-60 …，放不下就换行。
+             做成换行而不是横向滚动：这行没有箭头，横向滚不到后面就点不回前面那几段。 -->
+        <ItemsControl x:Name="RangeRow" Margin="0,12,0,0" Visibility="Collapsed">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Border Tag="{Binding}" MouseLeftButtonUp="OnRangeClick" Cursor="Hand"
@@ -236,7 +236,6 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-        </controls:HorizontalRow>
 
         <Grid Margin="0,16,0,0">
           <controls:HorizontalRow x:Name="EpisodeScroller">

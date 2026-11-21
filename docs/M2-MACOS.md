@@ -147,8 +147,8 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   也不被黑底挡住；单击黑底只把窗口选中，不切暂停。黑底上双击走**最大化 /
   还原**（`actions.zoom()`），和 Windows 一致；进假全屏会把三个圆点收掉，
   打开阶段不能这么干。
-- 选集超过 30 集时标题下有 `1-30 / 31-60 …` 段按钮：点一下先补页、再把横向选集行
-  滚到那一段第 1 集，高亮段自己也会滚进画面。滚动用 `Components.swift` 的
+- 选集超过 30 集时标题下有 `1-30 / 31-60 …` 段按钮（复用 `FlowChips`，放不下自动
+  换行，不用横向滚动）：点一下先补页、再把横向选集行滚到那一段第 1 集。滚动用 `Components.swift` 的
   `RowJumpBridge` 直接设行内 `NSScrollView` 的横向偏移——SwiftUI 的 `scrollTo`
   在卡片刚插进 `HStack` 的那一轮会静默失效。回归：`DVPLAYER_DETAIL=<id>
   DVPLAYER_RANGE=31 DVPLAYER_SCROLL_Y=430 DVPLAYER_SHOT=…`，日志应有
