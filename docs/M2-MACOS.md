@@ -243,6 +243,14 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
 
 ### 4.6 弹幕与在线字幕
 
+**音轨 / 字幕菜单的文案**
+
+- 字幕菜单只写「语言 · 标题」：`TrackPrefs.subtitleLabel` 把 `chi` / `eng` 翻成
+  中文名，把 `HDMV PGS_SUBTITLE`、`subrip` 这类容器 / 编码标题当作没有标题；
+  只有语言就只显示语言，两个都没有时用「字幕 N」，重名再追加序号（`中文 1`）。
+- 播放器菜单读 mpv 的 `track-list`，详情页 / 媒体信息卡读服务器的
+  `MediaInfo.subtitles`，两边共用同一个函数。
+
 **弹幕（弹弹play）**
 
 - 按「剧名 + 集号」匹配：`/api/v2/search/episodes?anime=&episode=` → episodeId，

@@ -797,14 +797,10 @@ public partial class SeriesPage : Page
             ("关闭字幕", selected == TrackPrefs.SubtitleOff, TrackPrefs.SubtitleOff),
         };
 
+        // 「语言 · 标题」，编码 / 容器标签不进菜单；外挂轨补一个「外挂」。
+        var labels = TrackPrefs.SubtitleLabels(subs);
         choices.AddRange(subs.Select((s, i) => (
-            Label: string.Join("  ", new[]
-                {
-                    TrackPrefs.SubtitleName(s),
-                    s.Codec,
-                    s.IsBitmap ? "图形" : null,
-                    s.IsExternal ? "外挂" : null,
-                }
+            Label: string.Join("  ", new[] { labels[i], s.IsExternal ? "外挂" : null }
                 .Where(part => !string.IsNullOrWhiteSpace(part))),
             Selected: i == selected,
             Value: i)));
@@ -1307,7 +1303,7 @@ public partial class SeriesPage : Page
                 var index = i;
                 var card = BuildInfoCard(
                     string.Empty,
-                    TrackPrefs.SubtitleName(subtitle),
+                    TrackPrefs.SubtitleName(subtitle, i + 1),
                     rows,
                     index == current,
                     SubtitleGlyph(),

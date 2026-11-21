@@ -377,6 +377,14 @@ public partial class MainWindow : FluentWindow
             await Task.Delay(300);
         }
 
+        if (player.OpenSubtitleMenuForShot() is { } subtitleMenu)
+        {
+            await Task.Delay(700);
+            UiCapture.Save(subtitleMenu, Path.Combine(dir, "play-subtitle.png"));
+            subtitleMenu.IsOpen = false;
+            await Task.Delay(300);
+        }
+
         if (player.OpenMoreMenuForShot() is { } moreMenu)
         {
             await Task.Delay(700);
@@ -562,6 +570,18 @@ public partial class MainWindow : FluentWindow
                         await Task.Delay(700);
                         UiCapture.Save(audioOutMenu, Path.Combine(dir, "play-audioout.png"));
                         audioOutMenu.IsOpen = false;
+                    }
+                    break;
+
+                case "submenu":
+                    player.ShowChromeForShot();
+                    await Task.Delay(600);
+                    if (player.OpenSubtitleMenuForShot() is { } subtitleMenu)
+                    {
+                        await Task.Delay(700);
+                        UiCapture.Save(subtitleMenu, Path.Combine(dir, "play-submenu.png"));
+                        subtitleMenu.IsOpen = false;
+                        await Task.Delay(300);
                     }
                     break;
 

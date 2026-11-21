@@ -538,7 +538,7 @@ struct DetailPage: View {
 
             cards.append(TrackCard(id: "subtitle-\(index)",
                                    icon: "captions.bubble",
-                                   title: subtitleName(subtitle),
+                                   title: subtitleName(subtitle, ordinal: index + 1),
                                    rows: rows,
                                    active: effectiveSubtitleIndex(info) == index,
                                    onPick: {
@@ -638,19 +638,11 @@ struct DetailPage: View {
         return info.subtitles.firstIndex(where: { $0.isDefault == true }) ?? TrackPrefs.subtitleOff
     }
 
-    /// 字幕按钮 / 菜单里的名字：中文轨映射成中文名，别露出 Simplified Chinese。
-    private func subtitleName(_ subtitle: SubtitleInfo) -> String {
-        let title = (subtitle.title ?? "").trimmingCharacters(in: .whitespaces)
-
-        if TrackPrefs.isSimplified(subtitle.language, title) { return "简体中文" }
-        if TrackPrefs.isTraditional(subtitle.language, title) { return "繁体中文" }
-
-        if TrackPrefs.isChinese(subtitle.language, title) {
-            let hasCjk = title.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
-            return hasCjk ? title : "中文"
-        }
-
-        return subtitle.language ?? subtitle.codec ?? "默认"
+    /// 字幕按钮 / 卡片里的名字：`语言 · 标题`，别露出容器标签。
+    private func subtitleName(_ subtitle: SubtitleInfo, ordinal: Int = 0) -> String {
+        TrackPrefs.subtitleLabel(language: subtitle.language,
+                                 title: subtitle.title,
+                                 ordinal: ordinal)
     }
 
     private var audioLabel: String {
@@ -708,15 +700,19 @@ struct DetailPage: View {
             },
         ]
 
+        // 「语言 · 标题」，编码 / 容器标签不进菜单；重名的追加序号。
+        let labels = TrackPrefs.subtitleLabels(info.subtitles.map { subtitle in
+            (language: subtitle.language, title: subtitle.title)
+        })
+
         choices.append(contentsOf: info.subtitles.enumerated().map { index, subtitle in
+            // 编码 / 格式属性属于媒体信息卡，菜单里只保留「图形 / 外挂」提示。
             var parts: [String] = []
-            if let codec = subtitle.codec, !codec.isEmpty { parts.append(codec) }
-            if let format = subtitle.format, !format.isEmpty { parts.append(format) }
             if subtitle.isBitmap == true { parts.append("图形") }
             if subtitle.isExternal == true { parts.append("外挂") }
 
             return TrackChoice(id: index,
-                               label: subtitleName(subtitle),
+                               label: labels[index],
                                detail: parts.joined(separator: " · "),
                                selected: index == current) {
                 TrackPrefs.setSubtitle(trackKey, index)

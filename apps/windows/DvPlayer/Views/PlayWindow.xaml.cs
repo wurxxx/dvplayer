@@ -2289,11 +2289,16 @@ public partial class PlayWindow : Window
             ("关闭字幕", !anySelected, TurnSubtitlesOff),
         };
 
+        // 菜单只写「语言 · 标题」，没有标题的轨（`HDMV PGS_SUBTITLE`）不再露编码，
+        // 重名的追加序号。
+        var labels = TrackPrefs.SubtitleLabels(
+            _subtitleTracks.Select(t => (t.Language, t.Title)).ToList());
+
         for (var i = 0; i < _subtitleTracks.Count; i++)
         {
             var track = _subtitleTracks[i];
             var position = i;
-            choices.Add((track.Describe(), track.Selected, (Action)(() => SelectSubtitle(position))));
+            choices.Add((labels[i], track.Selected, (Action)(() => SelectSubtitle(position))));
         }
 
         return OpenMenu(anchor ?? SubtitleButton, choices);
@@ -3979,6 +3984,9 @@ public partial class PlayWindow : Window
 
     /// <summary>截图巡检用：打开音频菜单（菜单是独立窗口，需要单独截）。</summary>
     public ContextMenu? OpenAudioMenuForShot() => OpenAudioMenu();
+
+    /// <summary>截图巡检用：直接打开字幕菜单（验证「语言 · 标题」文案）。</summary>
+    public ContextMenu? OpenSubtitleMenuForShot() => OpenSubtitleMenu();
 
     /// <summary>截图巡检用：打开「更多」菜单。</summary>
     public ContextMenu OpenMoreMenuForShot() => OpenMoreMenu();

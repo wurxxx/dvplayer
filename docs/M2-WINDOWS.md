@@ -24,6 +24,9 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
   「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
   不是 macOS 那种悬停子菜单。
+- **字幕菜单只写「语言 · 标题」**：`TrackPrefs.SubtitleLabel` 把 `chi` / `eng` 这类
+  语言码翻成中文名，`HDMV PGS_SUBTITLE`、`subrip` 这类容器 / 编码标题当作没有标题；
+  只有语言就只显示语言，两个都没有用「字幕 N」，重名再追加序号（`中文 1`）。
 - **弹幕轨按文件名认**：`sub-add` 在 JSON IPC 里不返回轨道 id，Windows 的
   `MpvIpc` 也没有命令回复，所以靠 `track-list` 推送，按
   `external-filename` 含 `DVPlayer-danmaku` 识别并排除出字幕菜单。
@@ -92,7 +95,8 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
   这样起播才走得到片头跳过。
 - `--play-features` 的项：`aspect:<fit|fill|stretch|16:9|4:3>`、`sleep:<秒>`、
   `danmaku`（离线解析 + ASS 生成自检）、`subtitle`（搜索 + 下载整轮）、
-  `menu`（截「更多」菜单到 `play-more.png`）、`overlay`（垫黑截浮层，
+  `menu`（截「更多」菜单到 `play-more.png`）、`submenu`（截字幕菜单到
+  `play-submenu.png`，验证「语言 · 标题」文案）、`overlay`（垫黑截浮层，
   进度条 / 控制条看 `play-overlay.png`）、`skipoutro`。
 - `audioout` / `audiotoggle`：打开音频输出菜单、切一次直通 / HDR 并写日志（无桌面自检用）。
 - `frame`：让 mpv 把当前解码帧写到 `<目录>\video-frame.png`，锁屏 / 无桌面也能验真实画面。

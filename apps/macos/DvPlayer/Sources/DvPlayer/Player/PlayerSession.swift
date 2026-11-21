@@ -587,16 +587,19 @@ final class PlayerSession: ObservableObject {
                                language: language, title: title, isDefault: raw.isDefault)
         }
 
-        subtitleTracks = subtitles.map { raw in
+        // 字幕菜单只写「语言 · 标题」，没有标题的轨（`HDMV PGS_SUBTITLE`）不再露编码，
+        // 重名的追加序号。
+        let subtitleLabels = TrackPrefs.subtitleLabels(subtitles.map { raw in
+            (language: raw.language.isEmpty ? nil : raw.language,
+             title: raw.title.isEmpty ? nil : raw.title)
+        })
+
+        subtitleTracks = subtitles.enumerated().map { index, raw in
             let language = raw.language.isEmpty ? nil : raw.language
             let title = raw.title.isEmpty ? nil : raw.title
-            let name = TrackPrefs.subtitleName(language: language,
-                                               title: title,
-                                               codec: raw.codec.isEmpty ? nil : raw.codec)
-            let detail = [language, raw.isExternal ? "外部" : nil]
-                .compactMap { $0 }
-                .filter { !$0.isEmpty }
-                .joined(separator: " · ")
+            let name = subtitleLabels[index]
+            // 名字里已经有语言 / 标题了，这里只补「外部」。
+            let detail = raw.isExternal ? "外部" : ""
             return PlayerTrack(id: raw.id, name: name, detail: detail,
                                language: language, title: title, isDefault: raw.isDefault)
         }

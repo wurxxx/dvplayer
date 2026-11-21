@@ -874,14 +874,16 @@ struct PlayerView: View {
     }
 
     private func subtitleLines(_ info: MediaInfo) -> [(String, String)] {
-        info.subtitles.enumerated().map { index, subtitle in
+        let labels = TrackPrefs.subtitleLabels(info.subtitles.map { subtitle in
+            (language: subtitle.language, title: subtitle.title)
+        })
+
+        return info.subtitles.enumerated().map { index, subtitle in
             var parts: [String] = []
-            if let language = subtitle.language, !language.isEmpty { parts.append(language) }
             if let codec = subtitle.codec, !codec.isEmpty { parts.append(codec) }
             if subtitle.isBitmap == true { parts.append("图形字幕") }
-            let label = TrackPrefs.subtitleName(language: subtitle.language,
-                                                title: subtitle.title,
-                                                codec: subtitle.codec)
+            if subtitle.isExternal == true { parts.append("外挂") }
+            let label = labels[index]
             let selected = session.selectedSubtitleId == session.subtitleTracks[safe: index]?.id
             return (label, (selected ? "✓ " : "") + parts.joined(separator: " · "))
         }
