@@ -123,6 +123,7 @@ Windows 的 NFS / WebDAV 依赖系统组件：NFS 需要在「启用或关闭 Wi
 > 扫描一个 12 项、其中一部 579 集的共享约 7–8 秒：顶层目录并发，且用
 > `readdir` 自带的类型，不再每个文件 `stat` 一次。
 >
-> Windows 侧已完成编译与界面回归：类型行、SMB 表单、挂载失败时的回显
-> （`SMB 连接失败（67）：找不到网络名`）都验证过。测试机的网段连不到 NAS，
-> 所以「Windows 成功挂载 SMB」还差一次有 NAS 的机器实测。
+> Windows 侧已完成编译与界面回归：类型行、SMB / NFS / WebDAV 三种表单、
+> 失败回显都验证过（SMB 报「找不到网络名」；NFS 先探 `mount` 命令，直接提示
+> 装「NFS 客户端」；WebDAV 报 `net use` 的系统错误并提示 WebClient 服务）。
+> 测试机的网段连不到 NAS，所以「Windows 成功挂载 SMB」还差一次有 NAS 的机器实测。

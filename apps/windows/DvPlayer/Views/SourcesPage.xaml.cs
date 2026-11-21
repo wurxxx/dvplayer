@@ -334,7 +334,8 @@ public partial class SourcesPage : Page
         BaseBox.Text = source.Base;
         UserBox.Text = source.Username;
         PassBox.Password = string.Empty;
-        AddStatus.Text = "密码留空表示不修改。";
+        // NFS 没有密码框，别留一句「密码留空」让人找。
+        AddStatus.Text = SelectedKind() == "nfs" ? string.Empty : "密码留空表示不修改。";
 
         NameBox.Focus();
         if (scrollIntoView)

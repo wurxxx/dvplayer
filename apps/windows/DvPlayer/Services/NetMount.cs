@@ -176,12 +176,20 @@ internal static class NetMount
 
         if (!Directory.Exists(drive + "\\"))
         {
+            // 没装 NFS 客户端时 `mount` 根本不存在，先探一下，别把英文启动异常甩给用户。
+            var (hasMount, _) = Run("where", "mount");
+            if (!hasMount)
+            {
+                throw new NetMountException(
+                    "NFS 需要先安装 Windows 的「NFS 客户端」功能（设置 → 可选功能），并重启。");
+            }
+
             var (ok, output) = Run("mount", $"-o anon \"{remote}\" {drive}");
             if (!ok)
             {
                 throw new NetMountException(
                     $"NFS 挂载失败：{output}\n" +
-                    "Windows 需要先启用「NFS 客户端」功能，并用管理员身份运行 DVPlayer。");
+                    "需要管理员权限；账号不是匿名时请改用 SMB。");
             }
         }
 
@@ -319,11 +327,22 @@ internal static class NetMount
             CreateNoWindow = true,
         };
 
-        using var process = Process.Start(info);
+        Process? process;
+        try
+        {
+            process = Process.Start(info);
+        }
+        catch (Exception ex)
+        {
+            return (false, $"找不到 {file} 命令：{ex.Message}");
+        }
+
         if (process is null)
         {
             return (false, "无法启动 " + file);
         }
+
+        using var handle = process;
 
         var outTask = process.StandardOutput.ReadToEndAsync();
         var errTask = process.StandardError.ReadToEndAsync();
