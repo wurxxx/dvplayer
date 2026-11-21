@@ -200,7 +200,8 @@ public partial class PlayWindow : Window
         double? startSeconds = null,
         List<PlayEpisode>? playlist = null,
         string? seriesTitle = null,
-        string? hintTitle = null)
+        string? hintTitle = null,
+        bool silentFailure = false)
     {
         // 连点保护：正在开的时候只接一次；刚开完的 800ms 也当连点。
         if (Interlocked.CompareExchange(ref _openGate, 1, 0) != 0 ||
@@ -237,7 +238,11 @@ public partial class PlayWindow : Window
                 var failed = window;
                 window = null;
                 failed.Close();
-                ConfirmDialog.Alert(owner, "无法播放", error ?? "取播放地址失败");
+                if (!silentFailure)
+                {
+                    ConfirmDialog.Alert(owner, "无法播放", error ?? "取播放地址失败");
+                }
+
                 return null;
             }
 
@@ -254,7 +259,10 @@ public partial class PlayWindow : Window
         {
             Trace.Write("play open failed: " + ex.Message);
             window?.Close();
-            ConfirmDialog.Alert(owner, "无法播放", ex.Message);
+            if (!silentFailure)
+            {
+                ConfirmDialog.Alert(owner, "无法播放", ex.Message);
+            }
             return null;
         }
         finally

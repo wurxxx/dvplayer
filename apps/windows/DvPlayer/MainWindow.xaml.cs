@@ -375,7 +375,8 @@ public partial class MainWindow : FluentWindow
         var preset = new SkipMarker();
         foreach (var feature in features)
         {
-            var parts = feature.Split(':');
+            // 只切前两个冒号：aspect:16:9 的值本身带冒号。
+            var parts = feature.Split(':', 3);
             if (parts.Length == 3 && parts[0] == "mark" && double.TryParse(parts[2], out var at))
             {
                 if (parts[1] == "intro")
@@ -402,10 +403,11 @@ public partial class MainWindow : FluentWindow
             startOverride = Math.Max(0, startAt);
         }
 
-        var player = await PlayWindow.OpenAsync(this, itemId, startOverride, playlist, seriesTitle);
+        var player = await PlayWindow.OpenAsync(this, itemId, startOverride, playlist, seriesTitle,
+            silentFailure: true);
         if (player is null)
         {
-            Trace.Write("features: 播放窗没打开");
+            Trace.Write("features: 播放窗没打开，跳过自检");
             return;
         }
 
@@ -414,7 +416,7 @@ public partial class MainWindow : FluentWindow
 
         foreach (var feature in features)
         {
-            var parts = feature.Split(':');
+            var parts = feature.Split(':', 2);
             switch (parts[0])
             {
                 case "aspect" when parts.Length > 1:
