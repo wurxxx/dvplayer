@@ -40,7 +40,7 @@ enum SubtitleError: LocalizedError {
     var errorDescription: String? {
         switch self {
             case .missingApiKey:
-                return "字幕搜索需要 OpenSubtitles API Key（写在 settings.json）"
+                return "字幕搜索需要先在「设置」里填 OpenSubtitles API Key"
             case .http(let code, let message):
                 return message.isEmpty ? "OpenSubtitles 返回 HTTP \(code)"
                                        : "OpenSubtitles：\(message)"

@@ -164,7 +164,7 @@ public sealed class OpenSubtitlesService
     {
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new SubtitleException("字幕搜索需要 OpenSubtitles API Key（写在 settings.json）");
+            throw new SubtitleException("字幕搜索需要先在「设置 → 弹幕 / 字幕」里填 OpenSubtitles API Key");
         }
 
         var query = "?query=" + Uri.EscapeDataString(title)

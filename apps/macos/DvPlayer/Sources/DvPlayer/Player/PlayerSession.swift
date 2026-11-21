@@ -1157,7 +1157,7 @@ final class PlayerSession: ObservableObject {
             let current = AppSettings.load()
             if (current.danmakuAppId ?? "").isEmpty
                 || (current.danmakuAppSecret ?? "").isEmpty {
-                toast("弹幕需要配置弹弹play AppId / AppSecret")
+                toast("弹幕需要先在「设置」里填 AppId / AppSecret")
             }
             loadDanmakuIfNeeded()
         } else {

@@ -54,7 +54,17 @@ public partial class SettingsPage : Page
         SelectContent(PageSizeBox, settings.PageSize.ToString());
         SelectTag(BufferSizeBox, settings.BufferSizeMb.ToString());
 
+        DanmakuSwitch.IsChecked = settings.DanmakuEnabled ?? false;
+        DanmakuIdBox.Text = settings.DanmakuAppId ?? "";
+        DanmakuSecretBox.Password = settings.DanmakuAppSecret ?? "";
+        SubtitleKeyBox.Password = settings.OpenSubtitlesApiKey ?? "";
+        SubtitleUserBox.Text = settings.OpenSubtitlesUsername ?? "";
+        SubtitlePassBox.Password = settings.OpenSubtitlesPassword ?? "";
+        SubtitleLangBox.Text = settings.SubtitleLanguages ?? "";
+        SubtitleLangBox.ToolTip = "默认 zh-cn,zh-tw,en";
+
         _ready = true;
+        RefreshExtrasHints();
     }
 
     private static void SelectTag(ComboBox box, string tag)
@@ -109,6 +119,9 @@ public partial class SettingsPage : Page
             case "play":
                 PlaySegment.IsChecked = true;
                 break;
+            case "extras":
+                ExtrasSegment.IsChecked = true;
+                break;
             case "about":
                 AboutSegment.IsChecked = true;
                 break;
@@ -128,6 +141,7 @@ public partial class SettingsPage : Page
         GeneralPanel.Visibility = Visible(GeneralSegment);
         ListPanel.Visibility = Visible(ListSegment);
         PlayPanel.Visibility = Visible(PlaySegment);
+        ExtrasPanel.Visibility = Visible(ExtrasSegment);
         AboutPanel.Visibility = Visible(AboutSegment);
 
         static Visibility Visible(RadioButton button) =>
@@ -145,6 +159,7 @@ public partial class SettingsPage : Page
         settings.AutoConnect = AutoConnectSwitch.IsChecked == true;
         settings.ShowResolution = ResolutionSwitch.IsChecked == true;
         settings.ResumePlayback = ResumeSwitch.IsChecked == true;
+        settings.DanmakuEnabled = DanmakuSwitch.IsChecked == true;
         settings.StartPage = (StartPageBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "libraries";
 
         if (PageSizeBox.SelectedItem is ComboBoxItem { Content: string size } && int.TryParse(size, out var pageSize))
@@ -160,6 +175,57 @@ public partial class SettingsPage : Page
 
         settings.Save();
         StatusText.Text = "已保存";
+    }
+
+    /// <summary>弹幕 / 字幕的文本框：边输入边写回 settings.json，不依赖配色或分段切换。</summary>
+    private void OnSettingTextChanged(object sender, TextChangedEventArgs e) => SaveExtras();
+
+    private void OnSettingPasswordChanged(object sender, RoutedEventArgs e) => SaveExtras();
+
+    private void SaveExtras()
+    {
+        if (!_ready)
+        {
+            return;
+        }
+
+        var settings = AppServices.Instance.Settings;
+        settings.DanmakuAppId = NullIfEmpty(DanmakuIdBox.Text);
+        settings.DanmakuAppSecret = NullIfEmpty(DanmakuSecretBox.Password);
+        settings.OpenSubtitlesApiKey = NullIfEmpty(SubtitleKeyBox.Password);
+        settings.OpenSubtitlesUsername = NullIfEmpty(SubtitleUserBox.Text);
+        settings.OpenSubtitlesPassword = NullIfEmpty(SubtitlePassBox.Password);
+        settings.SubtitleLanguages = NullIfEmpty(SubtitleLangBox.Text);
+        settings.Save();
+
+        RefreshExtrasHints();
+        StatusText.Text = "已保存";
+    }
+
+    private void RefreshExtrasHints()
+    {
+        if (DanmakuHint is null || SubtitleHint is null)
+        {
+            return;
+        }
+
+        var settings = AppServices.Instance.Settings;
+        var hasDanmaku = !string.IsNullOrWhiteSpace(settings.DanmakuAppId)
+            && !string.IsNullOrWhiteSpace(settings.DanmakuAppSecret);
+        DanmakuHint.Text = hasDanmaku
+            ? "已配置：播放页打开弹幕时会按「剧名 + 集号」自动匹配。"
+            : "还没填全：打开弹幕时只会提示缺少 AppId / AppSecret，不会联网。";
+
+        var hasSubtitle = !string.IsNullOrWhiteSpace(settings.OpenSubtitlesApiKey);
+        SubtitleHint.Text = hasSubtitle
+            ? "已配置：播放页「更多 → 搜索字幕」会按当前剧集与语言去搜。"
+            : "还没填 API Key：字幕搜索会提示缺什么，不会联网。";
+    }
+
+    private static string? NullIfEmpty(string text)
+    {
+        var value = text.Trim();
+        return value.Length == 0 ? null : value;
     }
 
     private void OnManageSourcesClick(object sender, RoutedEventArgs e) =>

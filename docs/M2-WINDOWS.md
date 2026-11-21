@@ -176,6 +176,9 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 **这个开关只给自检用**，正常启动不要设。
 
 弹幕 / 字幕的真实接口需要凭据（弹弹play AppId + AppSecret、OpenSubtitles API Key）。
+设置页「弹幕 / 字幕」分组里可以直接填（AppSecret / API Key / 密码用 `PasswordBox`，
+AppId 与语言是普通输入框）：边输入边写 `settings.json`，卡片底部一行小字显示
+「已配置 / 还没填全」。没配时播放页的弹幕开关与「搜索字幕」只给一句提示，不联网。
 离线自检用 `DVPLAYER_DANDANPLAY_BASE` / `DVPLAYER_OPENSUBTITLES_BASE` 指向本地
 假服务器（仓库里 `scripts/windows/fake-player-api.ps1`，拷到主机上跑），可以完整验证签名之外的每条链路：
 搜索、下载、`sub-add`、`secondary-sid` 绑定、切集重挂。

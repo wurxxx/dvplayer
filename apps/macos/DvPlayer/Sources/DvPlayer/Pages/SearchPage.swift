@@ -197,6 +197,79 @@ struct SettingsPage: View {
                     }
 
                     SurfaceCard(padding: 18) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            SectionTitle(text: "弹幕（弹弹play）")
+                            Text("在弹弹play 控制台申请 AppId / AppSecret 后填在这里，"
+                                 + "播放页「更多」里的弹幕开关才能拉到弹幕。")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.faint)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Toggle("打开播放页时默认开弹幕", isOn: boolBinding(\.danmakuEnabled))
+                                .font(.system(size: 13.5))
+                                .foregroundStyle(Theme.text)
+                                .toggleStyle(.switch)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                FieldLabel(text: "AppId")
+                                InputField(placeholder: "弹弹play AppId", text: textBinding(\.danmakuAppId))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                FieldLabel(text: "AppSecret")
+                                InputField(placeholder: "弹弹play AppSecret",
+                                           text: textBinding(\.danmakuAppSecret), secure: true)
+                            }
+
+                            Text(danmakuHint)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.faint)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    SurfaceCard(padding: 18) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            SectionTitle(text: "在线字幕（OpenSubtitles）")
+                            Text("注册 OpenSubtitles 后就能拿到 API Key；用户名 / 密码可以不填，"
+                                 + "填了下载更稳。")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.faint)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                FieldLabel(text: "API Key")
+                                InputField(placeholder: "OpenSubtitles API Key",
+                                           text: textBinding(\.openSubtitlesApiKey), secure: true)
+                            }
+
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    FieldLabel(text: "用户名（可选）")
+                                    InputField(placeholder: "用户名",
+                                               text: textBinding(\.openSubtitlesUsername))
+                                }
+                                VStack(alignment: .leading, spacing: 6) {
+                                    FieldLabel(text: "密码（可选）")
+                                    InputField(placeholder: "密码",
+                                               text: textBinding(\.openSubtitlesPassword), secure: true)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                FieldLabel(text: "搜索语言（逗号分隔）")
+                                InputField(placeholder: "zh-cn,zh-tw,en",
+                                           text: textBinding(\.subtitleLanguages))
+                            }
+
+                            Text(subtitleHint)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.faint)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    SurfaceCard(padding: 18) {
                         VStack(alignment: .leading, spacing: 10) {
                             SectionTitle(text: "关于")
 
@@ -220,6 +293,42 @@ struct SettingsPage: View {
         .onChange(of: state.settings.showResolution) { _ in state.settings.save() }
         .onChange(of: state.settings.autoConnect) { _ in state.settings.save() }
         .onChange(of: state.settings.bufferSizeMb) { _ in state.settings.save() }
+    }
+
+    // MARK: - 弹幕 / 字幕凭据
+
+    private var danmakuHint: String {
+        let settings = state.settings
+        let filled = !(settings.danmakuAppId ?? "").isEmpty
+            && !(settings.danmakuAppSecret ?? "").isEmpty
+        return filled
+            ? "已配置：播放页打开弹幕时会按「剧名 + 集号」自动匹配。"
+            : "还没填全：打开弹幕时只会提示缺少 AppId / AppSecret，不会联网。"
+    }
+
+    private var subtitleHint: String {
+        (state.settings.openSubtitlesApiKey ?? "").isEmpty
+            ? "还没填 API Key：字幕搜索会提示缺什么，不会联网。"
+            : "已配置：播放页「更多 → 搜索字幕」会按当前剧集与语言去搜。"
+    }
+
+    /// 文本框：边输入边写回 settings.json，清空就当作没填。
+    private func textBinding(_ keyPath: WritableKeyPath<AppSettings, String?>) -> Binding<String> {
+        Binding(
+            get: { state.settings[keyPath: keyPath] ?? "" },
+            set: { value in
+                state.settings[keyPath: keyPath] = value.isEmpty ? nil : value
+                state.settings.save()
+            })
+    }
+
+    private func boolBinding(_ keyPath: WritableKeyPath<AppSettings, Bool?>) -> Binding<Bool> {
+        Binding(
+            get: { state.settings[keyPath: keyPath] ?? false },
+            set: { value in
+                state.settings[keyPath: keyPath] = value
+                state.settings.save()
+            })
     }
 }
 

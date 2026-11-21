@@ -147,8 +147,8 @@ mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、�
 | 项 | 卡在哪 |
 | --- | --- |
 | Jellyfin 联调 | Emby 已在 Monta HD（4.9.3）实测通过，含播放直链与进度回写；Jellyfin 共用同一适配器，但还没有实例可测（[EMBY-API.md](EMBY-API.md) §5） |
-| 弹幕（弹弹play） | 需要 AppId / AppSecret。签名、XML → ASS、`sub-add` + `secondary-sid` 同屏已用本地假服务器验过 |
-| 在线字幕（OpenSubtitles） | 需要 API Key。搜索 / 下载 / `sub-add select` 已用本地假服务器验过 |
+| 弹幕（弹弹play） | 需要 AppId / AppSecret。两端设置页已有输入入口（Windows「设置 → 弹幕 / 字幕」、macOS 设置页的弹幕卡片），签名、XML → ASS、`sub-add` + `secondary-sid` 同屏已用本地假服务器验过 |
+| 在线字幕（OpenSubtitles） | 需要 API Key。两端设置页已有 API Key / 可选账号的输入入口，搜索 / 下载 / `sub-add select` 已用本地假服务器验过 |
 | HDR 直通到 HDR 屏 | 缺 HDR 显示器。Windows 开关已接（`target-colorspace-hint`），只能证明元数据解析正确 |
 | 音频直通听感 | 缺 AVR / 支持 DTS-HD 的接收端。Windows 已接 `audio-spdif` 与设备选择 |
 | macOS 播放画面 | 本机无显示 / 锁屏会话里 Vulkan 拿不到交换链（日志停在 `(Re)creating swapchain`），状态与音轨都对但画面黑；需带屏真机目视一次 |

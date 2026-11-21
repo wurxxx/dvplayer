@@ -3204,7 +3204,7 @@ public partial class PlayWindow : Window
             if (!_danmakuNoticeShown)
             {
                 _danmakuNoticeShown = true;
-                ShowToast("弹幕需要配置弹弹play AppId / AppSecret");
+                ShowToast("弹幕需要先在「设置 → 弹幕 / 字幕」里填 AppId / AppSecret");
             }
 
             return;
@@ -3268,7 +3268,7 @@ public partial class PlayWindow : Window
         var apiKey = settings.OpenSubtitlesApiKey;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            ShowToast("字幕搜索需要 OpenSubtitles API Key（写在 settings.json）");
+            ShowToast("字幕搜索需要先在「设置 → 弹幕 / 字幕」里填 OpenSubtitles API Key");
             Trace.Write("subtitles skipped: 未配置 openSubtitlesApiKey");
             return;
         }
@@ -3346,7 +3346,7 @@ public partial class PlayWindow : Window
         var apiKey = settings.OpenSubtitlesApiKey;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            ShowToast("字幕搜索需要 OpenSubtitles API Key（写在 settings.json）");
+            ShowToast("字幕搜索需要先在「设置 → 弹幕 / 字幕」里填 OpenSubtitles API Key");
             return;
         }
 
