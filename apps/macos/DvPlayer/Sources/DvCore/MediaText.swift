@@ -103,6 +103,9 @@ extension MediaText {
         case "jellyfin": return "Jellyfin"
         case "plex": return "Plex"
         case "local": return "本地文件夹"
+        case "smb", "cifs": return "SMB"
+        case "nfs": return "NFS"
+        case "webdav": return "WebDAV"
         case "directory": return "本地目录"
         default: return kind
         }

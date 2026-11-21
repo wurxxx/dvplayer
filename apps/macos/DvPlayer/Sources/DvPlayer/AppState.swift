@@ -132,18 +132,23 @@ final class AppState: ObservableObject {
             return
         }
 
+        // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
         var result: [SourceConnection] = []
         for config in settings.sources {
             do {
-                let info = try await hub.add(config)
-                result.append(SourceConnection(id: info.id, name: info.name,
-                                               kind: info.kind, ok: true, error: nil))
+                let effective = try await MountSources.prepare(config)
+                _ = try await hub.add(effective)
+                result.append(SourceConnection(id: config.id, name: config.name,
+                                               kind: config.kind, ok: true, error: nil))
             } catch {
                 result.append(SourceConnection(id: config.id, name: config.name,
                                                kind: config.kind, ok: false,
                                                error: error.localizedDescription))
             }
         }
+
+        // 已删掉的源留下的挂载点顺手卸掉。
+        cleanupStaleMounts(keep: Set(settings.sources.map(\.id)))
 
         connections = result
         guard result.contains(where: \.ok) else {
@@ -189,9 +194,16 @@ final class AppState: ObservableObject {
 
     func saveSource(_ incoming: SourceConfig) async {
         var config = incoming
-        // 本地源一定要有 data_dir，否则进度只活在内存里；界面不用管这件事。
-        if config.kind == "local", (config.dataDir ?? "").isEmpty {
+        // 本地 / 文件协议源一定要有 data_dir，否则进度只活在内存里。
+        if (config.kind == "local" || MountSources.isMount(config.kind)),
+           (config.dataDir ?? "").isEmpty {
             config.dataDir = AppSettings.directory.path
+        }
+
+        // 地址或协议改了：旧挂载点先卸，connectAll 会按新地址重挂。
+        if let old = settings.sources.first(where: { $0.id == config.id }),
+           old.kind != config.kind || old.base != config.base {
+            releaseMount(config.id)
         }
 
         if let index = settings.sources.firstIndex(where: { $0.id == config.id }) {
@@ -206,6 +218,7 @@ final class AppState: ObservableObject {
     }
 
     func removeSource(_ id: String) async {
+        releaseMount(id)
         settings.sources.removeAll { $0.id == id }
         if settings.lastSourceId == id {
             settings.lastSourceId = settings.sources.first?.id

@@ -104,24 +104,37 @@
                 HorizontalAlignment="Left" Visibility="Collapsed" Margin="0,4,0,0">
           <StackPanel>
             <TextBlock x:Name="AddTitle" Text="添加服务器" Style="{StaticResource SectionTitle}" />
-            <TextBlock Text="Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。"
+            <TextBlock x:Name="FormHint" Text="Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。"
                        Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap" />
 
             <TextBlock Text="类型" Style="{StaticResource FieldLabel}" />
-            <!-- 类型只有三种，用分段按钮比下拉框更贴合这套深色界面 -->
+            <!-- 媒体服务器和文件协议分两行：七个分段按钮挤一行会截字 -->
             <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Left"
                     Background="{StaticResource SurfaceHoverBrush}">
-              <StackPanel Orientation="Horizontal">
-                <RadioButton x:Name="KindFnos" Content="飞牛影视" GroupName="Kind"
-                             Checked="OnKindChanged"
-                             Style="{StaticResource SegmentItem}" IsChecked="True" />
-                <RadioButton x:Name="KindEmby" Content="Emby" GroupName="Kind" Checked="OnKindChanged"
-                             Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
-                <RadioButton x:Name="KindJellyfin" Content="Jellyfin" GroupName="Kind" Checked="OnKindChanged"
-                             Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
-                <RadioButton x:Name="KindLocal" Content="本地文件夹" GroupName="Kind"
-                             Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
-                             Checked="OnKindChanged" />
+              <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton x:Name="KindFnos" Content="飞牛影视" GroupName="Kind"
+                               Checked="OnKindChanged"
+                               Style="{StaticResource SegmentItem}" IsChecked="True" />
+                  <RadioButton x:Name="KindEmby" Content="Emby" GroupName="Kind" Checked="OnKindChanged"
+                               Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
+                  <RadioButton x:Name="KindJellyfin" Content="Jellyfin" GroupName="Kind" Checked="OnKindChanged"
+                               Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
+                  <RadioButton x:Name="KindLocal" Content="本地文件夹" GroupName="Kind"
+                               Style="{StaticResource SegmentItem}" Margin="2,0,0,0"
+                               Checked="OnKindChanged" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                  <RadioButton x:Name="KindSmb" Content="SMB" GroupName="Kind"
+                               Checked="OnKindChanged"
+                               Style="{StaticResource SegmentItem}" />
+                  <RadioButton x:Name="KindNfs" Content="NFS" GroupName="Kind"
+                               Checked="OnKindChanged"
+                               Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
+                  <RadioButton x:Name="KindWebdav" Content="WebDAV" GroupName="Kind"
+                               Checked="OnKindChanged"
+                               Style="{StaticResource SegmentItem}" Margin="2,0,0,0" />
+                </StackPanel>
               </StackPanel>
             </Border>
 
@@ -139,15 +152,12 @@
                       Click="OnBrowseClick" Style="{StaticResource GhostButton}"
                       Visibility="Collapsed" />
             </Grid>
-            <TextBlock x:Name="LocalHint" Style="{StaticResource Caption}" Margin="0,6,0,0"
-                       TextWrapping="Wrap" Visibility="Collapsed"
-                       Text="目录里的每个视频是一个条目；剧按 Season / S01E01 分季分集，ISO 原盘也能播。" />
 
             <StackPanel x:Name="CredentialPanel">
-              <TextBlock Text="用户名（Emby 可留空）" Style="{StaticResource FieldLabel}" />
+              <TextBlock x:Name="UserLabel" Text="用户名（Emby 可留空）" Style="{StaticResource FieldLabel}" />
               <TextBox x:Name="UserBox" Style="{StaticResource Input}" />
 
-              <TextBlock Text="密码 / API Key" Style="{StaticResource FieldLabel}" />
+              <TextBlock x:Name="PassLabel" Text="密码 / API Key" Style="{StaticResource FieldLabel}" />
               <PasswordBox x:Name="PassBox" Style="{StaticResource InputPassword}" />
             </StackPanel>
 

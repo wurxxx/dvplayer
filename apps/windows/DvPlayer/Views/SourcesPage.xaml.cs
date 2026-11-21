@@ -52,7 +52,13 @@ public partial class SourcesPage : Page
         KindFnos.IsEnabled = kinds.Contains("fnos");
         KindEmby.IsEnabled = kinds.Contains("emby");
         KindJellyfin.IsEnabled = kinds.Contains("jellyfin");
-        KindLocal.IsEnabled = kinds.Contains("local");
+
+        // 本地文件夹和文件协议源都走核心的 local 扫描，核心支持 local 就能用。
+        var folder = kinds.Contains("local");
+        KindLocal.IsEnabled = folder;
+        KindSmb.IsEnabled = folder;
+        KindNfs.IsEnabled = folder;
+        KindWebdav.IsEnabled = folder;
 
         if (KindFnos.IsEnabled)
         {
@@ -72,6 +78,9 @@ public partial class SourcesPage : Page
     private string SelectedKind() =>
         KindEmby.IsChecked == true ? "emby"
         : KindJellyfin.IsChecked == true ? "jellyfin"
+        : KindSmb.IsChecked == true ? "smb"
+        : KindNfs.IsChecked == true ? "nfs"
+        : KindWebdav.IsChecked == true ? "webdav"
         : KindLocal.IsChecked == true ? "local"
         : "fnos";
 
@@ -80,15 +89,30 @@ public partial class SourcesPage : Page
         KindFnos.IsChecked = kind == "fnos";
         KindEmby.IsChecked = kind == "emby";
         KindJellyfin.IsChecked = kind == "jellyfin";
+        KindSmb.IsChecked = kind is "smb" or "cifs";
+        KindNfs.IsChecked = kind == "nfs";
+        KindWebdav.IsChecked = kind == "webdav";
         KindLocal.IsChecked = kind == "local";
         UpdateKindUi();
     }
+
+    /// <summary>表单标题 / 默认名里的类型称呼。</summary>
+    private static string TypeNoun(string kind) => kind switch
+    {
+        "local" => "本地文件夹",
+        "smb" or "cifs" => "SMB",
+        "nfs" => "NFS",
+        "webdav" => "WebDAV",
+        "emby" => "Emby",
+        "jellyfin" => "Jellyfin",
+        _ => "服务器",
+    };
 
     private const string DefaultBase = "http://10.0.0.134:8005";
 
     private void OnKindChanged(object sender, RoutedEventArgs e) => UpdateKindUi();
 
-    /// <summary>本地文件夹和服务器是两套字段：一个要路径，一个要地址和账号。</summary>
+    /// <summary>每个类型要的字段不一样：本地要路径，文件协议要地址（加账号），服务器要地址加账号。</summary>
     private void UpdateKindUi()
     {
         // InitializeComponent 里 IsChecked="True" 会先触发一次，那时控件还没建全。
@@ -97,24 +121,77 @@ public partial class SourcesPage : Page
             return;
         }
 
-        var local = SelectedKind() == "local";
-        CredentialPanel.Visibility = local ? Visibility.Collapsed : Visibility.Visible;
+        var kind = SelectedKind();
+        var local = kind == "local";
+        var needsCredentials = kind is "emby" or "jellyfin" or "smb" or "cifs" or "webdav";
+
+        CredentialPanel.Visibility = needsCredentials ? Visibility.Visible : Visibility.Collapsed;
         BrowseButton.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
-        LocalHint.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
-        BaseLabel.Text = local ? "文件夹 / ISO" : "服务器地址";
-        AddTitle.Text = (_editingId is null ? "添加" : "编辑") +
-                        (local ? "本地文件夹" : "服务器");
+        BaseLabel.Text = kind switch
+        {
+            "local" => "文件夹 / ISO",
+            "smb" or "cifs" => "SMB 地址",
+            "nfs" => "NFS 地址",
+            "webdav" => "WebDAV 地址",
+            _ => "服务器地址",
+        };
+
+        FormHint.Text = kind switch
+        {
+            "local" => "目录里的每个视频是一个条目；剧按 Season / S01E01 分季分集，ISO 原盘也能播。",
+            "smb" or "cifs" => "写到共享名，例如 smb://192.168.1.10/影视；系统挂载后直接读本地路径，ISO 原盘也能播。",
+            "nfs" => "Windows 需要先启用「NFS 客户端」功能；不需要账号密码就留空。",
+            "webdav" => "Windows 需要启用「WebClient」服务（默认关闭），服务器要支持 WebDAV。",
+            _ => "Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。",
+        };
+
+        UserLabel.Text = kind is "emby" or "jellyfin"
+            ? "用户名（可留空，只用 API Key）"
+            : "用户名";
+        PassLabel.Text = kind is "emby" or "jellyfin" ? "密码 / API Key" : "密码";
+
+        AddTitle.Text = (_editingId is null ? "添加" : "编辑") + TypeNoun(kind);
+        AddSubmitButton.Content = _editingId is null ? "添加并连接" : "保存并连接";
 
         // 切换类型时别把上一个类型的示例值留在框里。
-        if (local && BaseBox.Text.Trim() == DefaultBase)
+        var sample = kind switch
         {
-            BaseBox.Text = string.Empty;
+            "local" => string.Empty,
+            "smb" or "cifs" => "smb://192.168.1.10/影视",
+            "nfs" => "nfs://192.168.1.10:/volume1/media",
+            "webdav" => "https://192.168.1.10:5006/dav",
+            _ => DefaultBase,
+        };
+        var current = BaseBox.Text.Trim();
+        if (string.IsNullOrEmpty(current) || IsSampleAddress(current))
+        {
+            BaseBox.Text = sample;
         }
-        else if (!local && string.IsNullOrWhiteSpace(BaseBox.Text))
+
+        // 名称还是默认值（或空）就跟着类型走。
+        if (string.IsNullOrWhiteSpace(NameBox.Text) || IsDefaultName(NameBox.Text))
         {
-            BaseBox.Text = DefaultBase;
+            NameBox.Text = TypeNoun(kind);
         }
     }
+
+    private static readonly string[] SampleAddresses =
+    {
+        DefaultBase,
+        "smb://192.168.1.10/影视",
+        "nfs://192.168.1.10:/volume1/media",
+        "https://192.168.1.10:5006/dav",
+    };
+
+    private static bool IsSampleAddress(string text) =>
+        SampleAddresses.Contains(text);
+
+    private static readonly string[] DefaultNames =
+    {
+        "飞牛影视", "Emby", "Jellyfin", "SMB", "NFS", "WebDAV", "本地文件夹",
+    };
+
+    private static bool IsDefaultName(string text) => DefaultNames.Contains(text);
 
     /// <summary>本地源选目录（ISO 也可以直接在地址框里填路径）。</summary>
     private void OnBrowseClick(object sender, RoutedEventArgs e)
@@ -295,6 +372,7 @@ public partial class SourcesPage : Page
             return;
         }
 
+        NetMount.Release(id);
         settings.Sources.RemoveAll(s => s.Id == id);
         if (settings.LastSourceId == id)
         {
@@ -363,17 +441,31 @@ public partial class SourcesPage : Page
             return;
         }
 
-        if (!Uri.TryCreate(baseUri, UriKind.Absolute, out _))
+        // 文件协议源：地址不是 http，交给系统去挂载；NFS 可以匿名。
+        var mount = NetMount.IsMount(kind);
+        if (mount && string.IsNullOrWhiteSpace(baseUri))
+        {
+            AddStatus.Text = kind switch
+            {
+                "nfs" => "填 NFS 地址，例如 nfs://192.168.1.10:/volume1/media",
+                "webdav" => "填 WebDAV 地址，例如 https://192.168.1.10:5006/dav",
+                _ => "填 SMB 地址，例如 smb://192.168.1.10/影视",
+            };
+            return;
+        }
+
+        if (!mount && !Uri.TryCreate(baseUri, UriKind.Absolute, out _))
         {
             AddStatus.Text = "服务器地址无效，例如 http://10.0.0.134:8005";
             return;
         }
 
         // Emby / Jellyfin 支持只填 API Key：用户名留空，密码框里放 Key。
-        // 编辑时允许两项都留空（表示沿用原凭据）。
+        // 编辑时允许两项都留空（表示沿用原凭据）；NFS 匿名挂载不需要账号。
         var apiKeyOnly = kind is "emby" or "jellyfin";
+        var anonymous = kind == "nfs";
         var editingExisting = _editingId is not null;
-        if (!editingExisting &&
+        if (!anonymous && !editingExisting &&
             string.IsNullOrEmpty(user) && (!apiKeyOnly || string.IsNullOrEmpty(pass)))
         {
             AddStatus.Text = apiKeyOnly
@@ -392,12 +484,16 @@ public partial class SourcesPage : Page
             ? editing.Password
             : pass;
 
-        if (editing is null && string.IsNullOrEmpty(effectivePass))
+        if (!anonymous && editing is null && string.IsNullOrEmpty(effectivePass))
         {
             AddStatus.Text = "请填写密码或 API Key。";
             return;
         }
 
+        // 文件协议源的配置保留原始类型和地址（表单回显），连接时才换成挂载后的本地路径。
+        var dataDir = mount
+            ? Path.GetDirectoryName(AppSettings.FilePath) ?? string.Empty
+            : string.Empty;
         var config = new SourceConfig(
             editing?.Id ?? "src-" + Guid.NewGuid().ToString("N")[..8],
             name,
@@ -405,7 +501,13 @@ public partial class SourcesPage : Page
             baseUri,
             user,
             effectivePass,
-            string.Empty);
+            dataDir);
+
+        // 地址可能变了，先卸掉旧的挂载（重连时会按新地址重挂）。
+        if (editing is not null)
+        {
+            NetMount.Release(editing.Id);
+        }
 
         // 同一地址同一账号不重复加，按最新提交的为准（编辑自己不算重复）。
         settings.Sources.RemoveAll(s =>

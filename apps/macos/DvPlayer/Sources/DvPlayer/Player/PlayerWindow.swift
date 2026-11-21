@@ -172,14 +172,16 @@ final class PlayerLauncher {
                      hintTitle: hintTitle)
     }
 
-    /// 条目 id 的源是不是本地文件夹源。
+    /// 条目 id 的源是不是文件夹源（本地文件夹，或挂载成目录的 SMB / NFS / WebDAV）。
+    /// 这两类走同一套本地续播 / 原盘流程。
     private func isLocalItem(_ itemId: String) -> Bool {
         guard let sourceId = itemId.split(separator: ":", maxSplits: 1).first.map(String.init),
-              !sourceId.isEmpty else {
+              !sourceId.isEmpty,
+              let kind = AppState.shared.settings.sources
+                .first(where: { $0.id == sourceId })?.kind else {
             return false
         }
-        return AppState.shared.settings.sources
-            .first { $0.id == sourceId }?.kind == "local"
+        return kind == "local" || MountSources.isMount(kind)
     }
 
     private func startSession(itemId: String,

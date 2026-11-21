@@ -16,15 +16,75 @@ struct SourcesPage: View {
 
     private var isEditing: Bool { editing != nil }
 
+    /// 表单里的源已经在设置里（编辑）；新增时 `editing` 也非空，但那是草稿。
+    private var isExisting: Bool {
+        guard let editing else { return false }
+        return state.settings.sources.contains { $0.id == editing.id }
+    }
+
     /// 本地文件夹源：地址是一个目录（或单个视频 / ISO），没有账号密码。
-    private var isLocal: Bool { kind == "local" }
+    private var isFolder: Bool { kind == "local" }
+
+    /// 需要「用户名 / 密码」的类型。
+    private var needsCredentials: Bool {
+        ["emby", "jellyfin", "smb", "cifs", "webdav"].contains(kind)
+    }
+
+    private static func typeNoun(_ kind: String) -> String {
+        switch kind {
+        case "local": return "本地文件夹"
+        case "smb", "cifs": return "SMB"
+        case "nfs": return "NFS"
+        case "webdav": return "WebDAV"
+        default: return "服务器"
+        }
+    }
 
     /// 新增时 `editing` 也有值（拿着表单的临时配置），别把标题写成「编辑」。
+    private var addressLabel: String {
+        switch kind {
+        case "local": return "文件夹 / ISO"
+        case "smb", "cifs": return "SMB 地址"
+        case "nfs": return "NFS 地址"
+        case "webdav": return "WebDAV 地址"
+        default: return "服务器地址"
+        }
+    }
+
+    private var addressPlaceholder: String {
+        switch kind {
+        case "local": return "/Volumes/Media 或 /path/to/movie.iso"
+        case "smb", "cifs": return "smb://192.168.1.10/影视"
+        case "nfs": return "nfs://192.168.1.10:/volume1/media"
+        case "webdav": return "https://192.168.1.10:5006/dav"
+        default: return "http://192.168.1.10:8005"
+        }
+    }
+
+    private var credentialsLabel: String {
+        kind == "emby" || kind == "jellyfin" ? "用户名（可留空，只用 API Key）" : "用户名"
+    }
+
+    private var hint: String {
+        switch kind {
+        case "local":
+            return "选一个目录：里面的每个视频是一个条目，剧按 Season / S01E01 分季分集。"
+        case "smb", "cifs":
+            return "写到共享名；系统会把它挂载成目录，播放器直接读本地路径，ISO 原盘也能播。"
+        case "nfs":
+            return "NFS 不需要密码；Windows 需要在「启用或关闭 Windows 功能」里装 NFS 客户端。"
+        case "webdav":
+            return "WebDAV 会挂载成一个目录；Windows 需要 WebClient 服务（默认关闭）。"
+        default:
+            return "Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。"
+        }
+    }
+
     private var formTitle: String {
         let exists = editing.map { draft in
             state.settings.sources.contains { $0.id == draft.id }
         } ?? false
-        return (exists ? "编辑" : "添加") + (isLocal ? "本地文件夹" : "服务器")
+        return (exists ? "编辑" : "添加") + Self.typeNoun(kind)
     }
 
     var body: some View {
@@ -217,9 +277,7 @@ struct SourcesPage: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.text)
 
-            Text(isLocal
-                 ? "选一个目录：里面的每个视频是一个条目，剧按 Season / S01E01 分季分集。"
-                 : "Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。")
+            Text(hint)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.faint)
 
@@ -230,6 +288,9 @@ struct SourcesPage: View {
                         Text("飞牛影视").tag("fnos")
                         Text("Emby").tag("emby")
                         Text("Jellyfin").tag("jellyfin")
+                        Text("SMB").tag("smb")
+                        Text("NFS").tag("nfs")
+                        Text("WebDAV").tag("webdav")
                         Text("本地文件夹").tag("local")
                     }
                     .labelsHidden()
@@ -249,30 +310,28 @@ struct SourcesPage: View {
                 }
             }
 
-            if isLocal {
-                VStack(alignment: .leading, spacing: 6) {
-                    FieldLabel(text: "文件夹 / ISO")
-                    HStack(spacing: 10) {
-                        InputField(placeholder: "/Volumes/Media", text: $base)
+            VStack(alignment: .leading, spacing: 6) {
+                FieldLabel(text: addressLabel)
+                HStack(spacing: 10) {
+                    InputField(placeholder: addressPlaceholder, text: $base)
+                    if isFolder {
                         Button("选择…") { chooseFolder() }
                             .buttonStyle(SecondaryButtonStyle())
                     }
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    FieldLabel(text: "服务器地址")
-                    InputField(placeholder: "http://192.168.1.10:8005", text: $base)
-                }
+            }
 
+            if needsCredentials {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
-                        FieldLabel(text: "用户名（Emby 可留空）")
+                        FieldLabel(text: credentialsLabel)
                         InputField(placeholder: "用户名", text: $username)
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        FieldLabel(text: "密码 / API Key")
-                        InputField(placeholder: "密码或 API Key", text: $password, secure: true)
+                        FieldLabel(text: "密码")
+                        InputField(placeholder: isExisting ? "留空表示不修改" : "密码",
+                                   text: $password, secure: true)
                     }
                 }
             }
@@ -302,7 +361,13 @@ struct SourcesPage: View {
     }
 
     private static func defaultName(for kind: String) -> String {
-        kind == "local" ? "本地文件" : MediaText.sourceKindLabel(kind)
+        switch kind {
+        case "local": return "本地文件"
+        case "smb", "cifs": return "SMB"
+        case "nfs": return "NFS"
+        case "webdav": return "WebDAV"
+        default: return MediaText.sourceKindLabel(kind)
+        }
     }
 
     private var defaultName: String { Self.defaultName(for: kind) }
@@ -339,7 +404,13 @@ struct SourcesPage: View {
         config.name = name.trimmingCharacters(in: .whitespaces)
         config.base = base.trimmingCharacters(in: .whitespaces)
         config.username = username
-        config.password = password
+        // 编辑时密码框是空的：沿用原来的密码，别因为改个名字就把源改失联。
+        if password.isEmpty,
+           let old = state.settings.sources.first(where: { $0.id == config.id }) {
+            config.password = old.password
+        } else {
+            config.password = password
+        }
 
         saving = true
         Task {

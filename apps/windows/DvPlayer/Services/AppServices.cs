@@ -87,10 +87,24 @@ public sealed class AppServices
         var results = new List<SourceConnection>();
         foreach (var config in configs)
         {
+            // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
+            SourceConfig effective;
+            try
+            {
+                effective = await Task.Run(() => NetMount.Prepare(config)).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                results.Add(new SourceConnection(
+                    config.Id, config.Name, config.Kind, false, ex.Message));
+                continue;
+            }
+
             ApiResult<SourceInfoDto> added;
             try
             {
-                added = await Task.Run(() => core.Add(config)).ConfigureAwait(false);
+                // 核心拿到的是 kind=local + 挂载后的路径。
+                added = await Task.Run(() => core.Add(effective)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

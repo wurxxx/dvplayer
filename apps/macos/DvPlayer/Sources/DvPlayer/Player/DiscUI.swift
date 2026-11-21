@@ -30,6 +30,12 @@ enum DiscUI {
             do {
                 let session = try BluRayDisc.open(isoPath: path)
                 DispatchQueue.main.async {
+                    NSLog("[Disc] titles=\(session.titles.count) "
+                          + session.titles.map { title in
+                              "\(session.isFeature(title) ? "正片" : "花絮")"
+                              + " \(title.number):\(Int(title.duration))s"
+                          }.joined(separator: " "))
+
                     // 只有一条标题就别多一步：直接播；多标题才弹选择框。
                     let title = autoTitle.flatMap { wanted in
                         session.titles.first { $0.number == wanted }

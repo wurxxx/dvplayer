@@ -10,7 +10,8 @@
 ## 1. 怎么加
 
 - **Windows / macOS**：「服务器」页 → 添加 → 类型选「本地文件夹」→
-  「浏览…」选目录（ISO 也可以直接在地址框里填完整路径）。
+  「浏览…」选目录（ISO 也可以直接在地址框里填完整路径）；
+  相邻的 SMB / NFS / WebDAV 三个类型填共享地址，见 §6。
   侧栏不再有单独的本地文件夹入口，加源的地方只有服务器页。
 
 源的类型是 `local`，`base` 是目录或文件的绝对路径，`dataDir` 是进度文件
@@ -79,3 +80,45 @@ cd core
 端上自检：本地源的条目和服务器条目一样，用 `DVPLAYER_DETAIL` /
 `DVPLAYER_PLAY`（macOS）、`--play`（Windows）指定
 `<源 id>:f/<相对路径>` 或 `<源 id>:d/<目录>` 即可。
+
+文件协议源（SMB / NFS / WebDAV）挂载以后也是本地目录，同样用上面的命令：
+
+```bash
+DVPLAYER_PLAY='smb-1:f/某部电影/某部电影.mkv' \
+DVPLAYER_PLAY_SECONDS=10 \
+apps/macos/DvPlayer/build/DvPlayer.app/Contents/MacOS/DvPlayer
+```
+
+## 6. 文件协议源（SMB / NFS / WebDAV）
+
+最初定的协议类型在同一个「添加」表单里：类型选 SMB / NFS / WebDAV，
+填共享地址（可带账号密码）。
+
+做法是**让系统先挂载，再把挂载后的本地路径交给核心**（核心看到的仍是
+`kind=local`）：
+
+| 平台 | SMB | NFS | WebDAV |
+| --- | --- | --- | --- |
+| macOS | `mount_smbfs`，挂到 `~/Library/Caches/DvPlayer/mounts/<源 id>` | `mount -t nfs -o vers=3,resvport,nolocks,soft` | `mount_webdav` |
+| Windows | `WNetAddConnection2`（mpr.dll），直接用 `\\host\share` | `mount -o anon` 到盘符 | `net use` 到盘符 |
+
+地址写法：
+
+- `smb://192.168.1.10/影视`、`//192.168.1.10/影视`、`\\192.168.1.10\影视`；
+- `nfs://192.168.1.10:/volume1/media`；
+- `https://192.168.1.10:5006/dav`。
+
+SMB / WebDAV 的账号密码可以填在表单里，也可以随地址一起写（地址里的账号密码会做百分号解码）；NFS 一般匿名，账号密码留空。
+
+为什么不把 SMB 客户端编进核心：随包 mpv 没有 libsmbclient，核心能列目录也
+打不开 `smb://`。挂载以后扫描、播放、ISO 原盘都只认本地路径，和本地文件夹
+源完全一样（§2–§4 全部适用）。
+
+Windows 的 NFS / WebDAV 依赖系统组件：NFS 需要在「启用或关闭 Windows 功能」
+里装「NFS 客户端」，WebDAV 需要启动「WebClient」服务；缺组件时表单直接回
+对应提示。SMB 不需要额外组件。
+
+> 实测：macOS 上 `smb://<账号>@10.0.0.134/影视` 挂载后列出 12 个条目
+> （剧 3 部、电影 9 部，含 ISO），普通视频与 UHD 原盘都能从条目起播。
+> 扫描一个 12 项、其中一部 579 集的共享约 7–8 秒：顶层目录并发，且用
+> `readdir` 自带的类型，不再每个文件 `stat` 一次。

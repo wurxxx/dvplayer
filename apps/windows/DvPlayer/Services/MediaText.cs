@@ -64,6 +64,9 @@ public static class MediaText
         "jellyfin" => "Jellyfin",
         "plex" => "Plex",
         "local" => "本地文件夹",
+        "smb" or "cifs" => "SMB",
+        "nfs" => "NFS",
+        "webdav" => "WebDAV",
         "directory" => "本地目录",
         _ => kind,
     };

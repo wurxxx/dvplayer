@@ -897,6 +897,26 @@ struct Meta {
 
 // —— 扫描 ——
 
+/// 读一层目录，顺带拿到「是不是目录」。
+///
+/// 不逐个 `Path::is_dir()`：那会对每个文件发一次 stat，SMB / NFS 上一个 579 集的
+/// 剧目录要几百次往返；`DirEntry::file_type()` 直接用 readdir 返回的类型。
+fn read_children(dir: &Path) -> Vec<(PathBuf, bool)> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut children: Vec<(PathBuf, bool)> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            (e.path(), is_dir)
+        })
+        .filter(|(path, _)| !is_hidden(path))
+        .collect();
+    children.sort_by(|a, b| a.0.cmp(&b.0));
+    children
+}
+
 fn scan(root: &Path) -> Index {
     let mut index = Index::default();
 
@@ -907,35 +927,90 @@ fn scan(root: &Path) -> Index {
         return index;
     }
 
-    let mut paths: Vec<PathBuf> = match fs::read_dir(root) {
-        Ok(dir) => dir
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| !is_hidden(p))
-            .collect(),
-        Err(_) => return index,
-    };
-    paths.sort();
+    let children = read_children(root);
+    if children.is_empty() {
+        return index;
+    }
 
-    for path in paths {
-        if path.is_dir() {
-            let videos = collect_videos(&path, MAX_DEPTH);
-            if videos.is_empty() {
-                continue;
-            }
-            if looks_like_show(&path, &videos) {
-                index.shows.push(build_show(root, &path));
-            } else if let Some(film) = film_from_dir(root, &path, &videos) {
-                index.films.push(film);
-            }
-        } else if is_video(&path) {
-            if let Some(film) = film_from_file(root, &path, None) {
-                index.films.push(film);
-            }
+    // 网络挂载（SMB / NFS / WebDAV）上每次 readdir 都是一次往返，串行扫十几个
+    // 剧目录能拖到几十秒。顶层目录并发扫，结果按原顺序放回去。
+    for entry in scan_top_entries(root, &children) {
+        match entry {
+            Some(TopEntry::Show(show)) => index.shows.push(show),
+            Some(TopEntry::Film(film)) => index.films.push(film),
+            None => {}
         }
     }
 
     index
+}
+
+enum TopEntry {
+    Show(Show),
+    Film(Film),
+}
+
+/// 顶层并发扫描，最多 8 个线程（本地盘也能顺带加速）。
+fn scan_top_entries(
+    root: &Path,
+    children: &[(PathBuf, bool)],
+) -> Vec<Option<TopEntry>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    let mut slots: Vec<Option<TopEntry>> = Vec::new();
+    slots.resize_with(children.len(), || None);
+
+    let workers = children.len().clamp(1, 8);
+    if workers == 1 {
+        for (i, (path, is_dir)) in children.iter().enumerate() {
+            slots[i] = top_entry(root, path, *is_dir);
+        }
+        return slots;
+    }
+
+    let cursor = AtomicUsize::new(0);
+    let done: Mutex<Vec<(usize, TopEntry)>> = Mutex::new(Vec::new());
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let i = cursor.fetch_add(1, Ordering::Relaxed);
+                let Some((path, is_dir)) = children.get(i) else { break };
+                if let Some(entry) = top_entry(root, path, *is_dir) {
+                    // 扫描没有顺序依赖，锁只保护结果列表。
+                    if let Ok(mut list) = done.lock() {
+                        list.push((i, entry));
+                    }
+                }
+            });
+        }
+    });
+
+    let mut collected = done.into_inner().unwrap_or_default();
+    collected.sort_by_key(|(i, _)| *i);
+    for (i, entry) in collected {
+        slots[i] = Some(entry);
+    }
+    slots
+}
+
+fn top_entry(root: &Path, path: &Path, is_dir: bool) -> Option<TopEntry> {
+    if is_dir {
+        let videos = collect_videos(path, MAX_DEPTH);
+        if videos.is_empty() {
+            return None;
+        }
+        if looks_like_show(path, &videos) {
+            Some(TopEntry::Show(build_show(root, path)))
+        } else {
+            film_from_dir(root, path, &videos).map(TopEntry::Film)
+        }
+    } else if is_video(path) {
+        film_from_file(root, path, None).map(TopEntry::Film)
+    } else {
+        None
+    }
 }
 
 fn film_from_file(root: &Path, path: &Path, title_override: Option<&str>) -> Option<Film> {
@@ -990,29 +1065,20 @@ fn build_show(root: &Path, dir: &Path) -> Show {
     let mut seasons: Vec<Season> = Vec::new();
     let mut loose: Vec<PathBuf> = Vec::new();
 
-    if let Ok(entries) = fs::read_dir(dir) {
-        let mut children: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| !is_hidden(p))
-            .collect();
-        children.sort();
-
-        for child in children {
-            if child.is_dir() {
-                if let Some(number) = parse_season_dir(&file_name(&child)) {
-                    let mut found = collect_videos(&child, MAX_DEPTH);
-                    found.sort();
-                    seasons.push(Season {
-                        number,
-                        episodes: build_episodes(root, &found),
-                    });
-                } else {
-                    loose.extend(collect_videos(&child, MAX_DEPTH));
-                }
-            } else if is_video(&child) {
-                loose.push(child);
+    for (child, is_dir) in read_children(dir) {
+        if is_dir {
+            if let Some(number) = parse_season_dir(&file_name(&child)) {
+                let mut found = collect_videos(&child, MAX_DEPTH);
+                found.sort();
+                seasons.push(Season {
+                    number,
+                    episodes: build_episodes(root, &found),
+                });
+            } else {
+                loose.extend(collect_videos(&child, MAX_DEPTH));
             }
+        } else if is_video(&child) {
+            loose.push(child);
         }
     }
 
@@ -1068,18 +1134,9 @@ fn collect_videos(dir: &Path, depth: usize) -> Vec<PathBuf> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return out;
-    };
-    let mut children: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| !is_hidden(p))
-        .collect();
-    children.sort();
 
-    for child in children {
-        if child.is_dir() {
+    for (child, is_dir) in read_children(dir) {
+        if is_dir {
             // 解开的蓝光目录：`BDMV/STREAM` 里是一堆 m2ts，按 ISO 处理更合适，
             // 这里不展开，避免一个原盘变成几千个「集」。
             if file_name(&child).eq_ignore_ascii_case("BDMV") {
@@ -1098,13 +1155,11 @@ fn looks_like_show(dir: &Path, videos: &[PathBuf]) -> bool {
     if videos.len() >= 2 {
         return true;
     }
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && parse_season_dir(&file_name(&path)).is_some() {
-                return true;
-            }
-        }
+    if read_children(dir)
+        .iter()
+        .any(|(path, is_dir)| *is_dir && parse_season_dir(&file_name(path)).is_some())
+    {
+        return true;
     }
     videos
         .iter()
