@@ -390,13 +390,119 @@ struct DetailPage: View {
 
     private var episodeBlock: some View {
         VStack(alignment: .leading, spacing: 11) {
-            SectionTitle(text: "选集", trailing: "\(episodes.count) 集")
+            SectionTitle(text: "选集",
+                         trailing: "\(episodeTotal > 0 ? episodeTotal : episodes.count) 集")
 
-            HorizontalRow(items: episodes, itemWidth: 314, spacing: 18) { row in
+            // 集数多时给一排「1-30 / 31-60 …」：点一下滚到那一段。
+            if episodeTotal > episodeRangeSize {
+                episodeRangeChips
+            }
+
+            HorizontalRow(items: episodes, itemWidth: 314, spacing: 18,
+                          jumpID: jumpEpisodeID, jumpToken: jumpToken) { row in
                 EpisodeCard(episode: row) {
                     play(row.id, startSeconds: nil)
                 }
             }
+        }
+    }
+
+    // MARK: - 快捷选集
+
+    private var episodeRanges: [(from: Int, to: Int)] {
+        guard episodeTotal > episodeRangeSize else { return [] }
+        return stride(from: 1, through: episodeTotal, by: episodeRangeSize).map {
+            ($0, min($0 + episodeRangeSize - 1, episodeTotal))
+        }
+    }
+
+    /// 高亮哪一段：点过的优先，否则跟着续播点所在的那段。
+    private var activeRangeStart: Int {
+        if selectedRangeStart > 0 { return rangeStart(selectedRangeStart) }
+        let resume = episodes.first { $0.item.progress > 0.01 && $0.item.progress < 0.995 }
+        return rangeStart(resume?.number ?? 1)
+    }
+
+    private func rangeStart(_ number: Int) -> Int {
+        max(1, (max(number, 1) - 1) / episodeRangeSize * episodeRangeSize + 1)
+    }
+
+    private var episodeRangeChips: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(episodeRanges, id: \.from) { range in
+                        let active = range.from == activeRangeStart
+                        Button {
+                            jump(toRange: range.from, to: range.to)
+                        } label: {
+                            Text("\(range.from)-\(range.to)")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(active ? Theme.accent : Theme.muted)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 5)
+                                .background(active ? Theme.accent.opacity(0.16) : Theme.surface,
+                                            in: RoundedRectangle(cornerRadius: 7))
+                        }
+                        .buttonStyle(.plain)
+                        .help("跳到第 \(range.from)-\(range.to) 集")
+                        .id(range.from)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            .onChange(of: selectedRangeStart) { value in
+                guard value > 0 else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(rangeStart(value), anchor: .center)
+                }
+            }
+        }
+    }
+
+    /// 点某一段：先把这一段拉出来，再让选集行滚到这段的第 1 集。
+    private func jump(toRange from: Int, to: Int) {
+        selectedRangeStart = from
+        let need = min(to, episodeTotal)
+
+        Task {
+            if episodes.count < need {
+                await ensureEpisodes(through: need)
+            }
+
+            // 等一帧让新卡片进视图，ScrollViewReader 才找得到目标 id。
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard let target = episodes.first(where: { $0.number >= from }) else { return }
+            NSLog("[Detail] range jump %d-%d -> E%d", from, to, target.number)
+            jumpEpisodeID = target.id
+            jumpToken += 1
+        }
+    }
+
+    /// 跳段时把目标段拉出来；后台补页先跑完再接手。
+    private func ensureEpisodes(through need: Int) async {
+        guard let core = state.core, let season = seasonId else { return }
+
+        var waited = 0
+        while filling && waited < 150 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            waited += 1
+        }
+
+        var next = max(2, episodes.count / episodePageSize + 1)
+        while seasonId == season, episodes.count < need {
+            guard let paged = try? await core.children(season, page: next,
+                                                      pageSize: episodePageSize),
+                  !paged.items.isEmpty else { return }
+
+            let rows = makeRows(paged.items, used: Set(episodes.map(\.number)))
+            episodes.append(contentsOf: rows)
+            episodes.sort { $0.number < $1.number }
+            episodeTotal = max(episodeTotal, paged.total)
+            saveCache()
+
+            if paged.items.count < episodePageSize { return }
+            next += 1
         }
     }
 
@@ -815,6 +921,20 @@ struct DetailPage: View {
     /// 当前季服务器说的总集数（首屏可能只有一页）。
     @State private var episodeTotal = 0
 
+    /// 快捷选集：一段多少集（「1-30」「31-60」），以及当前高亮段的起点。
+    private let episodeRangeSize = 30
+    @State private var selectedRangeStart = 0
+
+    /// 让 HorizontalRow 滚到某一集：换 token 触发，id 是目标卡。
+    @State private var jumpEpisodeID: String?
+    @State private var jumpToken = 0
+
+    /// 后台补页正在跑：跳段时先等它，别两边各拉一遍同一页。
+    @State private var filling = false
+
+    /// 截图巡检：DVPLAYER_RANGE=31 就自动点一次这一段。
+    @State private var rangeShotDone = false
+
     private func load() async {
         guard let core = state.core else {
             loading = false
@@ -839,6 +959,7 @@ struct DetailPage: View {
 
             Task { await loadMediaInfo() }
             Task { await loadSources() }
+            autoRangeShotIfNeeded()
             return
         }
 
@@ -881,6 +1002,7 @@ struct DetailPage: View {
 
         await loadMediaInfo()
         saveCache()
+        autoRangeShotIfNeeded()
     }
 
     /// 第一页集先渲染，`total` 还有剩就后台补（不挡首屏）。
@@ -898,7 +1020,9 @@ struct DetailPage: View {
 
     /// 后台按页把剩下的集补进来；中途切了季就停。
     private func fillEpisodes(_ season: String, from page: Int) async {
-        guard let core = state.core else { return }
+        guard let core = state.core, !filling else { return }
+        filling = true
+        defer { filling = false }
 
         var next = page
         while seasonId == season {
@@ -922,9 +1046,23 @@ struct DetailPage: View {
 
     private func loadEpisodes(_ season: String) async {
         seasonId = season
+        selectedRangeStart = 0
         await loadFirstEpisodes(season)
         await loadMediaInfo()
         saveCache()
+    }
+
+    /// 截图巡检：DVPLAYER_RANGE=31 自动点一次「31-60」，用来截跳段后的画面。
+    private func autoRangeShotIfNeeded() {
+        guard let raw = ProcessInfo.processInfo.environment["DVPLAYER_RANGE"],
+              let from = Int(raw), from > 0, !rangeShotDone else { return }
+
+        rangeShotDone = true
+        Task {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            let to = min(from + episodeRangeSize - 1, max(episodeTotal, from))
+            jump(toRange: from, to: to)
+        }
     }
 
     /// 把当前状态写回缓存；收藏 / 进度这类会主动 drop。

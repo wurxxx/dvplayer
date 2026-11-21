@@ -50,6 +50,16 @@ public partial class SeriesPage : Page
     /// <summary>这一季服务器说有多少集（首屏可能只拿到一页）。</summary>
     private int _episodeTotal;
 
+    /// <summary>快捷选集一段几集（「1-30」「31-60」）。</summary>
+    private const int RangeSize = 30;
+
+    /// <summary>当前高亮的段（段的起始集号，0 表示还没点过）。</summary>
+    private int _rangeFrom;
+    private readonly List<EpisodeRangeChip> _rangeChips = new();
+
+    /// <summary>补页和「跳段」共用：同一时间只拉一页，别两边各拉一遍。</summary>
+    private readonly SemaphoreSlim _fillGate = new(1, 1);
+
     private string? _playTargetId;
     private int _resumeEpisode;
     private string? _currentSeasonId;
@@ -89,6 +99,12 @@ public partial class SeriesPage : Page
 
     /// <summary>截图巡检用：往下滚一段，把集行露出来。</summary>
     public void ScrollByForShot(double offset) => PageScroll.ScrollToVerticalOffset(offset);
+
+    /// <summary>截图巡检用：点「1-30 / 31-60 …」里某一段，验证会滚到那一段。</summary>
+    public Task ClickRangeForShotAsync(int from) =>
+        _rangeChips.FirstOrDefault(c => c.From == from) is { } chip
+            ? JumpToRangeAsync(chip)
+            : Task.CompletedTask;
 
     /// <summary>截图巡检用：取第 N 个有 id 的演职人员（默认第一个）。</summary>
     public (string Id, string Name)? FirstPersonForShot(int index = 0)
@@ -268,6 +284,7 @@ public partial class SeriesPage : Page
         }
 
         _episodesParentId = parentId;
+        _rangeFrom = 0;
 
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var result = await Task.Run(() => core.Children(parentId, 1, EpisodePageSize))
@@ -291,37 +308,74 @@ public partial class SeriesPage : Page
     /// <summary>后台按页把剩下的集补进来；切了季就停。</summary>
     private async Task FillEpisodesAsync(string parentId, int page)
     {
+        await _fillGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            for (var next = page; _episodesParentId == parentId; next++)
+            {
+                if (!await LoadEpisodePageAsync(parentId, next).ConfigureAwait(true))
+                {
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            _fillGate.Release();
+        }
+    }
+
+    /// <summary>拉一页挂到列表后面；返回是否还有下一页。</summary>
+    private async Task<bool> LoadEpisodePageAsync(string parentId, int page)
+    {
         var core = AppServices.Instance.Core;
         if (core is null)
         {
-            return;
+            return false;
         }
 
-        for (var next = page; _episodesParentId == parentId; next++)
+        var result = await Task.Run(() => core.Children(parentId, page, EpisodePageSize))
+            .ConfigureAwait(true);
+        var items = result.Ok
+            ? result.Data?.Items ?? new List<MediaItemDto>()
+            : new List<MediaItemDto>();
+
+        if (_episodesParentId != parentId || items.Count == 0)
         {
-            var result = await Task.Run(() => core.Children(parentId, next, EpisodePageSize))
-                .ConfigureAwait(true);
-            var items = result.Ok
-                ? result.Data?.Items ?? new List<MediaItemDto>()
-                : new List<MediaItemDto>();
+            return false;
+        }
 
-            if (_episodesParentId != parentId || items.Count == 0)
+        if (result.Ok && result.Data is { } data && data.Total > _episodeTotal)
+        {
+            _episodeTotal = data.Total;
+        }
+
+        await AppendEpisodesAsync(items).ConfigureAwait(true);
+        SaveCache();
+
+        return items.Count >= EpisodePageSize && _episodeItems.Count < _episodeTotal;
+    }
+
+    /// <summary>跳段时把目标段拉出来（后台补页跑着就先等它，别重复请求同一页）。</summary>
+    private async Task EnsureEpisodesAsync(string parentId, int need)
+    {
+        await _fillGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            var next = Math.Max(2, _episodeTiles.Count / EpisodePageSize + 1);
+            while (_episodesParentId == parentId && _episodeTiles.Count < need)
             {
-                return;
-            }
+                if (!await LoadEpisodePageAsync(parentId, next).ConfigureAwait(true))
+                {
+                    return;
+                }
 
-            if (result.Ok && result.Data is { } data && data.Total > _episodeTotal)
-            {
-                _episodeTotal = data.Total;
+                next++;
             }
-
-            await AppendEpisodesAsync(items).ConfigureAwait(true);
-            SaveCache();
-
-            if (items.Count < EpisodePageSize || _episodeItems.Count >= _episodeTotal)
-            {
-                return;
-            }
+        }
+        finally
+        {
+            _fillGate.Release();
         }
     }
 
@@ -360,6 +414,7 @@ public partial class SeriesPage : Page
 
             EpisodeSection.Visibility = Visibility.Visible;
             EpisodeCountText.Text = $"{_episodeTotal} 集";
+            BuildRangeChips();
 
             // 未刮削目录没有季，按钮就退化成一行静态标题。
             if (_seasons.Count == 0)
@@ -452,6 +507,7 @@ public partial class SeriesPage : Page
 
         var fresh = AddEpisodeTiles(items);
         EpisodeCountText.Text = $"{_episodeTotal} 集";
+        BuildRangeChips();
         Trace.Write($"episodes append n={fresh.Count} rows={_episodeTiles.Count}/{_episodeTotal}");
 
         // 续播点可能正好落在后面这页里。
@@ -464,6 +520,134 @@ public partial class SeriesPage : Page
         }
 
         await Task.WhenAll(fresh.Select(t => t.ApplyPosterAsync(t.PosterPath)));
+    }
+
+    // —— 快捷选集：集数多时按 30 集一段 ——
+
+    private static int RangeStartOf(int number) => Math.Max(1, (number - 1) / RangeSize * RangeSize + 1);
+
+    /// <summary>
+    /// 按当前集数铺「1-30 / 31-60 …」。高亮优先用用户点过的那段，
+    /// 没点过就跟续播点所在的那段（都没有就第一段）。
+    /// </summary>
+    private void BuildRangeChips()
+    {
+        var active = _rangeFrom > 0
+            ? RangeStartOf(_rangeFrom)
+            : _resumeEpisode > 0 ? RangeStartOf(_resumeEpisode) : 1;
+
+        _rangeChips.Clear();
+        if (_episodeTotal > RangeSize)
+        {
+            for (var from = 1; from <= _episodeTotal; from += RangeSize)
+            {
+                var to = Math.Min(from + RangeSize - 1, _episodeTotal);
+                _rangeChips.Add(new EpisodeRangeChip(from, to, from == active));
+            }
+        }
+
+        RangeRow.Visibility = _rangeChips.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        RangeList.ItemsSource = null;
+        RangeList.ItemsSource = _rangeChips;
+    }
+
+    private async void OnRangeClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: EpisodeRangeChip chip })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await JumpToRangeAsync(chip).ConfigureAwait(true);
+    }
+
+    /// <summary>滚到这一段的第 1 集；还没拉到的页先补出来。</summary>
+    private async Task JumpToRangeAsync(EpisodeRangeChip chip)
+    {
+        _rangeFrom = chip.From;
+        BuildRangeChips();
+
+        var parentId = _episodesParentId;
+        var need = Math.Min(chip.To, _episodeTotal);
+        if (string.IsNullOrEmpty(parentId) || need <= 0)
+        {
+            return;
+        }
+
+        if (_episodeTiles.Count < need)
+        {
+            StatusText.Text = $"正在加载第 {chip.From}-{chip.To} 集…";
+            await EnsureEpisodesAsync(parentId, need).ConfigureAwait(true);
+            if (_episodesParentId == parentId)
+            {
+                StatusText.Text = string.Empty;
+            }
+        }
+
+        if (_episodesParentId != parentId)
+        {
+            return;
+        }
+
+        ScrollEpisodeRowTo(chip.From);
+        ScrollRangeRowToActive();
+    }
+
+    /// <summary>快捷选集行本身也可能比窗口宽：把高亮段滚进画面。</summary>
+    private void ScrollRangeRowToActive()
+    {
+        var index = _rangeChips.FindIndex(c => c.Active);
+        if (index < 0 || RangeRow.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        RangeList.UpdateLayout();
+        if (RangeList.ItemContainerGenerator.ContainerFromIndex(index) is not FrameworkElement chip)
+        {
+            return;
+        }
+
+        var point = chip.TransformToAncestor(RangeRow).Transform(new Point(0, 0));
+        var target = RangeRow.HorizontalOffset + point.X - 24;
+        RangeRow.ScrollToHorizontalOffset(Math.Max(0, target));
+    }
+
+    /// <summary>把某一集滚到横向选集行的最左边。</summary>
+    private void ScrollEpisodeRowTo(int number)
+    {
+        if (_episodeTiles.Count == 0)
+        {
+            return;
+        }
+
+        EpisodeList.UpdateLayout();
+
+        var index = -1;
+        for (var i = 0; i < _episodeTiles.Count; i++)
+        {
+            if (_episodeTiles[i].Number >= number)
+            {
+                index = i;
+                break;
+            }
+        }
+
+        if (index < 0)
+        {
+            index = _episodeTiles.Count - 1;
+        }
+
+        // 卡片按集号插好、宽度固定：容器还没生成时用等宽估算兜底。
+        var offset = index * (TileWidth + 18);
+        if (EpisodeList.ItemContainerGenerator.ContainerFromIndex(index) is FrameworkElement card)
+        {
+            var point = card.TransformToAncestor(EpisodeScroller).Transform(new Point(0, 0));
+            offset = EpisodeScroller.HorizontalOffset + point.X;
+        }
+
+        EpisodeScroller.ScrollToHorizontalOffset(Math.Max(0, offset));
     }
 
     /// <summary>把当前状态写回缓存；收藏 / 标记看过会主动 drop。</summary>
@@ -1654,6 +1838,23 @@ public partial class SeriesPage : Page
     private static string FormatDuration(long? seconds) => seconds is > 0
         ? TimeSpan.FromSeconds(seconds.Value).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss")
         : "";
+
+    /// <summary>「1-30」这种快捷选集段的按钮数据。</summary>
+    private sealed class EpisodeRangeChip
+    {
+        public EpisodeRangeChip(int from, int to, bool active)
+        {
+            From = from;
+            To = to;
+            Active = active;
+            Title = $"{from}-{to}";
+        }
+
+        public int From { get; }
+        public int To { get; }
+        public string Title { get; }
+        public bool Active { get; }
+    }
 
     private sealed class SeasonChip
     {

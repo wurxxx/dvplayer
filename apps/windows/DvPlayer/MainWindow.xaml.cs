@@ -976,6 +976,15 @@ public partial class MainWindow : FluentWindow
                     await Task.Delay(700);
                 }
 
+                // --range <from>：点快捷选集段（1-30 / 31-60 …），确认滚到那一段。
+                if (int.TryParse(ArgumentAfter("--range"), out var rangeFrom) &&
+                    ContentFrame.Content is SeriesPage rangePage)
+                {
+                    await rangePage.ClickRangeForShotAsync(rangeFrom);
+                    await Task.Delay(900);
+                    UiCapture.Save(this, Path.Combine(dir, "series-range.png"));
+                }
+
                 var name = seriesIds.Length == 1 ? "series.png" : $"series-{i + 1}.png";
                 UiCapture.Save(this, Path.Combine(dir, name));
 

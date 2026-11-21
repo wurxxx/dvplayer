@@ -207,6 +207,37 @@
                      Margin="14,3,0,0" VerticalAlignment="Center" />
         </StackPanel>
 
+        <!-- 集数多时按 30 集一段给一排快捷入口：1-30 / 31-60 …，点一下滚到那一段 -->
+        <controls:HorizontalRow x:Name="RangeRow" Margin="0,12,0,0" Visibility="Collapsed">
+          <ItemsControl x:Name="RangeList">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Tag="{Binding}" MouseLeftButtonUp="OnRangeClick" Cursor="Hand"
+                        CornerRadius="7" Padding="11,5" Margin="0,0,8,0">
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+                      <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding Active}" Value="True">
+                          <Setter Property="Background" Value="#2E2412" />
+                          <Setter Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
+                  <TextBlock Text="{Binding Title}" FontSize="12.5" />
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </controls:HorizontalRow>
+
         <Grid Margin="0,16,0,0">
           <controls:HorizontalRow x:Name="EpisodeScroller">
             <ItemsControl x:Name="EpisodeList">

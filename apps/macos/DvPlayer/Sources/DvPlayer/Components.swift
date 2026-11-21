@@ -328,6 +328,9 @@ struct HorizontalRow<Item: Identifiable, Content: View>: View {
     /// 一项占的横向步长（卡宽 + 间距），用来算一屏能放几张。
     var itemWidth: CGFloat
     var spacing: CGFloat = 16
+    /// 外部要求跳到某一项：换 `jumpToken` 就会滚过去（选集快捷段用）。
+    var jumpID: Item.ID? = nil
+    var jumpToken: Int = 0
     @ViewBuilder var content: (Item) -> Content
 
     @State private var index = 0
@@ -366,7 +369,17 @@ struct HorizontalRow<Item: Identifiable, Content: View>: View {
             }
             .onHover { hovering = $0 }
             .onChange(of: items.count) { _ in index = 0 }
+            // SwiftUI 的 scrollTo 在「卡片刚插进来」这一轮会静默失效，
+            // 选集跳段直接拿底下的 NSScrollView 定偏移。
+            .background(RowJumpBridge(targetX: jumpTargetX, token: jumpToken))
         }
+    }
+
+    /// 跳段目标卡在行里的横向位置（按等宽步长算）。
+    private var jumpTargetX: CGFloat {
+        guard let jumpID,
+              let index = items.firstIndex(where: { $0.id == jumpID }) else { return 0 }
+        return CGFloat(index) * itemWidth
     }
 
     private func move(_ proxy: ScrollViewProxy, by delta: Int) {

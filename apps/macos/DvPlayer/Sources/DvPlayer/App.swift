@@ -255,6 +255,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             try? await Task.sleep(nanoseconds: UInt64(max(0.2, delay) * 1_000_000_000))
 
+            // `DVPLAYER_SCROLL_Y=<像素>`：把长页面往下滚一段（选集行在页面中部）。
+            if let dy = Double(env["DVPLAYER_SCROLL_Y"] ?? ""), dy != 0 {
+                Self.scrollBy(CGFloat(dy))
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+
             // `DVPLAYER_SCROLL=end`：截长页面底部（详情页的媒体信息在那里）。
             if env["DVPLAYER_SCROLL"] == "end" {
                 Self.scrollToEnd()
@@ -550,6 +556,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 把主窗口里第一个纵向滚动视图滚到底，截图巡检长页面用。
     @MainActor
+    /// 截图巡检：往下滚 `dy` 像素，用来截页面中段（详情页的选集行）。
+    static func scrollBy(_ dy: CGFloat) {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return }
+        guard let scroll = findScroll(in: window.contentView) else { return }
+        let current = scroll.contentView.bounds.origin.y
+        let maxY = max(0, (scroll.documentView?.bounds.height ?? 0) - scroll.contentView.bounds.height)
+        let target = min(max(0, current + dy), maxY)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: target))
+        reflectScroll(scroll)
+    }
+
+    private static func reflectScroll(_ scroll: NSScrollView) {
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
     static func scrollToEnd() {
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return }
         guard let scroll = findScroll(in: window.contentView) else { return }
