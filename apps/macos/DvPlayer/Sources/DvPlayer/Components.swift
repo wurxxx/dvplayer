@@ -144,9 +144,9 @@ struct ContinueCard: View {
     let record: PlayRecord
     var onTap: () -> Void
 
-    private var remaining: String {
-        let left = record.durationSeconds - record.positionSeconds
-        return left > 0 ? "剩 \(MediaText.duration(Double(left)))" : "已看完"
+    /// 右下角角标：总时长（和 Windows 的 ▶ 时长一致）。
+    private var total: String {
+        MediaText.duration(Double(record.durationSeconds))
     }
 
     var body: some View {
@@ -156,14 +156,18 @@ struct ContinueCard: View {
                     PosterImage(path: record.posterPath,
                                 title: record.seriesTitle ?? record.title)
 
-                    Text(remaining)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Color.white.opacity(0.9))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.black.opacity(0.55),
-                                    in: RoundedRectangle(cornerRadius: 6))
-                        .padding(10)
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 8.5))
+                        Text(total)
+                            .font(.system(size: 11.5))
+                    }
+                    .foregroundStyle(Color.white.opacity(0.9))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.55),
+                                in: RoundedRectangle(cornerRadius: 6))
+                    .padding(10)
                 }
                 .frame(width: 248, height: 140)
                 .overlay(alignment: .bottom) {
@@ -174,7 +178,7 @@ struct ContinueCard: View {
             }
             .buttonStyle(.plain)
 
-            Text(record.seriesTitle ?? record.title)
+            Text(recordTitle)
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
@@ -189,12 +193,44 @@ struct ContinueCard: View {
         .frame(width: 248, alignment: .leading)
     }
 
-    private var recordSub: String {
-        if let badge = MediaText.badge(season: record.seasonNumber,
-                                       episode: record.episodeNumber) {
-            return "\(record.seriesTitle ?? "剧集") · \(badge)"
+    /// 标题规则和 Windows 的 `MediaText.RecordTitle` 一致：
+    /// 「剧名 · 第 N 集」/ 文件名拆出来的一集 / 干脆就是片名。
+    private var recordTitle: String {
+        let series = record.seriesTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let episode = record.episodeNumber.flatMap { $0 > 0 ? $0 : nil }
+
+        if !series.isEmpty, let episode {
+            return "\(MediaText.clean(series)) · 第 \(episode) 集"
         }
+
+        if !series.isEmpty, record.title.trimmingCharacters(in: .whitespaces).isEmpty {
+            return MediaText.clean(series)
+        }
+
+        if let episode, MediaText.looksLikeFileName(record.title) {
+            return "\(MediaText.seriesTitle(from: record.title)) · 第 \(episode) 集"
+        }
+
         return MediaText.clean(record.title)
+    }
+
+    /// 副标题和 Windows 的 `EpisodeLabel` 一致：S01 · E02，或剩余时间 / 已看完。
+    private var recordSub: String {
+        var parts: [String] = []
+        if let season = record.seasonNumber, season > 0 {
+            parts.append(String(format: "S%02d", season))
+        }
+        if let episode = record.episodeNumber, episode > 0 {
+            parts.append("E\(episode)")
+        }
+        if !parts.isEmpty {
+            return parts.joined(separator: " · ")
+        }
+
+        let left = record.durationSeconds - record.positionSeconds
+        return record.progress >= 0.98 || record.durationSeconds <= 0
+            ? "已看完"
+            : "还剩 \(MediaText.duration(Double(max(0, left))))"
     }
 }
 

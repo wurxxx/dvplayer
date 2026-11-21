@@ -25,12 +25,23 @@ struct RecordsPage: View {
                 || Double($0.positionSeconds) < Double($0.durationSeconds) * 0.98 }
     }
 
-    private var groups: [(title: String, records: [PlayRecord])] {
+    /// 按媒体源分栏，和 Windows 的「继续观看」一致。
+    ///
+    /// 源名与顺序都来自当前连接列表：连上的排前面，没连上的源记录仍在，
+    /// 但排到最后、状态点是灰的（点了打不开）。
+    private struct SourceGroup: Identifiable {
+        let id: String
+        let title: String
+        let ok: Bool
+        let records: [PlayRecord]
+    }
+
+    private var groups: [SourceGroup] {
         var order: [String] = []
         var buckets: [String: [PlayRecord]] = [:]
 
         for record in continuing {
-            let key = record.seriesTitle ?? MediaText.seriesTitle(from: record.title)
+            let key = record.sourceId
             if buckets[key] == nil {
                 order.append(key)
                 buckets[key] = []
@@ -38,7 +49,24 @@ struct RecordsPage: View {
             buckets[key]?.append(record)
         }
 
-        return order.map { ($0, buckets[$0] ?? []) }
+        let connections = state.connections
+        var index: [String: Int] = [:]
+        for (position, connection) in connections.enumerated() {
+            index[connection.id] = position
+        }
+        let names = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0.name) })
+        let ok = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0.ok) })
+
+        return order
+            .sorted { (index[$0] ?? Int.max) < (index[$1] ?? Int.max) }
+            .map { key in
+                SourceGroup(
+                    id: key,
+                    title: names[key] ?? (key.isEmpty ? "其它" : key),
+                    ok: ok[key] ?? false,
+                    records: buckets[key] ?? []
+                )
+            }
     }
 
     var body: some View {
@@ -111,10 +139,24 @@ struct RecordsPage: View {
             if groups.isEmpty {
                 Caption(text: "还没有看到一半的内容。", size: 12.5)
             } else {
-                ForEach(groups, id: \.title) { group in
+                ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: 11) {
-                        SectionTitle(text: group.title,
-                                     trailing: "\(group.records.count)")
+                        // 和 Windows 一样：状态点 + 源名 + 「N 条」，全部靠左。
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(group.ok ? Theme.success : Theme.faint)
+                                .frame(width: 6, height: 6)
+
+                            Text(group.title)
+                                .font(.system(size: 14))
+                                .foregroundStyle(Theme.text)
+
+                            Text("\(group.records.count) 条")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.faint)
+
+                            Spacer(minLength: 0)
+                        }
 
                         HorizontalRow(items: group.records, itemWidth: 264) { record in
                             ContinueCard(record: record) {
@@ -132,11 +174,11 @@ struct RecordsPage: View {
                 if state.favorites.isEmpty {
                     Caption(text: "还没有收藏的视频。在详情页点「加入收藏」即可。", size: 12.5)
                 } else {
-                    LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 22) {
-                        ForEach(state.favorites) { item in
-                            PosterCard(item: item, width: 168) {
-                                state.openDetail(item.id)
-                            }
+                    // 和 Windows 的通用页一样：一行横向海报，箭头滚动；
+                    // 铺满的网格留给「收藏」分段。
+                    HorizontalRow(items: state.favorites, itemWidth: 184) { item in
+                        PosterCard(item: item, width: 168) {
+                            state.openDetail(item.id)
                         }
                     }
                 }
