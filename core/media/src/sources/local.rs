@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{percent_encode, MediaError, Result};
 use crate::models::{
-    Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind, MediaLibrary, Paged,
-    PlayRecord, PlaySource,
+    Genre, ImageSource, ListQuery, MediaDetail, MediaInfo, MediaItem, MediaKind, MediaLibrary,
+    Paged, PlayRecord, PlaySource,
 };
 use crate::sources::fnos::parse_episode_number;
 use crate::sources::MediaSource;
@@ -847,6 +847,36 @@ impl MediaSource for LocalSource {
         }
 
         Err(MediaError::Other(format!("本地源播不了这个条目：{item_id}")))
+    }
+
+    /// 详情页「位置」：电影 / 单集给文件路径，剧 / 季给所在目录。
+    /// 本地源没有服务器那套轨道信息，只回路径（界面会自己判断要不要显示媒体信息卡）。
+    fn media_info(&self, item_id: &str) -> Result<MediaInfo> {
+        let path = if let Some(film) = self.film_by_id(item_id) {
+            self.path_of(&film.rel)
+        } else if let Some((_, _, episode)) = self.episode_by_id(item_id) {
+            self.path_of(&episode.rel)
+        } else if let Some((_show, season)) = self.season_by_id(item_id) {
+            let episode = season
+                .episodes
+                .first()
+                .ok_or_else(|| MediaError::Other("这一季里没有视频".into()))?;
+            self.path_of(&episode.rel)
+        } else if let Some(show) = self.show_by_id(item_id) {
+            let episode = show
+                .seasons
+                .iter()
+                .find_map(|s| s.episodes.first())
+                .ok_or_else(|| MediaError::Other("这部剧里没有视频".into()))?;
+            self.path_of(&episode.rel)
+        } else {
+            return Err(MediaError::Other(format!("本地源不认识这个条目：{item_id}")));
+        };
+
+        Ok(MediaInfo {
+            path: Some(path.to_string_lossy().into_owned()),
+            ..MediaInfo::default()
+        })
     }
 
     fn image_source(&self, path: &str) -> Result<ImageSource> {

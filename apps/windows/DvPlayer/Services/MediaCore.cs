@@ -569,7 +569,8 @@ public sealed record PersonDto(
 public sealed record MediaInfoDto(
     VideoInfoDto? Video,
     List<AudioInfoDto> Audios,
-    List<SubtitleInfoDto> Subtitles);
+    List<SubtitleInfoDto> Subtitles,
+    string? Path);
 
 public sealed record SubtitleInfoDto(
     string? Title,

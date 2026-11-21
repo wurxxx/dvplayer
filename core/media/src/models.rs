@@ -402,6 +402,9 @@ pub struct Person {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaInfo {
+    /// 文件 / 目录的绝对路径（详情页「位置」）。本地源只有这一项，服务器可能不给。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video: Option<VideoInfo>,
     #[serde(default)]

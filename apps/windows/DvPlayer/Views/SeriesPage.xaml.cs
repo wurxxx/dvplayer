@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -1218,7 +1219,51 @@ public partial class SeriesPage : Page
             UpdatePlayButton();
             UpdateTrackButtons(info);
             RenderMediaInfo(info);
+            UpdateLocation(info);
         }
+    }
+
+    /// <summary>
+    /// 详情页「位置」：电影 / 单集给完整文件路径，剧集 / 季给所在目录。
+    /// 飞牛、Emby 和本地源都走 `MediaInfo.Path`。
+    /// </summary>
+    private void UpdateLocation(MediaInfoDto? info)
+    {
+        var path = info?.Path?.Trim();
+        if (string.IsNullOrEmpty(path))
+        {
+            LocationSection.Visibility = Visibility.Collapsed;
+            LocationText.Text = string.Empty;
+            return;
+        }
+
+        var kind = (_detail?.Kind ?? string.Empty).ToLowerInvariant();
+        if (kind is not ("movie" or "video" or "episode"))
+        {
+            path = DirectoryOf(path);
+        }
+
+        // WPF 的 TextWrapping 不会在长路径（没有空格）里断行，分隔符后补零宽空格。
+        LocationText.Text = path.Replace("/", "/\u200B").Replace("\\", "\\\u200B");
+        LocationSection.Visibility = Visibility.Visible;
+        Trace.Write($"location kind={_detail?.Kind ?? "-"} raw={info?.Path ?? "-"} shown={path}");
+    }
+
+    /// <summary>
+    /// 取目录：NAS 的 POSIX 路径保持 `/`（Windows 的 `Path.GetDirectoryName`
+    /// 会把分隔符全换成 `\`，显示成 `\vol02\...`），本地 Windows 路径才交给 `Path`。
+    /// </summary>
+    private static string DirectoryOf(string path)
+    {
+        if (path.StartsWith('/'))
+        {
+            var trimmed = path.TrimEnd('/');
+            var slash = trimmed.LastIndexOf('/');
+            return slash > 0 ? trimmed[..slash] : path;
+        }
+
+        var directory = Path.GetDirectoryName(path);
+        return string.IsNullOrEmpty(directory) ? path : directory;
     }
 
     private void RenderMediaInfo(MediaInfoDto? info)

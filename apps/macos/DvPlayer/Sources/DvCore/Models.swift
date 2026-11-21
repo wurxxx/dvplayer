@@ -247,6 +247,8 @@ public struct MediaInfo: Codable, Sendable {
     public let video: VideoInfo?
     public let audios: [AudioInfo]
     public let subtitles: [SubtitleInfo]
+    /// 文件 / 目录路径（详情页「位置」）；本地源只有这一项，服务器可能不给。
+    public let path: String?
 }
 
 public struct VideoInfo: Codable, Sendable {

@@ -1091,7 +1091,14 @@ impl FnOsSource {
             })
             .unwrap_or_default();
 
+        // `/stream` 的 `file_stream.path` 是文件在 NAS 上的绝对路径（详情页「位置」）。
+        let path = data
+            .get("file_stream")
+            .and_then(|f| pick_str(f, &["path"]))
+            .filter(|p| !p.is_empty());
+
         Ok(MediaInfo {
+            path,
             video,
             audios,
             subtitles,

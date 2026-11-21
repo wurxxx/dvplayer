@@ -550,6 +550,11 @@ impl EmbySource {
             .unwrap_or_default();
 
         let media = info.media_sources.first().cloned().unwrap_or_default();
+        let path = media
+            .path
+            .clone()
+            .or_else(|| item.path.clone())
+            .filter(|p| !p.trim().is_empty());
         let streams = if media.media_streams.is_empty() {
             item.media_streams.clone().unwrap_or_default()
         } else {
@@ -631,6 +636,7 @@ impl EmbySource {
             .collect();
 
         Ok(MediaInfo {
+            path,
             video,
             audios,
             subtitles,
@@ -1035,6 +1041,9 @@ struct ItemQueryDto {
 struct ItemDto {
     #[serde(default)]
     id: String,
+    /// 文件 / 目录路径（`Fields=Path`），详情页「位置」用。
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     name: String,
     #[serde(default, rename = "Type")]
@@ -1123,6 +1132,8 @@ struct PlaybackInfoDto {
 struct MediaSourceDto {
     #[serde(default)]
     id: String,
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     run_time_ticks: Option<i64>,
     #[serde(default)]

@@ -418,7 +418,7 @@
       </StackPanel>
 
       <!-- 媒体信息：视频、音频各一张卡，横向排开 -->
-      <StackPanel x:Name="MediaInfoSection" Margin="40,32,40,40" Visibility="Collapsed">
+      <StackPanel x:Name="MediaInfoSection" Margin="40,32,40,20" Visibility="Collapsed">
         <TextBlock x:Name="MediaInfoTitle" Text="媒体信息" Style="{StaticResource SectionTitle}" />
 
         <Grid Margin="0,14,0,0">
@@ -438,6 +438,26 @@
             <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="15"
                        Foreground="{StaticResource TextBrush}" />
           </Button>
+        </Grid>
+      </StackPanel>
+
+      <!-- 存储位置：电影 / 单集给完整文件路径，剧集 / 季给所在目录 -->
+      <StackPanel x:Name="LocationSection" Margin="40,10,40,16" Visibility="Collapsed">
+        <TextBlock Text="存储位置" Style="{StaticResource SectionTitle}" />
+
+        <Grid Margin="0,11,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock Grid.Column="0" Text="&#xE8B7;" FontFamily="{StaticResource IconFont}"
+                     FontSize="12" Foreground="{StaticResource FaintBrush}"
+                     VerticalAlignment="Top" Margin="0,2,8,0" />
+          <TextBlock Grid.Column="1" x:Name="LocationText" FontSize="12.5"
+                     Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                     LineHeight="19"
+                     ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
         </Grid>
       </StackPanel>
 

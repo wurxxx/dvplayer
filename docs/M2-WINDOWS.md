@@ -24,6 +24,9 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
   「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
   不是 macOS 那种悬停子菜单。
+- **详情页「存储位置」**：`MediaInfo.Path` 放在媒体信息之后；电影 / 单集显示完整
+  文件路径，剧集 / 季只显示目录。飞牛取 `/stream` 的 `file_stream.path`，Emby 取
+  `PlaybackInfo` 的 `Path`（退回条目的 `Path`），本地源直接给文件路径。
 - **字幕菜单只写「语言 · 标题」**：`TrackPrefs.SubtitleLabel` 把 `chi` / `eng` 这类
   语言码翻成中文名，`HDMV PGS_SUBTITLE`、`subrip` 这类容器 / 编码标题和纯序号
   （`1`、`2`）当作没有标题；只有语言就只显示语言，两个都没有用「字幕 N」，

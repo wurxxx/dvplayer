@@ -177,6 +177,27 @@ struct DetailPage: View {
                     if let mediaInfo, hasTracks(mediaInfo) {
                         mediaInfoBlock(mediaInfo)
                     }
+
+                    // 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
+                    if let location = locationText {
+                        VStack(alignment: .leading, spacing: 11) {
+                            SectionTitle(text: "存储位置")
+
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(Theme.faint)
+                                    .padding(.top, 2)
+
+                                Text(location)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Theme.muted)
+                                    .lineLimit(3)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
                 }
                 .padding(.horizontal, 32)
                 .padding(.top, 26)
@@ -586,6 +607,20 @@ struct DetailPage: View {
             parts.append(String(format: "%.1f 分", rating))
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
+    private var locationText: String? {
+        guard let raw = mediaInfo?.path?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+
+        let kind = (detail?.kind ?? "").lowercased()
+        if ["movie", "video", "episode"].contains(kind) {
+            return raw
+        }
+
+        let directory = (raw as NSString).deletingLastPathComponent
+        return directory.isEmpty || directory == raw ? raw : directory
     }
 
     private var chips: [String] {
