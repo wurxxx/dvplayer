@@ -64,23 +64,28 @@ public static class Playback
     /// <summary>
     /// 回写进度。失败不打扰用户：网络抖动、播完退出都可能失败。
     /// </summary>
-    public static void Report(string itemId, double positionSeconds, double durationSeconds)
+    /// <returns>上报任务。关窗时可以等一下，别让进程退出把它带走。</returns>
+    public static Task Report(
+        string itemId, double positionSeconds, double durationSeconds, bool stopped = false)
     {
         var core = AppServices.Instance.Core;
         if (core is null || string.IsNullOrEmpty(itemId))
         {
             Trace.Write("report skipped: 未连接或 itemId 为空");
-            return;
+            return Task.CompletedTask;
         }
 
         var position = (long)Math.Max(0, positionSeconds);
         var duration = (long)Math.Max(0, durationSeconds);
-        _ = Task.Run(() =>
+        return Task.Run(() =>
         {
-            var result = core.ReportProgress(itemId, position, duration);
+            // 关窗 / 播完要发 Stopped：Emby 收到它才落 UserData。
+            var result = stopped
+                ? core.ReportStopped(itemId, position, duration)
+                : core.ReportProgress(itemId, position, duration);
             Trace.Write(result.Ok
-                ? $"report ok  item={itemId[..Math.Min(8, itemId.Length)]} pos={position} dur={duration}"
-                : $"report fail item={itemId[..Math.Min(8, itemId.Length)]} pos={position} dur={duration} err={result.Error}");
+                ? $"report ok  item={itemId[..Math.Min(8, itemId.Length)]} pos={position} dur={duration} stopped={stopped}"
+                : $"report fail item={itemId[..Math.Min(8, itemId.Length)]} pos={position} dur={duration} stopped={stopped} err={result.Error}");
         });
     }
 }

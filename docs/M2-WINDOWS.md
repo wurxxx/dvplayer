@@ -51,6 +51,13 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   要一次播放地址，已经有地址就按原参数重开 mpv；重试时才发现是原盘，会关掉占位窗
   换成原盘窗口。回归：`--play bogus --play-fail-shot <目录>`，日志里应有
   `play open failed` / `play retry`，截图为窗内错误面板（不关窗）。
+- **Emby 进度上报走播放会话**：`Sessions/Playing`（注册会话）→ 每 10 秒
+  `Sessions/Playing/Progress` → 关窗 / 播完 `Sessions/Playing/Stopped`。
+  Monta HD 的反代对 `/Users/{uid}/Items/{id}/UserData` 返回 404，而且只发
+  `Progress` 不落盘；`Stopped` 之后 `UserData.PlaybackPositionTicks` 才会更新。
+  关窗时等一下这次上报（`wait: true`），否则进程退出会把后台任务带走。
+  回归：播放 80 秒后关窗，`player.log` 出现 `report ok ... stopped=True`，
+  服务器该条目的位置同步到 ~73 秒。
 - **服务器图标**：服务器卡片和侧栏名字左边都显示源自己的图标。飞牛用官方牛头
   （品牌蓝底 + 白色剪影），Emby 用官方 app 图标（绿菱形 + 白三角），Jellyfin 用
   官方标志（紫 → 青三角），本地 / SMB / NFS / WebDAV 各是文件夹 / 共享 / 硬盘 / 云。

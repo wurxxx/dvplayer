@@ -117,6 +117,12 @@ pub trait MediaSource: Send + Sync {
     /// 上报进度（秒）。
     fn report_progress(&self, item_id: &str, position: i64, duration: i64) -> Result<()>;
 
+    /// 播放结束 / 关窗时上报一次。Emby 这类服务端只有在 `Stopped` 时才把
+    /// 位置写进 UserData；默认实现退化成普通进度上报，不影响其他源。
+    fn report_stopped(&self, item_id: &str, position: i64, duration: i64) -> Result<()> {
+        self.report_progress(item_id, position, duration)
+    }
+
     /// 取播放源：直链、请求头、续播点、轨道。
     fn play_source(&self, item_id: &str) -> Result<PlaySource>;
 

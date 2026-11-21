@@ -82,13 +82,18 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 | https / 反代 | **已验证**：公网域名 + `native-tls` 正常；`/System/Info/Public` 可直接用来探活 |
 | 库与层级 | **已验证**：`Views` 返回 3 个库；`ParentId` 能列 `Folder → Movie` 与 `Folder → Folder → Movie`，界面上按实际层级显示 |
 | 详情与图片 | **已验证**：海报、背景图、简介、时长、`RecursiveItemCount`（「N 集」）都正常；没有剧照的条目回退成渐变占位（服务器没生成图，不是 bug） |
-| 播放直链 | **待验**：`PlaybackInfo` 只传 `{UserId}`，若服务器不给 `MediaSources` 要补最小 `DeviceProfile` |
-| 进度回写 | **待验**：`POST /Users/{uid}/Items/{id}/UserData` |
+| 播放直链 | **已验证**：`PlaybackInfo` 只传 `{UserId}` 就够了；`Static=true&MediaSourceId=…&api_key=…` 直连原文件，Monta HD 上 mpv 解出 4K HEVC + eac3/aac 两轨 |
+| 进度回写 | **已验证**：走 `POST /Sessions/Playing` → `/Sessions/Playing/Progress` → `/Sessions/Playing/Stopped`，`Stopped` 之后服务端才写 `UserData.PlaybackPositionTicks`。`POST /Users/{uid}/Items/{id}/UserData` 在 Monta HD 的反代上直接 404，只作兜底 |
 | 外挂字幕 | 只给了轨道信息，没给 `DeliveryUrl`；字幕选择（B12）做的时候再拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` |
 | Jellyfin 差异 | 同一套 API、登录字段一致；认证头两个都发。暂未单独验证 |
 
-「播放直链 / 进度回写」是仅剩的两项，代码路径已写完，等真实服务器与凭据
+播放直链与进度回写已在 Monta HD（Emby 4.9.3，https + openresty 反代）实测通过。
+Jellyfin 与 Emby 共用 `emby.rs`，登录与上报路径一致，等有实例再补一次
 （[PLAN.md](PLAN.md) §5.1、[M1.md](M1.md) B10）。
+
+**上报细节**：`Sessions/Playing` 先注册会话（`PlaySessionId` 由客户端生成），
+之后每 10 秒发 `Progress`；关窗 / 播完发 `Stopped`，服务端这时才把位置写进
+`UserData`。只发 `Progress` 时服务端返回 204 但不落盘。
 
 ## 6. 相关
 

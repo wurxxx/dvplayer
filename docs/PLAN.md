@@ -73,7 +73,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 里程碑 | 范围 | 状态 |
 | --- | --- | --- |
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
-| M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包 | **基本完成**：功能已落地，剩 Emby / Jellyfin 联调、MSIX 打包与自动更新；清单见 [M1.md](M1.md) |
+| M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包 | **基本完成**：功能已落地，Emby 联调已通过，剩 Jellyfin 实测、MSIX 打包与自动更新；清单见 [M1.md](M1.md) |
 | M2 Android / TV | Media3 管线、格式矩阵（DV 探测与回退）、TV 焦点 | 未开始（只有 README 与选型） |
 | M3 macOS | mpv 子进程 + 浮层窗全链路、DV / HDR10 或 SDR 回退、公证与 Sparkle | **进行中**：浏览、播放、五项功能已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、公证 / Sparkle 待做 |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | 未开始（共享核心已提前在 M1 落地） |
@@ -118,7 +118,7 @@ MSIX 打包与自动更新。Plex 排在最后。
 - 已完成：Emby / Jellyfin 适配器、多源聚合与合并搜索（跨源去重 + 详情页「资源」选源）、
   音轨/字幕面板、本地与文件协议源（SMB / NFS / WebDAV）、蓝光原盘（ISO / BDMV）、
   音频输出设备 / 音频直通 / HDR 直通开关与 F11 全屏、进度条三层与缓冲大小；
-- 未完成：Emby / Jellyfin 真实服务器联调（播放直链与进度回写）、MSIX 打包与自动更新。
+- 未完成：Jellyfin 真实服务器联调（Emby 已完成）、MSIX 打包与自动更新。
 
 ### M2 — Android / TV Alpha
 
@@ -146,7 +146,7 @@ mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、�
 
 | 项 | 卡在哪 |
 | --- | --- |
-| Emby / Jellyfin 联调 | 登录、库、层级、详情、图片已验；**播放直链与进度回写**没在真实服务器跑过（[EMBY-API.md](EMBY-API.md) §5 标「待验」），需要地址与凭据 |
+| Jellyfin 联调 | Emby 已在 Monta HD（4.9.3）实测通过，含播放直链与进度回写；Jellyfin 共用同一适配器，但还没有实例可测（[EMBY-API.md](EMBY-API.md) §5） |
 | 弹幕（弹弹play） | 需要 AppId / AppSecret。签名、XML → ASS、`sub-add` + `secondary-sid` 同屏已用本地假服务器验过 |
 | 在线字幕（OpenSubtitles） | 需要 API Key。搜索 / 下载 / `sub-add select` 已用本地假服务器验过 |
 | HDR 直通到 HDR 屏 | 缺 HDR 显示器。Windows 开关已接（`target-colorspace-hint`），只能证明元数据解析正确 |

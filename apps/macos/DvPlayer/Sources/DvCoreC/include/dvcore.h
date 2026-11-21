@@ -34,6 +34,8 @@ char *dv_hub_play_source(const DVHub handle, const char *item_id);
 char *dv_hub_records(const DVHub handle);
 char *dv_hub_report_progress(const DVHub handle, const char *item_id,
                              int64_t position, int64_t duration);
+char *dv_hub_report_stopped(const DVHub handle, const char *item_id,
+                            int64_t position, int64_t duration);
 char *dv_hub_set_favorite(const DVHub handle, const char *item_id, int32_t favorite);
 char *dv_hub_set_watched(const DVHub handle, const char *item_id, int32_t watched);
 char *dv_hub_remove_record(const DVHub handle, const char *item_id);

@@ -1226,7 +1226,7 @@ final class PlayerSession: ObservableObject {
         aboutToClose = true
         // 播到结尾时 mpv 会把 time-pos 复位，别拿这个值覆盖刚写好的「已看完」。
         if !eof {
-            report(position)
+            report(position, stopped: true, wait: true)
         }
         onClose?()
     }
@@ -1240,7 +1240,7 @@ final class PlayerSession: ObservableObject {
         reportTimer = nil
 
         if !eof {
-            report(max(position, 0))
+            report(max(position, 0), stopped: true, wait: true)
         }
 
         mpv.onPosition = nil
@@ -1274,7 +1274,8 @@ final class PlayerSession: ObservableObject {
         }
     }
 
-    private func report(_ seconds: Double) {
+    /// <param name="wait">关窗 / 退出时同步等这次上报，异步 Task 会被进程退出带走。</param>
+    private func report(_ seconds: Double, stopped: Bool = false, wait: Bool = false) {
         guard seconds > 0 else { return }
         let item = itemId
         let total = Int(duration > 0
@@ -1287,9 +1288,18 @@ final class PlayerSession: ObservableObject {
         // 从媒体库点开的本地原盘：条目在核心里，进度回写核心。
         if let coreItemId = localSource?.coreItemId {
             guard let core = AppState.shared.core else { return }
-            NSLog("[Play] report local \(coreItemId) pos=\(value) dur=\(total)")
-            Task {
-                try? await core.reportProgress(coreItemId, position: value, duration: total)
+            NSLog("[Play] report local \(coreItemId) pos=\(value) dur=\(total) wait=\(wait)")
+            if wait {
+                core.reportBlocking(coreItemId, position: value, duration: total,
+                                    stopped: stopped)
+            } else {
+                Task {
+                    if stopped {
+                        try? await core.reportStopped(coreItemId, position: value, duration: total)
+                    } else {
+                        try? await core.reportProgress(coreItemId, position: value, duration: total)
+                    }
+                }
             }
             return
         }
@@ -1305,9 +1315,18 @@ final class PlayerSession: ObservableObject {
         }
 
         guard let core = AppState.shared.core else { return }
-        NSLog("[Play] report \(item) pos=\(value) dur=\(total)")
+        NSLog("[Play] report \(item) pos=\(value) dur=\(total) stopped=\(stopped) wait=\(wait)")
+        if wait {
+            // 关窗 / 退出：同步等上报做完，否则进程先退出就丢了。
+            core.reportBlocking(item, position: value, duration: total, stopped: stopped)
+            return
+        }
         Task {
-            try? await core.reportProgress(item, position: value, duration: total)
+            if stopped {
+                try? await core.reportStopped(item, position: value, duration: total)
+            } else {
+                try? await core.reportProgress(item, position: value, duration: total)
+            }
         }
     }
 

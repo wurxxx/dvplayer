@@ -1600,7 +1600,8 @@ public partial class PlayWindow : Window
             return;
         }
 
-        ReportProgress(EffectiveDuration, EffectiveDuration);
+        // 播完也要给服务端一个 Stopped，位置写片尾（Emby 会顺手标已看完）。
+        ReportProgress(EffectiveDuration, EffectiveDuration, stopped: true);
 
         if (_sleepAtEof)
         {
@@ -1787,18 +1788,21 @@ public partial class PlayWindow : Window
     /// <summary>
     /// 媒体库的片回写核心；原盘核心不认识，存到本地续播文件里。
     /// </summary>
-    private void ReportProgress(double position, double duration)
+    private void ReportProgress(
+        double position, double duration, bool stopped = false, bool wait = false)
     {
         // 媒体库里的本地条目：进度仍然写核心，只是影片本身要走原盘流程。
         if (!string.IsNullOrEmpty(_coreItemId))
         {
-            Playback.Report(_coreItemId!, position, duration);
+            var task = Playback.Report(_coreItemId!, position, duration, stopped);
+            if (wait) task.Wait(2500);
             return;
         }
 
         if (!_isLocalDisc)
         {
-            Playback.Report(_itemId, position, duration);
+            var task = Playback.Report(_itemId, position, duration, stopped);
+            if (wait) task.Wait(2500);
             return;
         }
 
@@ -3594,7 +3598,9 @@ public partial class PlayWindow : Window
 
         if (!_eof && _position > 0)
         {
-            ReportProgress(_position, EffectiveDuration);
+            // 关窗是「停止播放」：Emby 靠 Stopped 才写 UserData。
+            // 窗口关完进程就退，这里等一下这次上报，别让它被一起带走。
+            ReportProgress(_position, EffectiveDuration, stopped: true, wait: true);
         }
 
         _danmakuCts?.Cancel();

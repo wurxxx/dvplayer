@@ -137,6 +137,13 @@ public sealed class MediaCore : IDisposable
         return ReadOk(ptr);
     }
 
+    /// <summary>播放结束 / 关窗：Emby 要这个 Stopped 才会把位置写进 UserData。</summary>
+    public ApiResult<bool> ReportStopped(string itemId, long position, long duration)
+    {
+        var ptr = dv_hub_report_stopped(_handle, itemId, position, duration);
+        return ReadOk(ptr);
+    }
+
     /// <summary>收藏 / 取消收藏。</summary>
     public ApiResult<bool> SetFavorite(string itemId, bool favorite)
     {
@@ -380,6 +387,13 @@ public sealed class MediaCore : IDisposable
         IntPtr handle,
         int page,
         int pageSize);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_report_stopped", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_report_stopped(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
+        long position,
+        long duration);
 
     [DllImport(Lib, EntryPoint = "dv_hub_report_progress", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_report_progress(

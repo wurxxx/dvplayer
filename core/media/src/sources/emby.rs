@@ -8,6 +8,8 @@
 //! 所有请求都带 `X-Emby-Token`。播放走 `Static=true` 直连原文件，不转码——
 //! 解码交给 mpv，服务端只当文件服务器（和飞牛一致）。
 
+use std::sync::Mutex;
+
 use reqwest::blocking::Client;
 use reqwest::Method;
 use serde::de::DeserializeOwned;
@@ -50,6 +52,18 @@ pub struct EmbySource {
     http: Client,
     /// 用户设的 HTTP 代理；空表示直连。
     proxy: String,
+    /// 当前播放会话。Emby 的进度上报要 `MediaSourceId` + `PlaySessionId`，
+    /// 每 10 秒一次不能都去查 PlaybackInfo，播放开始时记下来。
+    play: Mutex<Option<PlaySession>>,
+}
+
+/// 一次播放会话：`Sessions/Playing` 系列接口的身份。
+struct PlaySession {
+    item_id: String,
+    media_source_id: String,
+    id: String,
+    /// 已经发过 `Sessions/Playing`（服务端要求先注册会话再报进度）。
+    started: bool,
 }
 
 impl EmbySource {
@@ -73,6 +87,7 @@ impl EmbySource {
             user_id: None,
             http: super::http_client(&proxy),
             proxy,
+            play: Mutex::new(None),
         }
     }
 
@@ -392,15 +407,109 @@ impl EmbySource {
             .collect())
     }
 
-    /// 回写进度。用 `/Items/{id}/UserData` 直接写「看到第几秒」，
-    /// 不依赖播放会话——客户端重启、只在退出时回写也能生效。
+    /// 回写进度：走 `Sessions/Playing/Progress`，和 Emby 自己客户端一致。
+    ///
+    /// 有些服务端的反代没放行 `/Users/{id}/Items/{id}/UserData`（Monta HD 的
+    /// Emby 4.9 就直接 404），所以失败时退回老写法。
     pub fn report_progress(&self, item_id: &str, position: i64, _duration: i64) -> Result<()> {
+        self.report_session(item_id, position, false)
+            .or_else(|_| self.write_user_data(item_id, position))
+    }
+
+    /// 播放结束 / 关窗：`Stopped` 之后服务端才把位置写进 UserData。
+    pub fn report_stopped(&self, item_id: &str, position: i64, _duration: i64) -> Result<()> {
+        self.report_session(item_id, position, true)
+            .or_else(|_| self.write_user_data(item_id, position))
+    }
+
+    /// 老写法：直接改用户数据。适合没开 Sessions 路由的服务端。
+    fn write_user_data(&self, item_id: &str, position: i64) -> Result<()> {
         let user = self.user_id()?;
         let body = serde_json::json!({
             "PlaybackPositionTicks": position.max(0) * TICKS_PER_SECOND,
         });
 
         self.post_empty(&format!("/Users/{user}/Items/{item_id}/UserData"), &body)
+    }
+
+    /// `Sessions/Playing` 系列要的播放会话；没播过就先查一次 PlaybackInfo。
+    fn session_for(&self, item_id: &str) -> Result<(String, String)> {
+        if let Ok(slot) = self.play.lock() {
+            if let Some(play) = slot.as_ref() {
+                if play.item_id == item_id {
+                    return Ok((play.media_source_id.clone(), play.id.clone()));
+                }
+            }
+        }
+
+        let user = self.user_id()?;
+        let info: PlaybackInfoDto = self
+            .post_json(
+                &format!("/Items/{item_id}/PlaybackInfo"),
+                &serde_json::json!({ "UserId": user }),
+            )
+            .unwrap_or_default();
+        let media_id = info
+            .media_sources
+            .first()
+            .map(|m| m.id.clone())
+            .unwrap_or_default();
+        let id = new_session_id();
+
+        if let Ok(mut slot) = self.play.lock() {
+            *slot = Some(PlaySession {
+                item_id: item_id.to_string(),
+                media_source_id: media_id.clone(),
+                id: id.clone(),
+                started: false,
+            });
+        }
+
+        Ok((media_id, id))
+    }
+
+    fn report_session(&self, item_id: &str, position: i64, stopped: bool) -> Result<()> {
+        let (media_id, session_id) = self.session_for(item_id)?;
+        let body = serde_json::json!({
+            "ItemId": item_id,
+            "MediaSourceId": media_id,
+            "PlaySessionId": session_id,
+            "PositionTicks": position.max(0) * TICKS_PER_SECOND,
+            "IsPaused": false,
+            "IsMuted": false,
+            "PlayMethod": "DirectStream",
+            "RepeatMode": "RepeatNone",
+            "VolumeLevel": 100,
+            "CanSeek": true,
+            "PlaylistIndex": 0,
+            "PlaylistLength": 0,
+        });
+
+        if stopped {
+            let result = self.post_empty("/Sessions/Playing/Stopped", &body);
+            if let Ok(mut slot) = self.play.lock() {
+                *slot = None;
+            }
+            return result;
+        }
+
+        // 第一次先注册会话，服务端才会认后面的 Progress。
+        let first = match self.play.lock() {
+            Ok(mut slot) => match slot.as_mut() {
+                Some(play) if play.item_id == item_id && !play.started => {
+                    play.started = true;
+                    true
+                }
+                _ => false,
+            },
+            Err(_) => false,
+        };
+        if first {
+            // 先注册会话，服务端才认后面的 Progress；注册失败就别假装成功了。
+            self.post_empty("/Sessions/Playing", &body)?;
+        }
+
+        self.post_empty("/Sessions/Playing/Progress", &body)
     }
 
     pub fn play_source(&self, item_id: &str) -> Result<PlaySource> {
@@ -415,6 +524,16 @@ impl EmbySource {
 
         let media = info.media_sources.first().cloned().unwrap_or_default();
         let media_id = media.id.clone();
+
+        // 进度上报要用这个会话；换集时旧的自动作废。
+        if let Ok(mut slot) = self.play.lock() {
+            *slot = Some(PlaySession {
+                item_id: item_id.to_string(),
+                media_source_id: media_id.clone(),
+                id: new_session_id(),
+                started: false,
+            });
+        }
 
         // 静态直连：原文件不转码，容器与轨道都由 mpv 自己解。
         let mut url = format!("{}/Videos/{item_id}/stream?Static=true", self.base);
@@ -1000,6 +1119,10 @@ impl MediaSource for EmbySource {
         EmbySource::report_progress(self, item_id, position, duration)
     }
 
+    fn report_stopped(&self, item_id: &str, position: i64, duration: i64) -> Result<()> {
+        EmbySource::report_stopped(self, item_id, position, duration)
+    }
+
     fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
         EmbySource::set_favorite(self, item_id, favorite)
     }
@@ -1314,6 +1437,18 @@ fn parse_iso8601_seconds(value: &str) -> Option<i64> {
     let days = era * 146_097 + doe - 719_468;
 
     Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+/// `PlaySessionId`：32 位十六进制，拿纳秒时间戳凑一个够用的。
+fn new_session_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+
+    format!("{nanos:032x}")
 }
 
 fn truncate(text: &str, limit: usize) -> String {

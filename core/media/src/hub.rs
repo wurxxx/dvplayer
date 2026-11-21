@@ -371,6 +371,12 @@ impl MediaHub {
         entry.source.report_progress(raw, position, duration)
     }
 
+    /// 播放结束 / 关窗：给服务端一次「停了」的信号（Emby 靠它落 UserData）。
+    pub fn report_stopped(&self, item_id: &str, position: i64, duration: i64) -> Result<()> {
+        let (entry, raw) = self.route(item_id)?;
+        entry.source.report_stopped(raw, position, duration)
+    }
+
     /// 收藏 / 取消收藏。
     pub fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<()> {
         let (entry, raw) = self.route(item_id)?;

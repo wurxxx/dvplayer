@@ -52,6 +52,7 @@ else
       --disable-static \
       --enable-videotoolbox \
       --enable-audiotoolbox \
+      --enable-securetransport \
       --enable-zlib \
       --enable-encoder=png \
       --enable-decoder=png

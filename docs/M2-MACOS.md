@@ -58,6 +58,10 @@
 - 搜索页：跨源搜索；结果卡片直接进详情（全局 `AppState.detailItemId` 路由，切侧栏自动收起）
 - 记录页：「观看」的播放按钮直接 `PlayerLauncher.play(record:)`，收藏卡片进详情
 - 设置页：续播、分辨率角标、自动连接、播放缓冲、核心版本与配置路径
+- Emby 源播放实测（2026-11-21）：Monta HD（Emby 4.9.3、https + openresty 反代、
+  HTTP 代理）直链 `Static=true` 在 mac 上正常出画，mpv 解出 4K HEVC + 2 条音轨；
+  每 10 秒 `Progress`、关窗 `Stopped` 都能落盘（服务器 `PlaybackPositionTicks`
+  跟着变）。这条链路原本被 FFmpeg 缺 TLS 挡住了，见 §4.7。
 
 ## 3. 踩过的坑
 
@@ -353,6 +357,22 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
   换行换成空格。颜色是 ASS 的 `&HAABBGGRR`，弹弹play 给的是 `0xRRGGBB`。
 - **锁屏时 Vulkan 拿不到 swapchain**：mpv 建完 pipeline 就卡住，`--length` 也不退出。
   不是代码问题（ADR-0006 在 11-19 同一台机器上验过），自检改用 `DVPLAYER_NO_VO=1`。
+- **FFmpeg 必须显式开 TLS**：`build-deps-macos.sh` 里用了 `--disable-autodetect`，
+  只开 `--enable-videotoolbox` / `--enable-audiotoolbox` 时 FFmpeg 没有任何 TLS 后端，
+  `--list-protocols` 里没有 `https://`，mpv 报
+  `No protocol handler found to open URL`，内网 `http://` 的飞牛正常、Emby / Jellyfin
+  这类 https 源全挂。加 `--enable-securetransport` 重编后 `https://` / `tls://` 都在。
+- **关窗时的进度上报要同步等**：`NSApp.terminate` / 关窗会直接结束进程，原来
+  `report(...)` 里的 `Task` 常常还没跑到网络请求就被带走，服务器位置停在旧值
+  （日志有 `stopped=true` 但 Emby 的 `PlaybackPositionTicks` 不变）。现在
+  `requestClose()` / `stop()` 走 `Core.reportBlocking`：核心队列 `async` + 信号量等
+  最多 2 秒，主线程阻塞在这条独立串行队列上不会死锁。
+- **Emby 的进度只在 `Stopped` 落盘**：`Sessions/Playing/Progress` 返回 204 但不改
+  `UserData`，必须发 `Sessions/Playing/Stopped`（关窗 / 播完）。这套由 `core/media`
+  统一处理，mac 和 Windows 走同一条路径。
+- **经代理 seek 到中段会长时间卡住**：Monta HD 的 https 源在反代后面，
+  `--start=90` 之类的中段请求会 504 / 长时间没有数据，自检里表现为
+  `loading=true`、`pos` 不动。从头播（start=0）正常，起播本身也要 30～40 秒。
 
 ## 5. 下一步
 

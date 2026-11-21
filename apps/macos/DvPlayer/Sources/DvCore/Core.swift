@@ -139,6 +139,48 @@ public final class Core: @unchecked Sendable {
         }
     }
 
+    /// 播放结束 / 关窗：Emby 要 Stopped 才会把位置写进 UserData。
+    public func reportStopped(_ itemId: String, position: Int, duration: Int) async throws {
+        try await performVoid { hub in
+            itemId.withCString {
+                dv_hub_report_stopped(hub, $0, Int64(position), Int64(duration))
+            }
+        }
+    }
+
+    /// 退出前的最后一次上报：**同步**等它发完。
+    ///
+    /// `NSApp.terminate` / 关窗会直接结束进程，异步 `Task` 常常还没跑到
+    /// 网络请求就被带走了（服务器位置停在旧值）。核心队列是一条独立的
+    /// 串行队列，主线程在这里等最多 `timeout` 秒，不会有死锁。
+    @discardableResult
+    public func reportBlocking(
+        _ itemId: String, position: Int, duration: Int, stopped: Bool,
+        timeout: TimeInterval = 2) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        queue.async { [weak self] in
+            defer { done.signal() }
+            guard let hub = self?.hub else { return }
+            let pointer = itemId.withCString { id in
+                stopped
+                    ? dv_hub_report_stopped(hub, id, Int64(position), Int64(duration))
+                    : dv_hub_report_progress(hub, id, Int64(position), Int64(duration))
+            }
+            if let pointer {
+                dv_string_free(pointer)
+            }
+        }
+
+        return done.wait(timeout: .now() + timeout) == .success
+    }
+
+    @discardableResult
+    public func reportStoppedBlocking(
+        _ itemId: String, position: Int, duration: Int, timeout: TimeInterval = 2) -> Bool {
+        reportBlocking(itemId, position: position, duration: duration,
+                       stopped: true, timeout: timeout)
+    }
+
     public func setFavorite(_ itemId: String, favorite: Bool) async throws {
         try await performVoid { hub in
             itemId.withCString { dv_hub_set_favorite(hub, $0, favorite ? 1 : 0) }
