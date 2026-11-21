@@ -124,6 +124,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         NSLog("[PlayTest] 没有观看记录")
                     }
 
+                    // `DVPLAYER_PLAY_OPENING_SHOT=<png>`：窗口刚弹出、视频还没出画时截一张，
+                    // 确认打开阶段是不透明黑底，而不是透出桌面。
+                    if let path = env["DVPLAYER_PLAY_OPENING_SHOT"] {
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        Self.capture(to: path, window: PlayerLauncher.shared.window)
+                    }
+
                     let wait = Double(env["DVPLAYER_PLAY_RECORD_WAIT"] ?? "") ?? 3
                     try? await Task.sleep(nanoseconds: UInt64(max(0.5, wait) * 1_000_000_000))
                     if let spec = env["DVPLAYER_PLAY_UI"] {
@@ -164,6 +171,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                           seriesTitle: seriesTitle,
                                           hintTitle: seriesTitle)
                 NSLog("[PlayTest] open \(itemId)")
+
+                if let path = env["DVPLAYER_PLAY_OPENING_SHOT"] {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    Self.capture(to: path, window: PlayerLauncher.shared.window)
+                }
 
 
                 if let text = env["DVPLAYER_PLAY_SEEK"], let seconds = Double(text) {

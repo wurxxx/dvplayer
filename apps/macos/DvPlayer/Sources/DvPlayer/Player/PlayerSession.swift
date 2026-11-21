@@ -375,6 +375,18 @@ final class PlayerSession: ObservableObject {
               "dur=\(Int(local.duration))")
         mpv.loadURL(local.url, headers: [:], start: start)
         startReporting()
+        armLoadingFallback()
+    }
+
+    /// 兜底：mpv 卡住 / 一直不出画时 `@file-loaded` 不会来，别让黑底永久盖着。
+    private func armLoadingFallback() {
+        let token = loadToken
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self, self.loading, !self.isStopped, self.loadToken == token else { return }
+            NSLog("[Play] loading fallback fired item=\(self.itemId)")
+            self.loading = false
+        }
     }
 
     private func begin(itemId: String, startSeconds: Double?) async {
@@ -413,6 +425,8 @@ final class PlayerSession: ObservableObject {
         danmakuStatus = nil
 
         NSLog("[Play] open \(itemId) playlist=\(playlist.count) start=\(startSeconds.map { String($0) } ?? "resume")")
+
+        armLoadingFallback()
 
         do {
             let source = try await core.playSource(itemId)

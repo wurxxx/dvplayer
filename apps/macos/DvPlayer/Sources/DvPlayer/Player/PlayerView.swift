@@ -33,20 +33,27 @@ struct PlayerView: View {
                 Spacer(minLength: 0)
             }
 
+            // 打开 / 切集：浮层是透明的，视频还没出画时下面就是桌面。
+            // 先铺一层不透明的黑，首帧到了再淡出（loading = false）。
             if session.loading {
+                Color.black
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+
                 loadingPanel
+                    .transition(.opacity)
             }
 
             if let error = session.error {
                 errorPanel(error)
             }
 
-            if session.isFullscreen == false {
+            if session.isFullscreen == false && !session.loading {
                 windowDots
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
-            if session.chromeVisible || session.panel != .none {
+            if !session.loading && (session.chromeVisible || session.panel != .none) {
                 topBar
                     .frame(maxHeight: .infinity, alignment: .top)
                 rightActions
@@ -54,7 +61,7 @@ struct PlayerView: View {
                     .padding(.trailing, 18)
             }
 
-            if session.chromeVisible {
+            if !session.loading && session.chromeVisible {
                 bottomBar
                     .frame(maxHeight: .infinity, alignment: .bottom)
             }
@@ -94,6 +101,7 @@ struct PlayerView: View {
                     .padding(.bottom, 132)
             }
         }
+        .animation(.easeOut(duration: 0.25), value: session.loading)
         .background(
             GeometryReader { proxy in
                 Color.clear

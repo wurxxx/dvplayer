@@ -7,6 +7,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using DvPlayer.Dialogs;
 using DvPlayer.Player;
@@ -101,6 +102,12 @@ public partial class PlayWindow : Window
     private bool _eof;
     private int _sinceReport;
     private bool _chromeVisible = true;
+
+    /// <summary>首帧已经到了：控制条这时才允许出现。打开 / 切集期间黑底盖着。</summary>
+    private bool _ready;
+
+    /// <summary>黑底兜底定时器：10 秒内没等到首帧也把黑底收掉。</summary>
+    private CancellationTokenSource? _openingCts;
     private bool _hardwareDecode = true;
     private bool _muted;
     private double _speed = 1;
@@ -216,6 +223,15 @@ public partial class PlayWindow : Window
         ResetHideTimer();
 
         RenderPlaylist();
+        ShowOpeningCover();
+    }
+
+    /// <summary>命令行参数：`--flag value`。</summary>
+    private static string? ArgAfter(string flag)
+    {
+        var args = Environment.GetCommandLineArgs();
+        var index = Array.IndexOf(args, flag);
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 
     /// <summary>开窗闸门：同一时刻只允许一次。</summary>
@@ -264,9 +280,29 @@ public partial class PlayWindow : Window
                 window.LoadingTitle.Text = hint;
             }
 
+            // 淡入：浮层是透明窗口，硬出现会像一块悬空的控制条。
+            // 要在 AttachSurface 之前置 0：那里会先把浮层 Show 出来摆位置。
+            window.Opacity = 0;
             window.AttachSurface(owner);
             window.Show();
+            window.BeginAnimation(OpacityProperty, new DoubleAnimation(
+                1, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+            });
             Trace.Write($"play open shown item={itemId} ms={clock.ElapsedMilliseconds}");
+
+            // 截图巡检：`--play-opening-shot <png>` 在窗口刚出现、还没出画时从桌面抓一张，
+            // 确认打开阶段是不透明黑底，而不是透出桌面。
+            if (ArgAfter("--play-opening-shot") is { Length: > 0 } openingShot)
+            {
+                _ = window.Dispatcher.BeginInvoke(async () =>
+                {
+                    await Task.Delay(150);
+                    // 渲染浮层自己：无头会话里桌面截图是白的，看不出黑底。
+                    Services.UiCapture.Save(window, openingShot, flattenOnBlack: true);
+                });
+            }
 
             var (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
             Trace.Write($"play open resolved item={itemId} ok={source is not null} " +
@@ -572,7 +608,13 @@ public partial class PlayWindow : Window
         }
 
         _surface.Title = Title;
+        _surface.Opacity = 0;
         _surface.Show();
+        _surface.BeginAnimation(OpacityProperty, new DoubleAnimation(
+            1, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        });
         _surface.Activated += OnSurfaceActivated;
         _surface.StateChanged += OnSurfaceStateChanged;
         Owner = _surface;
@@ -1212,6 +1254,7 @@ public partial class PlayWindow : Window
         _videoBitrate = 0;
         UpdateSeekBars();
         SkipOutroButton.Visibility = Visibility.Collapsed;
+        ShowOpeningCover();
 
         // 起播点落在片头里才跳；续播点已经在片头后面就不动。
         if (_markers.IntroEnd is { } intro && intro > 1)
@@ -1267,7 +1310,7 @@ public partial class PlayWindow : Window
         {
             LoadingStatus.Text = "已开始播放（控制通道未连上）";
             await Task.Delay(1200).ConfigureAwait(true);
-            LoadingPanel.Visibility = Visibility.Collapsed;
+            FinishOpening();
             return;
         }
 
@@ -1317,7 +1360,6 @@ public partial class PlayWindow : Window
 
         ApplyAspect();
         _ = LoadDanmakuAsync();
-        LoadingPanel.Visibility = Visibility.Collapsed;
     }
 
     private void OnMpvProperty(string name, JsonElement value)
@@ -1328,6 +1370,11 @@ public partial class PlayWindow : Window
             {
                 case "time-pos" when value.ValueKind == JsonValueKind.Number:
                     _position = value.GetDouble();
+                    // mpv 开始解码播放了，黑底可以收；等它比 IPC 连上更接近首帧。
+                    if (!_ready)
+                    {
+                        FinishOpening();
+                    }
                     UpdatePositionUi();
                     ApplyPendingIntroSkip();
                     UpdateOutroPrompt();
@@ -3580,9 +3627,98 @@ public partial class PlayWindow : Window
 
     private void ShowChrome()
     {
+        // 黑底还盖着（正在打开 / 切集）时别弹控制条。
+        if (!_ready)
+        {
+            return;
+        }
+
         _chromeVisible = true;
-        SetChromeOpacity(1);
+        AnimateChrome(1);
         ResetHideTimer();
+    }
+
+    /// <summary>整窗黑底 + 「正在打开…」，控制条藏起来。每次起播 / 切集都重新盖一次。</summary>
+    private void ShowOpeningCover()
+    {
+        _ready = false;
+        _chromeVisible = false;
+
+        // 兜底：mpv 卡住 / 不出画面时 time-pos 永远不来，别让黑底一直盖着。
+        _openingCts?.Cancel();
+        _openingCts = new CancellationTokenSource();
+        var token = _openingCts.Token;
+        _ = Task.Delay(TimeSpan.FromSeconds(10), token).ContinueWith(task =>
+        {
+            if (task.IsCanceled)
+            {
+                return;
+            }
+
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!_ready)
+                {
+                    FinishOpening();
+                }
+            });
+        }, TaskScheduler.Default);
+
+        LoadingPanel.Visibility = Visibility.Visible;
+        LoadingStatus.Text = "正在打开…";
+
+        OpeningCover.BeginAnimation(OpacityProperty, null);
+        OpeningCover.Opacity = 1;
+        OpeningCover.Visibility = Visibility.Visible;
+        SetChromeOpacity(0);
+    }
+
+    /// <summary>首帧到了：黑底淡出，控制条淡入。</summary>
+    private void FinishOpening()
+    {
+        if (_ready)
+        {
+            return;
+        }
+
+        _ready = true;
+        _openingCts?.Cancel();
+        LoadingPanel.Visibility = Visibility.Collapsed;
+
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        };
+        fade.Completed += (_, _) =>
+        {
+            // 淡出期间又切集了：新一轮的黑底别被这次收掉。
+            if (!_ready)
+            {
+                return;
+            }
+
+            OpeningCover.Visibility = Visibility.Collapsed;
+            OpeningCover.Opacity = 1;
+        };
+        OpeningCover.BeginAnimation(OpacityProperty, fade);
+
+        ShowChrome();
+    }
+
+    /// <summary>控制条淡入 / 淡出，别硬切。</summary>
+    private void AnimateChrome(double target)
+    {
+        var fade = new DoubleAnimation(target, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        foreach (var element in new FrameworkElement[] { TopBar, Chrome, RightActions })
+        {
+            element.BeginAnimation(OpacityProperty, fade);
+        }
+
+        Cursor = target > 0 ? Cursors.Arrow : Cursors.None;
     }
 
     private void SetChromeOpacity(double opacity)
@@ -3615,12 +3751,17 @@ public partial class PlayWindow : Window
         }
 
         _chromeVisible = false;
-        SetChromeOpacity(0);
+        AnimateChrome(0);
     }
 
     private void ShowError(string message)
     {
+        _ready = false;
+        OpeningCover.BeginAnimation(OpacityProperty, null);
+        OpeningCover.Opacity = 1;
+        OpeningCover.Visibility = Visibility.Visible;
         LoadingPanel.Visibility = Visibility.Collapsed;
+        SetChromeOpacity(0);
         Overlay.Visibility = Visibility.Collapsed;
         ErrorText.Text = message;
         ErrorPanel.Visibility = Visibility.Visible;
@@ -3636,8 +3777,13 @@ public partial class PlayWindow : Window
 
     // —— 截图巡检用的公开入口 ——
 
-    /// <summary>截图巡检用：把浮层强制显示出来。</summary>
-    public void ShowChromeForShot() => ShowChrome();
+    /// <summary>截图巡检用：把浮层强制显示出来（不等首帧）。</summary>
+    public void ShowChromeForShot()
+    {
+        _ready = true;
+        AnimateChrome(1);
+        ResetHideTimer();
+    }
 
     /// <summary>
     /// 巡检用：用真实鼠标事件验证「点画面暂停 / 顶栏拖动 / 右边缘改大小」。

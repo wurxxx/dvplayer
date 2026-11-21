@@ -23,14 +23,18 @@
         MouseLeftButtonUp="OnSurfaceMouseUp"
         MouseWheel="OnSurfaceWheel">
 
-    <!-- 打开中 -->
-    <StackPanel x:Name="LoadingPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
-      <TextBlock x:Name="LoadingTitle" Text="" FontFamily="{StaticResource DisplayFont}"
-                 FontSize="22" Foreground="#E6FFFFFF" TextAlignment="Center"
-                 TextWrapping="Wrap" MaxWidth="720" />
-      <TextBlock x:Name="LoadingStatus" Text="正在打开…" FontSize="13.5"
-                 Foreground="#99FFFFFF" Margin="0,10,0,0" TextAlignment="Center" />
-    </StackPanel>
+    <!-- 打开中 / 切集：整窗一层不透明黑。
+         浮层本身是透明的，视频窗还没出画面时下面就是桌面，看着像「透明窗口」。
+         就绪后这层淡出（FinishOpening），控制条那时候才淡入。 -->
+    <Border x:Name="OpeningCover" Background="#FF000000">
+      <StackPanel x:Name="LoadingPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock x:Name="LoadingTitle" Text="" FontFamily="{StaticResource DisplayFont}"
+                   FontSize="22" Foreground="#E6FFFFFF" TextAlignment="Center"
+                   TextWrapping="Wrap" MaxWidth="720" />
+        <TextBlock x:Name="LoadingStatus" Text="正在打开…" FontSize="13.5"
+                   Foreground="#99FFFFFF" Margin="0,10,0,0" TextAlignment="Center" />
+      </StackPanel>
+    </Border>
 
     <!-- 播放器浮层：跟着鼠标显隐 -->
     <Grid x:Name="Overlay" Background="Transparent">

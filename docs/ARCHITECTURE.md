@@ -138,6 +138,24 @@ macOS 见 [ADR-0010](adr/0010-macos-mpv-subprocess.md)。要点是让 mpv 自己
 和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）；换 mpv 版本
 只是换个可执行文件，不碰 libmpv 的 C++ 工具链。`core/mpv` 的 C++ 封装不再需要。
 
+### 2.0 打开播放窗的过渡（两端一致）
+
+播放窗是「视频层 + 透明浮层」两个窗口。视频层要先起进程 / 拿首帧，浮层如果
+一出现就画控制条，前面那几百毫秒就是「一条控制条悬在桌面上」。
+
+所以两端都按同一套节奏：
+
+| 阶段 | 表现 |
+| --- | --- |
+| 窗口出现 | 整窗淡入 180ms（Windows `Window.Opacity` / macOS `alphaValue`） |
+| 解析播放源 / 起 mpv | 浮层铺一层**不透明黑**，中间是片名 +「正在打开…」，控制条不显示 |
+| 首帧到达 | 黑底淡出 220ms（macOS 250ms），控制条淡入 180ms |
+| 兜底 | 10 秒还没首帧（mpv 卡住 / 控制通道没连上）也把黑底收掉，不留黑屏 |
+
+首帧的判定：Windows 用 IPC 的头一条 `time-pos`（比「IPC 连上」更接近出画），
+macOS 用 `@file-loaded`。切集走同一条路径：先盖黑底，再等新的首帧。
+黑底在浮层里面画，所以视频窗口还没就位时也看不到桌面。
+
 ### 2.1 两端的 IPC 契约（已落地）
 
 两端控制器走同一套 mpv JSON IPC，只是传输不同（Windows 命名管道 / macOS unix socket）：

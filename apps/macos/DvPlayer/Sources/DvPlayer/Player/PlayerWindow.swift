@@ -217,9 +217,16 @@ final class PlayerLauncher {
         session.onClose = { [weak window] in window?.closePlayer() }
 
         controller = window
+        // 淡入：浮层是透明窗口，硬出现像一块悬空的控制条。
+        window.window?.alphaValue = 0
         window.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.window?.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.window?.animator().alphaValue = 1
+        }
         Task { await session.start() }
     }
 
@@ -288,9 +295,15 @@ final class PlayerLauncher {
         session.onClose = { [weak window] in window?.closePlayer() }
 
         controller = window
+        window.window?.alphaValue = 0
         window.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.window?.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.window?.animator().alphaValue = 1
+        }
         Task { await session.start() }
     }
 
