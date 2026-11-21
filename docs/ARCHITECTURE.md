@@ -178,11 +178,11 @@ macOS 用 `@file-loaded`。切集走同一条路径：先盖黑底，再等新�
 
 | 环节 | 做法 | 现状 |
 | --- | --- | --- |
-| 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60 |
-| HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | 识别已验，直通待 HDR 屏 |
-| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | P7 FEL 已验；P5 在 `prefix-vk` 上颜色正确，产品路径待解锁后目视 |
-| 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | 未做 |
-| 字幕 | PGS / ASS / SRT 走内核；Android 用 libass NDK 自绘 | 桌面未验，Android 未做 |
+| 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60；macOS 参数已带，画面待目视 |
+| HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | Windows 开关已接、识别已验，真屏待验；macOS 还没传这个参数（默认 tone-map 到 SDR） |
+| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS 在 `prefix-vk` 上验过整形与 FEL 合成，产品路径待目视 |
+| 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | Windows 已接开关与设备选择（`audioDevice` / `audioPassthrough`，起 mpv 时带成参数），听感待 AVR 实测；macOS 未做 |
+| 字幕 | PGS / ASS / SRT 走内核；Android 用 libass NDK 自绘 | ASS / SRT 两端已验证，PGS 未单独验，Android 未做 |
 
 原则：**UI 显示的是实际行为，不是文件声称的格式**。播放页要给一条「源 → 输出」的信息
 （例如 `DV P7 (FEL) → HDR10 直通`、`DV P7 → 本机只播 BL`），
@@ -199,11 +199,13 @@ macOS 用 `@file-loaded`。切集走同一条路径：先盖黑底，再等新�
 
 ## 4. Windows
 
-- 顶层窗口 + 视频子 HWND，`HwndHost`（`MpvHost`）托管；`mpv --wid=<HostHandle>`。
-- `vo=gpu-next`、`gpu-api=d3d11`、`gpu-context=d3d11`、`target-colorspace-hint=yes`。
-- Airspace：XAML 画不到子 HWND 上面。控制条放视频外；临时提示用 mpv OSD；
-  浮层窗口留到 v2。
-- 全屏：resize 顶层窗口 + 子 HWND，不要重挂父窗口（M0 验证壳已实现，产品壳未接）。
+- 视频在一个独立的无边框黑窗（`PlayerSurfaceWindow`）里，`MpvHost`（HwndHost）托管；
+  `mpv --wid=<HostHandle>`。
+- `vo=gpu-next`、`gpu-api=d3d11`、`gpu-context=d3d11`。
+- Airspace：XAML 画不到子 HWND 上面，所以控制条是**另一个逐像素透明的窗口**
+  （`PlayWindow`，`AllowsTransparency`），两层由播放窗同步矩形与 z 序；
+  打开 / 切集时浮层铺不透明黑底，首帧到了再淡出（§2.0）。
+- 全屏：resize 两个窗口，不重挂父窗口；F11 / 双击进入，Esc 分层退出。
 - 进程生命周期：mpv 放进 Job Object，壳崩溃时子进程一起结束，不留后台播放。
 - DPI：手动同步子 HWND 位置与尺寸。
 

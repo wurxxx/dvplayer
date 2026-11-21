@@ -1,6 +1,8 @@
 # DVPlayer 项目计划
 
-> 状态：M0 完成（仅 A6 待真机）；M1（Windows Alpha）收尾；M2（macOS 壳）浏览链路已通，播放页未开始。最后更新：2026-11-20。
+> 状态：M0 完成（仅 A6 Android 真机待设备）；M1（Windows Alpha）功能收尾，剩
+> Emby / Jellyfin 联调与打包；macOS 壳的浏览 + 播放 + 五项功能已完成（画面待目视验收）；
+> Android / TV 未开始。最后更新：2026-11-21，剩余工作见 §5。
 
 ## 1. 目标
 
@@ -28,6 +30,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | Emby | `/Users/*` + `X-Emby-Token` | **适配器已完成，待联调** | 见 [EMBY-API.md](EMBY-API.md) |
 | Jellyfin | 与 Emby 同源 | **适配器已完成，待联调** | 与 Emby 共用 `emby.rs`，只多认一个 `Authorization` 头 |
 | Plex | `/library/*` + `X-Plex-Token` | 未开始 | 需要独立适配器 |
+| 本地文件夹 | 直接读路径 | **已接入** | 目录 / ISO 进媒体库，不刮削，按 `SxxExx` / `第 N 集` 认集号，见 [LOCAL-SOURCE.md](LOCAL-SOURCE.md) |
 | SMB / NFS / WebDAV | 系统挂载 + 本地扫描 | **已接入**（macOS 实测 SMB 全链路；Windows 已编译通过，SMB 表单与失败回显已验） | 无刮削，按 `SxxExx` / `第 N 集` 认集号；挂载后复用本地文件夹源，见 [LOCAL-SOURCE.md](LOCAL-SOURCE.md) §6 |
 
 同一部片出现在多个源时怎么选、搜索怎么合并，见
@@ -38,7 +41,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 平台 | UI | 视频面 | 播放内核 | 格式能力 |
 | --- | --- | --- | --- | --- |
 | Windows | .NET 10 + WPF + WPF-UI | mpv 子 HWND（`wid`），mpv 自管 swapchain | 官方 `mpv.exe` 子进程 + JSON IPC（ADR-0009，`vo=gpu-next`） | DV P7 FEL 完整；HDR10 / HDR10+ / HLG；硬解看 GPU（已验 4K120 / 8K60） |
-| macOS | SwiftUI + AppKit | mpv 自己的窗口（cocoa-cb + Vulkan），壳贴透明浮层 | `mpv` 子进程 + JSON IPC（ADR-0010，行内 Vulkan loader + MoltenVK） | gpu-next：DV P5/P7、HDR10；解码走 VideoToolbox；进度见 [M2-MACOS.md](M2-MACOS.md) |
+| macOS | SwiftUI + AppKit | mpv 自己的窗口（cocoa-cb + Vulkan），壳贴透明浮层 | `mpv` 子进程 + JSON IPC（ADR-0010，行内 Vulkan loader + MoltenVK） | gpu-next：DV P5/P7 整形、HDR10 识别，HDR 输出未接（默认 tone-map 到 SDR）；解码走 VideoToolbox；见 [M2-MACOS.md](M2-MACOS.md) |
 | Android / TV | Kotlin + Compose for TV | SurfaceView / SurfaceTexture | Media3 (ExoPlayer) | 取决于设备解码器；DV 按机型，P7 回退 BL 并标注 |
 
 关键结论（详见 ADR）：
@@ -70,9 +73,9 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 里程碑 | 范围 | 状态 |
 | --- | --- | --- |
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
-| M1 Windows Alpha | 多源接入（飞牛 + Emby）、聚合搜索、播放与续播、打包 | **进行中**，清单见 [M1.md](M1.md) |
-| M2 Android / TV | Media3 管线、格式矩阵（DV 探测与回退）、TV 焦点 | 未开始 |
-| M3 macOS | render 全链路、HDR10 呈现、公证与 Sparkle | 未开始（M0 已验到出画） |
+| M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包 | **基本完成**：功能已落地，剩 Emby / Jellyfin 联调、MSIX 打包与自动更新；清单见 [M1.md](M1.md) |
+| M2 Android / TV | Media3 管线、格式矩阵（DV 探测与回退）、TV 焦点 | 未开始（只有 README 与选型） |
+| M3 macOS | mpv 子进程 + 浮层窗全链路、DV / HDR10 或 SDR 回退、公证与 Sparkle | **进行中**：浏览、播放、五项功能已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、公证 / Sparkle 待做 |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | 未开始（共享核心已提前在 M1 落地） |
 
 ### 解码与呈现能力矩阵（横跨 M1–M3，不是独立里程碑）
@@ -81,14 +84,14 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 
 | 能力 | Windows | macOS | Android / TV |
 | --- | --- | --- | --- |
-| HEVC / H.264 硬解 | **已验**（4K/8K、120 fps） | 待验 | 待验 |
-| AV1 / VP9 | 待验 | 待验 | 待验 |
-| DV P7（FEL） | **已验** | 不支持（v1） | 回退 BL |
-| DV P5 / P8 | 部分验（P5 颜色待修，见 M0 §5.3） | 不支持 | 待验 |
-| HDR10 / HDR10+ / HLG 识别 | **已验**（元数据正确） | 待验 | 待验 |
-| HDR 直通到 HDR 屏 | 待验（本机 SDR 屏） | 待验 | 待验 |
-| 音频直通（DTS-HD / TrueHD / Atmos） | 未做 | 未做 | 未做 |
-| PGS / ASS 字幕 | 未验 | 未验 | libass NDK 未做 |
+| HEVC / H.264 硬解 | **已验**（4K/8K、120 fps） | 待验（VideoToolbox 参数已带） | 待验 |
+| AV1 / VP9 | 待验（mpv 支持，缺样片） | 待验 | 待验 |
+| DV P7（FEL） | **已验**（官方 mpv 自带 FEL 合成） | 已验（`prefix-vk` + gpu-next，A2 结构性通过）；产品路径待目视，FEL/MEL 不判 | 回退 BL |
+| DV P5 / P8 | 部分验（P5 颜色待修，见 M0 §5.3） | P5 颜色在 `prefix-vk` 上已验；产品路径待目视 | 待验 |
+| HDR10 / HDR10+ / HLG 识别 | **已验**（元数据正确） | 待验（`video-params` 已可读） | 待验 |
+| HDR 直通到 HDR 屏 | 开关已接（`target-colorspace-hint`），真屏待验 | **未接**（没传 `target-colorspace-hint`，默认 tone-map 到 SDR） | 待验 |
+| 音频直通（DTS-HD / TrueHD / Atmos） | 已接开关与设备选择（`audio-spdif`），听感待 AVR 实测 | **未做** | 未做 |
+| PGS / ASS 字幕 | ASS / SRT 已验证；PGS 未单独验 | ASS / SRT 已验证；PGS 未单独验 | libass NDK 未做 |
 
 ### M0 — 技术验证（完成）
 
@@ -100,11 +103,11 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 
 验收标准与执行记录见 [M0.md](M0.md)。
 
-### M1 — Windows Alpha（进行中）
+### M1 — Windows Alpha（基本完成）
 
-对应主线 2 与 3 的第一版：飞牛 + Emby 双源、跨源合并搜索、合并播放记录与续播；
-播放/暂停/seek/轨道/字幕/音频设备与直通/HDR 开关/全屏/快捷键；
-MSIX 打包与自动更新。Jellyfin / Plex / 目录源排在 Emby 之后。
+对应主线 2 与 3 的第一版：飞牛 + Emby / Jellyfin + 目录源、跨源合并搜索、
+合并播放记录与续播；播放/暂停/seek/轨道/字幕/音频设备与直通/HDR 开关/全屏/快捷键；
+MSIX 打包与自动更新。Plex 排在最后。
 
 共享层见 ADR-0008：媒体库逻辑在 `core/media`（Rust），三端只做界面。
 
@@ -113,8 +116,9 @@ MSIX 打包与自动更新。Jellyfin / Plex / 目录源排在 Emby 之后。
 - 已完成：飞牛接入、库 → 剧集 → 季 → 集、剧集详情页、未刮削目录当剧集、
   mpv 播放与硬解、进度回写与续播、播放记录、图片缓存、基本键位；
 - 已完成：Emby / Jellyfin 适配器、多源聚合与合并搜索（跨源去重 + 详情页「资源」选源）、
-  音轨/字幕面板、本地与文件协议源（SMB / NFS / WebDAV）；
-- 未开始：音频直通/HDR/全屏、MSIX 打包与自动更新。
+  音轨/字幕面板、本地与文件协议源（SMB / NFS / WebDAV）、蓝光原盘（ISO / BDMV）、
+  音频输出设备 / 音频直通 / HDR 直通开关与 F11 全屏、进度条三层与缓冲大小；
+- 未完成：Emby / Jellyfin 真实服务器联调（播放直链与进度回写）、MSIX 打包与自动更新。
 
 ### M2 — Android / TV Alpha
 
@@ -124,19 +128,53 @@ Media3 管线、DV 探测与回退、TV 焦点与 Leanback、下载与续播、l
 
 mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、公证与 Sparkle。
 
+现状：浏览、播放、五项功能（弹幕 / 片头片尾 / 定时关闭 / 画面比例 / 字幕搜索）
+与 Windows 对齐，见 [M2-MACOS.md](M2-MACOS.md)；未完成的是**画面目视验收**
+（本机 Vulkan 交换链在无显示 / 锁屏会话里不出帧）、HDR 真屏、音频输出与直通开关、
+公证与 Sparkle 自动更新。
+
 ### M4 — 共性层
 
 跨端同步（播放记录、收藏、续播点）、元数据缓存与服务端聚合搜索。
 「Rust 共享媒体库」已经提前在 M1 落地（ADR-0008），这里不再重复。
 
-## 5. 非目标（v1）
+## 5. 剩余工作（2026-11-21 盘点）
+
+分两类：**缺外部条件**（代码已就绪，等凭据 / 设备 / 真机）和**纯开发**。
+
+### 5.1 缺外部条件
+
+| 项 | 卡在哪 |
+| --- | --- |
+| Emby / Jellyfin 联调 | 登录、库、层级、详情、图片已验；**播放直链与进度回写**没在真实服务器跑过（[EMBY-API.md](EMBY-API.md) §5 标「待验」），需要地址与凭据 |
+| 弹幕（弹弹play） | 需要 AppId / AppSecret。签名、XML → ASS、`sub-add` + `secondary-sid` 同屏已用本地假服务器验过 |
+| 在线字幕（OpenSubtitles） | 需要 API Key。搜索 / 下载 / `sub-add select` 已用本地假服务器验过 |
+| HDR 直通到 HDR 屏 | 缺 HDR 显示器。Windows 开关已接（`target-colorspace-hint`），只能证明元数据解析正确 |
+| 音频直通听感 | 缺 AVR / 支持 DTS-HD 的接收端。Windows 已接 `audio-spdif` 与设备选择 |
+| macOS 播放画面 | 本机无显示 / 锁屏会话里 Vulkan 拿不到交换链（日志停在 `(Re)creating swapchain`），状态与音轨都对但画面黑；需带屏真机目视一次 |
+| PGS 字幕 | 缺 PGS 样片；走内核渲染，未单独验证 |
+| AV1 / VP9 | 缺样片；mpv 的 d3d11va / VideoToolbox 都支持，未测性能与硬解命中 |
+
+### 5.2 纯开发
+
+| 项 | 说明 |
+| --- | --- |
+| MSIX 打包与自动更新 | Windows 现在只有 `dotnet build` + 手拷目录（M1 B14） |
+| macOS 公证 + Sparkle | `.app` 未签名、未做自动更新（§4 M3） |
+| Plex 适配器 | `/library/*` + `X-Plex-Token`，与 Emby 差异大，单独一个适配器（M1 B15） |
+| macOS 音频输出 / 音频直通 / HDR 开关 | Windows 已做（M1 B13），macOS 播放页「更多」里还没有；`MpvEngine` 也没传 `target-colorspace-hint` |
+| FEL / MEL 徽标 | 需要侧路 ffmpeg + dovi_tool 读第一个 RPU 的 `disable_residual_flag`；现在只标 `DV P7` |
+| Android / TV | Media3 管线、TV 焦点、libass NDK，目前只有 README 与选型 |
+| M4 跨端同步 | 播放记录 / 收藏 / 续播点跨源、跨端合并；现在只回写播放的那个源 |
+
+## 6. 非目标（v1）
 
 - Linux、iOS
 - DV 编码 / 制作
 - 服务端转码
 - 跨端媒体库同步（推迟到 M4）
 
-## 6. 风险登记
+## 7. 风险登记
 
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
@@ -147,7 +185,7 @@ mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、�
 | 编解码专利 + Dolby 授权 | 商业分发风险 | 商业版走 Dolby 官方 SDK 或法务评估 |
 | Intel Mac 无 HDR 显示器 | macOS HDR 无法目视验收 | 外接 HDR 屏或先验 SDR 映射 |
 
-## 7. 决策记录
+## 8. 决策记录
 
 | 编号 | 决策 |
 | --- | --- |
@@ -162,7 +200,7 @@ mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、�
 | ADR-0009 | Windows 改用 mpv 子进程 + JSON IPC（修正 ADR-0001 的备选判断） |
 | ADR-0010 | macOS 改用 mpv 子进程 + 透明浮层窗（取代 ADR-0003，拿到 DV） |
 
-## 8. 目录结构
+## 9. 目录结构
 
 ```
 docs/            计划、架构、ADR、M0 / M1 记录

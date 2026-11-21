@@ -87,6 +87,9 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 | 外挂字幕 | 只给了轨道信息，没给 `DeliveryUrl`；字幕选择（B12）做的时候再拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` |
 | Jellyfin 差异 | 同一套 API、登录字段一致；认证头两个都发。暂未单独验证 |
 
+「播放直链 / 进度回写」是仅剩的两项，代码路径已写完，等真实服务器与凭据
+（[PLAN.md](PLAN.md) §5.1、[M1.md](M1.md) B10）。
+
 ## 6. 相关
 
 - [FNOS-API.md](FNOS-API.md)：第一个源的接口记录

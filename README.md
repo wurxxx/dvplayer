@@ -9,8 +9,9 @@
    统一接入、统一浏览、统一播放。
 3. **聚合搜索**：一次搜索覆盖所有已接入的源，播放记录与续播点合并展示。
 
-当前阶段：**M1 — Windows Alpha 进行中**。底层能力见 [docs/M0.md](docs/M0.md)（已完成），
-产品进度见 [docs/M1.md](docs/M1.md)。
+当前阶段：**M1 — Windows Alpha 收尾**（功能齐了，剩 Emby / Jellyfin 联调与打包），
+macOS 客户端的浏览与播放也已可用。底层能力见 [docs/M0.md](docs/M0.md)，
+产品进度与剩余工作见 [docs/PLAN.md](docs/PLAN.md) §4–§5、[docs/M1.md](docs/M1.md)。
 
 ## 能力现状
 
@@ -18,14 +19,16 @@
   DV P7 FEL 完整重建；矩阵与边界见 [docs/DECODE.md](docs/DECODE.md) 和 [docs/M0.md](docs/M0.md)
 - 媒体库：飞牛影视已打通（登录、媒体库、剧集 / 季 / 集、未刮削目录、详情页、海报）；
   Emby / Jellyfin 适配器已写完（共用一份实现），还差真实服务器联调；
-  Plex / 目录源排在后面
+  本地文件夹与 SMB / NFS / WebDAV 目录源已接（系统挂载后复用本地扫描）；Plex 未开始
 - 聚合：`MediaHub` 已落地——多个源同时连、条目 id 统一成 `<sourceId>:<itemId>`、
-  媒体库与播放记录合并展示；合并搜索与跨源去重还没做，
+  媒体库与播放记录合并展示；搜索各源并发、跨源去重，选源在详情页「资源」里做，
   设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1.2
 - 适配器文档：[docs/FNOS-API.md](docs/FNOS-API.md)、[docs/EMBY-API.md](docs/EMBY-API.md)
 - 播放：Windows 用 mpv 子进程挂 `wid`，`gpu-next` + `d3d11va`，DV P7 FEL 走官方构建；
   macOS 也是 mpv 子进程（gpu-next + Vulkan/macvk）+ 透明浮层窗，DV 走同一条整形路径
   （[ADR-0010](docs/adr/0010-macos-mpv-subprocess.md)，画面验收待解锁）
+- 两端对齐的功能：断点续播、自动接下一集、蓝光原盘、进度条三层 + 缓冲大小、
+  弹幕 / 片头片尾 / 定时关闭 / 画面比例 / 字幕搜索、窄窗单行控制条
 - 续播：进度回写到服务器，详情页「继续观看 第 N 集」
 - 共享核心：`core/media`（Rust + C ABI），媒体库逻辑只写一次，四端复用
 

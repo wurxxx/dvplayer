@@ -309,8 +309,10 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
    拖动 / 缩放 / 假全屏的手感。
 3. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，
    真正的 PQ 输出要在 HDR 显示器上看一次。
-4. 播放页细节对齐：顶栏右侧的倍速 / 静音指示（Windows 有，macOS 现在只在底部）、
-   进度条缓冲段。
+4. **音频输出 / 直通 / HDR 开关**：Windows 已有（M1 B13），macOS 播放页「更多」里
+   还没有。补 `audio-device-list` 菜单、`audio-spdif`、`target-colorspace-hint`
+   三个参数，落 `settings.json`（HDR 输出目前根本没开，默认 tone-map 到 SDR）。
+5. **公证与 Sparkle**：`.app` 未签名、未做自动更新。
 
 ## 6. 旧的下一步（已完成）
 
