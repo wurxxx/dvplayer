@@ -140,6 +140,8 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   `time-pos > 起播点 + 0.5`（片头跳过后从跳到的位置算），`file-loaded` 不再
   直接收黑底；播放中卡住（`paused-for-cache`）只在画面中间浮一个
   「正在缓冲…」小胶囊，不盖画面、不藏控制条。
+- 打开阶段三个窗口圆点（关闭 / 最小化 / 全屏）照常显示，顶部 30px 拖窗区
+  也不被黑底挡住；单击黑底只把窗口选中，不切暂停。
 - `PlayerSession`：起播、切集、EOF 接下一集、进度回写（10 秒一次）、
   轨道解析与中文默认、规格 chips、截图、浮层自动隐藏。
 - `PlayerWindowController`：透明浮层窗 + geometry 同步 + 假全屏 + 键盘 / 滚轮。

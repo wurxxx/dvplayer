@@ -15,10 +15,15 @@ struct PlayerView: View {
     var body: some View {
         ZStack {
             // 点画面：单击暂停、双击全屏；鼠标一动把控制条叫回来。
+            // 打开阶段黑底不吞点击，但单击也不要切暂停（只是把窗口选中 / 拖动）。
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { session.toggleFullscreen() }
-                .onTapGesture { session.togglePause() }
+                .onTapGesture {
+                    if !session.loading {
+                        session.togglePause()
+                    }
+                }
                 .onContinuousHover { phase in
                     if case .active = phase {
                         session.showChrome()
@@ -38,9 +43,11 @@ struct PlayerView: View {
             if session.loading {
                 Color.black
                     .ignoresSafeArea()
+                    .allowsHitTesting(false)
                     .transition(.opacity)
 
                 loadingPanel
+                    .allowsHitTesting(false)
                     .transition(.opacity)
             }
 
@@ -48,7 +55,7 @@ struct PlayerView: View {
                 errorPanel(error)
             }
 
-            if session.isFullscreen == false && !session.loading {
+            if session.isFullscreen == false {
                 windowDots
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }

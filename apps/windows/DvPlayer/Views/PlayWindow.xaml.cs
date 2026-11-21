@@ -1009,6 +1009,15 @@ public partial class PlayWindow : Window
 
         _pressPoint = point;
 
+        // 还没出画：黑底上整块都能拖窗口，单击只是选窗口，不切换暂停。
+        if (!_fullscreen && !_ready)
+        {
+            _pressInTopBar = true;
+            BeginDrag(DragKind.Move, e);
+            e.Handled = true;
+            return;
+        }
+
         // 顶栏那一行按住就是拖窗口，松手也不算「点了画面」。
         if (!_fullscreen && point.Y <= TopBarHeight)
         {
@@ -3702,6 +3711,7 @@ public partial class PlayWindow : Window
     {
         _ready = false;
         _chromeVisible = false;
+        _hideTimer.Stop();
 
         // 慢网络下 time-pos 会一直停在续播点，黑底要留到播放位置真的往前走。
         // 这里不设时限定时器：没出画就一直是「正在打开…」+ 转圈（Esc 可以关窗）。
@@ -3718,6 +3728,11 @@ public partial class PlayWindow : Window
         OpeningCover.Opacity = 1;
         OpeningCover.Visibility = Visibility.Visible;
         SetChromeOpacity(0);
+
+        // 打开 / 切集期间也保留顶栏（片名 + 右上角窗口按钮）：黑屏上总得能
+        // 最小化 / 最大化 / 关窗，鼠标也有箭头可点。底部控制条仍然等首帧。
+        TopBar.Opacity = 1;
+        Cursor = Cursors.Arrow;
     }
 
     private void StartSpinner()
@@ -3881,9 +3896,13 @@ public partial class PlayWindow : Window
 
     private void SetChromeOpacity(double opacity)
     {
-        TopBar.Opacity = opacity;
-        Chrome.Opacity = opacity;
-        RightActions.Opacity = opacity;
+        foreach (var element in new FrameworkElement[] { TopBar, Chrome, RightActions })
+        {
+            // 淡入 / 淡出的动画会 HoldEnd，直接改 Opacity 会被动画压住。
+            element.BeginAnimation(OpacityProperty, null);
+            element.Opacity = opacity;
+        }
+
         Cursor = opacity > 0 ? Cursors.Arrow : Cursors.None;
     }
 
