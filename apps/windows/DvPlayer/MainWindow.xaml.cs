@@ -155,6 +155,55 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // --disc-list <iso> --disc-shot <目录>：只截原盘标题选择框。
+        if (ArgumentAfter("--disc-list") is { Length: > 0 } discListIso &&
+            ArgumentAfter("--disc-shot") is { Length: > 0 } discListDir)
+        {
+            await CaptureDiscListAsync(discListIso, discListDir);
+            return;
+        }
+
+        // --play-iso <iso>：直接播蓝光原盘；--play-iso-title N 选标题。
+        if (ArgumentAfter("--play-iso") is { Length: > 0 } isoPath)
+        {
+            var isoTitle = int.TryParse(ArgumentAfter("--play-iso-title"), out var wanted)
+                ? wanted
+                : (int?)null;
+            var discStart = double.TryParse(ArgumentAfter("--play-start"), out var discAt)
+                ? Math.Max(0, discAt)
+                : (double?)null;
+
+            if (ArgumentAfter("--play-check") is { Length: > 0 } isoCheckDir)
+            {
+                var discPlayer = await OpenDiscAsync(isoPath, isoTitle, discStart, silent: true);
+                if (discPlayer is not null)
+                {
+                    await RunPlayCheckAsync(null, isoCheckDir, discPlayer);
+                }
+
+                Close();
+                return;
+            }
+
+            if (ArgumentAfter("--play-shot") is { Length: > 0 } isoShotDir)
+            {
+                await CaptureDiscAsync(isoPath, isoTitle, discStart, isoShotDir);
+                Close();
+                return;
+            }
+
+            var discWindow = await OpenDiscAsync(isoPath, isoTitle, discStart, silent: true);
+            if (int.TryParse(ArgumentAfter("--play-seconds"), out var discSeconds) &&
+                discSeconds > 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(discSeconds));
+                discWindow?.Close();
+                Close();
+            }
+
+            return;
+        }
+
         // 脚本化验证用：--play <itemId>，可再加 --play-seconds N 自动退出。
         var playId = ArgumentAfter("--play");
         if (playId is not null)
@@ -343,13 +392,137 @@ public partial class MainWindow : FluentWindow
         player.Close();
     }
 
+    /// <summary>侧栏「打开原盘…」：选 ISO → 读标题 → 挑一个 → 播。</summary>
+    private async void OnOpenDiscClick(object sender, RoutedEventArgs e)
+    {
+        var picker = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "打开蓝光原盘",
+            Filter = "蓝光原盘 (*.iso)|*.iso|所有文件 (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+
+        if (picker.ShowDialog(this) == true)
+        {
+            await OpenDiscAsync(picker.FileName);
+        }
+    }
+
+    /// <summary>
+    /// 读原盘标题并开播放窗。`titleNumber` 非空时直接播那一个（自检用），
+    /// 否则弹标题选择框。
+    /// </summary>
+    private async Task<PlayWindow?> OpenDiscAsync(string isoPath, int? titleNumber = null,
+        double? startOverride = null, bool silent = false)
+    {
+        if (!File.Exists(isoPath))
+        {
+            if (!silent)
+            {
+                ConfirmDialog.Alert(this, "无法打开原盘", "找不到 ISO 文件：" + isoPath);
+            }
+
+            return null;
+        }
+
+        OpenDiscButton.IsEnabled = false;
+        var oldCursor = Mouse.OverrideCursor;
+        Mouse.OverrideCursor = Cursors.Wait;
+
+        try
+        {
+            var (probe, error) = await BluRayDisc.ProbeAsync(isoPath);
+            Trace.Write($"disc probe iso={Path.GetFileName(isoPath)} " +
+                        $"titles={probe?.Titles.Count ?? 0} err={error ?? "-"}");
+
+            if (probe is null)
+            {
+                if (!silent)
+                {
+                    ConfirmDialog.Alert(this, "无法打开原盘", error ?? "读不到原盘标题。");
+                }
+
+                return null;
+            }
+
+            BluRayTitle? title = titleNumber is { } wanted
+                ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted) ?? probe.Titles[0]
+                : null;
+
+            title ??= DiscTitlesDialog.Pick(this, isoPath, probe);
+            if (title is null)
+            {
+                return null;
+            }
+
+            return PlayWindow.OpenIso(this, isoPath, title, probe.DiscName, startOverride);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = oldCursor;
+            OpenDiscButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>自检：把标题选择框单独截一张。</summary>
+    private async Task CaptureDiscListAsync(string isoPath, string dir)
+    {
+        Directory.CreateDirectory(dir);
+
+        var (probe, error) = await BluRayDisc.ProbeAsync(isoPath);
+        Trace.Write($"disc list iso={Path.GetFileName(isoPath)} " +
+                    $"titles={probe?.Titles.Count ?? 0} err={error ?? "-"}");
+        if (probe is null)
+        {
+            return;
+        }
+
+        var dialog = new DiscTitlesDialog();
+        dialog.Configure(isoPath, probe);
+        dialog.Owner = this;
+        dialog.Show();
+        await Task.Delay(900);
+        UiCapture.Save(dialog, Path.Combine(dir, "disc-titles.png"));
+        dialog.Close();
+        Application.Current.Shutdown();
+    }
+
+    /// <summary>自检：直接播原盘某个标题，截视频 + 浮层。</summary>
+    private async Task CaptureDiscAsync(string isoPath, int? titleNumber, double? startOverride,
+        string dir)
+    {
+        Directory.CreateDirectory(dir);
+
+        var player = await OpenDiscAsync(isoPath, titleNumber, startOverride, silent: true);
+        if (player is null)
+        {
+            return;
+        }
+
+        // 原盘要先读盘头、找 title，起画面比网络流慢一点。
+        await Task.Delay(14000);
+        player.ShowChromeForShot();
+        await Task.Delay(800);
+        Trace.Write("disc state " + player.DescribeFeatureState());
+
+        UiCapture.SaveDesktop(Path.Combine(dir, "disc-desktop.png"));
+        UiCapture.SaveScreen(player, Path.Combine(dir, "disc-screen.png"));
+
+        player.SetShotBackground(true);
+        await Task.Delay(500);
+        UiCapture.Save(player, Path.Combine(dir, "disc-overlay.png"));
+        player.SetShotBackground(false);
+        player.Close();
+    }
+
     /// <summary>
     /// --play-check <目录> --play-features a,b,c：五项功能的远程自检。
     ///
     /// 片头 / 片尾标记要在开窗前写好，起播跳过才走得到；其余项目在出画后逐个执行，
     /// 状态和结果都写进 player.log（远程只能看日志）。
     /// </summary>
-    private async Task RunPlayCheckAsync(string itemId, string dir)
+    private async Task RunPlayCheckAsync(string? itemId, string dir, PlayWindow? opened = null)
     {
         Directory.CreateDirectory(dir);
 
@@ -371,7 +544,8 @@ public partial class MainWindow : FluentWindow
             itemId = playlist[0].Id;
         }
 
-        var markerKey = string.IsNullOrWhiteSpace(seriesTitle) ? itemId : seriesTitle!;
+        var markerKey = opened?.ItemId ??
+                        (string.IsNullOrWhiteSpace(seriesTitle) ? itemId ?? "" : seriesTitle!);
         var preset = new SkipMarker();
         foreach (var feature in features)
         {
@@ -403,8 +577,8 @@ public partial class MainWindow : FluentWindow
             startOverride = Math.Max(0, startAt);
         }
 
-        var player = await PlayWindow.OpenAsync(this, itemId, startOverride, playlist, seriesTitle,
-            silentFailure: true);
+        var player = opened ?? await PlayWindow.OpenAsync(this, itemId ?? "", startOverride,
+            playlist, seriesTitle, silentFailure: true);
         if (player is null)
         {
             Trace.Write("features: 播放窗没打开，跳过自检");

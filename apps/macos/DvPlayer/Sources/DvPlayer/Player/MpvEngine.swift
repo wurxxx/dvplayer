@@ -395,9 +395,13 @@ final class MpvEngine {
                 dvProfile = profile
                 onVideoRange?(dvProfile, transferName)
             case "video-params":
-                if let map = data as? [String: Any],
-                   let transfer = map["transfer"] as? String {
-                    transferName = transfer
+                // mpv 把传递函数放在 gamma 里（pq / hlg / bt.1886），没有 transfer 字段。
+                if let map = data as? [String: Any] {
+                    if let gamma = map["gamma"] as? String {
+                        transferName = gamma
+                    } else if let transfer = map["transfer"] as? String {
+                        transferName = transfer
+                    }
                 }
                 onVideoRange?(dvProfile, transferName)
             case "pause":

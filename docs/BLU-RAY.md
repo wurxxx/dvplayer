@@ -165,14 +165,34 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
 
 | # | 缺什么 | 影响 | 计划 |
 | --- | --- | --- | --- |
-| 1 | 壳没有 ISO 入口与选集 UI | 用户只能拖文件，拖 ISO 会走默认 title | 打开对话框加 `*.iso`；识别 ISO 后弹选集 |
+| 1 | ~~壳没有 ISO 入口与选集 UI~~ | Windows 已做：侧栏「打开原盘…」→ 读 title → 选集 | macOS 的 mpv 构建不带 libbluray，见 §5.1 |
 | 2 | `Mount-DiskImage` 只支持本地 ISO | NAS 上的原盘要先下载 | 产品里应支持"边读边播"或缓存到本地；mpv 的 `bd://` 配 UNC 路径需要 Windows 先能读该路径 |
 | 3 | BD-J 菜单不支持 | 不能点原盘菜单 | mpv/libbluray 不带 Java 运行时；只能直接选 title，产品 UI 用选集列表替代 |
 | 4 | 无缝分支（seamless branching） | 多版本剪辑的衔接可能不完美 | 依赖 libbluray，暂不承诺 |
-| 5 | 音轨/字幕轨切换未接 IPC | 原盘通常有 5–10 条音轨 | 接 `track-list` + `set_property aid/sid` |
+| 5 | ~~音轨/字幕轨切换未接 IPC~~ | 播放页的 `track-list` / `set_property aid/sid` 已在正式壳里 | 原盘和网络片共用同一套 |
 | 6 | 4K UHD 蓝光 ISO 未测 | 当前样本都是 1080p AVC | 需要 UHD BD 原盘（HEVC + HDR10/DV） |
 | 7 | AACS / BD+ 加密盘 | 加密原盘可能打不开 | mpv 不带解密；需要 MakeMKV/抽流，产品上要么不支持，要么提示 |
-| 8 | 播放进度记忆 | 长片中断后要重找 | 按 ISO + playlist 记 `time-pos` |
+| 8 | ~~播放进度记忆~~ | Windows 已做：`%LOCALAPPDATA%\dvplayer\local-progress.json`，按 ISO + mpls 记 | — |
+
+## 5.1 正式壳入口（Windows）
+
+侧栏底部「打开原盘…」→ 选 `*.iso` → 弹标题列表（正片 / 花絮 + 时长）→ 播放。
+
+- **列 title 不自己解析 UDF**：用 `mpv.com --frames=1 --bluray-device=<iso> bd://`
+  读 libbluray 打在日志里的 `--edition=N 'title: N (时长) (xxxxx.mpls)'`。
+  title 号和 mpls 编号不一定对应（真实原盘常见 title 1 → 00800.mpls），
+  读这行最准，也不用挂载。
+- **播放**：`--bluray-device=<iso>` + `bd://mpls/<n>`；音频/字幕/章节/seek
+  全部复用播放页现有 IPC。
+- **不是媒体库条目**：原盘不查核心的播放源、不拉媒体信息、不回写进度；
+  续播点写本地 JSON，播完自动清掉。
+- **自检**：`--play-iso <iso> --play-iso-title 1 --play-check <目录>
+  --play-features overlay --play-start 0`；只截标题框用
+  `--disc-list <iso> --disc-shot <目录>`。
+
+macOS 随包的 mpv 没有 libbluray（`--list-options` 里没有 `--bluray-device`），
+所以 macOS 入口要另走「挂载 ISO + 读 mpls + 播 m2ts」的路子，暂未接。
+
 
 ## 6. 与 4K/8K/HDR 的关系
 

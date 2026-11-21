@@ -43,6 +43,21 @@
                    FontSize="11.5" Foreground="{StaticResource FaintBrush}"
                    Margin="20,0,18,18" TextTrimming="CharacterEllipsis" />
 
+        <!-- 本地蓝光原盘：不经过媒体库，直接从 ISO 里读 title。 -->
+        <Button x:Name="OpenDiscButton" DockPanel.Dock="Bottom"
+                Style="{StaticResource GhostButton}"
+                Margin="14,0,14,12" Padding="12,9"
+                HorizontalContentAlignment="Left"
+                ToolTip="打开蓝光原盘（ISO）"
+                Click="OnOpenDiscClick">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE958;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                       VerticalAlignment="Center" />
+            <TextBlock Text="打开原盘…" FontSize="13" Margin="10,0,0,0"
+                       VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+
         <StackPanel>
           <ListBox x:Name="Nav"
                    Background="Transparent"

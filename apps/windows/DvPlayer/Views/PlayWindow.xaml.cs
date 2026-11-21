@@ -61,6 +61,10 @@ public partial class PlayWindow : Window
     private string _itemId;
     private PlaySourceDto _current;
 
+    /// <summary>蓝光原盘：进度存本地、不查媒体信息、不拼选集，mpv 要带 --bluray-device。</summary>
+    private readonly bool _isLocalDisc;
+    private readonly string? _discIsoPath;
+
     private MediaInfoDto? _mediaInfo;
     private readonly List<MpvTrack> _audioTracks = new();
     private readonly List<MpvTrack> _subtitleTracks = new();
@@ -74,6 +78,10 @@ public partial class PlayWindow : Window
     /// <summary>mpv 报的 DV profile（0 = 不是 DV）与输出传递函数（pq / hlg / bt.1886）。</summary>
     private int _dvProfile;
     private string _transfer = "";
+    /// <summary>mpv 报的视频编码；原盘没有服务端媒体信息，chips 靠它。</summary>
+    private string _videoCodec = "";
+    private double _videoFps;
+    private double _videoBitrate;
 
     // —— 音频输出 / HDR 直通 ——
     private List<(string Name, string Description)> _audioDevices = new();
@@ -160,13 +168,17 @@ public partial class PlayWindow : Window
         PlaySourceDto source,
         double? startSeconds = null,
         List<PlayEpisode>? playlist = null,
-        string? seriesTitle = null)
+        string? seriesTitle = null,
+        bool localDisc = false,
+        string? discIsoPath = null)
     {
         _current = source;
         _startSeconds = startSeconds;
         _playlist = playlist ?? new List<PlayEpisode>();
         _seriesTitle = seriesTitle;
         _itemId = source.ItemId;
+        _isLocalDisc = localDisc;
+        _discIsoPath = discIsoPath;
 
         var settings = AppServices.Instance.Settings;
         _aspect = PlayerAspectExtensions.Parse(settings.VideoAspect);
@@ -293,6 +305,57 @@ public partial class PlayWindow : Window
         }
     }
 
+    /// <summary>
+    /// 播一个蓝光原盘标题。原盘不经过媒体库核心：直接拼一个本地播放源，
+    /// URL 是 `bd://mpls/<n>`，mpv 靠 `--bluray-device=<iso>` 读盘。
+    /// </summary>
+    public static PlayWindow OpenIso(
+        Window? owner,
+        string isoPath,
+        BluRayTitle title,
+        string? discName = null,
+        double? startOverride = null)
+    {
+        var name = Path.GetFileNameWithoutExtension(isoPath);
+        var display = string.IsNullOrWhiteSpace(discName) ? name : discName!;
+        var itemId = $"iso:{name}:mpls{title.Mpls}";
+        var start = startOverride ?? LocalProgress.Get(itemId);
+
+        var source = new PlaySourceDto(
+            itemId,
+            $"{display} · 标题 {title.TitleNumber}",
+            $"bd://mpls/{title.Mpls}",
+            new List<HttpHeaderDto>(),
+            true,
+            string.Empty,
+            null,
+            null,
+            null,
+            (long)Math.Max(0, start),
+            (long)Math.Max(0, title.DurationSeconds),
+            null,
+            null,
+            null,
+            null,
+            false,
+            null,
+            null,
+            new List<AudioTrackDto>(),
+            new List<SubtitleTrackDto>());
+
+        Trace.Write($"disc open iso={Path.GetFileName(isoPath)} title={title.TitleNumber} " +
+                    $"mpls={title.Mpls} dur={title.DurationSeconds:0} resume={start:0}");
+
+        var window = new PlayWindow(source, start > 0 ? start : 0, null, null,
+            localDisc: true, discIsoPath: isoPath);
+        // 先用占位状态挡住 Show() 触发的 OnLoaded，BeginPlayback 再正式起 mpv。
+        window._started = true;
+        window.AttachSurface(owner);
+        window.Show();
+        window.BeginPlayback(source, start > 0 ? start : 0);
+        return window;
+    }
+
     /// <summary>占位播放源：窗口先出来，真实地址解析出来后由 <see cref="BeginPlayback"/> 换掉。</summary>
     private static PlaySourceDto Placeholder(string itemId) => new(
         itemId,
@@ -342,6 +405,9 @@ public partial class PlayWindow : Window
 
     /// <summary>窗口还开着吗：后台补选集时先看一眼，别往已关的窗口里塞控件。</summary>
     public bool IsAlive => !_closed;
+
+    /// <summary>当前条目 id（原盘是 `iso:...`），自检写标记 / 日志用。</summary>
+    public string ItemId => _itemId;
 
     /// <summary>选集晚一点才拼好时补进来（续播入口不再为了列集而卡住开窗）。</summary>
     public void SetPlaylist(List<PlayEpisode> playlist, string? seriesTitle)
@@ -1046,6 +1112,16 @@ public partial class PlayWindow : Window
     private void Launch(PlaySourceDto source, double? startSeconds)
     {
         var launch = Playback.ToLaunch(source, startSeconds);
+        if (_isLocalDisc)
+        {
+            launch = launch with
+            {
+                IsDisc = true,
+                ExtraArgs = _discIsoPath is { Length: > 0 } isoPath
+                    ? new[] { $"--bluray-device={isoPath}" }
+                    : Array.Empty<string>(),
+            };
+        }
         _launchStart = launch.StartSeconds;
         _launchAt = DateTime.UtcNow;
         _pendingIntroSkip = null;
@@ -1059,6 +1135,9 @@ public partial class PlayWindow : Window
         _bufferedPosition = 0;
         _dvProfile = 0;
         _transfer = "";
+        _videoCodec = "";
+        _videoFps = 0;
+        _videoBitrate = 0;
         UpdateSeekBars();
         SkipOutroButton.Visibility = Visibility.Collapsed;
 
@@ -1095,7 +1174,10 @@ public partial class PlayWindow : Window
         }
 
         _ = AttachIpcAsync();
-        _ = LoadMediaInfoAsync(source.ItemId);
+        if (!_isLocalDisc)
+        {
+            _ = LoadMediaInfoAsync(source.ItemId);
+        }
     }
 
     private async Task AttachIpcAsync()
@@ -1143,6 +1225,7 @@ public partial class PlayWindow : Window
                      "width", "height", "video-params/aspect", "demuxer-cache-time",
                      "audio-device-list", "audio-device", "audio-spdif",
                      "target-colorspace-hint", "current-tracks/video", "video-params",
+                     "estimated-vf-fps", "video-bitrate",
                  })
         {
             ipc.Observe(name);
@@ -1227,15 +1310,34 @@ public partial class PlayWindow : Window
                         profile.ValueKind == JsonValueKind.Number
                             ? profile.GetInt32()
                             : 0;
+                    _videoCodec =
+                        value.TryGetProperty("codec", out var codec) &&
+                        codec.ValueKind == JsonValueKind.String
+                            ? codec.GetString() ?? ""
+                            : "";
+                    UpdateChips();
+                    break;
+
+                case "estimated-vf-fps" when value.ValueKind == JsonValueKind.Number:
+                    _videoFps = value.GetDouble();
+                    UpdateChips();
+                    break;
+
+                case "video-bitrate" when value.ValueKind == JsonValueKind.Number:
+                    _videoBitrate = value.GetDouble();
                     UpdateChips();
                     break;
 
                 case "video-params" when value.ValueKind == JsonValueKind.Object:
+                    // mpv 把传递函数放在 gamma 里（pq / hlg / bt.1886），没有 transfer 字段。
                     _transfer =
-                        value.TryGetProperty("transfer", out var transfer) &&
-                        transfer.ValueKind == JsonValueKind.String
-                            ? transfer.GetString() ?? ""
-                            : "";
+                        value.TryGetProperty("gamma", out var gamma) &&
+                        gamma.ValueKind == JsonValueKind.String
+                            ? gamma.GetString() ?? ""
+                            : value.TryGetProperty("transfer", out var transfer) &&
+                              transfer.ValueKind == JsonValueKind.String
+                                ? transfer.GetString() ?? ""
+                                : "";
                     UpdateChips();
                     break;
 
@@ -1317,7 +1419,7 @@ public partial class PlayWindow : Window
             return;
         }
 
-        Playback.Report(_itemId, EffectiveDuration, EffectiveDuration);
+        ReportProgress(EffectiveDuration, EffectiveDuration);
 
         if (_sleepAtEof)
         {
@@ -1501,6 +1603,27 @@ public partial class PlayWindow : Window
     /// </summary>
     private double EffectiveDuration => _duration > 0 ? _duration : _current.DurationSeconds;
 
+    /// <summary>
+    /// 媒体库的片回写核心；原盘核心不认识，存到本地续播文件里。
+    /// </summary>
+    private void ReportProgress(double position, double duration)
+    {
+        if (!_isLocalDisc)
+        {
+            Playback.Report(_itemId, position, duration);
+            return;
+        }
+
+        if (duration > 0 && position >= duration - 1)
+        {
+            LocalProgress.Clear(_itemId);
+        }
+        else if (position > 0)
+        {
+            LocalProgress.Save(_itemId, position, duration);
+        }
+    }
+
     private void OnTick(object? sender, EventArgs e)
     {
         HealWindowPair();
@@ -1512,7 +1635,7 @@ public partial class PlayWindow : Window
         }
 
         _sinceReport = 0;
-        Playback.Report(_itemId, _position, EffectiveDuration);
+        ReportProgress(_position, EffectiveDuration);
     }
 
     // —— 媒体信息 / 规格标签 ——
@@ -1572,6 +1695,10 @@ public partial class PlayWindow : Window
         {
             chips.Add(codec);
         }
+        else if (_videoCodec is { Length: > 0 } mpvCodec)
+        {
+            chips.Add(mpvCodec.ToUpperInvariant());
+        }
         else if (_current.VideoCodec is { Length: > 0 } sourceCodec)
         {
             chips.Add(sourceCodec.ToUpperInvariant());
@@ -1589,6 +1716,11 @@ public partial class PlayWindow : Window
         {
             chips.Add($"{height}p");
         }
+        else if (_videoHeight > 0)
+        {
+            // 原盘没有服务端媒体信息，分辨率直接取 mpv 解出来的画面。
+            chips.Add($"{_videoHeight}p");
+        }
         else if (!string.IsNullOrWhiteSpace(_current.Resolution))
         {
             chips.Add(_current.Resolution);
@@ -1598,10 +1730,18 @@ public partial class PlayWindow : Window
         {
             chips.Add($"{fps:0}FPS");
         }
+        else if (_videoFps > 0)
+        {
+            chips.Add($"{_videoFps:0}FPS");
+        }
 
         if (video?.BitRate is { } bitRate && bitRate > 0)
         {
             chips.Add($"{bitRate / 1_000_000.0:0.0}mbps");
+        }
+        else if (_videoBitrate > 0)
+        {
+            chips.Add($"{_videoBitrate / 1_000_000.0:0.0}mbps");
         }
 
         if (_aspect != PlayerAspect.Fit)
@@ -3202,7 +3342,7 @@ public partial class PlayWindow : Window
 
         if (!_eof && _position > 0)
         {
-            Playback.Report(_itemId, _position, EffectiveDuration);
+            ReportProgress(_position, EffectiveDuration);
         }
 
         _danmakuCts?.Cancel();

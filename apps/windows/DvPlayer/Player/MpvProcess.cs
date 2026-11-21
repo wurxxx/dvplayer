@@ -15,7 +15,11 @@ public sealed record MpvLaunch(
     IReadOnlyList<MpvHeader>? Headers = null,
     double StartSeconds = 0,
     string? Title = null,
-    bool IsNetwork = true);
+    bool IsNetwork = true,
+    /// <summary>蓝光原盘：URL 是 <c>bd://mpls/&lt;n&gt;</c>，不是磁盘上真实存在的文件。</summary>
+    bool IsDisc = false,
+    /// <summary>原盘额外参数，例如 <c>--bluray-device=D:\disc.iso</c>。</summary>
+    IReadOnlyList<string>? ExtraArgs = null);
 
 /// <summary>
 /// 启动官方 Windows mpv（shinchiro 构建，带 FEL 合成），用 <c>--wid</c> 挂到
@@ -81,7 +85,7 @@ public sealed class MpvProcess : IDisposable
             throw new InvalidOperationException("MpvHost 还没建好窗口。");
         }
 
-        if (!launch.IsNetwork && !File.Exists(launch.Url))
+        if (!launch.IsNetwork && !launch.IsDisc && !File.Exists(launch.Url))
         {
             throw new FileNotFoundException("找不到媒体文件。", launch.Url);
         }
@@ -246,6 +250,12 @@ public sealed class MpvProcess : IDisposable
         if (launch.StartSeconds > 1)
         {
             yield return $"--start={launch.StartSeconds:0.###}";
+        }
+
+        // 原盘：`--bluray-device=<iso>`，URL 是 `bd://mpls/<n>`。
+        foreach (var arg in launch.ExtraArgs ?? Array.Empty<string>())
+        {
+            yield return arg;
         }
 
         yield return launch.Url;
