@@ -3692,7 +3692,10 @@ public partial class PlayWindow : Window
     /// <summary>鼠标贴近四边就换成改大小的光标。</summary>
     private void UpdateCursor(Point point)
     {
-        if (!_chromeVisible)
+        // 打开 / 切集时控制条藏着，但窗口还能拖、四边还能改大小：
+        // 光标不能跟着控制条一起消失，否则鼠标移上去像不见了。
+        var opening = !_ready && !_fullscreen;
+        if (!opening && !_chromeVisible)
         {
             Cursor = Cursors.None;
             return;
@@ -4058,6 +4061,16 @@ public partial class PlayWindow : Window
     /// <summary>巡检用：像点错误面板的「重试」一样再取一次地址。</summary>
     public void RetryForShot() =>
         ErrorRetryButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+    /// <summary>
+    /// 巡检用：模拟鼠标停在窗口中间，返回此刻的光标名。
+    /// 打开阶段光标不能是 None（看不见鼠标），应当是 Arrow。
+    /// </summary>
+    public string ProbeCursorForShot()
+    {
+        UpdateCursor(new Point(ActualWidth / 2, ActualHeight / 2));
+        return $"{Cursor} ready={_ready} chrome={_chromeVisible}";
+    }
 
     /// <summary>
     /// 巡检用：用真实鼠标事件验证「点画面暂停 / 顶栏拖动 / 右边缘改大小」。

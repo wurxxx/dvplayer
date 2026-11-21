@@ -241,6 +241,7 @@ public partial class MainWindow : FluentWindow
                 Trace.Write($"cover shot 1 player={coverPlayer is not null} alive={coverPlayer?.IsAlive}");
                 if (coverPlayer is { IsAlive: true })
                 {
+                    Trace.Write("cover shot cursor " + coverPlayer.ProbeCursorForShot());
                     UiCapture.SaveDesktop(Path.Combine(coverDir, "opening-desktop.png"));
                     UiCapture.Save(coverPlayer, Path.Combine(coverDir, "opening.png"));
                 }
