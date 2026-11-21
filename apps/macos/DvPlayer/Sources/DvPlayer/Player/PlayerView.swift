@@ -174,11 +174,10 @@ struct PlayerView: View {
             }
 
             if isCompact {
-                // 竖屏窗口：传输 + 进度一行，工具按钮一行。
-                VStack(spacing: 8) {
+                // 竖屏窗口：只留传输 + 进度 + 「更多」，其余工具在更多菜单里。
+                HStack(spacing: 6) {
                     playRow
-                    toolsRow
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    moreMenu
                 }
             } else {
                 HStack(spacing: 6) {
@@ -299,22 +298,27 @@ struct PlayerView: View {
         .help("直接接下一集")
     }
 
-    private var audioMenu: some View {
-        Menu {
-            if session.audioTracks.isEmpty {
-                Text("没有音轨信息")
-            }
-            ForEach(session.audioTracks) { track in
-                Button {
-                    session.selectAudio(track.id)
-                } label: {
-                    if session.selectedAudioId == track.id {
-                        Label(trackLabel(track), systemImage: "checkmark")
-                    } else {
-                        Text(trackLabel(track))
-                    }
+    @ViewBuilder
+    private var audioMenuItems: some View {
+        if session.audioTracks.isEmpty {
+            Text("没有音轨信息")
+        }
+        ForEach(session.audioTracks) { track in
+            Button {
+                session.selectAudio(track.id)
+            } label: {
+                if session.selectedAudioId == track.id {
+                    Label(trackLabel(track), systemImage: "checkmark")
+                } else {
+                    Text(trackLabel(track))
                 }
             }
+        }
+    }
+
+    private var audioMenu: some View {
+        Menu {
+            audioMenuItems
         } label: {
             PlayerMenuIcon(icon: "waveform")
         }
@@ -324,35 +328,40 @@ struct PlayerView: View {
         .help("音轨")
     }
 
-    private var subtitleMenu: some View {
-        Menu {
-            Button {
-                session.selectSubtitle(0)
-            } label: {
-                if session.selectedSubtitleId == 0 {
-                    Label("关闭字幕", systemImage: "checkmark")
-                } else {
-                    Text("关闭字幕")
-                }
-            }
-
-            if session.subtitleTracks.isEmpty {
-                Divider()
-                Text("没有字幕轨")
+    @ViewBuilder
+    private var subtitleMenuItems: some View {
+        Button {
+            session.selectSubtitle(0)
+        } label: {
+            if session.selectedSubtitleId == 0 {
+                Label("关闭字幕", systemImage: "checkmark")
             } else {
-                Divider()
-                ForEach(session.subtitleTracks) { track in
-                    Button {
-                        session.selectSubtitle(track.id)
-                    } label: {
-                        if session.selectedSubtitleId == track.id {
-                            Label(trackLabel(track), systemImage: "checkmark")
-                        } else {
-                            Text(trackLabel(track))
-                        }
+                Text("关闭字幕")
+            }
+        }
+
+        if session.subtitleTracks.isEmpty {
+            Divider()
+            Text("没有字幕轨")
+        } else {
+            Divider()
+            ForEach(session.subtitleTracks) { track in
+                Button {
+                    session.selectSubtitle(track.id)
+                } label: {
+                    if session.selectedSubtitleId == track.id {
+                        Label(trackLabel(track), systemImage: "checkmark")
+                    } else {
+                        Text(trackLabel(track))
                     }
                 }
             }
+        }
+    }
+
+    private var subtitleMenu: some View {
+        Menu {
+            subtitleMenuItems
         } label: {
             PlayerMenuIcon(icon: "captions.bubble")
         }
@@ -362,19 +371,24 @@ struct PlayerView: View {
         .help("字幕")
     }
 
-    private var speedMenu: some View {
-        Menu {
-            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
-                Button {
-                    session.setSpeed(speed)
-                } label: {
-                    if abs(session.speed - speed) < 0.01 {
-                        Label(speedLabel(speed), systemImage: "checkmark")
-                    } else {
-                        Text(speedLabel(speed))
-                    }
+    @ViewBuilder
+    private var speedMenuItems: some View {
+        ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
+            Button {
+                session.setSpeed(speed)
+            } label: {
+                if abs(session.speed - speed) < 0.01 {
+                    Label(speedLabel(speed), systemImage: "checkmark")
+                } else {
+                    Text(speedLabel(speed))
                 }
             }
+        }
+    }
+
+    private var speedMenu: some View {
+        Menu {
+            speedMenuItems
         } label: {
             Text(speedLabel(session.speed))
                 .font(.system(size: 12, weight: .semibold))
@@ -443,6 +457,18 @@ struct PlayerView: View {
 
             Divider()
             Button("搜索字幕…") { session.openSubtitleSearch() }
+
+            if isCompact {
+                // 窄窗口控制条上放不下的工具，收到这里。
+                Divider()
+                Button(session.muted ? "取消静音" : "静音") { session.toggleMute() }
+                Button("音量 +10") { session.setVolume(session.volume + 10) }
+                Button("音量 −10") { session.setVolume(session.volume - 10) }
+                Menu("音轨") { audioMenuItems }
+                Menu("字幕") { subtitleMenuItems }
+                Menu("倍速") { speedMenuItems }
+            }
+
             Button("媒体信息") { session.togglePanel(.info) }
             Button("截图") { session.screenshot() }
             Button(session.isFullscreen ? "退出全屏" : "全屏") {

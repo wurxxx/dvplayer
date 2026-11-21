@@ -218,7 +218,7 @@
           </Border.Background>
         </Border>
 
-        <StackPanel Margin="24,0,24,18" VerticalAlignment="Bottom">
+        <StackPanel x:Name="ChromeStack" Margin="24,0,24,18" VerticalAlignment="Bottom">
 
           <!-- 规格标签：HW / HEVC / HDR / 2160p / 23FPS / 70mbps -->
           <WrapPanel x:Name="ChipsRow" Margin="0,0,0,10" />
@@ -322,41 +322,6 @@
               <TextBlock Text="&#xE712;" FontFamily="{StaticResource IconFont}" FontSize="17"
                          Foreground="#F2FFFFFF" />
             </Button>
-          </Grid>
-
-          <!--
-            紧凑布局：竖屏短剧的窗口只有 400 来像素宽，一行放不下十几个控件。
-            运行期把同一批控件搬到这里（换父节点，不复制），换成两行：
-            上一行传输 + 进度，下一行工具按钮。
-          -->
-          <Grid x:Name="CompactControls" Visibility="Collapsed">
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <Grid x:Name="CompactTop" Margin="0,0,0,6">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-            </Grid>
-
-            <Grid x:Name="CompactBottom" Grid.Row="1" HorizontalAlignment="Right">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-            </Grid>
           </Grid>
         </StackPanel>
       </Grid>

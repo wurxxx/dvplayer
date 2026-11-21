@@ -544,8 +544,9 @@ public partial class PlayWindow : Window
     }
 
     /// <summary>
-    /// 窗口窄（竖屏短剧）时把控制条换成两行：一行传输 + 进度，一行工具按钮。
-    /// 控件本身不复制，只是在两个 Grid 之间换父节点。
+    /// 窗口窄（竖屏短剧）时不摆两行：只留传输 + 进度 + 「更多」，
+    /// 静音 / 音量 / 音轨 / 字幕 / 倍速 / 全屏都收进「更多」菜单，
+    /// 控制条保持一行，别把画面压出一块。
     /// </summary>
     private void UpdateChromeLayout()
     {
@@ -556,51 +557,21 @@ public partial class PlayWindow : Window
         }
 
         _compactChrome = compact;
-        var controls = new FrameworkElement[]
-        {
-            PrevButton, PlayPauseButton, NextButton, PositionText, Seek, DurationText,
-            MuteButton, Volume, AudioButton, SubtitleButton, SpeedButton, FullscreenButton,
-            MoreButton,
-        };
 
-        foreach (var control in controls)
-        {
-            if (control.Parent is Panel parent)
-            {
-                parent.Children.Remove(control);
-            }
-        }
+        var tools = compact ? Visibility.Collapsed : Visibility.Visible;
+        MuteButton.Visibility = tools;
+        Volume.Visibility = tools;
+        AudioButton.Visibility = tools;
+        SubtitleButton.Visibility = tools;
+        SpeedButton.Visibility = tools;
+        FullscreenButton.Visibility = tools;
 
-        WideControls.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        CompactControls.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
-
-        if (!compact)
-        {
-            for (var i = 0; i < controls.Length; i++)
-            {
-                Grid.SetRow(controls[i], 0);
-                Grid.SetColumn(controls[i], i);
-                WideControls.Children.Add(controls[i]);
-            }
-
-            return;
-        }
-
-        // 第一行：上一集 / 播放 / 下一集 / 当前时间 / 进度 / 时长。
-        for (var i = 0; i < 6; i++)
-        {
-            Grid.SetRow(controls[i], 0);
-            Grid.SetColumn(controls[i], i);
-            CompactTop.Children.Add(controls[i]);
-        }
-
-        // 第二行：静音 / 音量 / 音轨 / 字幕 / 倍速 / 全屏 / 更多。
-        for (var i = 6; i < controls.Length; i++)
-        {
-            Grid.SetRow(controls[i], 0);
-            Grid.SetColumn(controls[i], i - 6);
-            CompactBottom.Children.Add(controls[i]);
-        }
+        // 窄窗左右各收一点边，给进度条多留几十像素。
+        ChromeStack.Margin = compact
+            ? new Thickness(16, 0, 16, 14)
+            : new Thickness(24, 0, 24, 18);
+        PositionText.Width = compact ? 46 : 58;
+        DurationText.Width = compact ? 52 : 66;
     }
 
     private void ApplyBounds(Rect bounds)
@@ -1872,10 +1843,9 @@ public partial class PlayWindow : Window
         Volume.ValueChanged += OnVolumeChanged;
     }
 
-    private void OnMuteClick(object sender, RoutedEventArgs e)
-    {
-        _ipc?.Command("cycle", "mute");
-    }
+    private void OnMuteClick(object sender, RoutedEventArgs e) => ToggleMute();
+
+    private void ToggleMute() => _ipc?.Command("cycle", "mute");
 
     // —— 音轨 / 字幕 / 速度 / 更多 ——
 
@@ -1889,7 +1859,7 @@ public partial class PlayWindow : Window
 
     private void OnSubtitleClick(object sender, RoutedEventArgs e) => OpenSubtitleMenu();
 
-    private ContextMenu? OpenAudioMenu()
+    private ContextMenu? OpenAudioMenu(FrameworkElement? anchor = null)
     {
         if (_audioTracks.Count == 0)
         {
@@ -1905,7 +1875,7 @@ public partial class PlayWindow : Window
 
         choices.Add(("禁用", !_audioTracks.Any(t => t.Selected), () => SelectAudio("no")));
 
-        return OpenMenu(AudioButton, choices);
+        return OpenMenu(anchor ?? AudioButton, choices);
     }
 
     private void SelectAudio(object id)
@@ -1921,7 +1891,7 @@ public partial class PlayWindow : Window
         }
     }
 
-    private ContextMenu OpenSubtitleMenu()
+    private ContextMenu OpenSubtitleMenu(FrameworkElement? anchor = null)
     {
         var anySelected = _subtitleTracks.Any(t => t.Selected);
         var choices = new List<(string Label, bool Selected, Action Action)>
@@ -1936,7 +1906,7 @@ public partial class PlayWindow : Window
             choices.Add((track.Describe(), track.Selected, (Action)(() => SelectSubtitle(position))));
         }
 
-        return OpenMenu(SubtitleButton, choices);
+        return OpenMenu(anchor ?? SubtitleButton, choices);
     }
 
     private void TurnSubtitlesOff()
@@ -1956,7 +1926,9 @@ public partial class PlayWindow : Window
         TrackPrefs.SetSubtitle(_itemId, index);
     }
 
-    private void OnSpeedClick(object sender, RoutedEventArgs e)
+    private void OnSpeedClick(object sender, RoutedEventArgs e) => OpenSpeedMenu();
+
+    private void OpenSpeedMenu(FrameworkElement? anchor = null)
     {
         double[] speeds = { 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3 };
         var current = Math.Round(_lastSpeed, 2);
@@ -1968,7 +1940,7 @@ public partial class PlayWindow : Window
                 Action: (Action)(() => SetSpeed(speed))))
             .ToList();
 
-        OpenMenu(SpeedButton, choices);
+        OpenMenu(anchor ?? SpeedButton, choices);
     }
 
     private double _lastSpeed = 1;
@@ -2028,6 +2000,19 @@ public partial class PlayWindow : Window
         }
 
         choices.Add(("搜索字幕…", false, () => _ = SearchSubtitlesAsync()));
+
+        // 窄窗口控制条只留传输 + 进度，这些工具都收到这里。
+        if (_compactChrome)
+        {
+            choices.Add(("-", false, NoOp));
+            choices.Add((_muted ? "取消静音" : "静音", _muted, ToggleMute));
+            choices.Add(("音量 +10", false, () => ChangeVolume(10)));
+            choices.Add(("音量 −10", false, () => ChangeVolume(-10)));
+            choices.Add(("音轨…", false, () => OpenAudioMenu(MoreButton)));
+            choices.Add(("字幕…", false, () => OpenSubtitleMenu(MoreButton)));
+            choices.Add(("倍速…", false, () => OpenSpeedMenu(MoreButton)));
+        }
+
         choices.Add(("-", false, NoOp));
         choices.Add((_fullscreen ? "退出全屏" : "全屏", _fullscreen, ToggleFullscreen));
         choices.Add((
