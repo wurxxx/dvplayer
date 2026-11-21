@@ -1,15 +1,11 @@
-# core/mpv
+# core/mpv（已放弃）
 
-桌面端共享的 libmpv 封装（C++），M1 开始实现。
+原计划：桌面端共享的 libmpv 封装（C++），Windows 走 `wid`、macOS 走 render API。
 
-职责：
+现在两端都改成 **mpv 子进程 + JSON IPC**，让 mpv 自己建 VO 和 swapchain：
 
-- 封装 `mpv_handle` 生命周期、属性观察、事件分发
-- 支持两种模式：
-  - `WindowBinding`：Windows，`wid` + `vo=gpu-next`
-  - `RenderApi`：macOS，`MPV_RENDER_API_TYPE_OPENGL`
-- 对 .NET 暴露薄 C ABI；对 Swift 暴露 Objective-C++ 桥
+- Windows：ADR-0009（官方 `mpv.exe` + `--wid` + 命名管道）
+- macOS：ADR-0010（`prefix-vk` 的 mpv + Vulkan/macvk，壳贴透明浮层，unix socket）
 
-接口草案见 [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)。
-
-M0 阶段不写这个模块，直接用 CLI 验证行为。
+因此这个模块不再实现，目录只留作历史记录。播放器代码分别在
+`apps/windows/DvPlayer/Player/` 与 `apps/macos/DvPlayer/Sources/DvPlayer/Player/`。

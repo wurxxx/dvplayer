@@ -23,7 +23,9 @@
   媒体库与播放记录合并展示；合并搜索与跨源去重还没做，
   设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1.2
 - 适配器文档：[docs/FNOS-API.md](docs/FNOS-API.md)、[docs/EMBY-API.md](docs/EMBY-API.md)
-- 播放：Windows 用 mpv 子进程挂 `wid`，`gpu-next` + `d3d11va`，DV P7 FEL 走官方构建
+- 播放：Windows 用 mpv 子进程挂 `wid`，`gpu-next` + `d3d11va`，DV P7 FEL 走官方构建；
+  macOS 也是 mpv 子进程（gpu-next + Vulkan/macvk）+ 透明浮层窗，DV 走同一条整形路径
+  （[ADR-0010](docs/adr/0010-macos-mpv-subprocess.md)，画面验收待解锁）
 - 续播：进度回写到服务器，详情页「继续观看 第 N 集」
 - 共享核心：`core/media`（Rust + C ABI），媒体库逻辑只写一次，四端复用
 
@@ -34,11 +36,11 @@ docs/            计划、架构、ADR、M0 / M1 记录
 deps/            依赖钉版本
 scripts/         preflight / 拆层 / FEL A-B / Windows 构建与验证
 core/media/      共享媒体库核心（Rust，C ABI）
-core/mpv/        libmpv 封装（C++，占位，macOS 路线用）
+core/mpv/        libmpv 封装（C++，已放弃：两端都改 mpv 子进程，见 ADR-0009 / 0010）
 core/dovi/       libdovi 封装（占位）：RPU / EL 类型
 apps/windows/DvPlayer/         正式壳：媒体库客户端（.NET 10 + WPF-UI）
 apps/windows/DvPlayer.Windows/ M0 验证壳：HwndHost / IPC / DV 徽标（保留参考）
-apps/macos/      SwiftUI + AppKit（M0 验证程序 m0-render）
+apps/macos/      SwiftUI + AppKit：正式客户端 DvPlayer + M0 验证程序 m0-render（留档）
 apps/android/    Kotlin + Compose for TV（未开始）
 samples/         测试片源（不入库）
 out/             运行产物（不入库）
@@ -57,16 +59,24 @@ dotnet build apps\windows\DvPlayer -c Release        # WPF 壳
 
 首次启动在「设置」里填服务器地址、用户名、密码，之后自动登录。
 
-### macOS（M0 验证环境）
+### macOS 客户端
 
 ```bash
-./scripts/build-deps-macos.sh   # 首次：构建 mpv/FFmpeg/libplacebo 到 prefix/
-./scripts/preflight.sh
+cd core && ~/.cargo/bin/cargo build -p dvplayer-media --release && cd ..
+
+./scripts/build-deps-macos.sh   # 首次：FFmpeg / libass / libplacebo 到 prefix/
+./scripts/build-vk-macos.sh     # 首次：mpv + Vulkan loader + MoltenVK 到 prefix-vk/
+
+cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 ```
 
-工具链齐全后：
+`build.sh` 会把 mpv、libplacebo、MoltenVK、Vulkan loader 和共享核心一起打进
+`.app/Contents/Frameworks`（约 48MB），换台机器也能直接跑。
+详见 [docs/M2-MACOS.md](docs/M2-MACOS.md)。
+
+DV / FEL 的验证脚本（用同一份 `prefix-vk`）：
 
 ```bash
 ./scripts/split-el.sh /path/to/p7-fel.mkv
-./scripts/fel-ab.sh /path/to/p7-fel.mkv 60
+./scripts/fel-ab.sh /path/to/p7-fel.mkv 60 --vk
 ```

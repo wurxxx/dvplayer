@@ -6,7 +6,7 @@ SwiftUI + AppKit，业务逻辑全部来自共享核心 `core/media`（Rust，C 
 | 目录 | 说明 |
 | --- | --- |
 | [DvPlayer](DvPlayer/) | 正式客户端（Swift Package，`./build.sh` 打成 `.app`） |
-| [m0-render](m0-render/) | M0 的 libmpv render API 验证程序（Objective-C++），播放页落地时抄它的骨架 |
+| [m0-render](m0-render/) | M0 的 libmpv render API 验证程序（Objective-C++）。只作历史验证留档，产品不走这条路 |
 
 ## 构建与运行
 
@@ -24,7 +24,9 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 依赖里现成的东西：
 
 - `core/target/release/libdvplayer_media.dylib`：媒体源适配 + 聚合 + 进度
-- `prefix/lib/libmpv.2.dylib`：M0 编的 libmpv（下一步播放页用 render API）
+- `prefix-vk/`：mpv 子进程（gpu-next + Vulkan/macvk），
+  `build.sh` 会把它、libplacebo、MoltenVK 与 Vulkan loader 一起打进
+  `.app/Contents/Frameworks`（见 [ADR-0010](../../docs/adr/0010-macos-mpv-subprocess.md)）
 
 ## 现在能做什么
 
@@ -36,15 +38,20 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 - 详情页：整块横版图 + 信息叠加、播放 / 重头看 / 收藏 / 标记看过、
   音轨 / 字幕选择（多条音轨或有字幕才出现，弹层选完记在 `TrackPrefs`）、
   分季选集（296 宽横卡，悬停出播放遮罩）、演职人员（点开头像看作品）、
-  豆瓣链接、媒体信息（视频 + 每条音轨一张卡）
+  豆瓣链接、媒体信息（视频 + 每条音轨 / 字幕各一张卡）
 - 记录页：通用（继续观看分组 + 视频收藏）/ 观看 / 收藏
 - 搜索页：跨源搜索
 - 设置：续播、分辨率角标、自动连接；显示核心版本
+- 播放页：mpv 自己开窗口出画（gpu-next，DV/HDR10），壳贴一个透明浮层
+  （顶栏 / 控制条 / 选集 / 媒体信息 / 键盘 / 假全屏）；音轨、字幕、倍速、
+  进度回写、播完接下一集 / 关窗，和 Windows 同一套行为
 
 ## 还没做
 
-- 播放页（libmpv render API + `NSOpenGLView`，浮层控件照 Windows 的风格）
-- 详情页里的音轨 / 字幕选择（`MediaInfo` 已经读到了，等播放页一起接）
+- 画面验收：锁屏时 Vulkan 拿不到 swapchain，目前只跑过 `DVPLAYER_NO_VO=1`
+  的解码 + IPC 链路；出画、浮层覆盖、geometry 跟随、P5 颜色要解锁后目视
+- HDR 真屏验收（这台是 SDR 屏）
+- 顶栏右侧的倍速 / 静音指示、进度条缓冲段
 
 ## 截图巡检
 

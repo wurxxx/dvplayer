@@ -168,7 +168,7 @@ docs/            计划、架构、ADR、M0 / M1 记录
 deps/            依赖钉版本
 scripts/         preflight / 拆层 / FEL A-B / Windows 构建与验证
 core/media/      共享媒体库核心（Rust，C ABI）：飞牛 / Emby 适配器
-core/mpv/        libmpv 封装（C++，占位，macOS 路线用）
+core/mpv/        libmpv 封装（C++，已放弃：两端都改 mpv 子进程，见 ADR-0009 / 0010）
 core/dovi/       libdovi 封装（占位）：RPU / EL 类型
 apps/windows/DvPlayer/         正式壳：媒体库客户端（.NET 10 + WPF-UI）
 apps/windows/DvPlayer.Windows/ M0 验证壳：HwndHost / IPC / DV 徽标（保留参考）

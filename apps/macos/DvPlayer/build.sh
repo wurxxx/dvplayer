@@ -3,7 +3,8 @@
 #
 # 依赖仓库里现成的东西：
 #   core/target/release/libdvplayer_media.dylib   （cargo build -p dvplayer-media --release）
-#   prefix/lib/libmpv.2.dylib                      （scripts/build-deps-macos.sh）
+#   prefix-vk/bin/mpv、prefix-vk/lib、prefix/lib   （scripts/build-vk-macos.sh + build-deps-macos.sh）
+# 播放器是 mpv 子进程 + gpu-next + Vulkan/macvk，依赖一起打进 Contents/Frameworks。
 set -euo pipefail
 cd "$(dirname "$0")"
 

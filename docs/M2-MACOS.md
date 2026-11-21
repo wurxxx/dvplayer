@@ -173,17 +173,17 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY=<itemId>` | 等核心连上后直接开播放窗 |
 | `DVPLAYER_PLAY_CONTAINER=<剧集 id>` | 先列这一季的集，再带 playlist 打开（模拟详情页） |
 | `DVPLAYER_PLAY_RECORD=1` | 从第一条观看记录续播（模拟「继续观看」，选集由 `PlaylistLoader` 补） |
+| `DVPLAYER_PLAY_RECORD_WAIT=<秒>` | 续播时等选集补完再打印状态（飞牛 `/item/list` 慢，默认不等） |
 | `DVPLAYER_PLAY_SEEK=<秒>` | 起播 2.5 秒后跳转 |
 | `DVPLAYER_PLAY_UI=episodes\|info\|audio:N\|subtitle:N\|pause\|fullscreen\|close` | 拨浮层 / 切轨（N 是轨序号，字幕 -1 为关闭） |
 | `DVPLAYER_PLAY_FRAME=<png>` | 让 mpv 抓窗口帧（`screenshot-to-file ... window`，含 gpu-next 后处理） |
 | `DVPLAYER_PLAY_SHOT=<png>` / `DVPLAYER_PLAY_SHOT_DELAY=` | 截播放窗的 SwiftUI 浮层 |
 | `DVPLAYER_PLAY_SECONDS=<秒>` | 到点打印 `[PlayTest]` 状态（位置 / 时长 / 轨道 / playlist） |
 | `DVPLAYER_NO_VO=1` | 加 `--vo=null`：锁屏 / 无图形会话时只跑解码 + IPC |
-| `DVPLAYER_MPV_LOG=1` | 打 mpv 日志 |
 
 日志前缀：`[Play] open / load / loaded / tracks / select / eof / report`、`[PlayTest]`。
-mpv 自己的日志在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的 stderr 在
-`.app` 里看不到，出问题先看这个）。
+mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的
+stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开关。
 
 ### 4.5 播放页的坑
 
@@ -217,7 +217,7 @@ mpv 自己的日志在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的 
 
 1. **DV 目视验收**：架构已经换成 gpu-next（ADR-0010），P5 不再偏紫是 ADR-0006
    在本机验过的结论；解锁后要用 `DVPLAYER_PLAY_FRAME` 抓一帧和
-   [M0 §5.3](M0.md) 的紫色基准对照一次，再补进这里。
+   [M0「已知限制：P5 在本机渲染成紫色」](M0.md) 的紫色基准对照一次，再补进这里。
 2. **解锁后的播放页观感**：mpv 出画、浮层覆盖、geometry 跟随、`--no-border`、
    拖动 / 缩放 / 假全屏的手感。
 3. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，

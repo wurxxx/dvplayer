@@ -8,16 +8,16 @@
 │  WPF (Win) / SwiftUI (macOS) / Compose (TV)  │
 ├──────────────────────────────────────────────┤
 │ 播放服务层                                    │
-│  C++ PlayerCore + C ABI（Windows）            │
-│  Objective-C++ 桥（macOS）                    │
+│  mpv 子进程 + JSON IPC（Windows / macOS）     │
+│  壳只做浮层与状态（WPF / SwiftUI）            │
 │  Media3 Player（Android）                     │
 ├──────────────────────────────────────────────┤
-│ 内核                                          │
-│  libmpv 0.42（桌面） / Media3（Android）       │
-│  FFmpeg 9 · libplacebo 7.387 · libdovi        │
+│ 内核（mpv 进程内）                            │
+│  mpv 0.42 · FFmpeg 9 · libplacebo 7.387       │
+│  libdovi（RPU / EL 解析）                     │
 ├──────────────────────────────────────────────┤
-│ 输出                                          │
-│  GPU surface（D3D11 / OpenGL / SurfaceView）  │
+│ 输出（mpv 自己建）                            │
+│  GPU surface（D3D11 / Vulkan-Metal / Surface）│
 │  音频（WASAPI / CoreAudio / AudioTrack）      │
 └──────────────────────────────────────────────┘
 ```
@@ -118,39 +118,21 @@ macOS 见 [ADR-0010](adr/0010-macos-mpv-subprocess.md)。要点是让 mpv 自己
 和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）；换 mpv 版本
 只是换个可执行文件，不碰 libmpv 的 C++ 工具链。`core/mpv` 的 C++ 封装不再需要。
 
-### 2.1 macOS 的 libmpv 接口（未落地，仅设计）
+### 2.1 两端的 IPC 契约（已落地）
 
-```cpp
-enum class SurfaceMode { WindowBinding, RenderApi };
+两端控制器走同一套 mpv JSON IPC，只是传输不同（Windows 命名管道 / macOS unix socket）：
 
-struct Config {
-  SurfaceMode mode;
-  std::string vo;        // "gpu-next" | "gpu"
-  std::string gpu_api;   // "d3d11" | "opengl"
-  void*       native;    // HWND（Windows）；macOS 传 nullptr
-  bool        hdr_passthrough = true;
-};
+| 用途 | 命令 |
+| --- | --- |
+| 打开 | `set_property http-header-fields`、`set_property start`、`loadfile <url> replace` |
+| 播放控制 | `set_property pause \| seek \| speed \| volume \| mute` |
+| 选轨 | `set_property aid \| sid`（关字幕传 `no`） |
+| 状态 | `observe_property`：`time-pos`、`duration`、`pause`、`eof-reached`、`speed`、`volume`、`mute`、`track-list`、`aid`、`sid` |
+| 事件 | `file-loaded`、`end-file`、`property-change` |
+| 位置同步 | macOS 额外用 `set_property geometry`（Windows 走 `wm_size`） |
 
-class PlayerCore {
-public:
-  static std::unique_ptr<PlayerCore> create(const Config&);
-
-  void open(const std::string& url);
-  void command(std::string_view name, const std::vector<std::string>& args);
-  void set(std::string_view prop, const mpv_node& v);
-  mpv_node get(std::string_view prop);
-
-  // macOS render 路径
-  void render(int fbo, int w, int h, bool flip_y);
-  void report_swap();
-
-  void set_event_handler(std::function<void(const mpv_event*)>);
-  void set_render_update_handler(std::function<void()>);
-};
-```
-
-原则：事件线程独立跑 `mpv_wait_event`，UI 只收结构化事件；属性用
-`mpv_observe_property`，不轮询；`mpv_node` 不裸传给 .NET，序列化成 JSON。
+原则：一条连接既发命令又收事件；命令带 `request_id`，回复按 id 分发；
+事件切回 UI 线程。属性用 `observe_property`，不轮询。
 
 ### 2.2 格式覆盖与降级策略
 
@@ -160,7 +142,7 @@ public:
 | --- | --- | --- |
 | 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60 |
 | HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | 识别已验，直通待 HDR 屏 |
-| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | P7 FEL 已验，P5 颜色待修 |
+| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | P7 FEL 已验；P5 在 `prefix-vk` 上颜色正确，产品路径待解锁后目视 |
 | 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | 未做 |
 | 字幕 | PGS / ASS / SRT 走内核；Android 用 libass NDK 自绘 | 桌面未验，Android 未做 |
 
@@ -172,13 +154,10 @@ public:
 
 | 线程 | 职责 |
 | --- | --- |
-| mpv 进程（Windows） | 自己解复用、解码、渲染；壳通过 JSON IPC `observe_property` 收事件 |
+| mpv 进程（两端） | 自己解复用、解码、渲染；壳通过 JSON IPC `observe_property` 收事件 |
 | IPC 读线程 | 逐行读 mpv 的 JSON，切分事件交给 UI 线程 |
-| UI 线程 | 接收事件，更新界面 |
-| 渲染线程 | Windows 由 mpv 自己驱动；macOS 由 `CADisplayLink` 驱动 `mpv_render_context_render` |
-
-macOS 注意：`mpv_render_context_set_update_callback` 里只做
-`dispatch_async` 到主线程置 `needsDisplay`，不要在回调线程直接渲染。
+| UI 线程 | 接收事件，更新界面；macOS 还要把浮层窗口的 frame 同步给 mpv |
+| 渲染线程 | 都在 mpv 进程内（gpu-next），壳不参与渲染 |
 
 ## 4. Windows
 
