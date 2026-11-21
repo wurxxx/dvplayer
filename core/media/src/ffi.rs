@@ -229,6 +229,30 @@ pub extern "C" fn dv_report_stopped(
     })
 }
 
+/// 判定 Dolby Vision P7 是 FEL 还是 MEL。
+///
+/// `url` 是播放直链（http(s)）或本地路径；`headers_json` 是
+/// `[{"name":..,"value":..}]`，网络源带上鉴权头；`proxy` 是用户设的 HTTP 代理。
+/// 只读码流前缀（8 MB），找到 RPU 就返回，找不到返回 ok=false。
+#[no_mangle]
+pub extern "C" fn dv_probe_dovi(
+    url: *const c_char,
+    headers_json: *const c_char,
+    proxy: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(url) = read_cstr(url) else {
+            return reply::<crate::dovi::DoviInfo>(Err(MediaError::Other("null url".into())));
+        };
+        let headers: Vec<crate::models::HttpHeader> = read_cstr(headers_json)
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let proxy = read_cstr(proxy).unwrap_or_default();
+
+        reply(crate::dovi::probe(&url, &headers, &proxy))
+    })
+}
+
 /// 条目详情：背景图、简介、季集数、播放入口。
 #[no_mangle]
 pub extern "C" fn dv_item_detail(handle: *mut SourceHandle, item_id: *const c_char) -> *mut c_char {

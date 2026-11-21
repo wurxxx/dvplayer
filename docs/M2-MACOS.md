@@ -271,6 +271,10 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
 - **动态范围徽标**：`MpvEngine` 观察 `current-tracks/video` 的
   `dolby-vision-profile` 与 `video-params` 的 `transfer`，chips 显示
   `DV P5/P7/P8` / `HDR10` / `HLG` / `SDR`（实际输出，服务端值只做兜底）。
+  P7 再按 RPU 判 FEL / MEL：`PlayerSession.probeDolbyVisionIfNeeded` 在
+  `dvProfile == 7` 时调核心 `dv_probe_dovi`（只读码流前缀 8 MB，解析
+  `disable_residual_flag`），按条目缓存，徽标拼成 `DV P7 (FEL)` /
+  `DV P7 (MEL)`；探不到或失败就退回 `DV P7`，不影响播放。
 - **进度条三层**：`PlayerView.seekBar` 自绘（不再用 `Slider`），
   已观看 = `Theme.accent`、已缓冲 = 白 55%、未观看 = 白 22%；
   `MpvEngine` 观察 `demuxer-cache-time`，`PlayerSession.bufferedPosition`

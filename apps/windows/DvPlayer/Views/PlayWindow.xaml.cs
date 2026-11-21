@@ -83,6 +83,11 @@ public partial class PlayWindow : Window
 
     /// <summary>mpv 报的 DV profile（0 = 不是 DV）与输出传递函数（pq / hlg / bt.1886）。</summary>
     private int _dvProfile;
+    /// <summary>P7 的增强层类型："fel" / "mel"；还没探到就只标 DV P7。</summary>
+    private string? _dvElType;
+    private bool _doviProbeStarted;
+    /// <summary>按条目缓存 FEL / MEL：切回来不再重复读码流。</summary>
+    private static readonly Dictionary<string, string> DoviCache = new();
     private string _transfer = "";
     /// <summary>mpv 报的视频编码；原盘没有服务端媒体信息，chips 靠它。</summary>
     private string _videoCodec = "";
@@ -1303,6 +1308,8 @@ public partial class PlayWindow : Window
         _fitApplied = false;
         _bufferedPosition = 0;
         _dvProfile = 0;
+        _dvElType = null;
+        _doviProbeStarted = false;
         _transfer = "";
         _videoCodec = "";
         _videoFps = 0;
@@ -1493,6 +1500,7 @@ public partial class PlayWindow : Window
                             ? codec.GetString() ?? ""
                             : "";
                     UpdateChips();
+                    ProbeDolbyVisionIfNeeded();
                     break;
 
                 case "estimated-vf-fps" when value.ValueKind == JsonValueKind.Number:
@@ -1854,10 +1862,78 @@ public partial class PlayWindow : Window
     /// 实际输出的动态范围：DV P5/P7/P8 → HDR10（PQ）→ HLG → SDR。
     /// 和 ARCHITECTURE §2.2 的「源格式 → 实际输出」对齐；mpv 没回报时返回 null。
     /// </summary>
+    /// <summary>
+    /// mpv 只给 P7 主层；增强层是 FEL 还是 MEL 要读码流的 RPU。
+    /// 异步做，失败就算了（徽标退回「DV P7」）。
+    /// </summary>
+    private void ProbeDolbyVisionIfNeeded()
+    {
+        if (_dvProfile != 7 || _doviProbeStarted)
+        {
+            return;
+        }
+
+        // 原盘的 URL 是 bd://，没有可直接读的码流。
+        if (_current.Url.StartsWith("bd://", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _doviProbeStarted = true;
+
+        if (DoviCache.TryGetValue(_itemId, out var cached))
+        {
+            _dvElType = cached;
+            UpdateChips();
+            return;
+        }
+
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        var item = _itemId;
+        var url = _current.Url;
+        var headers = _current.Headers;
+        var proxy = _current.Proxy;
+
+        _ = Task.Run(() =>
+        {
+            var result = core.ProbeDovi(url, headers, proxy);
+            if (!result.Ok || result.Data is null)
+            {
+                Trace.Write($"dovi probe {item} skipped: {result.Error}");
+                return;
+            }
+
+            var probe = result.Data;
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (_itemId != item || _dvProfile != 7)
+                {
+                    return;
+                }
+
+                _dvElType = probe.ElType;
+                DoviCache[item] = probe.ElType;
+                Trace.Write($"dovi probe {item} profile={probe.Profile} " +
+                            $"el={probe.ElType.ToUpperInvariant()}");
+                UpdateChips();
+            });
+        });
+    }
+
     private string? OutputRange()
     {
         if (_dvProfile > 0)
         {
+            if (_dvProfile == 7 && _dvElType is { Length: > 0 } elType)
+            {
+                return $"DV P7 ({elType.ToUpperInvariant()})";
+            }
+
             return $"DV P{_dvProfile}";
         }
 

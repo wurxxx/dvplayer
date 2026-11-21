@@ -3,6 +3,7 @@
 //! 目标：飞牛影视 / Emby 的登录、签名、分页、播放记录、聚合搜索都在这里做一次，
 //! 三端（Windows WPF、macOS SwiftUI、Android Compose）只做界面。
 
+pub mod dovi;
 pub mod error;
 pub mod ffi;
 pub mod hub;

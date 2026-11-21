@@ -197,6 +197,8 @@ final class PlayerSession: ObservableObject {
     private(set) var videoAspect: Double = 0
     /// 实际输出的动态范围：DV profile（0 = 不是 DV）与传递函数。
     @Published private(set) var dvProfile: Int = 0
+    /// P7 的增强层类型："fel" / "mel"；还没探到就是 nil（只标 DV P7）。
+    @Published private(set) var dvElType: String?
     @Published private(set) var outputTransfer: String = ""
     /// mpv 解出来的画面参数；原盘没有服务端媒体信息，chips 靠它们。
     @Published private(set) var videoWidth: Int = 0
@@ -243,6 +245,10 @@ final class PlayerSession: ObservableObject {
     /// 巡检用：出画后强制显示「正在缓冲…」状态（`DVPLAYER_BUFFERING_HOLD=1`）。
     private static let bufferingHold =
         ProcessInfo.processInfo.environment["DVPLAYER_BUFFERING_HOLD"] == "1"
+    /// 每集的 RPU 探测只做一次（mpv 会反复推 video-params）。
+    private var doviProbeStarted = false
+    /// 按条目缓存 FEL / MEL：切回来不再重复读码流。
+    private static var doviCache: [String: String] = [:]
     private var lastReportAt = Date.distantPast
     private var hideTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
@@ -325,6 +331,7 @@ final class PlayerSession: ObservableObject {
             guard let self else { return }
             self.dvProfile = profile
             self.outputTransfer = transfer
+            self.probeDolbyVisionIfNeeded()
         }
         engine.onVideoStats = { [weak self] width, height, fps, bitrate, codec in
             guard let self else { return }
@@ -390,6 +397,8 @@ final class PlayerSession: ObservableObject {
         showSkipOutro = false
         videoAspect = 0
         dvProfile = 0
+        dvElType = nil
+        doviProbeStarted = false
         outputTransfer = ""
         videoWidth = 0
         videoHeight = 0
@@ -447,6 +456,8 @@ final class PlayerSession: ObservableObject {
         showSkipOutro = false
         videoAspect = 0
         dvProfile = 0
+        dvElType = nil
+        doviProbeStarted = false
         outputTransfer = ""
         videoWidth = 0
         videoHeight = 0
@@ -1440,12 +1451,53 @@ final class PlayerSession: ObservableObject {
         return hintTitle.isEmpty ? "正在播放" : hintTitle
     }
 
+    // MARK: - Dolby Vision FEL / MEL
+
+    /// mpv 只给 P7 主层；增强层是 FEL 还是 MEL 要读 RPU。
+    /// 异步做，失败就算了（徽标退回「DV P7」）。
+    private func probeDolbyVisionIfNeeded() {
+        guard dvProfile == 7, !doviProbeStarted else { return }
+        // 原盘的 url 是 bd://，没有可直接读的码流；空地址也探不了。
+        guard let source, !source.disc, !source.url.isEmpty else {
+            return
+        }
+
+        doviProbeStarted = true
+        let item = itemId
+
+        if let cached = Self.doviCache[item] {
+            dvElType = cached
+            return
+        }
+
+        let url = source.url
+        let headers = source.headers
+        let proxy = source.proxy
+
+        Task { @MainActor [weak self] in
+            guard let self, let core = AppState.shared.core else { return }
+            do {
+                let probe = try await core.probeDovi(url: url, headers: headers, proxy: proxy)
+                guard self.itemId == item, self.dvProfile == 7 else { return }
+                self.dvElType = probe.elType
+                Self.doviCache[item] = probe.elType
+                NSLog("[Play] dovi probe \(item) profile=\(probe.profile) " +
+                      "el=\(probe.elType.uppercased())")
+            } catch {
+                NSLog("[Play] dovi probe \(item) skipped: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - 规格标签
 
     /// 底部的规格标签：HW / 编码 / HDR / 2160p / 帧率 / 码率。
     /// 实际输出：DV P5/P7/P8 → HDR10（PQ）→ HLG → SDR。
     private var outputRange: String? {
         if dvProfile > 0 {
+            if dvProfile == 7, let el = dvElType {
+                return "DV P7 (\(el.uppercased()))"
+            }
             return "DV P\(dvProfile)"
         }
 

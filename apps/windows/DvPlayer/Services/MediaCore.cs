@@ -144,6 +144,21 @@ public sealed class MediaCore : IDisposable
         return ReadOk(ptr);
     }
 
+    /// <summary>
+    /// 判定 Dolby Vision P7 是 FEL 还是 MEL：只读码流前缀（8 MB），
+    /// 扫 RPU 的 <c>disable_residual_flag</c>。不需要 hub 句柄。
+    /// </summary>
+    public ApiResult<DoviProbeDto> ProbeDovi(
+        string url, IReadOnlyList<HttpHeaderDto>? headers, string? proxy)
+    {
+        var headersJson = JsonSerializer.Serialize(
+            (headers ?? Array.Empty<HttpHeaderDto>())
+                .Select(header => new { name = header.Name, value = header.Value }),
+            Json);
+        var ptr = dv_probe_dovi(url, headersJson, proxy ?? "");
+        return Read(ptr, root => root.Deserialize<DoviProbeDto>(Json)!);
+    }
+
     /// <summary>收藏 / 取消收藏。</summary>
     public ApiResult<bool> SetFavorite(string itemId, bool favorite)
     {
@@ -387,6 +402,12 @@ public sealed class MediaCore : IDisposable
         IntPtr handle,
         int page,
         int pageSize);
+
+    [DllImport(Lib, EntryPoint = "dv_probe_dovi", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_probe_dovi(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string url,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string headersJson,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string proxy);
 
     [DllImport(Lib, EntryPoint = "dv_hub_report_stopped", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_report_stopped(
@@ -639,6 +660,9 @@ public sealed record PlayRecordDto(
     long? LastPlayed);
 
 public sealed record HttpHeaderDto(string Name, string Value);
+
+/// <summary>Dolby Vision P7 的增强层类型：<c>ElType</c> 是 "fel" / "mel"。</summary>
+public sealed record DoviProbeDto(int Profile, string ElType, bool DisableResidual);
 
 public sealed record ImageSourceDto(
     string Url,

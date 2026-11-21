@@ -22,13 +22,13 @@
 
 ## 实现
 
-- **mpv 0.42 并不暴露 DV profile**（2026-11-19 实测）：
-  `${dolby-vision-profile}` 展开为 `(error)`，`--list-properties` 里也没有这一项。
-  mpv 只给到 `video-params/colormatrix=dolbyvision`、`primaries=bt.2020`、
-  `gamma=pq`、`sig-peak`。
-- 因此“是不是 DV”看 `colormatrix`；
-  **profile 与 EL 类型必须自己解析**——`core/dovi` 用 libdovi 读 RPU，
-  同时拿到 `dv_profile` 和 `disable_residual_flag`：
-  `false` → FEL，`true` → MEL。
-- 解析在 `file-loaded` 之后做一次（RPU 在第一帧就完整），结果缓存为自定义属性，
-  UI 只读结果，不重复解析。
+- **profile 来自 mpv**：当前打包的 mpv 在 `current-tracks/video` 里报
+  `dolby-vision-profile`（早期 0.42 版本没有这一项，只能看
+  `video-params/colormatrix=dolbyvision`）。P5 / P7 / P8 直接用这个值。
+- **EL 类型必须自己解析**：mpv 不报 FEL / MEL。`core/media/src/dovi.rs`
+  读播放地址的码流前缀（本地文件直接读，网络源用 `Range` 取前 8 MB），
+  扫 HEVC type 62 NAL，交给 `dolby_vision` crate 解析 RPU 的
+  `disable_residual_flag`：`false` → FEL，`true` → MEL。不依赖外部
+  `dovi_tool`，Windows / macOS 共用同一份。
+- 解析只在 `dolby-vision-profile == 7` 时异步做一次，按条目缓存；
+  失败只记日志，徽标退回 `DV P7`，不阻塞播放。

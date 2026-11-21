@@ -18,6 +18,13 @@ private struct EnvelopeNoData: Decodable {
     let error: String?
 }
 
+/// Dolby Vision P7 的增强层类型：`elType` 是 "fel" / "mel"。
+public struct DoviProbe: Decodable, Sendable {
+    public let profile: Int
+    public let elType: String
+    public let disableResidual: Bool
+}
+
 public final class Core: @unchecked Sendable {
     private var hub: DVHub?
     private let queue = DispatchQueue(label: "com.dvplayer.core", qos: .userInitiated)
@@ -179,6 +186,42 @@ public final class Core: @unchecked Sendable {
         _ itemId: String, position: Int, duration: Int, timeout: TimeInterval = 2) -> Bool {
         reportBlocking(itemId, position: position, duration: duration,
                        stopped: true, timeout: timeout)
+    }
+
+    /// 判定 Dolby Vision P7 是 FEL 还是 MEL：只读码流前缀，找到 RPU 就返回。
+    ///
+    /// 这个不需要 hub（url 已经带齐鉴权），单独走核心队列，省得给
+    /// `dv_hub_probe_dovi` 再造一个句柄。
+    public func probeDovi(
+        url: String, headers: [HttpHeader], proxy: String?) async throws -> DoviProbe {
+        let headersJson = (try? JSONEncoder().encode(headers))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+        return try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                let pointer = url.withCString { urlPointer in
+                    headersJson.withCString { headersPointer in
+                        (proxy ?? "").withCString { proxyPointer in
+                            dv_probe_dovi(urlPointer, headersPointer, proxyPointer)
+                        }
+                    }
+                }
+
+                guard let pointer else {
+                    continuation.resume(throwing: ApiError("核心返回了空指针"))
+                    return
+                }
+
+                let text = String(cString: pointer)
+                dv_string_free(pointer)
+                do {
+                    continuation.resume(returning:
+                        try Self.decodeEnvelope(DoviProbe.self, from: text))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     public func setFavorite(_ itemId: String, favorite: Bool) async throws {

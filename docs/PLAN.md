@@ -86,11 +86,11 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | --- | --- | --- | --- |
 | HEVC / H.264 硬解 | **已验**（4K/8K、120 fps） | 待验（VideoToolbox 参数已带） | 待验 |
 | AV1 / VP9 | 待验（mpv 支持，缺样片） | 待验 | 待验 |
-| DV P7（FEL） | **已验**（官方 mpv 自带 FEL 合成） | 已验（`prefix-vk` + gpu-next，A2 结构性通过）；产品路径待目视，FEL/MEL 不判 | 回退 BL |
+| DV P7（FEL） | **已验**（官方 mpv 自带 FEL 合成；徽标 `DV P7 (FEL/MEL)`） | 已验（`prefix-vk` + gpu-next，A2 结构性通过）；产品路径待目视；徽标 `DV P7 (FEL/MEL)` | 回退 BL |
 | DV P5 / P8 | 部分验（P5 颜色待修，见 M0 §5.3） | P5 颜色在 `prefix-vk` 上已验；产品路径待目视 | 待验 |
 | HDR10 / HDR10+ / HLG 识别 | **已验**（元数据正确） | 待验（`video-params` 已可读） | 待验 |
-| HDR 直通到 HDR 屏 | 开关已接（`target-colorspace-hint`），真屏待验 | **未接**（没传 `target-colorspace-hint`，默认 tone-map 到 SDR） | 待验 |
-| 音频直通（DTS-HD / TrueHD / Atmos） | 已接开关与设备选择（`audio-spdif`），听感待 AVR 实测 | **未做** | 未做 |
+| HDR 直通到 HDR 屏 | 开关已接（`target-colorspace-hint`），真屏待验 | 开关已接（`target-colorspace-hint`），真屏待验 | 待验 |
+| 音频直通（DTS-HD / TrueHD / Atmos） | 已接开关与设备选择（`audio-spdif`），听感待 AVR 实测 | 已接开关与设备选择（`audio-spdif` / `audio-device`），听感待 AVR 实测 | 未做 |
 | PGS / ASS 字幕 | ASS / SRT 已验证；PGS 未单独验 | ASS / SRT 已验证；PGS 未单独验 | libass NDK 未做 |
 
 ### M0 — 技术验证（完成）
@@ -162,7 +162,6 @@ mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、�
 | MSIX 打包与自动更新 | Windows 现在只有 `dotnet build` + 手拷目录（M1 B14） |
 | macOS 公证 + Sparkle | `.app` 未签名、未做自动更新（§4 M3） |
 | Plex 适配器 | `/library/*` + `X-Plex-Token`，与 Emby 差异大，单独一个适配器（M1 B15） |
-| FEL / MEL 徽标 | 需要侧路 ffmpeg + dovi_tool 读第一个 RPU 的 `disable_residual_flag`；现在只标 `DV P7` |
 | Android / TV | Media3 管线、TV 焦点、libass NDK，目前只有 README 与选型 |
 | M4 跨端同步 | 播放记录 / 收藏 / 续播点跨源、跨端合并；现在只回写播放的那个源 |
 

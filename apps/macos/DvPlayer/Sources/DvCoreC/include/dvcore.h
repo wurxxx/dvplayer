@@ -36,6 +36,9 @@ char *dv_hub_report_progress(const DVHub handle, const char *item_id,
                              int64_t position, int64_t duration);
 char *dv_hub_report_stopped(const DVHub handle, const char *item_id,
                             int64_t position, int64_t duration);
+
+/* Dolby Vision P7 的 FEL / MEL 判定：只读码流前缀，找不到 RPU 返回 ok=false。 */
+char *dv_probe_dovi(const char *url, const char *headers_json, const char *proxy);
 char *dv_hub_set_favorite(const DVHub handle, const char *item_id, int32_t favorite);
 char *dv_hub_set_watched(const DVHub handle, const char *item_id, int32_t watched);
 char *dv_hub_remove_record(const DVHub handle, const char *item_id);
