@@ -71,6 +71,16 @@ public partial class PlayWindow : Window
     /// <summary>demuxer 缓存到的位置（秒）；没有缓存信息时等于当前位置。</summary>
     private double _bufferedPosition;
 
+    /// <summary>mpv 报的 DV profile（0 = 不是 DV）与输出传递函数（pq / hlg / bt.1886）。</summary>
+    private int _dvProfile;
+    private string _transfer = "";
+
+    // —— 音频输出 / HDR 直通 ——
+    private List<(string Name, string Description)> _audioDevices = new();
+    private string _audioDevice = "";
+    private bool _audioPassthrough;
+    private bool _hdrPassthrough;
+
     /// <summary>本次起播的续播点与起播时刻：用来认出「一开就播完」的假片尾。</summary>
     private double _launchStart;
     private DateTime _launchAt = DateTime.UtcNow;
@@ -161,6 +171,9 @@ public partial class PlayWindow : Window
         var settings = AppServices.Instance.Settings;
         _aspect = PlayerAspectExtensions.Parse(settings.VideoAspect);
         _danmakuEnabled = settings.DanmakuEnabled ?? false;
+        _audioPassthrough = settings.AudioPassthrough;
+        _hdrPassthrough = settings.HdrPassthrough;
+        _audioDevice = settings.AudioDevice ?? "";
         ResetMarkerKey();
 
         InitializeComponent();
@@ -1044,6 +1057,8 @@ public partial class PlayWindow : Window
         _videoHeight = 0;
         _fitApplied = false;
         _bufferedPosition = 0;
+        _dvProfile = 0;
+        _transfer = "";
         UpdateSeekBars();
         SkipOutroButton.Visibility = Visibility.Collapsed;
 
@@ -1126,6 +1141,8 @@ public partial class PlayWindow : Window
                      "time-pos", "duration", "pause", "volume", "mute", "eof-reached",
                      "track-list", "cache-speed", "speed", "hwdec",
                      "width", "height", "video-params/aspect", "demuxer-cache-time",
+                     "audio-device-list", "audio-device", "audio-spdif",
+                     "target-colorspace-hint", "current-tracks/video", "video-params",
                  })
         {
             ipc.Observe(name);
@@ -1176,6 +1193,50 @@ public partial class PlayWindow : Window
                         ? value.GetDouble()
                         : 0;
                     UpdateSeekBars();
+                    break;
+
+                case "audio-device-list" when value.ValueKind == JsonValueKind.Array:
+                    _audioDevices = value.EnumerateArray()
+                        .Select(device => (
+                            Name: device.TryGetProperty("name", out var name)
+                                ? name.GetString() ?? ""
+                                : "",
+                            Description: device.TryGetProperty("description", out var desc)
+                                ? desc.GetString() ?? ""
+                                : ""))
+                        .Where(device => device.Name.Length > 0)
+                        .ToList();
+                    break;
+
+                case "audio-device" when value.ValueKind == JsonValueKind.String:
+                    _audioDevice = value.GetString() ?? "";
+                    break;
+
+                case "audio-spdif" when value.ValueKind == JsonValueKind.String:
+                    _audioPassthrough = !string.IsNullOrWhiteSpace(value.GetString());
+                    break;
+
+                case "target-colorspace-hint" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                    _hdrPassthrough = value.GetBoolean();
+                    break;
+
+                case "current-tracks/video" when value.ValueKind == JsonValueKind.Object:
+                    // mpv 只在轨道对象里给 DV profile，没有 FEL/MEL（那要侧路解析 RPU）。
+                    _dvProfile =
+                        value.TryGetProperty("dolby-vision-profile", out var profile) &&
+                        profile.ValueKind == JsonValueKind.Number
+                            ? profile.GetInt32()
+                            : 0;
+                    UpdateChips();
+                    break;
+
+                case "video-params" when value.ValueKind == JsonValueKind.Object:
+                    _transfer =
+                        value.TryGetProperty("transfer", out var transfer) &&
+                        transfer.ValueKind == JsonValueKind.String
+                            ? transfer.GetString() ?? ""
+                            : "";
+                    UpdateChips();
                     break;
 
                 case "pause" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
@@ -1474,6 +1535,27 @@ public partial class PlayWindow : Window
         UpdateMediaInfoText();
     }
 
+    /// <summary>
+    /// 实际输出的动态范围：DV P5/P7/P8 → HDR10（PQ）→ HLG → SDR。
+    /// 和 ARCHITECTURE §2.2 的「源格式 → 实际输出」对齐；mpv 没回报时返回 null。
+    /// </summary>
+    private string? OutputRange()
+    {
+        if (_dvProfile > 0)
+        {
+            return $"DV P{_dvProfile}";
+        }
+
+        return _transfer switch
+        {
+            "pq" => "HDR10",
+            "hlg" => "HLG",
+            "bt.1886" or "srgb" or "bt.709" => "SDR",
+            "" => null,
+            _ => "SDR",
+        };
+    }
+
     private void UpdateChips()
     {
         ChipsRow.Children.Clear();
@@ -1495,7 +1577,9 @@ public partial class PlayWindow : Window
             chips.Add(sourceCodec.ToUpperInvariant());
         }
 
-        var range = video?.ColorRange ?? _current.ColorRange;
+        // 动态范围用 mpv 的实际输出（DV 源经 tone map 后就不一定是 DV 了），
+        // mpv 还没回报时退回服务端刮削的值。
+        var range = OutputRange() ?? video?.ColorRange ?? _current.ColorRange;
         if (!string.IsNullOrWhiteSpace(range))
         {
             chips.Add(range);
@@ -1983,6 +2067,101 @@ public partial class PlayWindow : Window
         OpenMenu(anchor ?? SpeedButton, choices);
     }
 
+    // —— 音频输出 / HDR ——
+
+    private string AudioOutputLabel()
+    {
+        var device = _audioDevices.FirstOrDefault(item => item.Name == _audioDevice);
+        var label = device.Description is { Length: > 0 }
+            ? device.Description
+            : _audioDevice is { Length: > 0 } ? _audioDevice : "系统默认";
+
+        if (_audioPassthrough)
+        {
+            label += " · 直通";
+        }
+
+        if (_hdrPassthrough)
+        {
+            label += " · HDR";
+        }
+
+        return label;
+    }
+
+    private ContextMenu? OpenAudioOutputMenu(FrameworkElement? anchor = null)
+    {
+        var choices = new List<(string Label, bool Selected, Action Action)>();
+
+        if (_audioDevices.Count == 0)
+        {
+            choices.Add(("还没读到音频设备，稍后再试", false, NoOp));
+        }
+
+        foreach (var device in _audioDevices)
+        {
+            var name = device.Name;
+            var label = device.Description is { Length: > 0 } ? device.Description : name;
+            choices.Add((label, name == _audioDevice,
+                () => SetAudioDevice(name)));
+        }
+
+        choices.Add(("-", false, NoOp));
+        choices.Add((_audioPassthrough ? "音频直通：开" : "音频直通：关", _audioPassthrough,
+            ToggleAudioPassthrough));
+        choices.Add((_hdrPassthrough ? "HDR 直通：开" : "HDR 直通：关", _hdrPassthrough,
+            ToggleHdrPassthrough));
+
+        return OpenMenu(anchor ?? MoreButton, choices);
+    }
+
+    /// <summary>自检：打开「音频输出」菜单，截完再关。</summary>
+    public ContextMenu? OpenAudioOutputForShot() => OpenAudioOutputMenu(MoreButton);
+
+    /// <summary>自检：切一次音频直通 + HDR 直通，走完整的 set_property + 落盘。</summary>
+    public string ToggleAudioOutputForShot()
+    {
+        ToggleAudioPassthrough();
+        ToggleHdrPassthrough();
+        return $"passthrough={_audioPassthrough} hdr={_hdrPassthrough} " +
+               $"device={(_audioDevice.Length > 0 ? _audioDevice : "-")}";
+    }
+
+    private void SetAudioDevice(string name)
+    {
+        _ipc?.Command("set_property", "audio-device", name);
+
+        var settings = AppServices.Instance.Settings;
+        settings.AudioDevice = name;
+        settings.Save();
+        ShowToast($"音频输出：{AudioOutputLabel()}");
+    }
+
+    private void ToggleAudioPassthrough()
+    {
+        var enabled = !_audioPassthrough;
+        _audioPassthrough = enabled;
+        _ipc?.Command("set_property", "audio-spdif",
+            enabled ? "ac3,eac3,dts,dts-hd,truehd" : "");
+
+        var settings = AppServices.Instance.Settings;
+        settings.AudioPassthrough = enabled;
+        settings.Save();
+        ShowToast(enabled ? "音频直通：开" : "音频直通：关");
+    }
+
+    private void ToggleHdrPassthrough()
+    {
+        var enabled = !_hdrPassthrough;
+        _hdrPassthrough = enabled;
+        _ipc?.Command("set_property", "target-colorspace-hint", enabled);
+
+        var settings = AppServices.Instance.Settings;
+        settings.HdrPassthrough = enabled;
+        settings.Save();
+        ShowToast(enabled ? "HDR 直通：开（系统要开 HDR）" : "HDR 直通：关");
+    }
+
     private double _lastSpeed = 1;
 
     private void SetSpeed(double speed)
@@ -2040,6 +2219,7 @@ public partial class PlayWindow : Window
         }
 
         choices.Add(("搜索字幕…", false, () => _ = SearchSubtitlesAsync()));
+        choices.Add(($"音频输出（{AudioOutputLabel()}）", false, () => OpenAudioOutputMenu()));
 
         // 窄窗口控制条只留传输 + 进度，这些工具都收到这里。
         if (_compactChrome)

@@ -435,6 +435,22 @@ public partial class MainWindow : FluentWindow
                     player.SearchSubtitlesForShot();
                     break;
 
+                case "audiotoggle":
+                    Trace.Write("audio toggle " + player.ToggleAudioOutputForShot());
+                    await Task.Delay(800);
+                    break;
+
+                case "audioout":
+                    player.ShowChromeForShot();
+                    await Task.Delay(1200);
+                    if (player.OpenAudioOutputForShot() is { } audioOutMenu)
+                    {
+                        await Task.Delay(700);
+                        UiCapture.Save(audioOutMenu, Path.Combine(dir, "play-audioout.png"));
+                        audioOutMenu.IsOpen = false;
+                    }
+                    break;
+
                 case "overlay":
                     player.ShowChromeForShot();
                     player.SetShotBackground(true);

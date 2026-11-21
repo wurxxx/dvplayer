@@ -55,6 +55,15 @@ struct ShellView: View {
 
     @ViewBuilder
     private var content: some View {
+        if let detail = state.detailItemId {
+            DetailPage(itemId: detail, onBack: { state.detailItemId = nil })
+        } else {
+            pageContent
+        }
+    }
+
+    @ViewBuilder
+    private var pageContent: some View {
         switch state.page {
         case .home(let sourceId):
             LibrariesPage(sourceId: sourceId)

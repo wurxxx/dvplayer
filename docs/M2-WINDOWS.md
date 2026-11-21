@@ -35,6 +35,16 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   音量 / 音轨 / 字幕 / 倍速 / 全屏收起来，只留传输 + 进度 + 「更多」；这些工具
   作为菜单项补进「更多」（音量 ±10、音轨… / 字幕… / 倍速… 连开一层）。
   窄窗左右边距和两个时间标签同时收窄，进度条才留得下。
+- **音频输出 / HDR 直通**：「更多 → 音频输出」列出 mpv `audio-device-list` 的
+  设备（当前项打勾），加「音频直通」「HDR 直通」两个开关：直通写
+  `audio-spdif=ac3,eac3,dts,dts-hd,truehd`，HDR 写 `target-colorspace-hint`。
+  三项都落 `settings.json`（`audioPassthrough` / `hdrPassthrough` /
+  `audioDevice`），`MpvProcess` 起 mpv 时当命令行参数带上，换集重启也保持；
+  播放页「更多」的标题会带当前设备 / 直通 / HDR 状态。
+- **动态范围徽标读实际输出**：`current-tracks/video` 的
+  `dolby-vision-profile` + `video-params` 的 `transfer` → `DV P5/P7/P8`、
+  `HDR10`、`HLG`、`SDR`，服务端刮削的 `ColorRange` 只在 mpv 还没回报时兜底。
+  P7 的 FEL/MEL 仍不判（要侧路 ffmpeg + dovi_tool，M0 验证壳里有）。
 - **记录页的卡片墙**：「观看」也是 `Controls/PosterGrid`（`CardRatio="1.7778"`
   = 16:9 横卡、`MinCardWidth="220"`），不再用固定 248 宽的 `WrapPanel`；
   「收藏」本来就是同一组件。`PosterGrid` 新增 `CardRatio` / `MinCardWidth`
@@ -72,6 +82,7 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
   `danmaku`（离线解析 + ASS 生成自检）、`subtitle`（搜索 + 下载整轮）、
   `menu`（截「更多」菜单到 `play-more.png`）、`overlay`（垫黑截浮层，
   进度条 / 控制条看 `play-overlay.png`）、`skipoutro`。
+- `audioout` / `audiotoggle`：打开音频输出菜单、切一次直通 / HDR 并写日志（无桌面自检用）。
 - `--screenshot <目录> settings --settings-tab play`：设置页直接停在「播放」分组，
   核对缓冲大小这类项。
 - 结果全部写 `%LOCALAPPDATA%\dvplayer\player.log`，状态行类似

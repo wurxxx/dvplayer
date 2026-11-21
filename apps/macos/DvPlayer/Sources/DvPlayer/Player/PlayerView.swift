@@ -122,6 +122,33 @@ struct PlayerView: View {
                 .padding(.top, 14)
                 .allowsHitTesting(false)
         }
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 6) {
+                if abs(session.speed - 1) > 0.01 {
+                    Text(speedLabel(session.speed))
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.4),
+                                    in: RoundedRectangle(cornerRadius: 5))
+                }
+
+                if session.muted {
+                    Image(systemName: "speaker.slash.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.4),
+                                    in: RoundedRectangle(cornerRadius: 5))
+                }
+            }
+            .padding(.top, 13)
+            .padding(.trailing, 18)
+            .allowsHitTesting(false)
+        }
         .opacity(session.chromeVisible ? 1 : 0)
         .animation(.easeOut(duration: 0.15), value: session.chromeVisible)
     }

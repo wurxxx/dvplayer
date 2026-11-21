@@ -16,7 +16,21 @@ final class AppState: ObservableObject {
     }
 
     @Published var settings = AppSettings.load()
-    @Published var page: Page = .sources
+    @Published var page: Page = .sources {
+        // 侧栏换页时收起详情，避免「搜索 → 详情 → 点记录」还停在详情上。
+        didSet {
+            if page != oldValue {
+                detailItemId = nil
+            }
+        }
+    }
+
+    /// 从搜索结果 / 记录收藏这类页面打开的详情（nil = 不显示）。
+    @Published var detailItemId: String?
+
+    func openDetail(_ itemId: String) {
+        detailItemId = itemId
+    }
     @Published var connections: [SourceConnection] = []
     @Published var libraries: [MediaLibrary] = []
     @Published var records: [PlayRecord] = []
@@ -84,6 +98,12 @@ final class AppState: ObservableObject {
         case "settings": page = .settings
         case "sources": page = .sources
         default: break
+        }
+
+        // 自检：直接从全局详情路由打开（搜索 / 记录页点卡片走的就是这一条）。
+        // 放在切页之后——切页会把详情收起来。
+        if let detail = debugDetail, !detail.isEmpty {
+            detailItemId = detail
         }
     }
 

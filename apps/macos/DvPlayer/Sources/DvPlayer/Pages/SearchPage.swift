@@ -40,7 +40,7 @@ struct SearchPage: View {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
                         ForEach(results) { item in
                             PosterCard(item: item, width: 168) {
-                                state.showToast("详情页下一轮接入")
+                                state.openDetail(item.id)
                             }
                         }
                     }

@@ -37,6 +37,8 @@ final class MpvEngine {
     var onLog: ((String) -> Void)?
     /// demuxer 缓存到的位置（秒），进度条画「已缓冲」那一段用。
     var onCacheTime: ((Double) -> Void)?
+    /// 实际输出的动态范围：DV profile（0 = 不是 DV）+ 传递函数（pq / hlg / bt.1886）。
+    var onVideoRange: ((Int, String) -> Void)?
     /// 视频显示宽高比（已含旋转 / 变形）；「适应窗口」用它把窗口改成同样的形状。
     var onVideoAspect: ((Double) -> Void)?
 
@@ -70,11 +72,14 @@ final class MpvEngine {
     private var shuttingDown = false
     private var lastPositionEmit: TimeInterval = 0
     private var eofSent = false
+    private var dvProfile = 0
+    private var transferName = ""
     private var startOverride: Double?
 
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
         "track-list", "aid", "sid", "video-params/aspect", "demuxer-cache-time",
+        "current-tracks/video", "video-params",
     ]
 
     init?(frame: NSRect, startSeconds: Double?) {
@@ -186,6 +191,8 @@ final class MpvEngine {
         loadGeneration += 1
         isLoaded = false
         eofSent = false
+        dvProfile = 0
+        transferName = ""
         eofReached = false
         position = 0
         duration = 0          // 上一集的时长别留在 loaded 里
@@ -381,6 +388,18 @@ final class MpvEngine {
             case "demuxer-cache-time":
                 guard let value = data as? Double else { return }
                 onCacheTime?(value)
+            case "current-tracks/video":
+                let map = data as? [String: Any]
+                let profile = (map?["dolby-vision-profile"] as? Int)
+                    ?? Int((map?["dolby-vision-profile"] as? Double) ?? 0)
+                dvProfile = profile
+                onVideoRange?(dvProfile, transferName)
+            case "video-params":
+                if let map = data as? [String: Any],
+                   let transfer = map["transfer"] as? String {
+                    transferName = transfer
+                }
+                onVideoRange?(dvProfile, transferName)
             case "pause":
                 let value = (data as? Bool) ?? ((data as? Int) == 1)
                 paused = value

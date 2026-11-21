@@ -130,7 +130,7 @@ struct RecordsPage: View {
                     LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 22) {
                         ForEach(state.favorites) { item in
                             PosterCard(item: item, width: 168) {
-                                state.showToast("详情页下一轮接入")
+                                state.openDetail(item.id)
                             }
                         }
                     }
@@ -176,7 +176,7 @@ struct RecordsPage: View {
                     Spacer()
 
                     Button("播放") {
-                        state.showToast("播放器下一轮接入")
+                        PlayerLauncher.shared.play(record: record)
                     }
                     .buttonStyle(SecondaryButtonStyle())
 
@@ -214,7 +214,7 @@ struct RecordsPage: View {
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 22) {
                     ForEach(state.favorites) { item in
                         PosterCard(item: item, width: 168) {
-                            state.showToast("详情页下一轮接入")
+                            state.openDetail(item.id)
                         }
                     }
                 }

@@ -200,6 +200,23 @@ public sealed class MpvProcess : IDisposable
             yield return "--ao=null";
         }
 
+        // 音频直通 / HDR 直通 / 输出设备从设置带进来：换集重启 mpv 也一直是用户选的。
+        var settings = DvPlayer.Services.AppServices.Instance.Settings;
+        if (settings.AudioPassthrough)
+        {
+            yield return "--audio-spdif=ac3,eac3,dts,dts-hd,truehd";
+        }
+
+        if (settings.HdrPassthrough)
+        {
+            yield return "--target-colorspace-hint=yes";
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.AudioDevice))
+        {
+            yield return "--audio-device=" + settings.AudioDevice;
+        }
+
         yield return $"--input-ipc-server=\\\\.\\pipe\\{pipeName}";
         yield return "--input-default-bindings=no";      // 快捷键归壳，mpv 不抢键盘
         yield return "--input-vo-keyboard=no";

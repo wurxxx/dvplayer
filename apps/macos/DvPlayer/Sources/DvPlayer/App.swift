@@ -234,6 +234,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // 和 Windows 的 `--play-features` 一样，支持逗号分隔的多条。
+        for item in spec.split(separator: ",") {
+            applyPlayerUI(String(item), session: session)
+        }
+    }
+
+    @MainActor
+    private static func applyPlayerUI(_ spec: String, session: PlayerSession) {
         let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
         switch parts[0] {
             case "episodes":
@@ -242,6 +250,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 session.togglePanel(.info)
             case "pause":
                 session.togglePause()
+            case "speed":
+                if let value = Double(parts.count > 1 ? parts[1] : ""), value > 0 {
+                    session.setSpeed(value)
+                }
+                NSLog("[PlayTest] speed=\(session.speed)")
+            case "mute":
+                session.toggleMute()
+                NSLog("[PlayTest] mute=\(session.muted)")
             case "close":
                 session.requestClose()
             case "fullscreen":

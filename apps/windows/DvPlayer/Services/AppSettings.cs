@@ -38,6 +38,15 @@ public sealed class AppSettings
     /// <summary>播放缓冲上限（MB）。默认 512，设置页可选 256 / 512 / 1024 / 2048 / 4096。</summary>
     public int BufferSizeMb { get; set; } = 512;
 
+    /// <summary>音频直通（AC3 / EAC3 / DTS / TrueHD 交给功放解码）。</summary>
+    public bool AudioPassthrough { get; set; }
+
+    /// <summary>HDR 直通（mpv 的 target-colorspace-hint，系统开了 HDR 才有效）。</summary>
+    public bool HdrPassthrough { get; set; }
+
+    /// <summary>音频输出设备（mpv audio-device 的名字）；空 = 系统默认。</summary>
+    public string? AudioDevice { get; set; }
+
     /// <summary>弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。</summary>
     public bool? DanmakuEnabled { get; set; }
     public string? DanmakuAppId { get; set; }

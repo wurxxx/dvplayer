@@ -41,8 +41,9 @@
 - 横向行：触控板横滑 + 悬停出左右箭头，按整屏翻、垂直居中，
   内容一屏放得下就不出箭头（`HorizontalRow`）
 - 记录页：通用（继续观看按剧分组 + 视频收藏）/ 观看 / 收藏
-- 搜索页：跨源搜索
-- 设置页：续播、分辨率角标、自动连接、核心版本与配置路径
+- 搜索页：跨源搜索；结果卡片直接进详情（全局 `AppState.detailItemId` 路由，切侧栏自动收起）
+- 记录页：「观看」的播放按钮直接 `PlayerLauncher.play(record:)`，收藏卡片进详情
+- 设置页：续播、分辨率角标、自动连接、播放缓冲、核心版本与配置路径
 
 ## 3. 踩过的坑
 
@@ -181,6 +182,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_UI=mark:intro\|outro\|clear` | 按当前位置标记片头结束 / 片尾开始 / 清除 |
 | `DVPLAYER_PLAY_UI=skipoutro` | 触发「跳过片尾」（seek 到片长 − 0.4 秒） |
 | `DVPLAYER_PLAY_UI=danmaku:on\|off` | 开关弹幕（需要弹弹play 凭据） |
+| `DVPLAYER_PLAY_UI=speed:1.5` / `mute` | 改倍速 / 静音（验证顶栏状态），多项用逗号连起来 |
 | `DVPLAYER_BUFFER_MB=<MB>` | 临时覆盖播放缓冲（自检时压小才看得到未缓冲段） |
 | `DVPLAYER_PLAY_UI=danmakufile:<ass>` | 直接挂一份本地弹幕 ASS（不联网，自检用） |
 | `DVPLAYER_PLAY_UI=subsearch` | 打开字幕面板并搜索 |
@@ -207,6 +209,10 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
   全屏 / 最大化 / 手动改过窗口时不抢尺寸，退出全屏或最大化还原后再适配。
   浮层宽度 < 640 时底部只留传输 + 进度 + 「更多」（静音 / 音量 ±10 / 音轨 / 字幕 /
   倍速作为子菜单进「更多」），不做第二行；chips 横向可滚动。
+- **顶栏状态**：右上角显示倍速（非 1×）和静音图标，和 Windows 顶栏对齐。
+- **动态范围徽标**：`MpvEngine` 观察 `current-tracks/video` 的
+  `dolby-vision-profile` 与 `video-params` 的 `transfer`，chips 显示
+  `DV P5/P7/P8` / `HDR10` / `HLG` / `SDR`（实际输出，服务端值只做兜底）。
 - **进度条三层**：`PlayerView.seekBar` 自绘（不再用 `Slider`），
   已观看 = `Theme.accent`、已缓冲 = 白 55%、未观看 = 白 22%；
   `MpvEngine` 观察 `demuxer-cache-time`，`PlayerSession.bufferedPosition`

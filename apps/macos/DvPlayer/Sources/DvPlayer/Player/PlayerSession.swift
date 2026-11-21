@@ -170,6 +170,9 @@ final class PlayerSession: ObservableObject {
     @Published private(set) var aspect: PlayerAspect
     /// 当前视频的显示宽高比（0 = 还不知道）。
     private(set) var videoAspect: Double = 0
+    /// 实际输出的动态范围：DV profile（0 = 不是 DV）与传递函数。
+    @Published private(set) var dvProfile: Int = 0
+    @Published private(set) var outputTransfer: String = ""
     /// 窗口控制器接这个：适应窗口时按视频形状改窗口。
     var onVideoAspect: ((Double) -> Void)?
     @Published private(set) var sleepDeadline: Date?
@@ -261,6 +264,11 @@ final class PlayerSession: ObservableObject {
             self.videoAspect = aspect
             self.onVideoAspect?(aspect)
         }
+        engine.onVideoRange = { [weak self] profile, transfer in
+            guard let self else { return }
+            self.dvProfile = profile
+            self.outputTransfer = transfer
+        }
         engine.onCacheTime = { [weak self] cache in
             guard let self else { return }
             // 刚 seek 回来缓存位置可能还落在进度后面，至少画到已观看那。
@@ -311,6 +319,8 @@ final class PlayerSession: ObservableObject {
         panel = .none
         showSkipOutro = false
         videoAspect = 0
+        dvProfile = 0
+        outputTransfer = ""
         bufferedPosition = 0
         markers = SkipMarkerStore.marker(for: markerKey)
         danmakuTask?.cancel()
@@ -1124,6 +1134,21 @@ final class PlayerSession: ObservableObject {
     // MARK: - 规格标签
 
     /// 底部的规格标签：HW / 编码 / HDR / 2160p / 帧率 / 码率。
+    /// 实际输出：DV P5/P7/P8 → HDR10（PQ）→ HLG → SDR。
+    private var outputRange: String? {
+        if dvProfile > 0 {
+            return "DV P\(dvProfile)"
+        }
+
+        switch outputTransfer {
+            case "pq": return "HDR10"
+            case "hlg": return "HLG"
+            case "bt.1886", "srgb", "bt.709": return "SDR"
+            case "": return nil
+            default: return "SDR"
+        }
+    }
+
     var chips: [String] {
         var chips: [String] = []
         let video = mediaInfo?.video
@@ -1136,12 +1161,11 @@ final class PlayerSession: ObservableObject {
             chips.append(codec.uppercased())
         }
 
-        if let range = video?.colorRange ?? source?.colorRange, !range.isEmpty {
+        // 动态范围用 mpv 的实际输出（DV 源 tone map 后不一定是 DV），
+        // 还没回报时退回服务端刮削的值。
+        if let range = outputRange ?? video?.colorRange ?? source?.colorRange,
+           !range.isEmpty {
             chips.append(range)
-        }
-
-        if source?.dolbyVision == true || video?.dolbyVision == true {
-            chips.append("DV")
         }
 
         if let label = video?.resolutionLabel, !label.isEmpty {
