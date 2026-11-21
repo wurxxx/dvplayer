@@ -105,6 +105,73 @@ exe 的图标来自 `Assets/DvPlayer.ico`（`ApplicationIcon`），侧栏左上�
 琥珀圆角块 + 摄像机，16–32 px 用简化成三角形的版本。换配色只需改脚本里的
 `AMBER_*` / `INK` 再跑一次（会同时更新 `assets/branding/` 下给 macOS 用的那份）。
 
+## 发布打包
+
+`apps/windows/packaging/build-release.ps1` 用**同一份自包含 win-x64 发布目录**
+产出两个包：
+
+| 产物 | 说明 |
+| --- | --- |
+| `out\release\DvPlayer-<版本>-win-x64-portable.zip` | 绿色版，解压即用；`mpv\` 与 `dvplayer_media.dll` 都在里面 |
+| `out\release\DvPlayer-<版本>-win-x64-setup.exe` | Inno Setup 安装版；写 Program Files、开始菜单 / 可选桌面快捷方式、带卸载项 |
+
+```powershell
+# 先确保共享核心和 mpv 就位
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-core.ps1
+
+# 默认 0.1.0，同时出绿色版和安装版
+powershell -ExecutionPolicy Bypass -File apps\windows\packaging\build-release.ps1
+```
+
+常用参数：`-Version 0.1.1`、`-MpvDir <目录>`（默认 `D:\dvplayer\mpv`）、
+`-SkipPublish`（复用 `out\release\payload`）、`-SkipPortable` / `-SkipInstaller`。
+第一次出安装版时如果找不到 `ISCC.exe`，脚本会下载 Inno Setup 静默装到
+`tools\innosetup`（需要联网；本机若已装 `C:\Program Files (x86)\Inno Setup 6`
+会直接复用）。安装包现在托管在 GitHub Releases，脚本默认给链接加
+`https://ghfast.top/` 加速；镜像不通会回退直连。要换镜像就设
+`DVPLAYER_GH_PROXY`（例如 `https://gh-proxy.com/`），设为空字符串则直连。
+
+静默安装 / 卸载（自动化验证用）：
+
+```powershell
+DvPlayer-0.1.0-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+    /DIR=D:\dvplayer\out\test-installed /LOG=D:\dvplayer\test-install.log
+# 跑一遍 UI 自检
+& D:\dvplayer\out\test-installed\DvPlayer.exe --screenshot D:\dvplayer\out\test-installed\shots
+# 卸载
+& D:\dvplayer\out\test-installed\unins000.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+绿色版：把 zip 解到空目录，直接 `DvPlayer.exe --screenshot <目录>`；不要只复制
+exe，`mpv\`、`*.dll`、`runtimeconfig.json` 都要在。
+
+### MSIX（可选）
+
+`apps/windows/packaging/build-msix.ps1` 仍保留：用 NuGet 里的
+`Microsoft.Windows.SDK.BuildTools` 取 `makeappx` / `signtool`，生成自签名
+`.msix`，`-UpdateUrl` 还会写一份 `.appinstaller` 更新源。
+
+注意本机是**非交互 SSH（Session 0）**：`Add-AppxPackage` 会在 PLM 初始化阶段
+报 `0x80070005`，用户桌面里双击安装通常没这个问题。远程验证可以改用：
+
+```powershell
+# 管理员
+Add-AppxProvisionedPackage -Online -PackagePath <msix> -SkipLicense
+# 等 Status 从 DeploymentInProgress 变成 Ok
+Get-AppxPackage -AllUsers Luckywur.DvPlayer
+```
+
+自签名证书在 `%LOCALAPPDATA%\dvplayer\msix\`（pfx + 密码 + cer，不入库），
+首次安装前要把 cer 放进 `Cert:\LocalMachine\TrustedPeople`：
+
+```powershell
+Import-Certificate -FilePath <cer> -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+```
+
+自动更新（`.appinstaller` 的 `OnLaunch` / `AutomaticBackgroundTask`）需要把
+`.appinstaller` 和 `.msix` 放到 https 地址；目前仓库只负责生成，发布地址定了
+再接。
+
 ## 无桌面环境的 UI 回归
 
 ```powershell

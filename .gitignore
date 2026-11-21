@@ -4,6 +4,7 @@ build/
 prefix/
 prefix-vk/
 tools/bin/
+tools/innosetup/
 tools/*.zip
 samples/*
 !samples/README.md
@@ -13,6 +14,7 @@ apps/macos/m0-render/m0-render
 # 品牌图标要入库（其余截图不提交）
 !assets/branding/*.png
 !apps/windows/DvPlayer/Assets/*.png
+!apps/windows/packaging/Assets/*.png
 # 服务器图标：两端同源，由 scripts/make-source-icons.py 生成
 !assets/sources/*.png
 !apps/windows/DvPlayer/Assets/sources/*.png

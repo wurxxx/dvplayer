@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MSIX 包清单模板。build-msix.ps1 会把 __TOKEN__ 换成实际值。 -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop desktop6 rescap">
+
+  <Identity
+    Name="__IDENTITY__"
+    Publisher="__PUBLISHER__"
+    Version="__VERSION__"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>DVPlayer</DisplayName>
+    <PublisherDisplayName>DvPlayer</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <!-- 便携版和 MSIX 版共用 %LOCALAPPDATA%\dvplayer\settings.json：
+         关掉 AppData 写虚拟化，否则配置会落到 Packages\...\LocalCache 里，
+         用户从便携版换过来会丢服务器列表。 -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="zh-CN" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application Id="DvPlayer" Executable="DvPlayer.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="DVPlayer"
+        Description="飞牛 / Emby / Jellyfin 媒体库播放器"
+        BackgroundColor="#141419"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          Wide310x150Logo="Assets\Wide310x150Logo.png"
+          Square71x71Logo="Assets\Square71x71Logo.png"
+          Square310x310Logo="Assets\Square310x310Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- 桌面程序走完整信任，不需要 AppContainer。 -->
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="DvPlayer.exe" />
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <!-- 关掉 AppData 写虚拟化需要这个受限能力；旁加载 / 商店都可声明。 -->
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+</Package>
