@@ -25,8 +25,10 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
   不是 macOS 那种悬停子菜单。
 - **字幕菜单只写「语言 · 标题」**：`TrackPrefs.SubtitleLabel` 把 `chi` / `eng` 这类
-  语言码翻成中文名，`HDMV PGS_SUBTITLE`、`subrip` 这类容器 / 编码标题当作没有标题；
-  只有语言就只显示语言，两个都没有用「字幕 N」，重名再追加序号（`中文 1`）。
+  语言码翻成中文名，`HDMV PGS_SUBTITLE`、`subrip` 这类容器 / 编码标题和纯序号
+  （`1`、`2`）当作没有标题；只有语言就只显示语言，两个都没有用「字幕 N」，
+  重名再追加序号（`中文 1`）。mpv 只给容器标题时，按轨序从服务器的
+  `MediaInfo.Subtitles` 补语言（原盘 / remux 的 `track-list` 常常 `lang` 为空）。
 - **弹幕轨按文件名认**：`sub-add` 在 JSON IPC 里不返回轨道 id，Windows 的
   `MpvIpc` 也没有命令回复，所以靠 `track-list` 推送，按
   `external-filename` 含 `DVPlayer-danmaku` 识别并排除出字幕菜单。

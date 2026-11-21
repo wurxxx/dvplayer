@@ -604,6 +604,9 @@ final class PlayerSession: ObservableObject {
                                language: language, title: title, isDefault: raw.isDefault)
         }
 
+        // 服务器的媒体信息可能比 `track-list` 晚到；到了以后按轨序把语言补回来。
+        refreshSubtitleLabels()
+
         // mpv 自己开了默认轨（比如第一条字幕）时，勾要跟着它。
         selectedAudioId = aid
         selectedSubtitleId = sid
@@ -615,6 +618,41 @@ final class PlayerSession: ObservableObject {
     }
 
     // MARK: - 音轨 / 字幕
+
+    /// mpv 对原盘 / remux 常常只给容器标题（`HDMV PGS_SUBTITLE`）、语言为空；
+    /// 服务器的媒体信息里如果有 ffprobe 读到的语言，按轨序补回来（只补缺的）。
+    private func refreshSubtitleLabels() {
+        guard !subtitleTracks.isEmpty else { return }
+        let server = mediaInfo?.subtitles ?? []
+
+        let labels = TrackPrefs.subtitleLabels(subtitleTracks.enumerated().map { index, track in
+            var language = track.language
+            var title = track.title
+            if server.indices.contains(index) {
+                if TrackPrefs.languageName(language) == nil {
+                    language = server[index].language
+                }
+                if TrackPrefs.isCodecLabel(title) {
+                    title = server[index].title
+                }
+            }
+            return (language: language, title: title)
+        })
+
+        subtitleTracks = subtitleTracks.enumerated().map { index, track in
+            PlayerTrack(id: track.id,
+                        name: labels.indices.contains(index) ? labels[index] : track.name,
+                        detail: track.detail,
+                        language: track.language,
+                        title: track.title,
+                        isDefault: track.isDefault)
+        }
+
+        if !server.isEmpty {
+            NSLog("[Play] subtitle labels server=\(server.count) -> "
+                  + labels.joined(separator: ","))
+        }
+    }
 
     /// 只在第一次拿到轨道时套用详情页的选择；之后用户自己改。
     /// 详情页没读媒体信息就起播（续播、切集）时，退到 mpv 轨上的中文判断。
@@ -1226,6 +1264,7 @@ final class PlayerSession: ObservableObject {
             mediaInfo = info
             NSLog("[Play] media info video=\(info.video != nil) audios=\(info.audios.count) " +
                   "subs=\(info.subtitles.count)")
+            refreshSubtitleLabels()
             applyTrackPrefsIfNeeded()
         } catch {
             NSLog("[Play] media info failed \(itemId): \(error.localizedDescription)")

@@ -167,6 +167,23 @@ enum TrackPrefs {
         ("uk", "乌克兰语"), ("ukr", "乌克兰语"),
         ("ro", "罗马尼亚语"), ("rum", "罗马尼亚语"), ("ron", "罗马尼亚语"),
         ("fa", "波斯语"), ("per", "波斯语"), ("fas", "波斯语"),
+        ("slk", "斯洛伐克语"), ("slo", "斯洛伐克语"),
+        ("slv", "斯洛文尼亚语"),
+        ("hrv", "克罗地亚语"), ("scr", "克罗地亚语"),
+        ("srp", "塞尔维亚语"), ("scc", "塞尔维亚语"),
+        ("bos", "波斯尼亚语"),
+        ("bul", "保加利亚语"),
+        ("mkd", "马其顿语"), ("mac", "马其顿语"),
+        ("lit", "立陶宛语"), ("lav", "拉脱维亚语"), ("est", "爱沙尼亚语"),
+        ("isl", "冰岛语"), ("ice", "冰岛语"),
+        ("cat", "加泰罗尼亚语"), ("eus", "巴斯克语"), ("baq", "巴斯克语"),
+        ("glg", "加利西亚语"),
+        ("sqi", "阿尔巴尼亚语"), ("alb", "阿尔巴尼亚语"),
+        ("bel", "白俄罗斯语"), ("kaz", "哈萨克语"),
+        ("fil", "菲律宾语"), ("tgl", "菲律宾语"),
+        ("ben", "孟加拉语"), ("tam", "泰米尔语"), ("tel", "泰卢固语"),
+        ("mar", "马拉地语"), ("guj", "古吉拉特语"), ("pan", "旁遮普语"),
+        ("urd", "乌尔都语"),
     ]
 
     private static let languageHints: [(hint: String, name: String)] = [
@@ -181,6 +198,18 @@ enum TrackPrefs {
         ("finnish", "芬兰语"), ("czech", "捷克语"), ("greek", "希腊语"),
         ("hebrew", "希伯来语"), ("hungarian", "匈牙利语"), ("ukrainian", "乌克兰语"),
         ("romanian", "罗马尼亚语"), ("persian", "波斯语"),
+        ("slovak", "斯洛伐克语"), ("slovenian", "斯洛文尼亚语"),
+        ("croatian", "克罗地亚语"), ("serbian", "塞尔维亚语"),
+        ("bosnian", "波斯尼亚语"), ("bulgarian", "保加利亚语"),
+        ("macedonian", "马其顿语"), ("lithuanian", "立陶宛语"),
+        ("latvian", "拉脱维亚语"), ("estonian", "爱沙尼亚语"),
+        ("icelandic", "冰岛语"), ("catalan", "加泰罗尼亚语"),
+        ("basque", "巴斯克语"), ("galician", "加利西亚语"),
+        ("albanian", "阿尔巴尼亚语"), ("belarusian", "白俄罗斯语"),
+        ("kazakh", "哈萨克语"), ("filipino", "菲律宾语"), ("tagalog", "菲律宾语"),
+        ("bengali", "孟加拉语"), ("tamil", "泰米尔语"), ("telugu", "泰卢固语"),
+        ("marathi", "马拉地语"), ("gujarati", "古吉拉特语"),
+        ("punjabi", "旁遮普语"), ("urdu", "乌尔都语"),
     ]
 
     private static let codecTokens = [
@@ -188,7 +217,8 @@ enum TrackPrefs {
         "dvdsub", "mov_text", "webvtt", "ttml", "dvb", "ssa", "ass", "srt", "text",
     ]
 
-    /// 标题只是容器 / 编码标签（`HDMV PGS_SUBTITLE`、`subrip`）时，当作没有标题。
+    /// 标题只是容器 / 编码标签（`HDMV PGS_SUBTITLE`、`subrip`）或纯序号（`1`、`2`）时，
+    /// 当作没有标题。
     static func isCodecLabel(_ title: String?) -> Bool {
         var text = (title ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         guard !text.isEmpty else { return true }
@@ -197,7 +227,7 @@ enum TrackPrefs {
             text = text.replacingOccurrences(of: token, with: " ")
         }
 
-        return !text.contains { $0.isLetter || $0.isNumber }
+        return !text.contains { $0.isLetter }
     }
 
     /// 去掉没意义的标题；nil = 这条字幕没有标题。

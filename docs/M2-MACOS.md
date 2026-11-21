@@ -246,8 +246,10 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
 **音轨 / 字幕菜单的文案**
 
 - 字幕菜单只写「语言 · 标题」：`TrackPrefs.subtitleLabel` 把 `chi` / `eng` 翻成
-  中文名，把 `HDMV PGS_SUBTITLE`、`subrip` 这类容器 / 编码标题当作没有标题；
-  只有语言就只显示语言，两个都没有时用「字幕 N」，重名再追加序号（`中文 1`）。
+  中文名，把 `HDMV PGS_SUBTITLE`、`subrip` 这类容器 / 编码标题和纯序号（`1`、`2`）
+  当作没有标题；只有语言就只显示语言，两个都没有时用「字幕 N」，重名再追加序号
+  （`中文 1`）。mpv 只给容器标题时，按轨序从服务器的 `MediaInfo.subtitles` 补语言
+  （原盘 / remux 的 `track-list` 常常 `lang` 为空）。
 - 播放器菜单读 mpv 的 `track-list`，详情页 / 媒体信息卡读服务器的
   `MediaInfo.subtitles`，两边共用同一个函数。
 

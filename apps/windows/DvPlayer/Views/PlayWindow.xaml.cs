@@ -2289,10 +2289,38 @@ public partial class PlayWindow : Window
             ("关闭字幕", !anySelected, TurnSubtitlesOff),
         };
 
-        // 菜单只写「语言 · 标题」，没有标题的轨（`HDMV PGS_SUBTITLE`）不再露编码，
-        // 重名的追加序号。
-        var labels = TrackPrefs.SubtitleLabels(
-            _subtitleTracks.Select(t => (t.Language, t.Title)).ToList());
+        var tracks = _subtitleTracks.Select(t => (t.Language, t.Title)).ToList();
+
+        // 原盘 / remux 的 mpv 轨常常只给 `HDMV PGS_SUBTITLE` 这种容器标题、语言为空；
+        // 服务器的媒体信息里如果有 ffprobe 读到的语言，按轨序补回来（只补缺的）。
+        var serverSubtitles = _mediaInfo?.Subtitles;
+        if (serverSubtitles is not null)
+        {
+            for (var i = 0; i < tracks.Count && i < serverSubtitles.Count; i++)
+            {
+                var language = tracks[i].Language;
+                var title = tracks[i].Title;
+                if (TrackPrefs.LanguageName(language) is null)
+                {
+                    language = serverSubtitles[i].Language;
+                }
+
+                if (TrackPrefs.IsCodecLabel(title))
+                {
+                    title = serverSubtitles[i].Title;
+                }
+
+                tracks[i] = (language, title);
+            }
+        }
+
+        Trace.Write("submenu mpv=" + string.Join(";", _subtitleTracks.Select(t =>
+            $"{t.Language ?? "-"}|{t.Title ?? "-"}|{t.Codec ?? "-"}")));
+        Trace.Write("submenu server=" + string.Join(";", (serverSubtitles ?? new List<SubtitleInfoDto>())
+            .Select(s => $"{s.Language ?? "-"}|{s.Title ?? "-"}|{s.Codec ?? "-"}")));
+
+        // 菜单只写「语言 · 标题」，没有标题的轨不再露编码，重名的追加序号。
+        var labels = TrackPrefs.SubtitleLabels(tracks);
 
         for (var i = 0; i < _subtitleTracks.Count; i++)
         {
@@ -2300,6 +2328,8 @@ public partial class PlayWindow : Window
             var position = i;
             choices.Add((labels[i], track.Selected, (Action)(() => SelectSubtitle(position))));
         }
+
+        Trace.Write("submenu labels=" + string.Join(";", labels));
 
         return OpenMenu(anchor ?? SubtitleButton, choices);
     }
