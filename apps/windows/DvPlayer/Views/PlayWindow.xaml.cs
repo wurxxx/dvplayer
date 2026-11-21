@@ -84,6 +84,11 @@ public partial class PlayWindow : Window
 
     // —— 画面比例 / 定时关闭 / 片头片尾 / 弹幕 / 在线字幕 ——
     private PlayerAspect _aspect = PlayerAspect.Fit;
+    private double _videoAspect;
+    private int _videoWidth;
+    private int _videoHeight;
+    private bool _fitApplied;
+    private double _fittedAspect;
     private SkipMarker _markers = new();
     private string _markerKey = "";
     private DateTime? _sleepDeadline;
@@ -597,6 +602,8 @@ public partial class PlayWindow : Window
 
         _fullscreen = false;
         ApplyBounds(_windowedBounds.Width > 320 ? _windowedBounds : MonitorLessRect());
+        _fitApplied = false;
+        FitWindowToVideo();
         UpdateFullscreenGlyph();
         ShowChrome();
     }
@@ -629,6 +636,8 @@ public partial class PlayWindow : Window
         {
             _maximized = false;
             ApplyBounds(_maximizedFrom.Width > 320 ? _maximizedFrom : MonitorLessRect());
+            _fitApplied = false;
+            FitWindowToVideo();
         }
         else
         {
@@ -991,6 +1000,10 @@ public partial class PlayWindow : Window
         _danmakuCount = 0;
         _danmakuBoundTrack = -1;
         _danmakuTrackId = -1;
+        _videoAspect = 0;
+        _videoWidth = 0;
+        _videoHeight = 0;
+        _fitApplied = false;
         SkipOutroButton.Visibility = Visibility.Collapsed;
 
         // 起播点落在片头里才跳；续播点已经在片头后面就不动。
@@ -1070,6 +1083,7 @@ public partial class PlayWindow : Window
                  {
                      "time-pos", "duration", "pause", "volume", "mute", "eof-reached",
                      "track-list", "cache-speed", "speed", "hwdec",
+                     "width", "height", "video-params/aspect",
                  })
         {
             ipc.Observe(name);
@@ -1142,6 +1156,22 @@ public partial class PlayWindow : Window
                 case "hwdec" when value.ValueKind == JsonValueKind.String:
                     _hardwareDecode = value.GetString() is not ("no" or "");
                     UpdateChips();
+                    break;
+
+                case "width" when value.ValueKind == JsonValueKind.Number:
+                    _videoWidth = value.GetInt32();
+                    UpdateVideoAspect();
+                    break;
+
+                case "height" when value.ValueKind == JsonValueKind.Number:
+                    _videoHeight = value.GetInt32();
+                    UpdateVideoAspect();
+                    break;
+
+                case "video-params/aspect" when value.ValueKind == JsonValueKind.Number:
+                    // 旋转过的视频（1920x1080 + rotate=90）宽高是编码尺寸，
+                    // 这个属性才是 mpv 实际显示的宽高比。
+                    SetVideoAspect(value.GetDouble());
                     break;
 
                 case "track-list":
@@ -2094,6 +2124,94 @@ public partial class PlayWindow : Window
         _markers = SkipMarkers.Get(_markerKey);
     }
 
+    private void UpdateVideoAspect()
+    {
+        if (_videoWidth <= 0 || _videoHeight <= 0)
+        {
+            return;
+        }
+
+        SetVideoAspect((double)_videoWidth / _videoHeight);
+    }
+
+    private void SetVideoAspect(double aspect)
+    {
+        if (aspect is <= 0.05 or > 20 || double.IsNaN(aspect))
+        {
+            return;
+        }
+
+        if (Math.Abs(aspect - _videoAspect) < 0.001)
+        {
+            return;
+        }
+
+        _videoAspect = aspect;
+        _fitApplied = false;
+        FitWindowToVideo();
+    }
+
+    /// <summary>
+    /// 适应窗口 = 窗口跟着视频的宽高比走（竖屏短剧就是竖窗口），
+    /// 画面正好铺满客户区，不留左右 / 上下黑边。只有「适应窗口」这样做，
+    /// 填充 / 拉伸 / 强制比例都是改画面、不动窗口。
+    /// </summary>
+    private void FitWindowToVideo()
+    {
+        if (_videoAspect <= 0 || _aspect != PlayerAspect.Fit || _fullscreen || _maximized)
+        {
+            return;
+        }
+
+        if (_fitApplied && Math.Abs(_fittedAspect - _videoAspect) < 0.001)
+        {
+            return;
+        }
+
+        var area = WorkAreaBounds();
+        var height = Math.Min(Height > 0 ? Height : area.Height * 0.75, area.Height * 0.85);
+        var width = height * _videoAspect;
+
+        var maxWidth = area.Width * 0.95;
+        if (width > maxWidth)
+        {
+            width = maxWidth;
+            height = width / _videoAspect;
+        }
+
+        // 竖屏窗口太窄的话控制条挤成一团，给一个可用的最小宽度。
+        const double minWidth = 420;
+        if (width < minWidth)
+        {
+            width = minWidth;
+            height = width / _videoAspect;
+        }
+
+        var maxHeight = area.Height * 0.95;
+        if (height > maxHeight)
+        {
+            height = maxHeight;
+            width = height * _videoAspect;
+        }
+
+        // 以当前窗口中心为中心缩放，再夹进工作区（别缩到屏幕外）。
+        var centerX = Left + Width / 2;
+        var centerY = Top + Height / 2;
+        var left = Math.Clamp(centerX - width / 2, area.Left, Math.Max(area.Left, area.Right - width));
+        var top = Math.Clamp(centerY - height / 2, area.Top, Math.Max(area.Top, area.Bottom - height));
+
+        _fitApplied = true;
+        _fittedAspect = _videoAspect;
+
+        var bounds = new Rect(left, top, width, height);
+        ApplyBounds(bounds);
+        _windowedBounds = bounds;
+        SyncSurface();
+
+        Trace.Write($"fit window video={_videoWidth}x{_videoHeight} aspect={_videoAspect:0.###} " +
+                    $"bounds={width:0}x{height:0} at {left:0},{top:0}");
+    }
+
     private void ApplyAspect()
     {
         if (_ipc is null)
@@ -2114,6 +2232,12 @@ public partial class PlayWindow : Window
     {
         _aspect = mode;
         ApplyAspect();
+
+        if (mode == PlayerAspect.Fit)
+        {
+            _fitApplied = false;
+            FitWindowToVideo();
+        }
 
         var settings = AppServices.Instance.Settings;
         settings.VideoAspect = mode.Key();
@@ -3212,7 +3336,8 @@ public partial class PlayWindow : Window
         var danmaku = DanmakuActive ? _danmakuFile! : "-";
         return $"aspect={_aspect.Key()} intro={intro} outro={outro} " +
                $"sleep={SleepLabel() ?? "-"} danmaku={danmaku} " +
-               $"outroPrompt={SkipOutroButton.Visibility} pos={(int)_position}";
+               $"outroPrompt={SkipOutroButton.Visibility} pos={(int)_position} " +
+               $"video={_videoWidth}x{_videoHeight} bounds={Width:0}x{Height:0}";
     }
 
     public void SetAspectForShot(string key) => SetAspect(PlayerAspectExtensions.Parse(key));

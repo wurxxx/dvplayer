@@ -226,6 +226,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     private var savedFrame: NSRect?
     private var zoomSavedFrame: NSRect?
     private var closeRequested = false
+    /// 上一次按视频比例调过的宽高比，避免同一部视频反复改窗口。
+    private var fittedAspect: Double = 0
 
     /// 新播放窗的初始位置：居中，最多 1280×720，四周留点边。
     static func preferredFrame() -> NSRect {
@@ -252,7 +254,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 720, height: 405)
+        // 竖屏短剧要能缩成竖窗口，最小尺寸不能按 16:9 卡死。
+        window.minSize = NSSize(width: 380, height: 380)
         window.center()
 
         // 透明浮层：底下的 mpv 窗口透出来。
@@ -273,6 +276,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
         // 播放页里的「全屏」按钮 / 双击画面 / 键盘 F 都走这里。
         session.onToggleFullscreen = { [weak self] in self?.toggleFullscreen() }
+        session.onVideoAspect = { [weak self] aspect in self?.fitWindowToVideo(aspect) }
 
         buildContentView()
         installKeyMonitor()
@@ -334,6 +338,53 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         session.mpv?.syncGeometry(to: window.frame)
     }
 
+    /// 适应窗口 = 窗口跟着视频的宽高比走（竖屏短剧就是竖窗口），
+    /// 画面正好铺满客户区，不留左右 / 上下黑边。填充 / 拉伸 / 强制比例不动窗口。
+    private func fitWindowToVideo(_ aspect: Double) {
+        guard aspect > 0.05, aspect <= 20 else { return }
+        guard session.aspect == .fit, !session.isFullscreen, let window else { return }
+
+        let screen = window.screen ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 720)
+        // 最大化（铺满工作区）时别抢尺寸。
+        if window.frame == visible { return }
+        if abs(aspect - fittedAspect) < 0.001 { return }
+        fittedAspect = aspect
+
+        var height = min(max(window.frame.height, 380), visible.height * 0.85)
+        var width = height * aspect
+
+        if width > visible.width * 0.95 {
+            width = visible.width * 0.95
+            height = width / aspect
+        }
+
+        // 竖屏窗口太窄控制条会挤成一团。
+        let minWidth = 380.0
+        if width < minWidth {
+            width = minWidth
+            height = width / aspect
+        }
+
+        if height > visible.height * 0.95 {
+            height = visible.height * 0.95
+            width = height * aspect
+        }
+
+        // 以当前窗口中心为中心缩放，再夹进屏幕可见区域。
+        let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        var frame = NSRect(x: center.x - width / 2, y: center.y - height / 2,
+                           width: width, height: height)
+        frame.origin.x = min(max(frame.origin.x, visible.minX),
+                             max(visible.minX, visible.maxX - width))
+        frame.origin.y = min(max(frame.origin.y, visible.minY),
+                             max(visible.minY, visible.maxY - height))
+
+        window.setFrame(frame, display: true, animate: false)
+        syncGeometry(force: true)
+        NSLog("[Play] fit window aspect=%.3f %.0fx%.0f", aspect, width, height)
+    }
+
     func closePlayer() {
         guard !closeRequested else { return }
         closeRequested = true
@@ -345,6 +396,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         guard let window, let screen = window.screen ?? NSScreen.main else { return }
         if window.frame == screen.visibleFrame {
             window.setFrame(zoomSavedFrame ?? Self.preferredFrame(), display: true)
+            fittedAspect = 0
+            fitWindowToVideo(session.videoAspect)
         } else {
             zoomSavedFrame = window.frame
             window.setFrame(screen.visibleFrame, display: true)
@@ -365,6 +418,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             NSApp.presentationOptions = []
             window.setFrame(saved, display: true, animate: false)
             session.isFullscreen = false
+            fittedAspect = 0
+            fitWindowToVideo(session.videoAspect)
         } else {
             savedFrame = window.frame
             NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock]

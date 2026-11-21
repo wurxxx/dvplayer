@@ -34,6 +34,8 @@ final class MpvEngine {
     var onVolume: ((Double, Bool) -> Void)?
     var onError: ((String) -> Void)?
     var onLog: ((String) -> Void)?
+    /// 视频显示宽高比（已含旋转 / 变形）；「适应窗口」用它把窗口改成同样的形状。
+    var onVideoAspect: ((Double) -> Void)?
 
     // —— 状态 ——
     private(set) var isLoaded = false
@@ -69,7 +71,7 @@ final class MpvEngine {
 
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
-        "track-list", "aid", "sid",
+        "track-list", "aid", "sid", "video-params/aspect",
     ]
 
     init?(frame: NSRect, startSeconds: Double?) {
@@ -358,6 +360,9 @@ final class MpvEngine {
                 guard let value = data as? Double else { return }
                 duration = value
                 onPosition?(position, value)
+            case "video-params/aspect":
+                guard let value = data as? Double, value > 0 else { return }
+                onVideoAspect?(value)
             case "pause":
                 let value = (data as? Bool) ?? ((data as? Int) == 1)
                 paused = value

@@ -200,6 +200,10 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
   → `MpvEngine.setAspect` 发 `keepaspect` / `panscan` / `video-aspect-override`。
   `video-aspect-override` 是逐文件的，每次 `file-loaded` 都重套一次；选择存
   `AppSettings.videoAspect`。
+  **适应窗口**还会按视频的显示宽高比改窗口：mpv 推 `video-params/aspect`，
+  `PlayerWindowController.fitWindowToVideo` 以当前窗口高度为基准算出宽度
+  （竖屏短剧就是竖窗口），夹进屏幕可见区域并居中，画面铺满、不留黑边；
+  全屏 / 最大化 / 手动改过窗口时不抢尺寸，退出全屏或最大化还原后再适配。
 - **定时关闭**：`sleepDeadline` / `sleepEndOfEpisode` 两个状态；`tick()`（1 秒）里
   检查，到点提示后关窗（`requestClose`，进度照常回写）；「本集结束后」在
   `handleEOF` 里关窗、不接下一集。剩余时间进 chips（`定时 12:34`）。

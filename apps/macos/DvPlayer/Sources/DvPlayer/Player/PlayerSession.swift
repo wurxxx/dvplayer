@@ -166,6 +166,10 @@ final class PlayerSession: ObservableObject {
 
     // —— 画面比例 / 定时关闭 / 片头片尾 ——
     @Published private(set) var aspect: PlayerAspect
+    /// 当前视频的显示宽高比（0 = 还不知道）。
+    private(set) var videoAspect: Double = 0
+    /// 窗口控制器接这个：适应窗口时按视频形状改窗口。
+    var onVideoAspect: ((Double) -> Void)?
     @Published private(set) var sleepDeadline: Date?
     /// 定时关闭选的是「本集结束后」。
     @Published private(set) var sleepEndOfEpisode = false
@@ -250,6 +254,11 @@ final class PlayerSession: ObservableObject {
         engine.onTracks = { [weak self] audio, subs, aid, sid in
             self?.handleTracks(audio, subs, aid, sid)
         }
+        engine.onVideoAspect = { [weak self] aspect in
+            guard let self else { return }
+            self.videoAspect = aspect
+            self.onVideoAspect?(aspect)
+        }
         engine.onSpeed = { [weak self] speed in
             self?.speed = speed
         }
@@ -294,6 +303,7 @@ final class PlayerSession: ObservableObject {
         mediaInfo = nil
         panel = .none
         showSkipOutro = false
+        videoAspect = 0
         markers = SkipMarkerStore.marker(for: markerKey)
         danmakuTask?.cancel()
         danmakuStatus = nil
@@ -695,6 +705,11 @@ final class PlayerSession: ObservableObject {
         var settings = AppSettings.load()
         settings.videoAspect = mode.rawValue
         settings.save()
+
+        if mode == .fit {
+            onVideoAspect?(videoAspect)
+        }
+
         toast(mode.label)
         showChrome()
     }
