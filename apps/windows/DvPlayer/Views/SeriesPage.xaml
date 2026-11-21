@@ -217,8 +217,9 @@
           </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
+                <!-- 换行后行与行之间要留出间距，否则两排段按钮会贴在一起 -->
                 <Border Tag="{Binding}" MouseLeftButtonUp="OnRangeClick" Cursor="Hand"
-                        CornerRadius="7" Padding="11,5" Margin="0,0,8,0">
+                        CornerRadius="7" Padding="11,5" Margin="0,0,8,8">
                   <Border.Style>
                     <Style TargetType="Border">
                       <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />

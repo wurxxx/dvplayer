@@ -191,14 +191,9 @@ struct SourcesPage: View {
         let connection = state.connections.first { $0.id == config.id }
 
         return HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Theme.surfaceHover)
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Image(systemName: "externaldrive.connected.to.line.below")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Theme.muted)
-                )
+            // 按种类给品牌图标：飞牛牛头 / Emby 绿三角 / Jellyfin 紫三角 /
+            // 本地文件夹 / SMB 共享 / NFS 硬盘 / WebDAV 云。
+            SourceIcon(kind: config.kind, size: 42)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {

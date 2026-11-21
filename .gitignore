@@ -13,6 +13,11 @@ apps/macos/m0-render/m0-render
 # 品牌图标要入库（其余截图不提交）
 !assets/branding/*.png
 !apps/windows/DvPlayer/Assets/*.png
+# 服务器图标：两端同源，由 scripts/make-source-icons.py 生成
+!assets/sources/*.png
+!apps/windows/DvPlayer/Assets/sources/*.png
+# 生成时下载的官方素材缓存（飞牛 logo / Emby 图标 / Jellyfin SVG），不入库
+assets/sources/.*
 *.hevc
 *.mkv
 *.mp4

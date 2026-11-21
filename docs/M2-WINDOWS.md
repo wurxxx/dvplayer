@@ -42,6 +42,7 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   段按钮；点一下把横向选集行滚到那一段的第 1 集（还没拉到页先补，状态栏写
   「正在加载第 31-60 集…」），被点的段高亮。段按钮**放不下就换行**（`WrapPanel`），
   不用横向滚动——这行没有箭头，滚到后面就点不回前面的段了（827 集时 28 段铺 3 行）。
+  换行后每个段按钮留了 8 px 下边距，两排之间不会贴在一起。
   切季会清掉高亮；没点过时高亮跟着续播点所在的那段。回归：`--series <id>
   --series-scroll 520 --range 301`，`series-range.png` 里集行从 E301 开始、
   `301-330` 高亮。
@@ -50,6 +51,12 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   要一次播放地址，已经有地址就按原参数重开 mpv；重试时才发现是原盘，会关掉占位窗
   换成原盘窗口。回归：`--play bogus --play-fail-shot <目录>`，日志里应有
   `play open failed` / `play retry`，截图为窗内错误面板（不关窗）。
+- **服务器图标**：服务器卡片和侧栏名字左边都显示源自己的图标。飞牛用官方牛头
+  （品牌蓝底 + 白色剪影），Emby 用官方 app 图标（绿菱形 + 白三角），Jellyfin 用
+  官方标志（紫 → 青三角），本地 / SMB / NFS / WebDAV 各是文件夹 / 共享 / 硬盘 / 云。
+  Emby / Jellyfin 不再自己画三角，直接取官方素材。图标由
+  `scripts/make-source-icons.py` 生成到 `Assets/sources/`（macOS 打包用仓库里同一份
+  `assets/sources/`）。侧栏的状态点从名字前面挪到图标右下角：连上绿点、失败红点。
 - **网络服务器代理**：服务器表单新增「HTTP 代理（可选）」，只对飞牛 / Emby /
   Jellyfin 显示，落 `settings.json` 的 `proxy`（空 = 直连，允许只写
   `127.0.0.1:7890`）。这个源的接口请求（核心 `http_client`）、海报下载

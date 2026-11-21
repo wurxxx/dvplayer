@@ -185,6 +185,7 @@ private struct SidebarView: View {
                     title: connection.name,
                     selected: state.page == .home(connection.id),
                     dot: connection.ok ? Theme.success : Theme.danger,
+                    sourceKind: connection.kind,
                     size: 13.5
                 ) {
                     state.openSource(connection.id)
@@ -207,6 +208,8 @@ private struct SidebarItem: View {
     let title: String
     let selected: Bool
     var dot: Color?
+    /// 服务器项：名字左边放这个源自己的图标，连接状态点叠在图标右下角。
+    var sourceKind: String?
     var size: CGFloat = 14
     let action: () -> Void
 
@@ -215,7 +218,22 @@ private struct SidebarItem: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                if let dot {
+                if let sourceKind {
+                    ZStack(alignment: .bottomTrailing) {
+                        SourceIcon(kind: sourceKind, size: 18)
+
+                        if let dot {
+                            Circle()
+                                .fill(dot)
+                                .frame(width: 6, height: 6)
+                                .overlay(
+                                    Circle().stroke(Theme.sidebar, lineWidth: 1.4)
+                                )
+                                .offset(x: 1.5, y: 1.5)
+                        }
+                    }
+                    .frame(width: 16, alignment: .leading)
+                } else if let dot {
                     Circle().fill(dot).frame(width: 6, height: 6)
                         .frame(width: 16)
                 } else {

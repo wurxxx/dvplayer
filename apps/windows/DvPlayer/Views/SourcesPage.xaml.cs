@@ -242,11 +242,7 @@ public partial class SourcesPage : Page
                     Id = s.Id,
                     Name = s.Name,
                     KindLabel = kind,
-                    Icon = s.Kind switch
-                    {
-                        "emby" or "jellyfin" => "\uE774",
-                        _ => "\uE7F4",
-                    },
+                    IconPath = SourceIcons.Pack(s.Kind),
                     Base = s.Base,
                     StatusText = status,
                     StatusBrush = (Brush)Application.Current.Resources[brush]!,
@@ -566,7 +562,7 @@ public partial class SourcesPage : Page
         public string Id { get; init; } = "";
         public string Name { get; init; } = "";
         public string KindLabel { get; init; } = "";
-        public string Icon { get; init; } = "";
+        public string IconPath { get; init; } = "";
         public string Base { get; init; } = "";
         public string StatusText { get; init; } = "";
         public Brush? StatusBrush { get; init; }

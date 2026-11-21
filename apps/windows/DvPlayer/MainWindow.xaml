@@ -100,9 +100,15 @@
                     <ColumnDefinition Width="*" />
                   </Grid.ColumnDefinitions>
 
-                  <!-- 和 macOS 一样：连上用绿点，没连上用红点（状态一眼能看出来） -->
-                  <Grid Grid.Column="0" Width="16">
-                    <Ellipse Width="6" Height="6" HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <!-- 名字左边是服务器自己的图标；连没连上用小状态点叠在图标右下角 -->
+                  <Grid Grid.Column="0" Width="22" Height="20">
+                    <Image Width="18" Height="18" Source="{Binding IconPath}"
+                           HorizontalAlignment="Left" VerticalAlignment="Center"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+
+                    <Ellipse Width="7" Height="7" HorizontalAlignment="Right"
+                             VerticalAlignment="Bottom" Margin="0,0,0,-1"
+                             Stroke="{StaticResource SidebarBrush}" StrokeThickness="1.5">
                       <Ellipse.Style>
                         <Style TargetType="Ellipse">
                           <Setter Property="Fill" Value="{StaticResource DangerBrush}" />

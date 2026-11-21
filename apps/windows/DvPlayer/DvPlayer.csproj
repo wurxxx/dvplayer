@@ -23,6 +23,12 @@
     <Resource Include="Assets\DvPlayer-256.png" />
   </ItemGroup>
 
+  <!-- 服务器图标：飞牛 / Emby / Jellyfin / 本地 / SMB / NFS / WebDAV，
+       由 scripts/make-source-icons.py 生成（macOS 打包用仓库里同一份）。 -->
+  <ItemGroup>
+    <Resource Include="Assets\sources\*.png" />
+  </ItemGroup>
+
   <!-- 共享媒体库核心由 scripts/windows/build-core.ps1 生成，构建后拷到输出目录。 -->
   <PropertyGroup>
     <MediaCoreDir>$(MSBuildThisFileDirectory)..\..\..\core\target\x86_64-pc-windows-gnu\release\</MediaCoreDir>

@@ -1276,7 +1276,8 @@ public partial class MainWindow : FluentWindow
             .Select(source => new SourceNavItem(
                 source.Id,
                 source.Name,
-                services.Connections.Any(c => c.Id == source.Id && c.Ok)))
+                services.Connections.Any(c => c.Id == source.Id && c.Ok),
+                SourceIcons.Pack(source.Kind)))
             .ToList();
 
         var selected = settings.LastSourceId;
@@ -1353,11 +1354,12 @@ public partial class MainWindow : FluentWindow
 
     private sealed class SourceNavItem
     {
-        public SourceNavItem(string id, string name, bool ok)
+        public SourceNavItem(string id, string name, bool ok, string iconPath)
         {
             Id = id;
             Name = name;
             Ok = ok;
+            IconPath = iconPath;
         }
 
         public string Id { get; }
@@ -1365,6 +1367,9 @@ public partial class MainWindow : FluentWindow
         public string Name { get; }
 
         public bool Ok { get; }
+
+        /// <summary>侧栏名字左边的服务器图标（pack URI）。</summary>
+        public string IconPath { get; }
     }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)

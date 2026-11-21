@@ -30,6 +30,11 @@ cp Info.plist "$APP/Contents/Info.plist"
 # 品牌图：侧栏左上角和 Windows 的 exe 图标用同一份位图。
 cp "$ROOT/assets/branding/DvPlayer-256.png" "$APP/Contents/Resources/"
 
+# 服务器图标（飞牛 / Emby / Jellyfin / 本地 / SMB / NFS / WebDAV）：
+# 和 Windows 工程里同一份图，scripts/make-source-icons.py 生成。
+mkdir -p "$APP/Contents/Resources/sources"
+cp "$ROOT/assets/sources/"*.png "$APP/Contents/Resources/sources/"
+
 # 核心 dylib 的 install name 是 cargo 的构建目录，不存在于运行期，
 # 拷进包里并统一改成 @rpath 引用。
 cp "$CORE_LIB" "$APP/Contents/Frameworks/"

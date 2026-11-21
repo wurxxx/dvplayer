@@ -148,7 +148,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   还原**（`actions.zoom()`），和 Windows 一致；进假全屏会把三个圆点收掉，
   打开阶段不能这么干。
 - 选集超过 30 集时标题下有 `1-30 / 31-60 …` 段按钮（复用 `FlowChips`，放不下自动
-  换行，不用横向滚动）：点一下先补页、再把横向选集行滚到那一段第 1 集。滚动用 `Components.swift` 的
+  换行、行间距 8 pt，不用横向滚动）：点一下先补页、再把横向选集行滚到那一段第 1 集。滚动用 `Components.swift` 的
   `RowJumpBridge` 直接设行内 `NSScrollView` 的横向偏移——SwiftUI 的 `scrollTo`
   在卡片刚插进 `HStack` 的那一轮会静默失效。回归：`DVPLAYER_DETAIL=<id>
   DVPLAYER_RANGE=31 DVPLAYER_SCROLL_Y=430 DVPLAYER_SHOT=…`，日志应有
@@ -157,6 +157,11 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   「重试 / 关闭」。重试会按原参数重跑；mpv 子进程已经退出时先换一个新实例。
   自检：`DVPLAYER_PLAY=bogus DVPLAYER_PLAY_RETRY=1`，日志应出现 `[Play] retry`
   且错误面板仍在。
+- 服务器图标：服务器卡片和侧栏名字左边都显示源自己的图标（飞牛官方牛头 / Emby
+  官方绿菱形 / Jellyfin 官方紫青三角 / 本地文件夹 / SMB 共享 / NFS 硬盘 / WebDAV 云）。
+  图标文件是仓库 `assets/sources/` 下同一份（`scripts/make-source-icons.py` 生成，
+  两端共用），`build.sh` 拷进 `Contents/Resources/sources/`，代码走
+  `SourceIcon`。侧栏的连接状态点叠在图标右下角。
 - 网络服务器的 HTTP 代理存在 `SourceConfig.proxy`：核心接口请求走
   `http_client`，海报走 `PosterStore` 里按代理缓存的 `URLSession`
   （`connectionProxyDictionary`），播放通过 mpv 的 `http-proxy` 属性设置。
