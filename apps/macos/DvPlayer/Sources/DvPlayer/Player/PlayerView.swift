@@ -225,13 +225,7 @@ struct PlayerView: View {
                 .frame(width: 56, alignment: .leading)
                 .padding(.leading, 4)
 
-            Slider(value: Binding(get: { session.seekPosition },
-                                  set: { session.seekPosition = $0 }),
-                   in: 0...max(1, session.duration)) { editing in
-                session.setScrubbing(editing)
-            }
-            .tint(.white)
-            .controlSize(.small)
+            seekBar
 
             Text(timeText(session.duration))
                 .font(.system(size: 12.5))
@@ -239,6 +233,57 @@ struct PlayerView: View {
                 .foregroundStyle(Color.white.opacity(0.7))
                 .frame(width: 66, alignment: .leading)
         }
+    }
+
+    /// 三层进度条：已观看（主色）/ 已缓冲（亮白）/ 未观看（暗白）。
+    /// 用自绘而不是 Slider，才能把缓存那一段单独染色；拖动和点击都还行。
+    private var seekBar: some View {
+        GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+            let total = max(1, session.duration)
+            let played = min(max(session.isScrubbing ? session.seekPosition : session.position,
+                                 0), total)
+            let buffered = min(max(session.bufferedPosition, played), total)
+            let playedWidth = width * played / total
+            let bufferedWidth = width * buffered / total
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.22))
+                    .frame(height: 4)
+
+                Capsule()
+                    .fill(Color.white.opacity(0.55))
+                    .frame(width: bufferedWidth, height: 4)
+
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: playedWidth, height: 4)
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: session.isScrubbing ? 11 : 9,
+                           height: session.isScrubbing ? 11 : 9)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    .position(x: min(max(playedWidth, 5), width - 5), y: 9)
+            }
+            .frame(height: 18)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if !session.isScrubbing {
+                            session.setScrubbing(true)
+                        }
+                        let ratio = Double(value.location.x / width)
+                        session.seekPosition = min(max(ratio, 0), 1) * total
+                    }
+                    .onEnded { _ in
+                        session.setScrubbing(false)
+                    }
+            )
+        }
+        .frame(height: 18)
     }
 
     private var toolsRow: some View {

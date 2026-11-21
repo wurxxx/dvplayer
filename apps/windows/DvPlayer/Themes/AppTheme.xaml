@@ -527,6 +527,51 @@
     </Setter>
   </Style>
 
+  <!-- 进度条只画滑块：已观看 / 已缓冲 / 未观看三层由播放页自己铺（SeekPlayedBar 等）。 -->
+  <Style x:Key="SeekBarHit" TargetType="Slider">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Slider">
+          <Grid VerticalAlignment="Stretch" Background="Transparent">
+            <Track x:Name="PART_Track">
+              <Track.DecreaseRepeatButton>
+                <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                  <RepeatButton.Template>
+                    <ControlTemplate TargetType="RepeatButton">
+                      <Border Height="18" Background="Transparent" />
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.DecreaseRepeatButton>
+              <Track.IncreaseRepeatButton>
+                <RepeatButton Command="Slider.IncreaseLarge" Focusable="False">
+                  <RepeatButton.Template>
+                    <ControlTemplate TargetType="RepeatButton">
+                      <Border Height="18" Background="Transparent" />
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.IncreaseRepeatButton>
+              <Track.Thumb>
+                <Thumb Width="12" Height="12" Cursor="Hand">
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                      <Grid>
+                        <Ellipse Fill="{StaticResource AccentBrush}" Width="12" Height="12" />
+                      </Grid>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+            </Track>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
 <!-- 顶栏里的图标按钮：加号 / 刷新 / 更多 -->
   <Style x:Key="ToolButton" TargetType="Button">
     <Setter Property="FocusVisualStyle" Value="{x:Null}" />

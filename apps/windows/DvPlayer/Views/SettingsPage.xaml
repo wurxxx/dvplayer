@@ -173,6 +173,29 @@
                               Checked="OnSettingChanged" Unchecked="OnSettingChanged" />
               </Grid>
 
+              <Grid Margin="0,20,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="缓冲大小" FontSize="14"
+                             Foreground="{StaticResource TextBrush}" />
+                  <TextBlock Text="mpv 最多预读多少；默认 512 MB，原盘可以调到 2 GB / 4 GB"
+                             FontSize="12.5" Foreground="{StaticResource FaintBrush}"
+                             Margin="0,4,0,0" />
+                </StackPanel>
+                <ComboBox x:Name="BufferSizeBox" Grid.Column="1" Width="112" Height="34"
+                          Style="{StaticResource Select}" VerticalAlignment="Center"
+                          SelectionChanged="OnSettingChanged">
+                  <ComboBoxItem Content="256 MB" Tag="256" />
+                  <ComboBoxItem Content="512 MB" Tag="512" />
+                  <ComboBoxItem Content="1 GB" Tag="1024" />
+                  <ComboBoxItem Content="2 GB" Tag="2048" />
+                  <ComboBoxItem Content="4 GB" Tag="4096" />
+                </ComboBox>
+              </Grid>
+
               <TextBlock Text="Windows 端用 mpv 自管窗口（--wid）渲染，不维护 libmpv 私有补丁；能直连的资源直接给 mpv，不让服务器转码。"
                          FontSize="12.5" Foreground="{StaticResource FaintBrush}"
                          TextWrapping="Wrap" Margin="0,18,0,0" LineHeight="18" />

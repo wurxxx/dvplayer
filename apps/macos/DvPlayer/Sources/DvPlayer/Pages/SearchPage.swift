@@ -118,6 +118,31 @@ struct SettingsPage: View {
                                 .font(.system(size: 13.5))
                                 .foregroundStyle(Theme.text)
                                 .toggleStyle(.switch)
+
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("播放缓冲")
+                                        .font(.system(size: 13.5))
+                                        .foregroundStyle(Theme.text)
+                                    Text("mpv 最多预读多少；默认 512 MB，原盘可以调到 2 GB / 4 GB")
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.faint)
+                                }
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { state.settings.bufferSizeMb ?? 512 },
+                                    set: { state.settings.bufferSizeMb = $0 })
+                                ) {
+                                    Text("256 MB").tag(256)
+                                    Text("512 MB").tag(512)
+                                    Text("1 GB").tag(1024)
+                                    Text("2 GB").tag(2048)
+                                    Text("4 GB").tag(4096)
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(width: 112)
+                            }
                         }
                     }
 
@@ -144,6 +169,7 @@ struct SettingsPage: View {
         .onChange(of: state.settings.resumePlayback) { _ in state.settings.save() }
         .onChange(of: state.settings.showResolution) { _ in state.settings.save() }
         .onChange(of: state.settings.autoConnect) { _ in state.settings.save() }
+        .onChange(of: state.settings.bufferSizeMb) { _ in state.settings.save() }
     }
 }
 

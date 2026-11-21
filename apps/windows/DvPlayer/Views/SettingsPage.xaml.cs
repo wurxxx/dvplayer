@@ -52,6 +52,7 @@ public partial class SettingsPage : Page
 
         SelectTag(StartPageBox, settings.StartPage);
         SelectContent(PageSizeBox, settings.PageSize.ToString());
+        SelectTag(BufferSizeBox, settings.BufferSizeMb.ToString());
 
         _ready = true;
     }
@@ -97,6 +98,26 @@ public partial class SettingsPage : Page
                 : $"{total} 个源，{ok} 个已连接";
     }
 
+    /// <summary>自检用：不用点分段按钮，直接切到某个设置分组。</summary>
+    public void ShowTabForShot(string key)
+    {
+        switch (key)
+        {
+            case "list":
+                ListSegment.IsChecked = true;
+                break;
+            case "play":
+                PlaySegment.IsChecked = true;
+                break;
+            case "about":
+                AboutSegment.IsChecked = true;
+                break;
+            default:
+                GeneralSegment.IsChecked = true;
+                break;
+        }
+    }
+
     private void OnTabChanged(object sender, RoutedEventArgs e)
     {
         if (GeneralPanel is null)
@@ -129,6 +150,12 @@ public partial class SettingsPage : Page
         if (PageSizeBox.SelectedItem is ComboBoxItem { Content: string size } && int.TryParse(size, out var pageSize))
         {
             settings.PageSize = pageSize;
+        }
+
+        if (BufferSizeBox.SelectedItem is ComboBoxItem { Tag: string buffer }
+            && int.TryParse(buffer, out var bufferMb))
+        {
+            settings.BufferSizeMb = bufferMb;
         }
 
         settings.Save();

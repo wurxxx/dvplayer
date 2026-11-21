@@ -35,6 +35,15 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   音量 / 音轨 / 字幕 / 倍速 / 全屏收起来，只留传输 + 进度 + 「更多」；这些工具
   作为菜单项补进「更多」（音量 ±10、音轨… / 字幕… / 倍速… 连开一层）。
   窄窗左右边距和两个时间标签同时收窄，进度条才留得下。
+- **进度条三层**：`Views/PlayWindow.xaml` 里 `SeekHost` 垫三条 `Border`
+  （未观看 `#3DFFFFFF` / 已缓冲 `#A6FFFFFF` / 已观看 `AccentBrush`），上面盖
+  只画滑块的 `SeekBarHit` Slider；`UpdateSeekBars()` 按 `demuxer-cache-time`
+  和当前进度算像素宽度。`demuxer-cache-time` 是绝对时间戳（实测缓存满时约等于
+  片长：96.7 vs 96）。
+- **缓冲大小可配**：设置 → 播放 →「缓冲大小」，`AppSettings.BufferSizeMb`
+  默认 512，可选 256 / 512 / 1024 / 2048 / 4096；`MpvProcess` 映射成
+  `--demuxer-max-bytes`（回看缓冲取一半），起播日志带 `buffer=<MB>MiB`。
+  `DVPLAYER_BUFFER_MB` 可临时覆盖，自检时压到 8 才能看到「未缓冲」那一段。
 - **没有独立的字幕搜索面板**：受控环境里不方便做 380 宽的右侧面板，
   「搜索字幕…」在「更多」里就地弹出结果菜单（语言 + 发行名 + 下载数），
   点一条即下载并选中。
@@ -56,7 +65,10 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
   这样起播才走得到片头跳过。
 - `--play-features` 的项：`aspect:<fit|fill|stretch|16:9|4:3>`、`sleep:<秒>`、
   `danmaku`（离线解析 + ASS 生成自检）、`subtitle`（搜索 + 下载整轮）、
-  `menu`（截「更多」菜单到 `play-more.png`）、`skipoutro`。
+  `menu`（截「更多」菜单到 `play-more.png`）、`overlay`（垫黑截浮层，
+  进度条 / 控制条看 `play-overlay.png`）、`skipoutro`。
+- `--screenshot <目录> settings --settings-tab play`：设置页直接停在「播放」分组，
+  核对缓冲大小这类项。
 - 结果全部写 `%LOCALAPPDATA%\dvplayer\player.log`，状态行类似
   `features state aspect=fill intro=8 outro=16 sleep=0:03 danmaku=... outroPrompt=Visible pos=16`。
 

@@ -163,6 +163,8 @@ final class PlayerSession: ObservableObject {
     var isFullscreenSwitching = false
     @Published var isScrubbing = false
     @Published var seekPosition: Double = 0
+    /// demuxer 缓存到的位置（秒）；进度条画「已缓冲」那一段。
+    @Published private(set) var bufferedPosition: Double = 0
 
     // —— 画面比例 / 定时关闭 / 片头片尾 ——
     @Published private(set) var aspect: PlayerAspect
@@ -259,6 +261,11 @@ final class PlayerSession: ObservableObject {
             self.videoAspect = aspect
             self.onVideoAspect?(aspect)
         }
+        engine.onCacheTime = { [weak self] cache in
+            guard let self else { return }
+            // 刚 seek 回来缓存位置可能还落在进度后面，至少画到已观看那。
+            self.bufferedPosition = max(cache, self.position)
+        }
         engine.onSpeed = { [weak self] speed in
             self?.speed = speed
         }
@@ -304,6 +311,7 @@ final class PlayerSession: ObservableObject {
         panel = .none
         showSkipOutro = false
         videoAspect = 0
+        bufferedPosition = 0
         markers = SkipMarkerStore.marker(for: markerKey)
         danmakuTask?.cancel()
         danmakuStatus = nil
@@ -583,6 +591,8 @@ final class PlayerSession: ObservableObject {
         let target = min(max(0, seconds), duration > 0 ? duration : seconds)
         position = target
         seekPosition = target
+        // 跳过去以后原来那段缓存没用了，等 demuxer 重新填。
+        bufferedPosition = target
         mpv.seek(to: target)
         showChrome()
     }

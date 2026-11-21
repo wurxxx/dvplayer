@@ -181,6 +181,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_UI=mark:intro\|outro\|clear` | 按当前位置标记片头结束 / 片尾开始 / 清除 |
 | `DVPLAYER_PLAY_UI=skipoutro` | 触发「跳过片尾」（seek 到片长 − 0.4 秒） |
 | `DVPLAYER_PLAY_UI=danmaku:on\|off` | 开关弹幕（需要弹弹play 凭据） |
+| `DVPLAYER_BUFFER_MB=<MB>` | 临时覆盖播放缓冲（自检时压小才看得到未缓冲段） |
 | `DVPLAYER_PLAY_UI=danmakufile:<ass>` | 直接挂一份本地弹幕 ASS（不联网，自检用） |
 | `DVPLAYER_PLAY_UI=subsearch` | 打开字幕面板并搜索 |
 | `DVPLAYER_PLAY_UI=subload:N` / `subauto` | 下载第 N 条 / 自动下载第一条 |
@@ -206,6 +207,15 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
   全屏 / 最大化 / 手动改过窗口时不抢尺寸，退出全屏或最大化还原后再适配。
   浮层宽度 < 640 时底部只留传输 + 进度 + 「更多」（静音 / 音量 ±10 / 音轨 / 字幕 /
   倍速作为子菜单进「更多」），不做第二行；chips 横向可滚动。
+- **进度条三层**：`PlayerView.seekBar` 自绘（不再用 `Slider`），
+  已观看 = `Theme.accent`、已缓冲 = 白 55%、未观看 = 白 22%；
+  `MpvEngine` 观察 `demuxer-cache-time`，`PlayerSession.bufferedPosition`
+  取值（seek 后重置到目标位置）。点击 / 拖动用 `DragGesture(minimumDistance: 0)`，
+  松手才 `setScrubbing(false)` 真 seek。
+- **缓冲大小可配**：设置 → 播放 →「播放缓冲」，`AppSettings.bufferSizeMb`
+  （可选，缺省 512）映射成 `--demuxer-max-bytes`，回看缓冲取一半；
+  `DVPLAYER_BUFFER_MB` 可临时覆盖（自检压到 8 看未缓冲段）。
+  这个字段必须是可选值：老配置没有这个键，非可选会让整个 settings.json 解不出来。
 - **定时关闭**：`sleepDeadline` / `sleepEndOfEpisode` 两个状态；`tick()`（1 秒）里
   检查，到点提示后关窗（`requestClose`，进度照常回写）；「本集结束后」在
   `handleEOF` 里关窗、不接下一集。剩余时间进 chips（`定时 12:34`）。

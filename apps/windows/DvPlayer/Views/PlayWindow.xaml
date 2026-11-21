@@ -262,11 +262,25 @@
                        Foreground="#E6FFFFFF" VerticalAlignment="Center" Width="58"
                        Margin="6,0,0,0" />
 
-            <Slider x:Name="Seek" Grid.Column="4" Style="{StaticResource SeekBar}"
-                    Margin="8,0" Minimum="0" Maximum="1" Value="0"
-                    IsMoveToPointEnabled="True" VerticalAlignment="Center"
-                    Thumb.DragStarted="OnSeekDragStarted"
-                    Thumb.DragCompleted="OnSeekDragCompleted" />
+            <Grid x:Name="SeekHost" Grid.Column="4" Margin="8,0" Height="18"
+                  VerticalAlignment="Center">
+              <!-- 未观看 / 已缓冲 / 已观看三层，颜色和宽度由 UpdateSeekBars 维护 -->
+              <Border x:Name="SeekTrackBar" Height="4" CornerRadius="2"
+                      Background="#3DFFFFFF" VerticalAlignment="Center"
+                      IsHitTestVisible="False" />
+              <Border x:Name="SeekBufferedBar" Height="4" CornerRadius="2"
+                      Background="#A6FFFFFF" HorizontalAlignment="Left"
+                      VerticalAlignment="Center" Width="0" IsHitTestVisible="False" />
+              <Border x:Name="SeekPlayedBar" Height="4" CornerRadius="2"
+                      Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
+                      VerticalAlignment="Center" Width="0" IsHitTestVisible="False" />
+
+              <Slider x:Name="Seek" Style="{StaticResource SeekBarHit}"
+                      Minimum="0" Maximum="1" Value="0"
+                      IsMoveToPointEnabled="True" VerticalAlignment="Stretch"
+                      Thumb.DragStarted="OnSeekDragStarted"
+                      Thumb.DragCompleted="OnSeekDragCompleted" />
+            </Grid>
 
             <TextBlock x:Name="DurationText" Grid.Column="5" Text="00:00" FontSize="12.5"
                        Foreground="#B3FFFFFF" VerticalAlignment="Center" Width="66"

@@ -11,6 +11,10 @@ public struct AppSettings: Codable, Sendable {
     public var showResolution: Bool = true
     public var resumePlayback: Bool = true
 
+    /// 播放缓冲上限（MB）。默认 512，设置页可选 256 / 512 / 1024 / 2048 / 4096。
+    /// 用可选值是为了老配置（没有这个键）能直接解出来，读的时候用 `?? 512`。
+    public var bufferSizeMb: Int?
+
     /// 画面比例模式（`fit` / `fill` / `stretch` / `16:9` / `4:3`）。
     /// 用可选值是为了老配置能直接解出来。
     public var videoAspect: String?

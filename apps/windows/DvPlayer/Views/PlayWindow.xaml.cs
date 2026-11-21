@@ -68,6 +68,8 @@ public partial class PlayWindow : Window
 
     private double _position;
     private double _duration;
+    /// <summary>demuxer 缓存到的位置（秒）；没有缓存信息时等于当前位置。</summary>
+    private double _bufferedPosition;
 
     /// <summary>本次起播的续播点与起播时刻：用来认出「一开就播完」的假片尾。</summary>
     private double _launchStart;
@@ -514,6 +516,7 @@ public partial class PlayWindow : Window
         {
             SyncSurface();
             UpdateChromeLayout();
+            UpdateSeekBars();
         };
     }
 
@@ -1040,6 +1043,8 @@ public partial class PlayWindow : Window
         _videoWidth = 0;
         _videoHeight = 0;
         _fitApplied = false;
+        _bufferedPosition = 0;
+        UpdateSeekBars();
         SkipOutroButton.Visibility = Visibility.Collapsed;
 
         // 起播点落在片头里才跳；续播点已经在片头后面就不动。
@@ -1054,7 +1059,8 @@ public partial class PlayWindow : Window
 
         Trace.Write($"mpv start url={launch.Url} headers={launch.Headers?.Count ?? 0} " +
                     $"start={launch.StartSeconds} resume={source.PositionSeconds} " +
-                    $"aspect={_aspect.Key()} introSkip={_pendingIntroSkip?.ToString("0") ?? "-"}");
+                    $"aspect={_aspect.Key()} introSkip={_pendingIntroSkip?.ToString("0") ?? "-"} " +
+                    $"buffer={MpvProcess.BufferSizeMb}MiB");
 
         try
         {
@@ -1119,7 +1125,7 @@ public partial class PlayWindow : Window
                  {
                      "time-pos", "duration", "pause", "volume", "mute", "eof-reached",
                      "track-list", "cache-speed", "speed", "hwdec",
-                     "width", "height", "video-params/aspect",
+                     "width", "height", "video-params/aspect", "demuxer-cache-time",
                  })
         {
             ipc.Observe(name);
@@ -1161,7 +1167,15 @@ public partial class PlayWindow : Window
                     {
                         Seek.Maximum = _duration;
                         DurationText.Text = Format(_duration);
+                        UpdateSeekBars();
                     }
+                    break;
+
+                case "demuxer-cache-time":
+                    _bufferedPosition = value.ValueKind == JsonValueKind.Number
+                        ? value.GetDouble()
+                        : 0;
+                    UpdateSeekBars();
                     break;
 
                 case "pause" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
@@ -1393,6 +1407,31 @@ public partial class PlayWindow : Window
             Seek.Value = Math.Clamp(_position, 0, Seek.Maximum);
             PositionText.Text = Format(_position);
         }
+
+        UpdateSeekBars();
+    }
+
+    /// <summary>
+    /// 进度条三层：已观看（主色）/ 已缓冲（亮白）/ 未观看（暗白）。
+    /// 宽度按像素算，和 Slider 的轨道对齐。
+    /// </summary>
+    private void UpdateSeekBars()
+    {
+        var width = SeekHost.ActualWidth;
+        var max = Seek.Maximum;
+        if (width <= 0 || max <= 0)
+        {
+            SeekPlayedBar.Width = 0;
+            SeekBufferedBar.Width = 0;
+            return;
+        }
+
+        var played = _seeking ? Seek.Value : _position;
+        SeekPlayedBar.Width = Math.Clamp(width * (played / max), 0, width);
+
+        // 缓存位置有时比当前进度还靠后（刚 seek 回来），至少画到已观看那。
+        var buffered = Math.Max(_bufferedPosition, played);
+        SeekBufferedBar.Width = Math.Clamp(width * (buffered / max), 0, width);
     }
 
     /// <summary>
@@ -1671,6 +1710,7 @@ public partial class PlayWindow : Window
     {
         _seeking = false;
         _position = Seek.Value;
+        UpdateSeekBars();
         if (_ipc is not null)
         {
             _ipc.Command("set_property", "time-pos", Seek.Value);
@@ -2936,6 +2976,7 @@ public partial class PlayWindow : Window
         _itemId = itemId;
         _position = 0;
         _duration = 0;
+        _bufferedPosition = 0;
         _eof = false;
         _tracksApplied = false;
         _audioTracks.Clear();
@@ -3387,7 +3428,8 @@ public partial class PlayWindow : Window
         return $"aspect={_aspect.Key()} intro={intro} outro={outro} " +
                $"sleep={SleepLabel() ?? "-"} danmaku={danmaku} " +
                $"outroPrompt={SkipOutroButton.Visibility} pos={(int)_position} " +
-               $"video={_videoWidth}x{_videoHeight} bounds={Width:0}x{Height:0}";
+               $"video={_videoWidth}x{_videoHeight} bounds={Width:0}x{Height:0} " +
+               $"buffered={_bufferedPosition:0.0}";
     }
 
     public void SetAspectForShot(string key) => SetAspect(PlayerAspectExtensions.Parse(key));

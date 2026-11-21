@@ -792,6 +792,14 @@ public partial class MainWindow : FluentWindow
             await Task.Delay((tag == "search" ? 15000 : tag == "libraries" ? 9000 : 5000)
                              + extraDelay * 1000);
 
+            // --settings-tab play：设置页直接停在「播放」分组（核对缓冲大小这种项）。
+            if (tag == "settings" && ArgumentAfter("--settings-tab") is { Length: > 0 } settingsTab &&
+                ContentFrame.Content is SettingsPage tabbedSettings)
+            {
+                tabbedSettings.ShowTabForShot(settingsTab);
+                await Task.Delay(600);
+            }
+
             // --edit-source：服务器页打开第一个源的编辑表单。
             if (Environment.GetCommandLineArgs().Contains("--edit-source") &&
                 ContentFrame.Content is SourcesPage sourcesPage)

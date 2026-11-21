@@ -26,6 +26,25 @@ public sealed record MpvLaunch(
 /// </summary>
 public sealed class MpvProcess : IDisposable
 {
+
+    /// <summary>播放缓冲上限（MB）：设置页的值，夹在 128MB–8GB。
+    /// `DVPLAYER_BUFFER_MB` 可强制覆盖，供无桌面环境的自检用（压小才看得到未缓冲段）。</summary>
+    public static int BufferSizeMb
+    {
+        get
+        {
+            var mb = Math.Clamp(
+                DvPlayer.Services.AppServices.Instance.Settings.BufferSizeMb, 128, 8192);
+
+            if (int.TryParse(Environment.GetEnvironmentVariable("DVPLAYER_BUFFER_MB"),
+                    out var forced) && forced > 0)
+            {
+                mb = forced;
+            }
+
+            return mb;
+        }
+    }
     private Process? _process;
     private FileStream? _logStream;
     private StreamWriter? _log;
@@ -193,10 +212,11 @@ public sealed class MpvProcess : IDisposable
 
         if (launch.IsNetwork)
         {
-            // 蓝光原盘几十 GB，缓冲给足，拖动才不卡。
+            // 缓冲大小跟着设置走：默认 512MB，蓝光原盘可以调到 2G / 4G。
+            var bufferMb = BufferSizeMb;
             yield return "--cache=yes";
-            yield return "--demuxer-max-bytes=256MiB";
-            yield return "--demuxer-max-back-bytes=128MiB";
+            yield return $"--demuxer-max-bytes={bufferMb}MiB";
+            yield return $"--demuxer-max-back-bytes={Math.Max(64, bufferMb / 2)}MiB";
             yield return "--network-timeout=30";
 
             // 飞牛、Emby 都要带鉴权头；-add 形式不会把值里的逗号切开。

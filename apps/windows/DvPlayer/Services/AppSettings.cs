@@ -35,6 +35,9 @@ public sealed class AppSettings
     /// <summary>画面比例：fit / fill / stretch / 16:9 / 4:3。</summary>
     public string? VideoAspect { get; set; }
 
+    /// <summary>播放缓冲上限（MB）。默认 512，设置页可选 256 / 512 / 1024 / 2048 / 4096。</summary>
+    public int BufferSizeMb { get; set; } = 512;
+
     /// <summary>弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。</summary>
     public bool? DanmakuEnabled { get; set; }
     public string? DanmakuAppId { get; set; }

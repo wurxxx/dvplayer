@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import DvCore
 
 /// mpv 自己开的窗口里的一条轨（音频 / 字幕）。
 struct RawTrack {
@@ -34,6 +35,8 @@ final class MpvEngine {
     var onVolume: ((Double, Bool) -> Void)?
     var onError: ((String) -> Void)?
     var onLog: ((String) -> Void)?
+    /// demuxer 缓存到的位置（秒），进度条画「已缓冲」那一段用。
+    var onCacheTime: ((Double) -> Void)?
     /// 视频显示宽高比（已含旋转 / 变形）；「适应窗口」用它把窗口改成同样的形状。
     var onVideoAspect: ((Double) -> Void)?
 
@@ -71,7 +74,7 @@ final class MpvEngine {
 
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
-        "track-list", "aid", "sid", "video-params/aspect",
+        "track-list", "aid", "sid", "video-params/aspect", "demuxer-cache-time",
     ]
 
     init?(frame: NSRect, startSeconds: Double?) {
@@ -106,6 +109,18 @@ final class MpvEngine {
             // 出问题看这个文件：mpv 是子进程，stderr 在 .app 里看不到。
             "--log-file=\(NSTemporaryDirectory())dvplayer-mpv.log",
         ]
+        // 缓冲大小跟着设置走：默认 512MB，蓝光原盘可以调到 2G / 4G。
+        // 网络流才需要预读，本地文件给多了只是白占内存。
+        var bufferMb = min(max(AppSettings.load().bufferSizeMb ?? 512, 128), 8192)
+        // 自检用：无桌面环境验证三层进度条时，把缓冲压小才看得到「未观看」那一段。
+        if let forced = Int(ProcessInfo.processInfo.environment["DVPLAYER_BUFFER_MB"] ?? ""),
+           forced > 0 {
+            bufferMb = forced
+        }
+        args.append("--cache=yes")
+        args.append("--demuxer-max-bytes=\(bufferMb)MiB")
+        args.append("--demuxer-max-back-bytes=\(max(64, bufferMb / 2))MiB")
+
         // 自检用：锁屏 / 无图形会话时 Vulkan 拿不到 swapchain，`--vo=null` 只跑解码和 IPC。
         if ProcessInfo.processInfo.environment["DVPLAYER_NO_VO"] == "1" {
             args.append("--vo=null")
@@ -363,6 +378,9 @@ final class MpvEngine {
             case "video-params/aspect":
                 guard let value = data as? Double, value > 0 else { return }
                 onVideoAspect?(value)
+            case "demuxer-cache-time":
+                guard let value = data as? Double else { return }
+                onCacheTime?(value)
             case "pause":
                 let value = (data as? Bool) ?? ((data as? Int) == 1)
                 paused = value
