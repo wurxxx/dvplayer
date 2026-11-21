@@ -15,10 +15,17 @@ struct PlayerView: View {
     var body: some View {
         ZStack {
             // 点画面：单击暂停、双击全屏；鼠标一动把控制条叫回来。
-            // 打开阶段黑底不吞点击，但单击也不要切暂停（只是把窗口选中 / 拖动）。
+            // 打开阶段黑底不吞点击，但单击也不要切暂停（只是把窗口选中 / 拖动）；
+            // 双击按 macOS 习惯最大化 / 还原——进全屏会把左上角三个圆点收掉。
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { session.toggleFullscreen() }
+                .onTapGesture(count: 2) {
+                    if session.loading || session.error != nil {
+                        actions.zoom()
+                    } else {
+                        session.toggleFullscreen()
+                    }
+                }
                 .onTapGesture {
                     if !session.loading && session.error == nil {
                         session.togglePause()
@@ -30,10 +37,16 @@ struct PlayerView: View {
                     }
                 }
 
-            // 无标题栏，顶栏那块按住拖窗口。
+            // 无标题栏，顶栏那块按住拖窗口；打开 / 打开失败时双击同样是最大化。
             VStack(spacing: 0) {
                 PlayerDragArea(action: actions.dragWindow,
-                               onDoubleClick: actions.toggleFullscreen)
+                               onDoubleClick: {
+                                   if session.loading || session.error != nil {
+                                       actions.zoom()
+                                   } else {
+                                       actions.toggleFullscreen()
+                                   }
+                               })
                     .frame(height: 30)
                 Spacer(minLength: 0)
             }

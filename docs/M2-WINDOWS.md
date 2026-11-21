@@ -31,6 +31,10 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   都能拖窗口，单击只是选中窗口、不切暂停；底部控制条和截图 / 选集仍等首帧。
   打开阶段控制条是藏着的，但鼠标指针照常显示箭头（贴近四边换成改大小光标），
   不会因为 `_chromeVisible=false` 被设成 `Cursors.None`。
+  打开阶段在黑底上**双击是最大化 / 还原**，不是全屏：全屏会把顶栏和右上角三个
+  按钮一起收掉，窗口也没法拖，控制条又藏着，指针会跟着消失；最大化符合 Windows
+  习惯，也保住了这几个操作入口。全屏里切集（`_ready=false`）同样不再把指针设成
+  `Cursors.None`，`AnimateChrome` / `SetChromeOpacity` 淡出时也不会。
   **播放中**卡住（mpv `paused-for-cache`，停超过 400ms）则在画面中间浮一个
   「正在缓冲…」小胶囊，画面、控制条都不盖掉。回归：`--play <id> --play-cover-shot
   <目录>`（配合 `DVPLAYER_OPENING_HOLD=1` 假装首帧不来，截 1.5 / 12 / 31 秒三张）。

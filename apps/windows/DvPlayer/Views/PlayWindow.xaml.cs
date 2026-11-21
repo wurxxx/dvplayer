@@ -996,14 +996,7 @@ public partial class PlayWindow : Window
 
         if (e.ClickCount == 2)
         {
-            // 双击时的第一次单击已经切过暂停，这里还原，只当全屏用。
-            if (_clickToggledPause)
-            {
-                _clickToggledPause = false;
-                TogglePause();
-            }
-
-            ToggleFullscreen();
+            OnSurfaceDoubleClick();
             e.Handled = true;
             return;
         }
@@ -1043,6 +1036,29 @@ public partial class PlayWindow : Window
         }
 
         _pressInTopBar = false;
+    }
+
+    /// <summary>
+    /// 双击画面：出画后进 / 退全屏；打开 / 切集阶段（黑底 + 顶栏）按 Windows 习惯
+    /// 最大化 / 还原。这段时间进全屏会把顶栏和右上角窗口按钮收掉，窗口也没法拖，
+    /// 而且全屏里控制条是藏着的，鼠标指针会跟着一起消失。
+    /// </summary>
+    private void OnSurfaceDoubleClick()
+    {
+        // 双击时的第一次单击已经切过暂停，这里还原，只当全屏 / 最大化用。
+        if (_clickToggledPause)
+        {
+            _clickToggledPause = false;
+            TogglePause();
+        }
+
+        if (!_ready)
+        {
+            ToggleMaximize();
+            return;
+        }
+
+        ToggleFullscreen();
     }
 
     private void OnSurfaceMouseUp(object sender, MouseButtonEventArgs e)
@@ -3694,7 +3710,8 @@ public partial class PlayWindow : Window
     {
         // 打开 / 切集时控制条藏着，但窗口还能拖、四边还能改大小：
         // 光标不能跟着控制条一起消失，否则鼠标移上去像不见了。
-        var opening = !_ready && !_fullscreen;
+        // 全屏里切集也一样——这时候顶上没有控制条可露，更不能把指针藏掉。
+        var opening = !_ready;
         if (!opening && !_chromeVisible)
         {
             Cursor = Cursors.None;
@@ -3909,7 +3926,7 @@ public partial class PlayWindow : Window
             element.BeginAnimation(OpacityProperty, fade);
         }
 
-        Cursor = target > 0 ? Cursors.Arrow : Cursors.None;
+        Cursor = (target > 0 || !_ready) ? Cursors.Arrow : Cursors.None;
     }
 
     private void SetChromeOpacity(double opacity)
@@ -3921,7 +3938,7 @@ public partial class PlayWindow : Window
             element.Opacity = opacity;
         }
 
-        Cursor = opacity > 0 ? Cursors.Arrow : Cursors.None;
+        Cursor = (opacity > 0 || !_ready) ? Cursors.Arrow : Cursors.None;
     }
 
     private void ResetHideTimer()
@@ -4069,7 +4086,16 @@ public partial class PlayWindow : Window
     public string ProbeCursorForShot()
     {
         UpdateCursor(new Point(ActualWidth / 2, ActualHeight / 2));
-        return $"{Cursor} ready={_ready} chrome={_chromeVisible}";
+        return $"{Cursor} ready={_ready} chrome={_chromeVisible} " +
+               $"fullscreen={_fullscreen} maximized={_maximized} " +
+               $"bounds={Left:0},{Top:0},{ActualWidth:0}x{ActualHeight:0}";
+    }
+
+    /// <summary>巡检用：打开遮罩上走一遍双击逻辑（和手点同一条路径）。</summary>
+    public string ProbeOpeningDoubleClick()
+    {
+        OnSurfaceDoubleClick();
+        return "dblclick " + ProbeCursorForShot();
     }
 
     /// <summary>

@@ -244,6 +244,15 @@ public partial class MainWindow : FluentWindow
                     Trace.Write("cover shot cursor " + coverPlayer.ProbeCursorForShot());
                     UiCapture.SaveDesktop(Path.Combine(coverDir, "opening-desktop.png"));
                     UiCapture.Save(coverPlayer, Path.Combine(coverDir, "opening.png"));
+
+                    // 打开遮罩上双击：应当最大化（不是全屏），顶栏和右上角三按钮还在，
+                    // 指针仍旧是箭头；再走一次同一条路径还原成窗口态。
+                    Trace.Write("cover shot dblclick max " + coverPlayer.ProbeOpeningDoubleClick());
+                    await Task.Delay(700);
+                    UiCapture.SaveDesktop(Path.Combine(coverDir, "opening-max-desktop.png"));
+                    UiCapture.Save(coverPlayer, Path.Combine(coverDir, "opening-max.png"));
+                    Trace.Write("cover shot dblclick restore " + coverPlayer.ProbeOpeningDoubleClick());
+                    await Task.Delay(400);
                 }
 
                 await Task.Delay(10500);

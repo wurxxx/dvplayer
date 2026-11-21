@@ -144,7 +144,9 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   直接收黑底；播放中卡住（`paused-for-cache`）只在画面中间浮一个
   「正在缓冲…」小胶囊，不盖画面、不藏控制条。
 - 打开阶段三个窗口圆点（关闭 / 最小化 / 全屏）照常显示，顶部 30px 拖窗区
-  也不被黑底挡住；单击黑底只把窗口选中，不切暂停。
+  也不被黑底挡住；单击黑底只把窗口选中，不切暂停。黑底上双击走**最大化 /
+  还原**（`actions.zoom()`），和 Windows 一致；进假全屏会把三个圆点收掉，
+  打开阶段不能这么干。
 - 打开失败（取地址失败 / 播放器退出）时窗口不关：黑底上显示原因和
   「重试 / 关闭」。重试会按原参数重跑；mpv 子进程已经退出时先换一个新实例。
   自检：`DVPLAYER_PLAY=bogus DVPLAYER_PLAY_RETRY=1`，日志应出现 `[Play] retry`
