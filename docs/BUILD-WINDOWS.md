@@ -148,6 +148,7 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 | `--person-index <n>` | 配合 `--person-first`：取第 n 个有 id 的演职人员（0 起） |
 | `--play <id> --play-seconds <n>` | 直接播放 n 秒后自动退出（验证播放与进度回写） |
 | `--play-shot <dir>` | 播放页巡检：依次截图 `play.png` / `play-episodes.png` / `play-audio.png` / `play-more.png` / `play-info.png`（浮层、选集、两个菜单、媒体信息），另有 `play-screen.png` / `play-episodes-screen.png` 是从桌面抓的真实画面（含视频） |
+| `--records-general-fav` | 配合 `--screenshot <目录> records`：停在「通用」，临时收藏第一条记录后截图，验证收藏数据晚到时不会盖到继续观看上（截 `records-general-fav.png`，最后自动取消） |
 | `--play-opening-shot <png>` | 配合 `--play` / `--play-record`：窗口刚弹出、视频还没出画时截一张，确认打开阶段是不透明黑底 + 片名 +「正在打开…」，没有控制条、也不透出桌面 |
 | `--play-end` | 配合 `--play-shot`：跳到片尾前 4 秒，20 秒后截 `play-next.png`，验证播完自动接下一集 |
 | `--play-input` | 配合 `--play-shot`：用真实鼠标事件验证点画面暂停 / 拖顶栏移动 / 拖右边缘改大小，结果写进 `player.log`，最后截 `desktop-input.png` |

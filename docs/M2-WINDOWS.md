@@ -53,6 +53,10 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   `title: N (时长) (xxxxx.mpls)`，不自己挂 ISO；播放用
   `--bluray-device=<iso>` + `bd://mpls/<n>`。进度回写核心（本地源）。
   自检：`--play-iso` / `--play-iso-title` / `--disc-list` / `--disc-shot`。
+- **记录页「通用」的收藏行**：继续观看下面接一行「视频收藏」（168×252 竖卡 +
+  左右箭头，空时给一句提示），和 macOS 的通用页一致。三个分段面板的显隐统一走
+  `ApplyTabVisibility()`：收藏是异步拉的，晚到时之前会直接把「收藏」整块设成可见，
+  结果竖版海报盖在「继续观看」那一行上（像是记录串了图）。
 - **记录页的卡片墙**：「观看」也是 `Controls/PosterGrid`（`CardRatio="1.7778"`
   = 16:9 横卡、`MinCardWidth="220"`），不再用固定 248 宽的 `WrapPanel`；
   「收藏」本来就是同一组件。`PosterGrid` 新增 `CardRatio` / `MinCardWidth`

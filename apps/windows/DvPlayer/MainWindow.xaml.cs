@@ -961,6 +961,21 @@ public partial class MainWindow : FluentWindow
                 }
             }
 
+            // --records-general-fav：停在「通用」，再让收藏数据晚到一次。
+            // 回归：收藏的竖版海报不能盖到「继续观看」那一行上。
+            if (Environment.GetCommandLineArgs().Contains("--records-general-fav") &&
+                ContentFrame.Content is RecordsPage generalFav)
+            {
+                generalFav.ShowGeneralForShot();
+                await Task.Delay(1200);
+                if (await generalFav.FavoriteFirstForShotAsync() is { Length: > 0 } favId)
+                {
+                    await Task.Delay(1200);
+                    UiCapture.Save(this, Path.Combine(dir, "records-general-fav.png"));
+                    await generalFav.UnfavoriteForShotAsync(favId);
+                }
+            }
+
             // --menu-records：记录页「观看」第一张卡片的右键菜单单独渲染。
             if (Environment.GetCommandLineArgs().Contains("--menu-records") &&
                 ContentFrame.Content is RecordsPage menuRecords)

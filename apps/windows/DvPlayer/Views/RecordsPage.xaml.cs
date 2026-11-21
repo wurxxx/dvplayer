@@ -26,6 +26,9 @@ public partial class RecordsPage : Page
         Unloaded += OnUnloaded;
     }
 
+    /// <summary>截图巡检用：停在「通用」分段。</summary>
+    public void ShowGeneralForShot() => GeneralSegment.IsChecked = true;
+
     /// <summary>截图巡检用：停在「观看」分段。</summary>
     public void ShowWatchForShot() => WatchSegment.IsChecked = true;
 
@@ -46,12 +49,14 @@ public partial class RecordsPage : Page
         var result = await Task.Run(() => core.SetFavorite(record.ItemId, true)).ConfigureAwait(true);
         if (!result.Ok)
         {
+            Trace.Write($"records favorite shot failed id={record.ItemId} err={result.Error}");
             return null;
         }
 
         _favoritesLoaded = false;
         await LoadFavoritesAsync().ConfigureAwait(true);
         FillFavorites();
+        Trace.Write($"records favorite shot id={record.ItemId} favorites={_favorites.Count}");
         return record.ItemId;
     }
 
@@ -340,8 +345,17 @@ public partial class RecordsPage : Page
     {
         var cards = _favorites.Select(ToFavoriteCard).ToList();
         FavoriteList.ItemsSource = cards;
-        FavoriteScroll.Visibility = cards.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        FavoritePanel.Visibility = cards.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+
+        // 「通用」里也有一行收藏（和 macOS 一致），空的时候给一句提示。
+        GeneralFavoriteList.ItemsSource = cards;
+        GeneralFavoritesCount.Text = cards.Count > 0 ? $"{cards.Count} 个" : "";
+        GeneralFavorites.Visibility = cards.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        GeneralFavoritesEmpty.Visibility = cards.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+
+        // 收藏是异步拉的，到货时用户很可能还停在「通用」。
+        // 分段面板的显隐只能交给 ApplyTabVisibility —— 直接设 Visible
+        // 会让「收藏」整块盖到「继续观看」上（看起来像记录串了图）。
+        ApplyTabVisibility();
 
         // 取消收藏后列表会变空，标题上的「共 N 个收藏」也得跟着改。
         if (FavoriteSegment.IsChecked == true)
@@ -529,27 +543,39 @@ public partial class RecordsPage : Page
             return;
         }
 
-        GeneralPanel.Visibility = GeneralSegment.IsChecked == true
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        WatchPanel.Visibility = WatchSegment.IsChecked == true
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        var favorites = FavoriteSegment.IsChecked == true;
-        FavoritePanel.Visibility = favorites && _favorites.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        FavoriteScroll.Visibility = favorites && _favorites.Count > 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
+        ApplyTabVisibility();
         UpdateStatusText();
 
         // 每次切到收藏都重新拉一次：刚在卡片右键里收藏 / 取消的会立刻反映。
-        if (favorites)
+        if (FavoriteSegment.IsChecked == true)
         {
             _ = LoadFavoritesAsync(force: true);
         }
+    }
+
+    /// <summary>
+    /// 三个分段面板互斥。所有改动显隐的地方都走这里：收藏数据晚到时
+    /// 不能把「收藏」面板在自己的标签页之外露出来。
+    /// </summary>
+    private void ApplyTabVisibility()
+    {
+        if (GeneralPanel is null)
+        {
+            return;
+        }
+
+        var general = GeneralSegment.IsChecked == true;
+        var watch = WatchSegment.IsChecked == true;
+        var favorites = FavoriteSegment.IsChecked == true;
+
+        GeneralPanel.Visibility = general ? Visibility.Visible : Visibility.Collapsed;
+        WatchPanel.Visibility = watch ? Visibility.Visible : Visibility.Collapsed;
+        FavoriteScroll.Visibility = favorites && _favorites.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        FavoritePanel.Visibility = favorites && _favorites.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
