@@ -56,6 +56,8 @@ public partial class PlayWindow : Window
     private IntPtr _hwnd;
     private bool _started;
     private bool _closed;
+    /// <summary>错误面板点「重试」正在跑：别连点重复解析 / 重复起 mpv。</summary>
+    private bool _retrying;
     private MpvIpc? _ipc;
     private int _session;
 
@@ -283,6 +285,7 @@ public partial class PlayWindow : Window
         Trace.Write($"play open start item={itemId}");
 
         PlayWindow? window = null;
+        var shown = false;
         try
         {
             window = new PlayWindow(Placeholder(itemId), startSeconds, playlist, seriesTitle);
@@ -299,6 +302,7 @@ public partial class PlayWindow : Window
             window.Opacity = 0;
             window.AttachSurface(owner);
             window.Show();
+            shown = true;
             window.BeginAnimation(OpacityProperty, new DoubleAnimation(
                 1, TimeSpan.FromMilliseconds(180))
             {
@@ -323,15 +327,19 @@ public partial class PlayWindow : Window
                         $"ms={clock.ElapsedMilliseconds}");
             if (source is null)
             {
-                var failed = window;
-                window = null;
-                failed.Close();
-                if (!silentFailure)
+                // 不关窗：黑底上直接写原因，用户可以点「重试」再取一次地址。
+                // 真的不想留（后台补选集之类）才走 silentFailure。
+                if (silentFailure)
                 {
-                    ConfirmDialog.Alert(owner, "无法播放", error ?? "取播放地址失败");
+                    var failed = window;
+                    window = null;
+                    failed.Close();
+                    return null;
                 }
 
-                return null;
+                Trace.Write($"play open failed item={itemId} err={error ?? "-"}");
+                window.ShowError(error ?? "取播放地址失败");
+                return window;
             }
 
             // 等地址的这几秒里用户可能已经把窗口关了，别对着死 hwnd 起 mpv。
@@ -358,6 +366,13 @@ public partial class PlayWindow : Window
         catch (Exception ex)
         {
             Trace.Write("play open failed: " + ex.Message);
+            if (shown && window is not null && !silentFailure)
+            {
+                // 窗口已经出来了：不关，把原因留在黑底上，重试按钮还能用。
+                window.ShowError(ex.Message);
+                return window;
+            }
+
             window?.Close();
             if (!silentFailure)
             {
@@ -3933,6 +3948,7 @@ public partial class PlayWindow : Window
 
     private void ShowError(string message)
     {
+        Trace.Write("play error shown: " + message);
         _ready = false;
         _buffering = false;
         _bufferingCts?.Cancel();
@@ -3944,8 +3960,81 @@ public partial class PlayWindow : Window
         LoadingPanel.Visibility = Visibility.Collapsed;
         SetChromeOpacity(0);
         Overlay.Visibility = Visibility.Collapsed;
+        ErrorRetryButton.Visibility = _closed ? Visibility.Collapsed : Visibility.Visible;
         ErrorText.Text = message;
         ErrorPanel.Visibility = Visibility.Visible;
+
+        // 错误面板是最后一道操作口：顶栏藏掉了，至少窗口还能关（Esc / 关闭按钮）。
+        Cursor = Cursors.Arrow;
+        Focus();
+    }
+
+    /// <summary>
+    /// 错误面板的「重试」：占位源（还没取到地址）就重新向核心要一次，
+    /// 已经有地址（mpv 启动失败）就在同一个源上重起 mpv。
+    /// </summary>
+    private async void OnErrorRetryClick(object sender, RoutedEventArgs e)
+    {
+        if (_retrying || _closed)
+        {
+            return;
+        }
+
+        _retrying = true;
+        ErrorPanel.Visibility = Visibility.Collapsed;
+        Trace.Write($"play retry item={_itemId} hasUrl={!string.IsNullOrEmpty(_current.Url)}");
+
+        try
+        {
+            Overlay.Visibility = Visibility.Visible;
+            ShowOpeningCover();
+
+            if (!string.IsNullOrEmpty(_current.Url))
+            {
+                // 地址已经在手上：mpv 没起来 / 起播失败，直接再来一次。
+                _ipc = null;
+                _started = false;
+                BeginPlayback(_current, _startSeconds);
+                return;
+            }
+
+            var (source, error) = await Playback.ResolveAsync(_itemId).ConfigureAwait(true);
+            if (_closed)
+            {
+                return;
+            }
+
+            if (source is null)
+            {
+                ShowError(error ?? "取播放地址失败");
+                return;
+            }
+
+            // 这次才认出是原盘：换成原盘窗口（当前窗口的占位源没法带 --bluray-device）。
+            if (source.Disc)
+            {
+                var iso = source.Url;
+                var start = source.PositionSeconds > 0 ? source.PositionSeconds : (double?)null;
+                var coreItemId = source.ItemId;
+                Trace.Write($"play retry disc iso={iso}");
+                Close();
+                await OpenDiscAsync(null, iso, startOverride: start, coreItemId: coreItemId);
+                return;
+            }
+
+            _ipc = null;
+            _started = false;
+            BeginPlayback(source, _startSeconds);
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("play retry failed: " + ex.Message);
+            ShowError(ex.Message);
+        }
+        finally
+        {
+            _retrying = false;
+        }
     }
 
     private static string Format(double seconds)
@@ -3965,6 +4054,10 @@ public partial class PlayWindow : Window
         AnimateChrome(1);
         ResetHideTimer();
     }
+
+    /// <summary>巡检用：像点错误面板的「重试」一样再取一次地址。</summary>
+    public void RetryForShot() =>
+        ErrorRetryButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 
     /// <summary>
     /// 巡检用：用真实鼠标事件验证「点画面暂停 / 顶栏拖动 / 右边缘改大小」。

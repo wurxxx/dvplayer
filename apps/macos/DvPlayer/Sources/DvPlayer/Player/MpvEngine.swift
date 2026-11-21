@@ -59,6 +59,9 @@ final class MpvEngine {
     /// mpv 窗口的 frame（屏幕坐标，左上原点），浮层照这个摆。
     private(set) var videoFrame: NSRect = .zero
 
+    /// mpv 子进程还活着吗：错误面板「重试」用它决定要不要换个新进程。
+    var isAlive: Bool { !shuttingDown && process.isRunning }
+
     private let process = Process()
     private let ipc = MpvIPC()
     private let socketPath: String
@@ -67,7 +70,7 @@ final class MpvEngine {
     private var subtitleTracks: [RawTrack] = []
     private var audioId: Int64 = 0
     private var subtitleId: Int64 = 0
-    private var pendingLoad: (url: String, headers: [String: String], start: Double)?
+    private var pendingLoad: (url: String, headers: [String: String], start: Double, proxy: String?)?
     /// 当前挂着的弹幕 ASS 路径：从字幕菜单里排除。
     private var secondarySubtitlePath: String?
     /// 每次 loadfile +1：切集时把上一集还没绑完的弹幕回调丢掉。
@@ -184,16 +187,17 @@ final class MpvEngine {
 
         if let pendingLoad {
             self.pendingLoad = nil
-            loadURL(pendingLoad.url, headers: pendingLoad.headers, start: pendingLoad.start)
+            loadURL(pendingLoad.url, headers: pendingLoad.headers,
+                    start: pendingLoad.start, proxy: pendingLoad.proxy)
         }
     }
 
     // MARK: - 播放控制
 
-    func loadURL(_ url: String, headers: [String: String], start: Double) {
+    func loadURL(_ url: String, headers: [String: String], start: Double, proxy: String? = nil) {
         guard !shuttingDown else { return }
         guard ready else {
-            pendingLoad = (url, headers, start)
+            pendingLoad = (url, headers, start, proxy)
             return
         }
 
@@ -222,6 +226,9 @@ final class MpvEngine {
         // 请求头：每集可能不一样（飞牛带 token）。
         let fields = headers.map { "\($0.key): \($0.value)" }.joined(separator: ",")
         ipc.command(["set_property", "http-header-fields", fields])
+
+        // 服务器的代理设置：设了就一直用，切集换成新源时会重新设。
+        ipc.command(["set_property", "http-proxy", Self.normalizeProxy(proxy)])
         ipc.command(["set_property", "pause", "no"])
 
         // `start` 是 option：先设再 loadfile，比给 loadfile 传 options 稳
@@ -234,6 +241,17 @@ final class MpvEngine {
 
         NSLog("[Play] mpv load \(url.prefix(72))… start=\(startValue)")
         ipc.command(["loadfile", url, "replace"])
+    }
+
+    /// 代理地址允许只写 `127.0.0.1:7890`；空表示直连（mpv 要的是空串）。
+    private static func normalizeProxy(_ proxy: String?) -> String {
+        guard var value = proxy?.trimmingCharacters(in: .whitespaces), !value.isEmpty else {
+            return ""
+        }
+        if !value.contains("://") {
+            value = "http://" + value
+        }
+        return value
     }
 
     func play() {

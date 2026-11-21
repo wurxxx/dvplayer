@@ -19,10 +19,13 @@ public struct SourceConfig: Codable, Identifiable, Hashable, Sendable {
     public var password: String
     /// 本地源把进度写这里；服务器源留空。可选是为了老配置能直接解出来。
     public var dataDir: String?
+    /// 网络服务器的 HTTP 代理（如 `http://127.0.0.1:7890`）；空 = 直连。
+    /// 可选同样是为了老配置能直接解出来。
+    public var proxy: String?
 
     public init(id: String = UUID().uuidString, name: String, kind: String = "fnos",
                 base: String, username: String = "", password: String = "",
-                dataDir: String? = nil) {
+                dataDir: String? = nil, proxy: String? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -30,6 +33,7 @@ public struct SourceConfig: Codable, Identifiable, Hashable, Sendable {
         self.username = username
         self.password = password
         self.dataDir = dataDir
+        self.proxy = proxy
     }
 }
 
@@ -146,6 +150,8 @@ public struct HttpHeader: Codable, Hashable, Sendable {
 public struct ImageSource: Codable, Sendable {
     public let url: String
     public let headers: [HttpHeader]
+    /// 服务器设的 HTTP 代理；空 = 直连。
+    public let proxy: String?
 }
 
 public struct PlayRecord: Codable, Identifiable, Hashable, Sendable {
@@ -218,6 +224,8 @@ public struct PlaySource: Codable, Sendable {
     public let dolbyVision: Bool
     public let videoCodec: String?
     public let audioCodec: String?
+    /// 服务器设的 HTTP 代理；空 = 直连。播放请求也走它。
+    public let proxy: String?
 }
 
 public struct AudioInfo: Codable, Hashable, Sendable {

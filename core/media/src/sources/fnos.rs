@@ -109,13 +109,22 @@ pub struct FnOsSource {
     password: String,
     token: Option<String>,
     http: Client,
+    /// 用户设的 HTTP 代理；空表示直连。
+    proxy: String,
     /// item_guid → media_guid。`play_source` 时记下，回写进度要用。
     /// 换片源不重启客户端也没关系：缓存没有时现查一次 `play/info`。
     media_cache: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl FnOsSource {
-    pub fn new(id: String, name: String, base: String, username: String, password: String) -> Self {
+    pub fn new(
+        id: String,
+        name: String,
+        base: String,
+        username: String,
+        password: String,
+        proxy: String,
+    ) -> Self {
         Self {
             id,
             name,
@@ -124,10 +133,8 @@ impl FnOsSource {
             password,
             token: None,
             media_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
-            http: Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+            http: super::http_client(&proxy),
+            proxy,
         }
     }
 
@@ -941,6 +948,7 @@ impl FnOsSource {
             audio_codec: meta.audio_type.first().cloned(),
             audio_streams,
             subtitle_streams,
+            proxy: self.proxy.clone(),
         })
     }
 
@@ -1231,6 +1239,7 @@ impl FnOsSource {
         Ok(ImageSource {
             url: format!("{}/v/api/v1/sys/img{}", self.base, normalized),
             headers: self.auth_headers(),
+            proxy: self.proxy.clone(),
         })
     }
 

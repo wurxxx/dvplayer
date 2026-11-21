@@ -10,7 +10,7 @@ fn main() {
     let pass = std::env::var("FN_PASS").expect("FN_PASS");
     let id = std::env::args().nth(1).expect("item id");
 
-    let mut source = FnOsSource::new("probe".into(), "probe".into(), base, user, pass);
+    let mut source = FnOsSource::new("probe".into(), "probe".into(), base, user, pass, String::new());
     source.login().expect("login");
 
     match source.item_detail(&id) {

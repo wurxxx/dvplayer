@@ -268,6 +268,9 @@ pub struct PlaySource {
     pub audio_streams: Vec<AudioTrack>,
     #[serde(default)]
     pub subtitle_streams: Vec<SubtitleTrack>,
+    /// 播放请求要走这个 HTTP 代理（服务器的代理设置）；空表示直连。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub proxy: String,
 }
 
 /// 一张图片的地址与鉴权头（海报走 Authorization，不能直接塞给 <img>）。
@@ -277,6 +280,9 @@ pub struct ImageSource {
     pub url: String,
     #[serde(default)]
     pub headers: Vec<HttpHeader>,
+    /// 图片要走这个 HTTP 代理（服务器设置）；空表示直连。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub proxy: String,
 }
 
 /// 条目详情：列表接口不带的信息（背景图、简介、季集数、播放入口）。

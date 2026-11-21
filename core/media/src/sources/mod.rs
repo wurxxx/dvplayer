@@ -36,6 +36,10 @@ pub struct SourceConfig {
     /// 本地源的进度 / 缓存放这里（两端传 Application Support 目录）。
     #[serde(default)]
     pub data_dir: String,
+    /// 网络服务器的 HTTP 代理，例如 `http://127.0.0.1:7890`；空表示直连。
+    /// 这个源的接口、海报下载和播放请求都走它。
+    #[serde(default)]
+    pub proxy: String,
 }
 
 /// 当前实现的适配器类型。界面的「添加源」下拉框直接用它。
@@ -147,6 +151,7 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
             config.base.clone(),
             config.username.clone(),
             config.password.clone(),
+            config.proxy.clone(),
         ))),
         "emby" | "jellyfin" => Some(Box::new(EmbySource::new(
             config.id.clone(),
@@ -154,6 +159,7 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
             config.base.clone(),
             config.username.clone(),
             config.password.clone(),
+            config.proxy.clone(),
         ))),
         "local" | "folder" => Some(Box::new(LocalSource::new(
             config.id.clone(),
@@ -163,6 +169,39 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
         ))),
         _ => None,
     }
+}
+
+/// 统一构造 HTTP 客户端：设了代理的服务器，接口请求全走代理。
+pub(crate) fn http_client(proxy: &str) -> reqwest::blocking::Client {
+    let mut builder =
+        reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30));
+    if let Some(proxy) = normalize_proxy(proxy) {
+        match reqwest::Proxy::all(&proxy) {
+            Ok(configured) => builder = builder.proxy(configured),
+            Err(err) => {
+                // 代理写错不拦着直连：至少还能用，设置页会照原样存着。
+                eprintln!("代理地址无效，已忽略：{proxy}（{err}）");
+            }
+        }
+    }
+
+    builder
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+}
+
+/// 代理地址允许只写 `127.0.0.1:7890`，补成 `http://`。
+pub(crate) fn normalize_proxy(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    Some(if value.contains("://") {
+        value.to_string()
+    } else {
+        format!("http://{value}")
+    })
 }
 
 // —— 条目标签的中文化 ——
@@ -297,4 +336,53 @@ pub(crate) fn pick_bool(v: &serde_json::Value, keys: &[&str]) -> Option<bool> {
         },
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn normalizes_proxy_address() {
+        assert_eq!(normalize_proxy(""), None);
+        assert_eq!(normalize_proxy("   "), None);
+        assert_eq!(
+            normalize_proxy("127.0.0.1:7890").as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+        assert_eq!(
+            normalize_proxy("http://10.0.0.2:8080").as_deref(),
+            Some("http://10.0.0.2:8080")
+        );
+    }
+
+    #[test]
+    fn http_client_sends_requests_through_proxy() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            let mut buf = [0u8; 2048];
+            let n = socket.read(&mut buf).unwrap();
+            let text = String::from_utf8_lossy(&buf[..n]).to_string();
+            let _ = socket.write_all(
+                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            text
+        });
+
+        let client = http_client(&format!("127.0.0.1:{port}"));
+        let _ = client.get("http://media.invalid/probe").send();
+
+        let request = handle.join().unwrap();
+        assert!(
+            request.starts_with("GET http://media.invalid/probe "),
+            "代理没有收到绝对地址请求：{request}"
+        );
+    }
 }

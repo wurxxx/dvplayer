@@ -506,6 +506,7 @@ impl LocalSource {
             audio_codec: None,
             audio_streams: Vec::new(),
             subtitle_streams: Vec::new(),
+            proxy: String::new(),
         })
     }
 }
@@ -888,6 +889,7 @@ impl MediaSource for LocalSource {
         Ok(ImageSource {
             url: file_url(&full),
             headers: Vec::new(),
+            proxy: String::new(),
         })
     }
 }

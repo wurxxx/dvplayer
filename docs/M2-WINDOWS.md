@@ -32,6 +32,16 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   **播放中**卡住（mpv `paused-for-cache`，停超过 400ms）则在画面中间浮一个
   「正在缓冲…」小胶囊，画面、控制条都不盖掉。回归：`--play <id> --play-cover-shot
   <目录>`（配合 `DVPLAYER_OPENING_HOLD=1` 假装首帧不来，截 1.5 / 12 / 31 秒三张）。
+- **播放打开失败**：取地址失败或 mpv 启动失败时窗口不关，黑底上留「播放失败 +
+  原因」和「重试 / 关闭」。重试分两种：还是占位源（手上没有地址）就重新向核心
+  要一次播放地址，已经有地址就按原参数重开 mpv；重试时才发现是原盘，会关掉占位窗
+  换成原盘窗口。回归：`--play bogus --play-fail-shot <目录>`，日志里应有
+  `play open failed` / `play retry`，截图为窗内错误面板（不关窗）。
+- **网络服务器代理**：服务器表单新增「HTTP 代理（可选）」，只对飞牛 / Emby /
+  Jellyfin 显示，落 `settings.json` 的 `proxy`（空 = 直连，允许只写
+  `127.0.0.1:7890`）。这个源的接口请求（核心 `http_client`）、海报下载
+  （`PosterLoader` 按代理缓存 `HttpClient`）和播放（mpv `--http-proxy`）全走它；
+  已配置过的老源会原样带过来。
 - **详情页「存储位置」**：`MediaInfo.Path` 放在媒体信息之后；电影 / 单集显示完整
   文件路径，剧集 / 季只显示目录。飞牛取 `/stream` 的 `file_stream.path`，Emby 取
   `PlaybackInfo` 的 `Path`（退回条目的 `Path`），本地源直接给文件路径。

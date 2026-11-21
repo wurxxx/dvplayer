@@ -208,6 +208,28 @@ public partial class MainWindow : FluentWindow
         var playId = ArgumentAfter("--play");
         if (playId is not null)
         {
+            // --play-fail-shot <目录>：验证「打开失败不关窗」——窗内错误面板 + 重试。
+            if (ArgumentAfter("--play-fail-shot") is { Length: > 0 } failDir)
+            {
+                Directory.CreateDirectory(failDir);
+                var failed = await PlayWindow.OpenAsync(this, playId);
+                Trace.Write($"fail shot open player={failed is not null} " +
+                            $"alive={failed?.IsAlive}");
+                await Task.Delay(1200);
+                if (failed is { IsAlive: true })
+                {
+                    UiCapture.Save(failed, Path.Combine(failDir, "error.png"));
+                    failed.RetryForShot();
+                    await Task.Delay(3000);
+                    Trace.Write($"fail shot retry alive={failed.IsAlive}");
+                    UiCapture.Save(failed, Path.Combine(failDir, "error-retry.png"));
+                }
+
+                failed?.Close();
+                Close();
+                return;
+            }
+
             // --play-cover-shot <目录>：抓打开遮罩（慢网络下不能透出桌面）。1.5 秒一张，
             // 12 秒再一张，31 秒第三张，验证「一直没出画面时黑底始终不透明」。
             if (ArgumentAfter("--play-cover-shot") is { Length: > 0 } coverDir)

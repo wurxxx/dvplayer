@@ -19,7 +19,9 @@ public sealed record MpvLaunch(
     /// <summary>蓝光原盘：URL 是 <c>bd://mpls/&lt;n&gt;</c>，不是磁盘上真实存在的文件。</summary>
     bool IsDisc = false,
     /// <summary>原盘额外参数，例如 <c>--bluray-device=D:\disc.iso</c>。</summary>
-    IReadOnlyList<string>? ExtraArgs = null);
+    IReadOnlyList<string>? ExtraArgs = null,
+    /// <summary>服务器设的 HTTP 代理；空 = 直连。</summary>
+    string? Proxy = null);
 
 /// <summary>
 /// 启动官方 Windows mpv（shinchiro 构建，带 FEL 合成），用 <c>--wid</c> 挂到
@@ -240,6 +242,12 @@ public sealed class MpvProcess : IDisposable
             yield return $"--demuxer-max-back-bytes={Math.Max(64, bufferMb / 2)}MiB";
             yield return "--network-timeout=30";
 
+            // 服务器的代理设置：该源的接口、海报和播放请求都走它。
+            if (!string.IsNullOrWhiteSpace(launch.Proxy))
+            {
+                yield return "--http-proxy=" + NormalizeProxy(launch.Proxy);
+            }
+
             // 飞牛、Emby 都要带鉴权头；-add 形式不会把值里的逗号切开。
             foreach (var header in launch.Headers ?? Array.Empty<MpvHeader>())
             {
@@ -259,6 +267,13 @@ public sealed class MpvProcess : IDisposable
         }
 
         yield return launch.Url;
+    }
+
+    /// <summary>代理地址允许只写 <c>127.0.0.1:7890</c>，mpv 要完整的 scheme。</summary>
+    private static string NormalizeProxy(string proxy)
+    {
+        var value = proxy.Trim();
+        return value.Contains("://", StringComparison.Ordinal) ? value : "http://" + value;
     }
 
     private static string FindMpv()

@@ -142,6 +142,14 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   「正在缓冲…」小胶囊，不盖画面、不藏控制条。
 - 打开阶段三个窗口圆点（关闭 / 最小化 / 全屏）照常显示，顶部 30px 拖窗区
   也不被黑底挡住；单击黑底只把窗口选中，不切暂停。
+- 打开失败（取地址失败 / 播放器退出）时窗口不关：黑底上显示原因和
+  「重试 / 关闭」。重试会按原参数重跑；mpv 子进程已经退出时先换一个新实例。
+  自检：`DVPLAYER_PLAY=bogus DVPLAYER_PLAY_RETRY=1`，日志应出现 `[Play] retry`
+  且错误面板仍在。
+- 网络服务器的 HTTP 代理存在 `SourceConfig.proxy`：核心接口请求走
+  `http_client`，海报走 `PosterStore` 里按代理缓存的 `URLSession`
+  （`connectionProxyDictionary`），播放通过 mpv 的 `http-proxy` 属性设置。
+  空代理 = 直连。
 - `PlayerSession`：起播、切集、EOF 接下一集、进度回写（10 秒一次）、
   轨道解析与中文默认、规格 chips、截图、浮层自动隐藏。
 - `PlayerWindowController`：透明浮层窗 + geometry 同步 + 假全屏 + 键盘 / 滚轮。

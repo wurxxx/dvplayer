@@ -172,6 +172,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                           hintTitle: seriesTitle)
                 NSLog("[PlayTest] open \(itemId)")
 
+                // `DVPLAYER_PLAY_RETRY=1`：等错误面板出来，点一次「重试」再记状态。
+                if env["DVPLAYER_PLAY_RETRY"] == "1" {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    PlayerLauncher.shared.current?.retry()
+                    NSLog("[PlayTest] retry sent")
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    Self.logPlayerState()
+                }
+
                 if let path = env["DVPLAYER_PLAY_OPENING_SHOT"] {
                     try? await Task.sleep(nanoseconds: 200_000_000)
                     Self.capture(to: path, window: PlayerLauncher.shared.window)

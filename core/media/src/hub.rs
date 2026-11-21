@@ -867,6 +867,7 @@ mod tests {
                 audio_codec: None,
                 audio_streams: Vec::new(),
                 subtitle_streams: Vec::new(),
+                proxy: String::new(),
             })
         }
 
@@ -874,6 +875,7 @@ mod tests {
             Ok(ImageSource {
                 url: format!("http://{}{path}", self.tag),
                 headers: Vec::new(),
+                proxy: String::new(),
             })
         }
     }

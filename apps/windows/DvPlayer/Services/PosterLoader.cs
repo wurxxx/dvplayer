@@ -13,6 +13,44 @@ namespace DvPlayer.Services;
 public static class PosterLoader
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private static readonly Dictionary<string, HttpClient> Proxied = new();
+
+    /// <summary>按服务器的代理设置挑 HttpClient：海报请求和播放请求走同一个代理。</summary>
+    private static HttpClient ClientFor(string? proxy)
+    {
+        var value = proxy?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            return Http;
+        }
+
+        var address = value.Contains("://", StringComparison.Ordinal) ? value : "http://" + value;
+        lock (Gate)
+        {
+            if (Proxied.TryGetValue(address, out var cached))
+            {
+                return cached;
+            }
+
+            try
+            {
+                var handler = new HttpClientHandler
+                {
+                    Proxy = new System.Net.WebProxy(address),
+                    UseProxy = true,
+                };
+                var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+                Proxied[address] = client;
+                return client;
+            }
+            catch (UriFormatException)
+            {
+                // 代理写得不像地址：这张图直连，别让海报拖垮页面。
+                Trace.Write($"poster proxy invalid {address}");
+                return Http;
+            }
+        }
+    }
 
     private static readonly Dictionary<string, BitmapSource> Memory = new();
     private static readonly Dictionary<string, Task<BitmapSource?>> Pending = new();
@@ -93,7 +131,8 @@ public static class PosterLoader
                     request.Headers.TryAddWithoutValidation(header.Name, header.Value);
                 }
 
-                using var response = await Http.SendAsync(request).ConfigureAwait(false);
+                using var response = await ClientFor(source.Data.Proxy)
+                    .SendAsync(request).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     Trace.Write($"poster http {(int)response.StatusCode} {posterPath}");

@@ -116,7 +116,7 @@ public partial class SourcesPage : Page
     private void UpdateKindUi()
     {
         // InitializeComponent 里 IsChecked="True" 会先触发一次，那时控件还没建全。
-        if (CredentialPanel is null || BaseLabel is null || AddTitle is null)
+        if (CredentialPanel is null || BaseLabel is null || AddTitle is null || ProxyPanel is null)
         {
             return;
         }
@@ -126,6 +126,10 @@ public partial class SourcesPage : Page
         var needsCredentials = kind is "emby" or "jellyfin" or "smb" or "cifs" or "webdav";
 
         CredentialPanel.Visibility = needsCredentials ? Visibility.Visible : Visibility.Collapsed;
+        // 只有走 HTTP 的服务器才有代理：本地目录、SMB / NFS / WebDAV 是系统挂载。
+        ProxyPanel.Visibility = kind is "fnos" or "feiniu" or "emby" or "jellyfin"
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         BrowseButton.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
         BaseLabel.Text = kind switch
         {
@@ -292,6 +296,7 @@ public partial class SourcesPage : Page
         BaseBox.Text = DefaultBase;
         UserBox.Text = string.Empty;
         PassBox.Password = string.Empty;
+        ProxyBox.Text = string.Empty;
         SelectKind("fnos");
     }
 
@@ -334,6 +339,7 @@ public partial class SourcesPage : Page
         BaseBox.Text = source.Base;
         UserBox.Text = source.Username;
         PassBox.Password = string.Empty;
+        ProxyBox.Text = source.Proxy;
         // NFS 没有密码框，别留一句「密码留空」让人找。
         AddStatus.Text = SelectedKind() == "nfs" ? string.Empty : "密码留空表示不修改。";
 
@@ -398,6 +404,7 @@ public partial class SourcesPage : Page
     {
         var name = string.IsNullOrWhiteSpace(NameBox.Text) ? "飞牛影视" : NameBox.Text.Trim();
         var baseUri = BaseBox.Text.Trim();
+        var proxy = ProxyBox.Text.Trim();
         var user = UserBox.Text.Trim();
         var pass = PassBox.Password;
         var kind = SelectedKind();
@@ -502,7 +509,8 @@ public partial class SourcesPage : Page
             baseUri,
             user,
             effectivePass,
-            dataDir);
+            dataDir,
+            proxy);
 
         // 地址可能变了，先卸掉旧的挂载（重连时会按新地址重挂）。
         if (editing is not null)

@@ -20,7 +20,7 @@ struct PlayerView: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { session.toggleFullscreen() }
                 .onTapGesture {
-                    if !session.loading {
+                    if !session.loading && session.error == nil {
                         session.togglePause()
                     }
                 }
@@ -38,14 +38,17 @@ struct PlayerView: View {
                 Spacer(minLength: 0)
             }
 
-            // 打开 / 切集：浮层是透明的，视频还没出画时下面就是桌面。
-            // 先铺一层不透明的黑，首帧到了再淡出（loading = false）。
-            if session.loading {
+            // 打开 / 切集 / 打开失败：浮层是透明的，视频还没出画时下面就是桌面。
+            // 先铺一层不透明的黑，首帧到了再淡出（loading = false）；
+            // 错误面板也压在黑底上，不能把桌面透出来。
+            if session.loading || session.error != nil {
                 Color.black
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
                     .transition(.opacity)
+            }
 
+            if session.loading {
                 loadingPanel
                     .allowsHitTesting(false)
                     .transition(.opacity)
@@ -60,7 +63,8 @@ struct PlayerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
-            if !session.loading && (session.chromeVisible || session.panel != .none) {
+            if !session.loading && session.error == nil
+                && (session.chromeVisible || session.panel != .none) {
                 topBar
                     .frame(maxHeight: .infinity, alignment: .top)
                 rightActions
@@ -68,7 +72,7 @@ struct PlayerView: View {
                     .padding(.trailing, 18)
             }
 
-            if !session.loading && session.chromeVisible {
+            if !session.loading && session.error == nil && session.chromeVisible {
                 bottomBar
                     .frame(maxHeight: .infinity, alignment: .bottom)
             }
@@ -949,9 +953,13 @@ struct PlayerView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Color.white.opacity(0.75))
                 .fixedSize(horizontal: false, vertical: true)
-            Button("关闭") { actions.close() }
-                .buttonStyle(.bordered)
-                .padding(.top, 6)
+            HStack(spacing: 10) {
+                Button("重试") { session.retry() }
+                    .buttonStyle(.borderedProminent)
+                Button("关闭") { actions.close() }
+                    .buttonStyle(.bordered)
+            }
+            .padding(.top, 6)
         }
         .padding(24)
         .frame(maxWidth: 560, alignment: .leading)

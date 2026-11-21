@@ -12,6 +12,7 @@ struct SourcesPage: View {
     @State private var base = ""
     @State private var username = ""
     @State private var password = ""
+    @State private var proxy = ""
     @State private var saving = false
 
     private var isEditing: Bool { editing != nil }
@@ -28,6 +29,11 @@ struct SourcesPage: View {
     /// 需要「用户名 / 密码」的类型。
     private var needsCredentials: Bool {
         ["emby", "jellyfin", "smb", "cifs", "webdav"].contains(kind)
+    }
+
+    /// 走 HTTP 的服务器才有代理；本地目录、SMB / NFS / WebDAV 是系统挂载。
+    private var needsProxy: Bool {
+        ["fnos", "feiniu", "emby", "jellyfin"].contains(kind)
     }
 
     private static func typeNoun(_ kind: String) -> String {
@@ -336,6 +342,16 @@ struct SourcesPage: View {
                 }
             }
 
+            if needsProxy {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel(text: "HTTP 代理（可选）")
+                    InputField(placeholder: "http://127.0.0.1:7890，留空表示直连", text: $proxy)
+                    Text("这个服务器的接口、海报和播放请求都会走这个代理。")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.faint)
+                }
+            }
+
             HStack {
                 Spacer()
                 Button("取消") { editing = nil }
@@ -358,6 +374,7 @@ struct SourcesPage: View {
         base = ""
         username = ""
         password = ""
+        proxy = ""
     }
 
     private static func defaultName(for kind: String) -> String {
@@ -396,6 +413,7 @@ struct SourcesPage: View {
         base = config.base
         username = config.username
         password = config.password
+        proxy = config.proxy ?? ""
     }
 
     private func save() {
@@ -411,6 +429,7 @@ struct SourcesPage: View {
         } else {
             config.password = password
         }
+        config.proxy = proxy.trimmingCharacters(in: .whitespaces)
 
         saving = true
         Task {

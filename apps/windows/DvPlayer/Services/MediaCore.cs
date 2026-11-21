@@ -457,7 +457,9 @@ public sealed record SourceConfig(
     string Username,
     string Password,
     /// <summary>本地源把进度写这里；服务器源留空。</summary>
-    string DataDir = "");
+    string DataDir = "",
+    /// <summary>网络服务器的 HTTP 代理（如 http://127.0.0.1:7890）；空 = 直连。</summary>
+    string Proxy = "");
 
 public sealed record SourceInfoDto(string Id, string Name, string Kind);
 
@@ -624,7 +626,11 @@ public sealed record PlayRecordDto(
 
 public sealed record HttpHeaderDto(string Name, string Value);
 
-public sealed record ImageSourceDto(string Url, List<HttpHeaderDto> Headers);
+public sealed record ImageSourceDto(
+    string Url,
+    List<HttpHeaderDto> Headers,
+    /// <summary>服务器设的 HTTP 代理；空 = 直连。</summary>
+    string? Proxy = null);
 
 public sealed record AudioTrackDto(
     string Guid,
@@ -663,7 +669,9 @@ public sealed record PlaySourceDto(
     string? VideoCodec,
     string? AudioCodec,
     List<AudioTrackDto> AudioStreams,
-    List<SubtitleTrackDto> SubtitleStreams);
+    List<SubtitleTrackDto> SubtitleStreams,
+    /// <summary>服务器设的 HTTP 代理；空 = 直连。播放请求也走它。</summary>
+    string? Proxy = null);
 
 public readonly record struct ApiResult<T>(bool Ok, T? Data, string? Error)
 {

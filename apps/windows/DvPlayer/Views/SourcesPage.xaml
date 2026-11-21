@@ -161,6 +161,14 @@
               <PasswordBox x:Name="PassBox" Style="{StaticResource InputPassword}" />
             </StackPanel>
 
+            <StackPanel x:Name="ProxyPanel">
+              <TextBlock Text="HTTP 代理（可选）" Style="{StaticResource FieldLabel}" />
+              <TextBox x:Name="ProxyBox" Style="{StaticResource Input}"
+                       ToolTip="例如 http://127.0.0.1:7890；只写 127.0.0.1:7890 也可以。留空表示直连。" />
+              <TextBlock Text="这个服务器的接口、海报和播放请求都会走这个代理。"
+                         Style="{StaticResource Caption}" Margin="0,6,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="AddSubmitButton" Content="添加并连接" Click="OnAddClick"
                       Style="{StaticResource AccentButton}" />

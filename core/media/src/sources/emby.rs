@@ -45,10 +45,19 @@ pub struct EmbySource {
     token: Option<String>,
     user_id: Option<String>,
     http: Client,
+    /// 用户设的 HTTP 代理；空表示直连。
+    proxy: String,
 }
 
 impl EmbySource {
-    pub fn new(id: String, name: String, base: String, username: String, password: String) -> Self {
+    pub fn new(
+        id: String,
+        name: String,
+        base: String,
+        username: String,
+        password: String,
+        proxy: String,
+    ) -> Self {
         Self {
             id,
             name,
@@ -57,10 +66,8 @@ impl EmbySource {
             password,
             token: None,
             user_id: None,
-            http: Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+            http: super::http_client(&proxy),
+            proxy,
         }
     }
 
@@ -494,6 +501,7 @@ impl EmbySource {
             audio_codec: audio_streams.first().and_then(|a| a.codec.clone()),
             audio_streams,
             subtitle_streams,
+            proxy: self.proxy.clone(),
         })
     }
 
@@ -660,6 +668,7 @@ impl EmbySource {
                 width
             ),
             headers: self.auth_headers(),
+            proxy: self.proxy.clone(),
         })
     }
 
@@ -1310,6 +1319,7 @@ mod tests {
             "emby-1".into(),
             "Emby".into(),
             "http://127.0.0.1:8096".into(),
+            String::new(),
             String::new(),
             String::new(),
         )

@@ -139,6 +139,11 @@ final class PlayerSession: ObservableObject {
 
     // —— mpv（子进程 + IPC，视频在 mpv 自己的窗口里） ——
     private(set) var mpv: MpvEngine!
+    /// 起 mpv 时用的 frame：进程退出后重试要按同一个形状重开。
+    private let engineFrame: NSRect
+    /// 上次打开失败的参数：错误面板「重试」照原样再跑一次。
+    private var retryItemId: String?
+    private var retryStartSeconds: Double?
 
     // —— 正在播的 ——
     @Published private(set) var itemId: String
@@ -265,8 +270,13 @@ final class PlayerSession: ObservableObject {
                                      startSeconds: local == nil ? startSeconds : nil) else {
             return nil
         }
+        engineFrame = frame
         mpv = engine
+        wire(engine)
+    }
 
+    /// 把回调和 mpv 实例接上。进程退出后重试会换一个新实例，所以单独拿出来。
+    private func wire(_ engine: MpvEngine) {
         engine.onPosition = { [weak self] position, duration in
             self?.handlePosition(position, duration)
         }
@@ -394,6 +404,10 @@ final class PlayerSession: ObservableObject {
     }
 
     private func begin(itemId: String, startSeconds: Double?) async {
+        // 错误面板的「重试」按这次参数再来一遍。
+        retryItemId = itemId
+        retryStartSeconds = startSeconds
+
         guard let core = AppState.shared.core else {
             error = "未连接媒体源。"
             loading = false
@@ -457,7 +471,7 @@ final class PlayerSession: ObservableObject {
                 source.headers.map { ($0.name, $0.value) },
                 uniquingKeysWith: { _, last in last })
             NSLog("[Play] load \(itemId) from=\(String(format: "%.1f", start)) dur=\(source.durationSeconds)")
-            mpv.loadURL(source.url, headers: headers, start: start)
+            mpv.loadURL(source.url, headers: headers, start: start, proxy: source.proxy)
             startReporting()
 
             Task { await loadMediaInfo(itemId: itemId) }
@@ -480,6 +494,37 @@ final class PlayerSession: ObservableObject {
     func switchTo(itemId: String) {
         guard itemId != self.itemId || error != nil else { return }
         Task { await begin(itemId: itemId, startSeconds: 0) }
+    }
+
+    /// 错误面板的「重试」：地址没取到就重新取；播放器进程退出就换个新进程。
+    func retry() {
+        guard !isStopped else { return }
+        let id = retryItemId ?? itemId
+        let start = retryStartSeconds
+        NSLog("[Play] retry item=\(id) start=\(start.map { String($0) } ?? "resume") " +
+              "mpvAlive=\(mpv.isAlive)")
+
+        error = nil
+
+        // mpv 子进程已经退出（或启动失败）：IPC 已经没用了，换个新实例再试。
+        if !mpv.isAlive {
+            mpv.shutdown()
+            guard let engine = MpvEngine(frame: engineFrame, startSeconds: nil) else {
+                loading = false
+                error = "播放器启动失败"
+                return
+            }
+            mpv = engine
+            wire(engine)
+        }
+
+        // 本地文件 / 原盘不走核心取地址，照原来的入口再来一次。
+        if let localSource {
+            Task { await beginLocal(localSource) }
+            return
+        }
+
+        Task { await begin(itemId: id, startSeconds: start) }
     }
 
     func playEpisode(_ episode: PlayerEpisode) {

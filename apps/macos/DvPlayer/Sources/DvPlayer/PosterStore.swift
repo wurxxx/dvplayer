@@ -11,6 +11,7 @@ actor PosterStore {
 
     private var memory = NSCache<NSString, NSImage>()
     private var inflight: [String: Task<NSImage?, Never>] = [:]
+    private var sessions: [String: URLSession] = [:]
     private let directory: URL
 
     init() {
@@ -46,7 +47,7 @@ actor PosterStore {
                 for header in source.headers {
                     request.setValue(header.value, forHTTPHeaderField: header.name)
                 }
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session(for: source.proxy).data(for: request)
                 guard (response as? HTTPURLResponse)?.statusCode ?? 200 < 300,
                       let image = NSImage(data: data) else {
                     return nil
@@ -66,6 +67,38 @@ actor PosterStore {
             memory.setObject(image, forKey: path as NSString)
         }
         return image
+    }
+
+    /// 按服务器的代理设置挑 URLSession：海报和播放走同一个代理。
+    /// 没设代理就用 shared，别为每张图新建会话。
+    private func session(for proxy: String?) -> URLSession {
+        guard var address = proxy?.trimmingCharacters(in: .whitespaces), !address.isEmpty else {
+            return .shared
+        }
+        if !address.contains("://") {
+            address = "http://" + address
+        }
+        if let cached = sessions[address] {
+            return cached
+        }
+
+        guard let url = URL(string: address), let host = url.host else {
+            return .shared
+        }
+
+        let port = url.port ?? 8080
+        let configuration = URLSessionConfiguration.default
+        configuration.connectionProxyDictionary = [
+            "HTTPEnable": true,
+            "HTTPProxy": host,
+            "HTTPPort": port,
+            "HTTPSEnable": true,
+            "HTTPSProxy": host,
+            "HTTPSPort": port,
+        ]
+        let built = URLSession(configuration: configuration)
+        sessions[address] = built
+        return built
     }
 
     private static func fileName(_ path: String) -> String {

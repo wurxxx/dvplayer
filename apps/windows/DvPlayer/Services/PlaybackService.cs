@@ -57,7 +57,8 @@ public static class Playback
             headers,
             start,
             string.IsNullOrWhiteSpace(source.Title) ? null : source.Title,
-            IsNetwork: source.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase));
+            IsNetwork: source.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase),
+            Proxy: string.IsNullOrWhiteSpace(source.Proxy) ? null : source.Proxy.Trim());
     }
 
     /// <summary>
