@@ -246,6 +246,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             Self.capture(to: shot)
+
+            // 截图巡检：`DVPLAYER_SHOT_SHEET=1` 再截一张附着的 sheet
+            // （选源框、确认框这类浮层不在主窗口的图层里）。
+            if env["DVPLAYER_SHOT_SHEET"] == "1",
+               let sheet = NSApp.windows.first(where: { $0.sheetParent != nil }) {
+                let ext = (shot as NSString).pathExtension
+                let base = (shot as NSString).deletingPathExtension
+                let suffix = ext.isEmpty ? "-sheet" : "-sheet.\(ext)"
+                Self.capture(to: base + suffix, window: sheet)
+
+                // 留着 sheet 的话 NSApp.terminate 会被挡住，截完就收起来。
+                sheet.sheetParent?.endSheet(sheet)
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+
             if env["DVPLAYER_EXIT"] == "1" {
                 NSApp.terminate(nil)
             }

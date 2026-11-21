@@ -25,6 +25,7 @@ use crate::models::{
 };
 use crate::sources::fnos::parse_episode_number;
 use crate::sources::MediaSource;
+use crate::text::{clean_title, year_of};
 
 /// 认作视频的扩展名。ISO 也算，播放时由界面决定走不走原盘流程。
 const VIDEO_EXTS: &[&str] = &[
@@ -315,6 +316,7 @@ impl LocalSource {
             status: None,
             backdrop_path: None,
             single_child_id: None,
+            sources: Vec::new(),
         }
     }
 
@@ -372,6 +374,7 @@ impl LocalSource {
             backdrop_path: None,
             single_child_id: (show.seasons.len() == 1)
                 .then(|| format!("d/{}@{}", encode_id(&show.rel), show.seasons[0].number)),
+            sources: Vec::new(),
         }
     }
 
@@ -414,6 +417,7 @@ impl LocalSource {
             status: None,
             backdrop_path: None,
             single_child_id: None,
+            sources: Vec::new(),
         }
     }
 
@@ -452,6 +456,7 @@ impl LocalSource {
             status: None,
             backdrop_path: None,
             single_child_id: None,
+            sources: Vec::new(),
         }
     }
 
@@ -1230,87 +1235,6 @@ fn chinese_number(text: &str) -> Option<i32> {
             .map(|n| 10 + n as i32);
     }
     None
-}
-
-/// 从文件名里挑年份：`(2023)`、`（2023）`、`.2023.`、` 2023 `。
-fn year_of(text: &str) -> Option<i32> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i + 4 <= chars.len() {
-        if chars[i..i + 4].iter().all(|c| c.is_ascii_digit()) {
-            let raw: String = chars[i..i + 4].iter().collect();
-            let before_ok = i == 0
-                || !chars[i - 1].is_ascii_alphanumeric();
-            let after_ok = i + 4 == chars.len()
-                || !chars[i + 4].is_ascii_alphanumeric();
-            if before_ok && after_ok {
-                if let Ok(year) = raw.parse::<i32>() {
-                    if (1900..=2100).contains(&year) {
-                        return Some(year);
-                    }
-                }
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-/// 发布名清理：`Some.Movie.2023.2160p.BluRay.x265.mkv` → `Some Movie`。
-/// 中文标题原样保留，只把点、下划线换成空格并去掉技术词。
-fn clean_title(raw: &str) -> String {
-    let replaced: String = raw
-        .chars()
-        .map(|c| match c {
-            '.' | '_' => ' ',
-            '【' | '】' | '[' | ']' => ' ',
-            _ => c,
-        })
-        .collect();
-
-    let keep: Vec<&str> = replaced
-        .split_whitespace()
-        .filter(|word| !is_release_word(word))
-        .collect();
-
-    let mut text = keep.join(" ");
-    // 去掉结尾的年份括号残留，如「电影 (2023)」→「电影」。
-    text = text.trim().to_string();
-    for pattern in [" (", "（"] {
-        if let Some(index) = text.rfind(pattern) {
-            let tail = &text[index..];
-            if tail.contains(')') || tail.contains('）') {
-                let inner: String = tail
-                    .chars()
-                    .filter(|c| c.is_ascii_digit())
-                    .collect();
-                if inner.len() == 4 {
-                    text.truncate(index);
-                }
-            }
-        }
-    }
-    text.trim().to_string()
-}
-
-fn is_release_word(word: &str) -> bool {
-    const WORDS: &[&str] = &[
-        "2160p", "1080p", "720p", "480p", "4k", "8k", "uhd", "bluray", "blu-ray", "bdrip",
-        "remux", "webrip", "web-dl", "webdl", "web", "hdtv", "dvdrip", "hdr", "hdr10", "hdr10+",
-        "dv", "dovi", "sdr", "x264", "x265", "h264", "h265", "hevc", "avc", "10bit", "8bit",
-        "aac", "ac3", "eac3", "ddp", "dd", "dts", "dtshd", "truehd", "atmos", "flac", "proper",
-        "repack", "internal", "extended", "uncut", "remastered", "imax", "hmax", "60fps",
-    ];
-    let lower = word.to_lowercase();
-    if WORDS.contains(&lower.as_str()) {
-        return true;
-    }
-    // `DDP5.1`、`x265-ABC` 这类合成词。
-    lower.starts_with("ddp")
-        || lower.starts_with("aac")
-        || lower.starts_with("x26")
-        || lower.starts_with("h26")
-        || lower.starts_with("dts")
 }
 
 // —— 路径小工具 ——

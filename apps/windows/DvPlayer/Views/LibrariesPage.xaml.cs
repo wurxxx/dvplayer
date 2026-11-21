@@ -1144,19 +1144,25 @@ public partial class LibrariesPage : Page
             return;
         }
 
+        // 核心已经去重、把命中集提升成剧，并按主源排好了。
+        // 库内搜索只保留当前源里也有的条目，并把 id 换成本源那一条
+        // （主源可能是别的源，比如那边有进度）。
         var sourceId = AppServices.Instance.Settings.LastSourceId;
-        var shown = result.Data
-            .Where(i => sourceId is null || i.SourceId == sourceId)
-            .GroupBy(i => string.IsNullOrWhiteSpace(i.ParentId) ? i.Id : i.ParentId!)
-            .Select(g => g.OrderByDescending(i => i.LastPlayed ?? 0).First())
-            .Select(item => string.IsNullOrWhiteSpace(item.ParentId)
-                ? item
-                : item with
+        var shown = result.Data.Items
+            .Select(item =>
+            {
+                if (sourceId is null)
                 {
-                    Id = item.ParentId!,
-                    Title = string.IsNullOrWhiteSpace(item.ParentTitle) ? item.Title : item.ParentTitle!,
-                    Kind = "series",
-                })
+                    return item;
+                }
+
+                var hit = item.Sources?.FirstOrDefault(s => s.SourceId == sourceId);
+                return hit is null
+                    ? null
+                    : item with { Id = hit.ItemId, SourceId = hit.SourceId };
+            })
+            .Where(item => item is not null)
+            .Select(item => item!)
             .ToList();
 
         if (version != _inlineSearchVersion)

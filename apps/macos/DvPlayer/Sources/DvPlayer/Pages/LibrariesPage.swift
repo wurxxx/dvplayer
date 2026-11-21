@@ -420,8 +420,8 @@ struct LibrariesPage: View {
         searching = true
         defer { searching = false }
 
-        let all = (try? await core.search(keyword)) ?? []
-        searchResults = all.filter { $0.sourceId == sourceId }
+        let all = (try? await core.search(keyword)) ?? SearchResult()
+        searchResults = all.items.filter { $0.sourceId == sourceId }
     }
 
     // MARK: - 加载

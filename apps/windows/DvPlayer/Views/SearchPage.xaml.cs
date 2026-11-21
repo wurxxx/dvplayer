@@ -9,8 +9,8 @@ namespace DvPlayer.Views;
 /// 聚合搜索页。空态：一个放大镜加「搜索所有媒体库中的内容」；
 /// 输入后跨所有已连上的源找片名。
 ///
-/// 现在核心还没有搜索接口，这里先把各库首页（每个库前 300 条）缓存在内存里做匹配，
-/// 输入时只过滤本地索引。等核心加上索引（飞牛客户端索引 + 跨源合并）就换掉这一段。
+/// 去重、选主源、失败源都由核心的 `MediaHub::search` 做完，这里只负责显示：
+/// 同一部片只出现一次，左上角标出有几个来源，点开先让用户选一个。
 /// </summary>
 public partial class SearchPage : Page
 {
@@ -124,9 +124,21 @@ public partial class SearchPage : Page
 
         try
         {
-            var cards = RecordSegment.IsChecked == true
-                ? await SearchRecordsAsync(query)
-                : await SearchMediaAsync(query);
+            List<SearchCard> cards;
+            List<SourceFailureDto> failed;
+
+            if (RecordSegment.IsChecked == true)
+            {
+                cards = await SearchRecordsAsync(query);
+                failed = new List<SourceFailureDto>();
+            }
+            else
+            {
+                // 核心已经把跨源结果去重、按主源排好；这里只负责显示。
+                var outcome = await SearchMediaAsync(query);
+                cards = outcome.Cards;
+                failed = outcome.Failed;
+            }
 
             if (version != _version)
             {
@@ -138,15 +150,39 @@ public partial class SearchPage : Page
                 ShowEmpty($"没有找到「{query}」", RecordSegment.IsChecked == true
                     ? "换个关键词，或去媒体库里翻"
                     : "试试剧名或更短的关键词");
-                StatusText.Text = "0 个结果";
+                StatusText.ToolTip = null;
+
+                if (failed.Count == 0)
+                {
+                    StatusText.Text = "0 个结果";
+                }
+                else
+                {
+                    var names = string.Join("、", failed.Select(f => f.SourceName));
+                    StatusText.Text = $"0 个结果 · {failed.Count} 个源没响应（{names}）";
+                    StatusText.ToolTip = string.Join("\n",
+                        failed.Select(f => $"{f.SourceName}：{f.Error}"));
+                }
                 return;
             }
 
             ResultGrid.ItemsSource = cards;
             EmptyState.Visibility = Visibility.Collapsed;
             ResultScroll.Visibility = Visibility.Visible;
-            StatusText.Text = $"{cards.Count} 个结果" +
-                "";
+
+            if (failed.Count == 0)
+            {
+                StatusText.Text = $"{cards.Count} 个结果";
+                StatusText.ToolTip = null;
+            }
+            else
+            {
+                // 某个源挂了不影响其它源，但要让用户知道结果不全。
+                var names = string.Join("、", failed.Select(f => f.SourceName));
+                StatusText.Text = $"{cards.Count} 个结果 · {failed.Count} 个源没响应（{names}）";
+                StatusText.ToolTip = string.Join("\n",
+                    failed.Select(f => $"{f.SourceName}：{f.Error}"));
+            }
 
             await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)));
         }
@@ -159,47 +195,36 @@ public partial class SearchPage : Page
         }
     }
 
-    /// <summary>跨源搜索，交给核心（飞牛 /search/list、Emby SearchTerm）。</summary>
-    private async Task<List<SearchCard>> SearchMediaAsync(string query)
+    /// <summary>跨源搜索，交给核心（去重、选主源、失败源都已在核心里做完）。</summary>
+    private async Task<(List<SearchCard> Cards, List<SourceFailureDto> Failed)> SearchMediaAsync(string query)
     {
         var core = AppServices.Instance.Core;
         if (core is null)
         {
-            return new List<SearchCard>();
+            return (new List<SearchCard>(), new List<SourceFailureDto>());
         }
 
         var result = await Task.Run(() => core.Search(query)).ConfigureAwait(true);
         if (!result.Ok || result.Data is null)
         {
-            return new List<SearchCard>();
+            return (new List<SearchCard>(), new List<SourceFailureDto>());
         }
 
         var showResolution = AppServices.Instance.Settings.ShowResolution;
-        return result.Data
-            // 命中的可能是某一集，按父级归并成一部剧。
-            .GroupBy(i => string.IsNullOrWhiteSpace(i.ParentId) ? i.Id : i.ParentId!)
-            .Select(g => g.OrderByDescending(i => i.LastPlayed ?? 0).First())
+        var failed = result.Data.Failed ?? new List<SourceFailureDto>();
+
+        var cards = result.Data.Items
             .Select(item =>
             {
-                // 命中某一集时按它所属的剧展示。
-                var shown = string.IsNullOrWhiteSpace(item.ParentId)
-                    ? item
-                    : item with
-                    {
-                        Id = item.ParentId!,
-                        Title = string.IsNullOrWhiteSpace(item.ParentTitle) ? item.Title : item.ParentTitle!,
-                        Kind = "series",
-                    };
-
-                var id = shown.Id;
-                var title = shown.Title;
+                var title = item.Title;
+                var sources = item.Sources ?? new List<ItemSourceDto>();
 
                 var card = new SearchCard
                 {
-                    Id = id,
-                    Kind = shown.Kind,
+                    Id = item.Id,
+                    Kind = item.Kind,
                     Title = MediaText.Clean(title),
-                    Sub = MediaText.Describe(shown),
+                    Sub = MediaText.Describe(item),
                     Badge = showResolution && !string.IsNullOrEmpty(item.Resolution)
                         ? item.Resolution!
                         : "",
@@ -208,12 +233,15 @@ public partial class SearchPage : Page
                     BadgeVisibility = showResolution && !string.IsNullOrEmpty(item.Resolution)
                         ? Visibility.Visible
                         : Visibility.Collapsed,
+                    Sources = sources,
                 };
-                card.UseGradient(id + title);
+                card.UseGradient(item.Id + title);
                 return card;
             })
             .Take(120)
             .ToList();
+
+        return (cards, failed);
     }
 
     private async Task<List<SearchCard>> SearchRecordsAsync(string query)
@@ -277,17 +305,20 @@ public partial class SearchPage : Page
     /// </summary>
     private void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        if (sender is not FrameworkElement { DataContext: SearchCard card } ||
+            string.IsNullOrEmpty(card.Id))
         {
             return;
         }
 
-        NavigationService?.Navigate(new SeriesPage(id));
+        // 多来源不在这里选：进详情页的「资源」里切。
+        NavigationService?.Navigate(new SeriesPage(card.Id));
     }
-
 
     private sealed class SearchCard : CardVisual
     {
+        private List<ItemSourceDto> _sources = new();
+
         public string Id { get; init; } = "";
         public string Kind { get; init; } = "";
         public string Title { get; init; } = "";
@@ -296,5 +327,17 @@ public partial class SearchPage : Page
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
         public Visibility BadgeVisibility { get; init; } = Visibility.Collapsed;
+
+        /// <summary>同一部片的所有来源；只有聚合搜索会填。</summary>
+        public List<ItemSourceDto> Sources
+        {
+            get => _sources;
+            init => _sources = value ?? new List<ItemSourceDto>();
+        }
+
+        public string SourcesBadge => $"{Sources.Count} 源";
+
+        public Visibility SourcesVisibility =>
+            Sources.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
     }
 }

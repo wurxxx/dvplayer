@@ -2,6 +2,71 @@ import SwiftUI
 import AppKit
 import DvCore
 
+/// 详情页「资源」里的一张卡：源名 + 分辨率 + 进度；当前源描边、最佳来源标「推荐」。
+private struct SourceCard: View {
+    let source: ItemSource
+    let current: Bool
+    let best: Bool
+    var onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Text(source.sourceName)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+
+                    if current {
+                        tag("当前", color: Theme.accent)
+                    } else if best {
+                        tag("推荐", color: Theme.muted)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 10) {
+                    if let resolution = source.resolution, !resolution.isEmpty {
+                        Text(resolution)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Theme.surfaceHover, in: RoundedRectangle(cornerRadius: 5))
+                    }
+
+                    Text(source.progress > 0.01
+                         ? "看过 \(Int(source.progress * 100))%"
+                         : "未看")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.faint)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(current ? Theme.accent : Theme.line.opacity(0.6),
+                            lineWidth: current ? 1.5 : 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func tag(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
 /// 选集里的一项：带上真正的集号（有些源不给 `episodeNumber`，就按顺序补）。
 struct EpisodeRow: Identifiable {
     let item: MediaItem
@@ -34,6 +99,8 @@ struct DetailPage: View {
     @State private var episodes: [EpisodeRow] = []
     @State private var people: [Person] = []
     @State private var mediaInfo: MediaInfo?
+    /// 同一部片在各源的条目（详情页「资源」）。
+    @State private var sources: [ItemSource] = []
     @State private var loading = true
     @State private var busy = false
     @State private var showingAudio = false
@@ -94,6 +161,11 @@ struct DetailPage: View {
 
                     if !episodes.isEmpty {
                         episodeBlock
+                    }
+
+                    // 同一部片在多个源里都有：详情页列出来，点一下切源。
+                    if sources.count > 1 {
+                        sourcesBlock
                     }
 
                     if !people.isEmpty {
@@ -302,6 +374,24 @@ struct DetailPage: View {
             HorizontalRow(items: episodes, itemWidth: 314, spacing: 18) { row in
                 EpisodeCard(episode: row) {
                     play(row.id, startSeconds: nil)
+                }
+            }
+        }
+    }
+
+    // MARK: - 资源（同一部片的多个来源）
+
+    private var sourcesBlock: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            SectionTitle(text: "资源", trailing: "\(sources.count) 个来源")
+
+            HorizontalRow(items: sources, itemWidth: 250, spacing: 14) { source in
+                SourceCard(source: source,
+                           current: source.itemId == itemId,
+                           best: source.id == sources.first?.id) {
+                    // 当前正在看的那张不做任何事，免得白刷一次详情。
+                    guard source.itemId != itemId else { return }
+                    state.openDetail(source.itemId)
                 }
             }
         }
@@ -717,6 +807,7 @@ struct DetailPage: View {
             }
 
             Task { await loadMediaInfo() }
+            Task { await loadSources() }
             return
         }
 
@@ -733,6 +824,9 @@ struct DetailPage: View {
 
         // 演职人员对整部剧取，和 Windows 一致。
         people = (try? await core.people(itemId)) ?? []
+
+        // 「资源」要跨源再搜一遍，慢一点，别挡首屏。
+        Task { await loadSources() }
 
         guard let kind = detail?.kind.lowercased(),
               ["series", "tv", "season", "folder"].contains(kind) else {
@@ -809,6 +903,12 @@ struct DetailPage: View {
                                             seasons: seasons, seasonId: seasonId,
                                             episodes: episodes, total: episodeTotal,
                                             at: Date()))
+    }
+
+    /// 「资源」列表：核心按详情标题跨源找回同一部片，去重规则和搜索一样。
+    private func loadSources() async {
+        guard let core = state.core else { return }
+        sources = (try? await core.itemSources(itemId)) ?? []
     }
 
     private func loadMediaInfo() async {

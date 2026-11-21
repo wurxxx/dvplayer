@@ -77,6 +77,12 @@
                             Visibility="{Binding BadgeVisibility}">
                       <TextBlock Text="{Binding Badge}" FontSize="11.5" Foreground="#CCFFFFFF" />
                     </Border>
+                    <!-- 聚合搜索里同一部片有多个源时标一下，点开先选源。 -->
+                    <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="8"
+                            Background="#73000000" CornerRadius="5" Padding="6,2"
+                            Visibility="{Binding SourcesVisibility}">
+                      <TextBlock Text="{Binding SourcesBadge}" FontSize="11.5" Foreground="#E6FFFFFF" />
+                    </Border>
                   </Grid>
                 </Border>
                 <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"

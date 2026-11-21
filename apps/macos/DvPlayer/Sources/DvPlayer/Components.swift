@@ -104,6 +104,19 @@ struct PosterCard: View {
                         ProgressBar(value: item.progress)
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    // 聚合搜索里同一部片有多个源时标一下，点开可以先选源。
+                    if item.sources.count > 1 {
+                        Text("\(item.sources.count) 源")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Color.white.opacity(0.85))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.black.opacity(0.45),
+                                        in: RoundedRectangle(cornerRadius: 5))
+                            .padding(8)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .contentShape(Rectangle())
             }

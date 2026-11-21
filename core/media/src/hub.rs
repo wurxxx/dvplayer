@@ -13,8 +13,8 @@ use crate::error::{MediaError, Result};
 use crate::models::{
     Person,
     MediaInfo,
-    Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged, PlayRecord,
-    PlaySource,
+    Genre, ImageSource, ItemSource, ListQuery, MediaDetail, MediaItem, MediaKind, MediaLibrary,
+    Paged, PlayRecord, PlaySource, SearchResult, SourceFailure,
 };
 use crate::sources::{create, MediaSource, SourceConfig};
 
@@ -140,18 +140,83 @@ impl MediaHub {
         entry.source.genres(raw)
     }
 
-    /// 跨源关键词搜索。各源结果合并后截断，避免界面一次塞太多。
-    pub fn search(&self, query: &str) -> Result<Vec<MediaItem>> {
-        let mut list = self.collect(
-            |entry| entry.source.search(query),
-            |entry, mut item| {
-                qualify_items(&entry.id, std::slice::from_mut(&mut item));
-                item
-            },
-        )?;
+    /// 跨源关键词搜索：各源并发，按「标题 + 年份 + 类型（剧再比集数）」去重，
+    /// 同一部片只留一条，其余来源挂在 `sources` 里供界面切换。
+    ///
+    /// 选主源：有进度 > 用户设的源顺序（`entries` 顺序）> 分辨率。
+    /// 某个源失败只进 `failed`，不影响其它源；全失败才返回错误。
+    pub fn search(&self, query: &str) -> Result<SearchResult> {
+        let mut failed = Vec::new();
+        let mut groups: Vec<Group> = Vec::new();
 
-        list.truncate(120);
-        Ok(list)
+        // 并发跑，一个源卡住不拖慢整次搜索。
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = self
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(priority, entry)| {
+                    scope.spawn(move || (priority, entry, entry.source.search(query)))
+                })
+                .collect();
+
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok())
+                .collect::<Vec<_>>()
+        });
+
+        for (priority, entry, result) in results {
+            match result {
+                Ok(items) => {
+                    for mut item in items {
+                        // 命中的是集 / 季：按父级归并成一部剧。
+                        promote_episode(&mut item);
+                        qualify_items(&entry.id, std::slice::from_mut(&mut item));
+
+                        let candidate = Candidate {
+                            source_id: entry.id.clone(),
+                            source_name: entry.source.name().to_string(),
+                            priority,
+                            item,
+                        };
+                        let key = GroupKey::of(&candidate.item);
+                        match groups.iter_mut().find(|group| group.key.matches(&key)) {
+                            Some(group) => group.push(candidate),
+                            None => groups.push(Group::new(key, candidate)),
+                        }
+                    }
+                }
+                Err(err) => failed.push(SourceFailure {
+                    source_id: entry.id.clone(),
+                    source_name: entry.source.name().to_string(),
+                    error: err.to_string(),
+                }),
+            }
+        }
+
+        if groups.is_empty() && !failed.is_empty() {
+            let message = failed
+                .iter()
+                .map(|f| format!("{}：{}", f.source_name, f.error))
+                .collect::<Vec<_>>()
+                .join("；");
+            return Err(MediaError::Other(format!("所有源都搜索失败：{message}")));
+        }
+
+        // 组内选主；组间有进度的在前，其余保持源返回顺序（稳定排序）。
+        for group in &mut groups {
+            group.sort();
+        }
+        groups.sort_by(|a, b| b.has_progress().cmp(&a.has_progress()));
+
+        let items = groups
+            .into_iter()
+            .map(Group::finish)
+            .take(120)
+            .collect();
+
+        Ok(SearchResult { items, failed })
     }
 
     pub fn children(
@@ -178,6 +243,83 @@ impl MediaHub {
         detail.play_item_id = qualify_opt(&entry.id, detail.play_item_id);
 
         Ok(detail)
+    }
+
+    /// 详情页「资源」列表：同一部片在所有源里的条目。
+    ///
+    /// 从搜索页之外的入口（媒体库、记录、播放页下一集）进详情时，界面手里只有
+    /// 一个条目 id；这里用详情标题各源再搜一遍，按搜索去重的同一套规则归组，
+    /// 把同一部片的其它源找出来。排序同搜索：有进度 > 源顺序 > 分辨率。
+    pub fn item_sources(&self, item_id: &str) -> Result<Vec<ItemSource>> {
+        let (entry, raw) = self.route(item_id)?;
+        let detail = entry.source.detail(raw)?;
+
+        // 单集 / 单季不进「资源」：那是一部剧内部的层级，不是同一部片的另一个源。
+        if matches!(detail.kind, MediaKind::Episode | MediaKind::Season) {
+            return Ok(Vec::new());
+        }
+
+        let key = GroupKey {
+            title: crate::text::normalize_key(&detail.title),
+            year: detail
+                .release_date
+                .as_deref()
+                .and_then(crate::text::year_of),
+            kind: group_kind(detail.kind),
+            episodes: detail.episode_count.or(detail.local_episode_count),
+        };
+
+        let mut rows: Vec<(usize, ItemSource)> = Vec::new();
+
+        // 先放各源搜到的那一条（带真实进度），搜不到再退回详情本身。
+        if let Ok(found) = self.search(&detail.title) {
+            for item in found.items {
+                if !key.matches(&GroupKey::of(&item)) {
+                    continue;
+                }
+                for source in item.sources {
+                    if rows.iter().any(|(_, row)| row.item_id == source.item_id) {
+                        continue;
+                    }
+                    let priority = self
+                        .entries
+                        .iter()
+                        .position(|e| e.id == source.source_id)
+                        .unwrap_or(usize::MAX);
+                    rows.push((priority, source));
+                }
+            }
+        }
+
+        let own_id = qualify(&entry.id, &detail.id);
+        if !rows.iter().any(|(_, row)| row.item_id == own_id) {
+            let priority = self
+                .entries
+                .iter()
+                .position(|e| e.id == entry.id)
+                .unwrap_or(0);
+            rows.push((
+                priority,
+                ItemSource {
+                    item_id: own_id,
+                    source_id: entry.id.clone(),
+                    source_name: entry.source.name().to_string(),
+                    resolution: detail.resolution.clone(),
+                    progress: 0.0,
+                },
+            ));
+        }
+
+        rows.sort_by(|a, b| {
+            let a_watched = a.1.progress > 0.0;
+            let b_watched = b.1.progress > 0.0;
+            b_watched
+                .cmp(&a_watched)
+                .then(a.0.cmp(&b.0))
+                .then(resolution_rank(&b.1.resolution).cmp(&resolution_rank(&a.1.resolution)))
+        });
+
+        Ok(rows.into_iter().map(|(_, row)| row).collect())
     }
 
     /// 详情页「媒体信息」。条目 id 可能带源前缀，这里去掉再交给适配器。
@@ -374,6 +516,164 @@ fn qualify_items(source_id: &str, items: &mut [MediaItem]) {
     }
 }
 
+// —— 搜索结果去重 ——
+
+/// 一次搜索里，同一个源给的一条候选。
+struct Candidate {
+    item: MediaItem,
+    source_id: String,
+    source_name: String,
+    /// 源在配置里的顺序，小的优先。
+    priority: usize,
+}
+
+/// 去重键：标题归一 + 年份 + 类型 + 剧集数。
+struct GroupKey {
+    title: String,
+    year: Option<i32>,
+    kind: MediaKind,
+    episodes: Option<i32>,
+}
+
+impl GroupKey {
+    fn of(item: &MediaItem) -> Self {
+        Self {
+            title: crate::text::normalize_key(&item.title),
+            year: item.year,
+            kind: group_kind(item.kind),
+            episodes: item.episode_count.or(item.local_episode_count),
+        }
+    }
+
+    /// 年份 / 集数只有两边都给了且不同才算不同片；缺一边就按同一部合并。
+    fn matches(&self, other: &Self) -> bool {
+        self.title == other.title
+            && self.kind == other.kind
+            && compatible(self.year, other.year)
+            && compatible(self.episodes, other.episodes)
+    }
+}
+
+fn compatible<T: PartialEq>(a: Option<T>, b: Option<T>) -> bool {
+    match (a, b) {
+        (Some(x), Some(y)) => x == y,
+        _ => true,
+    }
+}
+
+/// 电影 / 视频文件 / 未知都算「电影」；剧 / 季 / 集都算「剧」。
+/// 不同源对同一部片的叫法不一样（Emby 给 Movie，本地文件给 Video），不归一就合不起来。
+fn group_kind(kind: MediaKind) -> MediaKind {
+    match kind {
+        MediaKind::Movie | MediaKind::Video | MediaKind::Unknown => MediaKind::Movie,
+        MediaKind::Series | MediaKind::Season | MediaKind::Episode => MediaKind::Series,
+        other => other,
+    }
+}
+
+/// 命中一集时按父级展示成一部剧（搜索页不该出现同一部剧的十几集）。
+fn promote_episode(item: &mut MediaItem) {
+    if !matches!(item.kind, MediaKind::Episode | MediaKind::Season) {
+        return;
+    }
+    let Some(parent) = item.parent_id.clone() else {
+        return;
+    };
+
+    item.id = parent;
+    if let Some(title) = item.parent_title.take().filter(|t| !t.trim().is_empty()) {
+        item.title = title;
+    }
+    item.kind = MediaKind::Series;
+    item.season_number = None;
+    item.episode_number = None;
+    item.parent_id = None;
+}
+
+/// 分辨率粗排：4K > 1440p > 1080p > 720p。
+fn resolution_rank(resolution: &Option<String>) -> u8 {
+    let Some(text) = resolution else {
+        return 0;
+    };
+    let lower = text.to_lowercase();
+    if lower.contains("4320") || lower.contains("8k") {
+        5
+    } else if lower.contains("2160") || lower.contains("4k") {
+        4
+    } else if lower.contains("1440") {
+        3
+    } else if lower.contains("1080") {
+        2
+    } else if lower.contains("720") {
+        1
+    } else {
+        0
+    }
+}
+
+/// 同一部片的所有来源，第一条是主条目。
+struct Group {
+    key: GroupKey,
+    candidates: Vec<Candidate>,
+}
+
+impl Group {
+    fn new(key: GroupKey, candidate: Candidate) -> Self {
+        Self {
+            key,
+            candidates: vec![candidate],
+        }
+    }
+
+    fn push(&mut self, candidate: Candidate) {
+        // 同一个源可能把同一条结果给了两次。
+        if self
+            .candidates
+            .iter()
+            .any(|existing| existing.item.id == candidate.item.id)
+        {
+            return;
+        }
+        self.candidates.push(candidate);
+    }
+
+    fn sort(&mut self) {
+        self.candidates.sort_by(|a, b| {
+            let a_watched = a.item.progress > 0.0;
+            let b_watched = b.item.progress > 0.0;
+            b_watched
+                .cmp(&a_watched)
+                .then(a.priority.cmp(&b.priority))
+                .then(
+                    resolution_rank(&b.item.resolution)
+                        .cmp(&resolution_rank(&a.item.resolution)),
+                )
+        });
+    }
+
+    fn has_progress(&self) -> bool {
+        self.candidates.iter().any(|c| c.item.progress > 0.0)
+    }
+
+    fn finish(mut self) -> MediaItem {
+        let primary = self.candidates.remove(0);
+        let sources = std::iter::once(&primary)
+            .chain(self.candidates.iter())
+            .map(|candidate| ItemSource {
+                item_id: candidate.item.id.clone(),
+                source_id: candidate.source_id.clone(),
+                source_name: candidate.source_name.clone(),
+                resolution: candidate.item.resolution.clone(),
+                progress: candidate.item.progress,
+            })
+            .collect();
+
+        let mut item = primary.item;
+        item.sources = sources;
+        item
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,11 +698,33 @@ mod tests {
 
     struct Mock {
         tag: &'static str,
+        hits: Vec<MediaItem>,
+        fail_search: bool,
     }
 
     impl Mock {
         fn boxed(tag: &'static str) -> Box<dyn MediaSource> {
-            Box::new(Self { tag })
+            Box::new(Self {
+                tag,
+                hits: Vec::new(),
+                fail_search: false,
+            })
+        }
+
+        fn with_hits(tag: &'static str, hits: Vec<MediaItem>) -> Box<dyn MediaSource> {
+            Box::new(Self {
+                tag,
+                hits,
+                fail_search: false,
+            })
+        }
+
+        fn failing(tag: &'static str) -> Box<dyn MediaSource> {
+            Box::new(Self {
+                tag,
+                hits: Vec::new(),
+                fail_search: true,
+            })
         }
     }
 
@@ -460,14 +782,26 @@ mod tests {
         }
 
         fn search(&self, _query: &str) -> Result<Vec<MediaItem>> {
-            Ok(Vec::new())
+            if self.fail_search {
+                return Err(MediaError::Other("搜索接口 500".into()));
+            }
+            Ok(self.hits.clone())
         }
 
         fn detail(&self, item_id: &str) -> Result<MediaDetail> {
+            // 有 hit 时按 hit 的字段回，方便测「详情 → 资源列表」这条链路。
+            let hit = self.hits.iter().find(|hit| hit.id == item_id);
             Ok(MediaDetail {
                 id: item_id.to_string(),
-                title: format!("{}-{item_id}", self.tag),
-                kind: crate::models::MediaKind::Series,
+                title: hit
+                    .map(|hit| hit.title.clone())
+                    .unwrap_or_else(|| format!("{}-{item_id}", self.tag)),
+                kind: hit
+                    .map(|hit| hit.kind)
+                    .unwrap_or(crate::models::MediaKind::Series),
+                episode_count: hit.and_then(|hit| hit.episode_count),
+                local_episode_count: hit.and_then(|hit| hit.local_episode_count),
+                resolution: hit.and_then(|hit| hit.resolution.clone()),
                 original_title: None,
                 overview: None,
                 poster_path: Some("/p.webp".into()),
@@ -478,10 +812,7 @@ mod tests {
                 runtime_seconds: None,
                 season_count: None,
                 local_season_count: None,
-                episode_count: None,
-                local_episode_count: None,
                 status: None,
-                resolution: None,
                 audio_type: None,
                 color_range: None,
                 play_item_id: Some("3".into()),
@@ -574,8 +905,186 @@ mod tests {
                 status: None,
                 backdrop_path: None,
                 single_child_id: None,
+                sources: Vec::new(),
             }
         }
+    }
+
+    fn hit(
+        tag: &str,
+        id: &str,
+        title: &str,
+        kind: crate::models::MediaKind,
+        year: Option<i32>,
+        progress: f64,
+    ) -> MediaItem {
+        MediaItem {
+            id: id.to_string(),
+            title: title.to_string(),
+            kind,
+            source_id: tag.to_string(),
+            poster_path: None,
+            parent_id: None,
+            parent_title: None,
+            year,
+            runtime_seconds: None,
+            progress,
+            is_favorite: false,
+            overview: None,
+            resolution: Some("1080p".into()),
+            last_played: None,
+            season_number: None,
+            episode_number: None,
+            episode_count: None,
+            local_episode_count: None,
+            season_count: None,
+            rating: None,
+            release_date: None,
+            status: None,
+            backdrop_path: None,
+            single_child_id: None,
+            sources: Vec::new(),
+        }
+    }
+
+    fn hub_with(
+        a: Vec<MediaItem>,
+        b: Vec<MediaItem>,
+    ) -> MediaHub {
+        let mut hub = MediaHub::new();
+        hub.add_source("a", Mock::with_hits("a", a)).unwrap();
+        hub.add_source("b", Mock::with_hits("b", b)).unwrap();
+        hub
+    }
+
+    #[test]
+    fn search_merges_the_same_movie_across_sources() {
+        let hub = hub_with(
+            vec![hit("a", "1", "Some Movie", crate::models::MediaKind::Movie, Some(2023), 0.0)],
+            vec![hit("b", "2", "some.movie.2023.2160p", crate::models::MediaKind::Movie, Some(2023), 0.0)],
+        );
+
+        let result = hub.search("some").unwrap();
+        assert_eq!(result.items.len(), 1);
+        let item = &result.items[0];
+        // 源顺序在前的是主条目。
+        assert_eq!(item.id, "a:1");
+        assert_eq!(item.sources.len(), 2);
+        assert_eq!(item.sources[0].item_id, "a:1");
+        assert_eq!(item.sources[1].item_id, "b:2");
+        assert_eq!(item.sources[1].source_name, "b");
+    }
+
+    #[test]
+    fn search_prefers_the_source_with_progress() {
+        let hub = hub_with(
+            vec![hit("a", "1", "Some Movie", crate::models::MediaKind::Movie, Some(2023), 0.0)],
+            vec![hit("b", "2", "Some Movie", crate::models::MediaKind::Movie, Some(2023), 0.5)],
+        );
+
+        let result = hub.search("some").unwrap();
+        assert_eq!(result.items[0].id, "b:2");
+        assert_eq!(result.items[0].sources[0].source_id, "b");
+        assert_eq!(result.items[0].sources[1].source_id, "a");
+    }
+
+    #[test]
+    fn search_keeps_different_years_apart() {
+        let hub = hub_with(
+            vec![hit("a", "1", "Some Movie", crate::models::MediaKind::Movie, Some(2023), 0.0)],
+            vec![hit("b", "2", "Some Movie", crate::models::MediaKind::Movie, Some(2024), 0.0)],
+        );
+
+        assert_eq!(hub.search("some").unwrap().items.len(), 2);
+    }
+
+    #[test]
+    fn search_promotes_episodes_to_their_series() {
+        let mut episode = hit(
+            "a",
+            "e1",
+            "第 3 集",
+            crate::models::MediaKind::Episode,
+            None,
+            0.0,
+        );
+        episode.parent_id = Some("show-1".into());
+        episode.parent_title = Some("某部剧".into());
+
+        let mut other = hit(
+            "b",
+            "s-9",
+            "某部剧",
+            crate::models::MediaKind::Series,
+            None,
+            0.0,
+        );
+        other.episode_count = Some(24);
+
+        let hub = hub_with(vec![episode], vec![other]);
+        let result = hub.search("某部剧").unwrap();
+
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].id, "a:show-1");
+        assert_eq!(result.items[0].kind, crate::models::MediaKind::Series);
+        assert_eq!(result.items[0].sources.len(), 2);
+    }
+
+    #[test]
+    fn item_sources_lists_the_same_movie_on_every_source() {
+        let hub = hub_with(
+            vec![hit("a", "1", "Some Movie", crate::models::MediaKind::Movie, Some(2023), 0.0)],
+            vec![hit("b", "2", "some.movie.2023.2160p", crate::models::MediaKind::Movie, Some(2023), 0.0)],
+        );
+
+        let rows = hub.item_sources("a:1").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].item_id, "a:1");
+        assert_eq!(rows[1].item_id, "b:2");
+        assert_eq!(rows[1].source_name, "b");
+    }
+
+    #[test]
+    fn item_sources_still_has_the_entry_when_search_misses_it() {
+        let hub = hub_with(
+            vec![hit("a", "1", "Some Movie", crate::models::MediaKind::Movie, Some(2023), 0.0)],
+            vec![hit("b", "2", "Other Movie", crate::models::MediaKind::Movie, Some(2024), 0.0)],
+        );
+
+        let rows = hub.item_sources("a:1").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].item_id, "a:1");
+    }
+
+    #[test]
+    fn item_sources_skips_a_single_episode() {
+        let hub = hub_with(
+            vec![hit("a", "e1", "第 3 集", crate::models::MediaKind::Episode, None, 0.0)],
+            Vec::new(),
+        );
+
+        assert!(hub.item_sources("a:e1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_reports_failed_sources_without_dropping_the_rest() {
+        let mut hub = MediaHub::new();
+        hub.add_source("a", Mock::with_hits("a", vec![hit(
+            "a",
+            "1",
+            "Some Movie",
+            crate::models::MediaKind::Movie,
+            Some(2023),
+            0.0,
+        )]))
+        .unwrap();
+        hub.add_source("b", Mock::failing("b")).unwrap();
+
+        let result = hub.search("some").unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].source_id, "b");
+        assert!(result.failed[0].error.contains("500"));
     }
 
     fn two_sources() -> MediaHub {

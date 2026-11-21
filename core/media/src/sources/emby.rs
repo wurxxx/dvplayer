@@ -726,6 +726,7 @@ impl EmbySource {
             status: d.status.clone().filter(|s| !s.is_empty()),
             backdrop_path: has_backdrop(d).then(|| format!("{}/Backdrop/0", d.id)),
             single_child_id: None,
+            sources: Vec::new(),
         }
     }
 

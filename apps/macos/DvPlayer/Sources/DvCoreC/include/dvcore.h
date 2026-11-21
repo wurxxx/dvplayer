@@ -25,6 +25,7 @@ char *dv_hub_genres(const DVHub handle, const char *scope_id);
 char *dv_hub_search(const DVHub handle, const char *query);
 
 char *dv_hub_detail(const DVHub handle, const char *item_id);
+char *dv_hub_item_sources(const DVHub handle, const char *item_id);
 char *dv_hub_people(const DVHub handle, const char *item_id);
 char *dv_hub_person_works(const DVHub handle, const char *person_id);
 char *dv_hub_media_info(const DVHub handle, const char *item_id);

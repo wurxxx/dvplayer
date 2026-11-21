@@ -89,10 +89,41 @@ public struct MediaItem: Codable, Identifiable, Hashable, Sendable {
     public var status: String?
     public var backdropPath: String?
     public var singleChildId: String?
+    /// 同一部片在各源的条目（聚合搜索填，其它地方是空数组）。第一项就是自己。
+    public var sources: [ItemSource] = []
 
     public var isSeason: Bool { kind.lowercased() == "season" }
     public var isSeries: Bool { ["series", "tv"].contains(kind.lowercased()) }
     public var isFolder: Bool { kind.lowercased() == "folder" }
+}
+
+/// 同一部片在某个源里的条目（搜索结果的多来源）。
+public struct ItemSource: Codable, Identifiable, Hashable, Sendable {
+    public let itemId: String
+    public let sourceId: String
+    public let sourceName: String
+    public var resolution: String?
+    public var progress: Double = 0
+
+    public var id: String { itemId }
+}
+
+/// 搜索时没有响应的源。
+public struct SourceFailure: Codable, Hashable, Sendable {
+    public let sourceId: String
+    public let sourceName: String
+    public let error: String
+}
+
+/// 聚合搜索结果：去重后的条目 + 失败的源。
+public struct SearchResult: Codable, Sendable {
+    public var items: [MediaItem]
+    public var failed: [SourceFailure] = []
+
+    public init(items: [MediaItem] = [], failed: [SourceFailure] = []) {
+        self.items = items
+        self.failed = failed
+    }
 }
 
 public struct Paged<T: Codable & Sendable>: Codable, Sendable {

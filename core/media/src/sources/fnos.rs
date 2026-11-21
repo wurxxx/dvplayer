@@ -588,6 +588,7 @@ impl FnOsSource {
             status: empty_to_none(d.status.unwrap_or_default()),
             backdrop_path: empty_to_none(d.backdrops.unwrap_or_default()),
             single_child_id: d.single_child_guid.filter(|s| !s.is_empty()),
+            sources: Vec::new(),
         }
     }
 

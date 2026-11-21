@@ -110,9 +110,9 @@ enum PlaylistLoader {
     }
 
     private static func findSeries(_ core: Core, title: String) async -> String? {
-        guard let items = try? await core.search(title) else { return nil }
+        guard let result = try? await core.search(title) else { return nil }
         let wanted = title.trimmingCharacters(in: .whitespaces)
-        let series = items.filter { ["series", "tv"].contains($0.kind.lowercased()) }
+        let series = result.items.filter { ["series", "tv"].contains($0.kind.lowercased()) }
         return series.first { $0.title.trimmingCharacters(in: .whitespaces) == wanted }?.id
             ?? series.first?.id
     }

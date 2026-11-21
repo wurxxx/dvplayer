@@ -104,6 +104,43 @@ pub struct MediaItem {
     /// 只有一季时，服务器直接给出那一季的 id，能少一层请求。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub single_child_id: Option<String>,
+    /// 同一部片在各源的条目，按「有进度 > 源优先级 > 分辨率」排好；第一项是自己。
+    /// 只有聚合搜索会填，列表 / 详情里是空数组。
+    #[serde(default)]
+    pub sources: Vec<ItemSource>,
+}
+
+/// 同一部片在某个源里的条目（搜索结果的多来源）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSource {
+    /// 带源前缀的条目 id，界面用它切源。
+    pub item_id: String,
+    pub source_id: String,
+    pub source_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+    #[serde(default)]
+    pub progress: f64,
+}
+
+/// 搜索时没有响应的源。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceFailure {
+    pub source_id: String,
+    pub source_name: String,
+    pub error: String,
+}
+
+/// 聚合搜索结果：去重后的条目 + 失败的源。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub items: Vec<MediaItem>,
+    /// 总是序列化：Swift 合成的 Decodable 不会用属性默认值补缺失的键。
+    #[serde(default)]
+    pub failed: Vec<SourceFailure>,
 }
 
 /// 各源的播放记录。

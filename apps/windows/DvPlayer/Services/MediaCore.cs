@@ -111,10 +111,11 @@ public sealed class MediaCore : IDisposable
         query is null ? "" : JsonSerializer.Serialize(query, Json);
 
     /// <summary>跨源关键词搜索。返回平铺的条目，集/文件由界面按父级归并。</summary>
-    public ApiResult<List<MediaItemDto>> Search(string query)
+    public ApiResult<SearchResultDto> Search(string query)
     {
         var ptr = dv_hub_search(_handle, query);
-        return Read(ptr, root => root.Deserialize<List<MediaItemDto>>(Json) ?? new());
+        return Read(ptr, root => root.Deserialize<SearchResultDto>(Json)
+                               ?? new SearchResultDto(new List<MediaItemDto>()));
     }
 
     public ApiResult<List<PlayRecordDto>> Records()
@@ -169,6 +170,16 @@ public sealed class MediaCore : IDisposable
     {
         var ptr = dv_hub_play_source(_handle, itemId);
         return Read(ptr, root => root.Deserialize<PlaySourceDto>(Json)!);
+    }
+
+    /// <summary>
+    /// 详情页「资源」：同一部片在各源的条目。核心按详情标题跨源找回，
+    /// 去重规则和搜索一样；第一项是最佳来源。
+    /// </summary>
+    public ApiResult<List<ItemSourceDto>> ItemSources(string itemId)
+    {
+        var ptr = dv_hub_item_sources(_handle, itemId);
+        return Read(ptr, root => root.Deserialize<List<ItemSourceDto>>(Json) ?? new());
     }
 
     /// <summary>详情页「媒体信息」：编码、分辨率、比特率、音轨明细。</summary>
@@ -417,6 +428,11 @@ public sealed class MediaCore : IDisposable
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
+    [DllImport(Lib, EntryPoint = "dv_hub_item_sources", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_item_sources(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
+
     [DllImport(Lib, EntryPoint = "dv_hub_media_info", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_media_info(
         IntPtr handle,
@@ -495,7 +511,28 @@ public sealed record MediaItemDto(
     string? ReleaseDate,
     string? Status,
     string? BackdropPath,
-    string? SingleChildId);
+    string? SingleChildId,
+    /// <summary>同一部片在各源的条目；聚合搜索填，其它地方是空数组。</summary>
+    List<ItemSourceDto>? Sources = null);
+
+/// <summary>同一部片在某个源里的条目（搜索结果的多来源）。</summary>
+public sealed record ItemSourceDto(
+    string ItemId,
+    string SourceId,
+    string SourceName,
+    string? Resolution,
+    double Progress);
+
+/// <summary>搜索时没有响应的源。</summary>
+public sealed record SourceFailureDto(
+    string SourceId,
+    string SourceName,
+    string Error);
+
+/// <summary>聚合搜索结果：去重后的条目 + 失败的源。</summary>
+public sealed record SearchResultDto(
+    List<MediaItemDto> Items,
+    List<SourceFailureDto>? Failed = null);
 
 public sealed record MediaDetailDto(
     string Id,

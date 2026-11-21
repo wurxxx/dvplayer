@@ -7,6 +7,9 @@ struct SearchPage: View {
 
     @State private var keyword = ""
     @State private var results: [MediaItem] = []
+    @State private var failures: [SourceFailure] = []
+    /// 所有源都失败时的错误（单源失败走 failures）。
+    @State private var errorText: String?
     @State private var searching = false
     @State private var searched = false
 
@@ -32,13 +35,27 @@ struct SearchPage: View {
                             Caption(text: "正在搜索…", size: 12)
                         }
                     } else if searched && results.isEmpty {
-                        Caption(text: "没有找到匹配的内容。", size: 12)
+                        HStack(spacing: 10) {
+                            if let errorText {
+                                Text("搜索失败：\(errorText)")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.danger)
+                                    .lineLimit(2)
+                            } else {
+                                Caption(text: "没有找到匹配的内容。", size: 12)
+                            }
+                            failureNote
+                        }
                     } else if !results.isEmpty {
-                        Caption(text: "\(results.count) 个结果 · 跨 \(sourceCount) 个源", size: 12)
+                        HStack(spacing: 10) {
+                            Caption(text: "\(results.count) 个结果 · 跨 \(sourceCount) 个源", size: 12)
+                            failureNote
+                        }
                     }
 
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
                         ForEach(results) { item in
+                            // 多来源不在这里选：进详情页的「资源」里切。
                             PosterCard(item: item, width: 168) {
                                 state.openDetail(item.id)
                             }
@@ -56,6 +73,13 @@ struct SearchPage: View {
                 }
             }
         }
+        .onAppear {
+            // 截图巡检：`DVPLAYER_SEARCH=<关键词>` 直接带一个查询进来。
+            let env = ProcessInfo.processInfo.environment
+            if keyword.isEmpty, let wanted = env["DVPLAYER_SEARCH"], !wanted.isEmpty {
+                keyword = wanted
+            }
+        }
         .onSubmit(of: .text) { Task { await search() } }
         .onChange(of: keyword) { _ in
             Task {
@@ -67,8 +91,22 @@ struct SearchPage: View {
         }
     }
 
+    /// 某个源挂了不影响其它源，但要让用户知道结果不全。
+    @ViewBuilder
+    private var failureNote: some View {
+        if !failures.isEmpty {
+            Text("\(failures.count) 个源没响应："
+                 + failures.map(\.sourceName).joined(separator: "、"))
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.danger)
+                .lineLimit(1)
+                .help(failures.map { "\($0.sourceName)：\($0.error)" }
+                    .joined(separator: "\n"))
+        }
+    }
+
     private var sourceCount: Int {
-        Set(results.map(\.sourceId)).count
+        Set(results.flatMap { $0.sources.map(\.sourceId) }).count
     }
 
     private func search() async {
@@ -76,6 +114,8 @@ struct SearchPage: View {
         let text = keyword.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else {
             results = []
+            failures = []
+            errorText = nil
             searched = false
             return
         }
@@ -83,7 +123,17 @@ struct SearchPage: View {
         searching = true
         defer { searching = false }
 
-        results = (try? await core.search(text)) ?? []
+        do {
+            let result = try await core.search(text)
+            results = result.items
+            failures = result.failed
+            errorText = nil
+        } catch {
+            // 全失败才抛到这里；单个源失败在 result.failed 里。
+            results = []
+            failures = []
+            errorText = error.localizedDescription
+        }
         searched = true
     }
 }

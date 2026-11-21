@@ -90,7 +90,7 @@ public final class Core: @unchecked Sendable {
         try await perform { hub in scopeId.withCString { dv_hub_genres(hub, $0) } }
     }
 
-    public func search(_ keyword: String) async throws -> [MediaItem] {
+    public func search(_ keyword: String) async throws -> SearchResult {
         try await perform { hub in keyword.withCString { dv_hub_search(hub, $0) } }
     }
 
@@ -98,6 +98,11 @@ public final class Core: @unchecked Sendable {
 
     public func detail(_ itemId: String) async throws -> MediaDetail {
         try await perform { hub in itemId.withCString { dv_hub_detail(hub, $0) } }
+    }
+
+    /// 详情页「资源」：同一部片在各源的条目（第一项是该片的最佳来源）。
+    public func itemSources(_ itemId: String) async throws -> [ItemSource] {
+        try await perform { hub in itemId.withCString { dv_hub_item_sources(hub, $0) } }
     }
 
     public func people(_ itemId: String) async throws -> [Person] {
@@ -211,6 +216,7 @@ public final class Core: @unchecked Sendable {
         do {
             envelope = try JSONDecoder().decode(Envelope<T>.self, from: Data(text.utf8))
         } catch {
+            NSLog("[DvCore] 解码 \(T.self) 失败：\(error)")
             throw ApiError("核心返回的不是合法 JSON：\(text.prefix(120))")
         }
 

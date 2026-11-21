@@ -18,8 +18,8 @@ use crate::hub::MediaHub;
 use crate::models::{
     Person,
     MediaInfo,
-    Envelope, Genre, ImageSource, ListQuery, MediaDetail, MediaItem, MediaLibrary, Paged,
-    PlayRecord, PlaySource,
+    Envelope, Genre, ImageSource, ItemSource, ListQuery, MediaDetail, MediaItem, MediaLibrary,
+    Paged, PlayRecord, PlaySource,
 };
 use crate::sources::{self, MediaSource, SourceConfig};
 
@@ -373,6 +373,22 @@ pub extern "C" fn dv_hub_search(handle: *const HubHandle, query: *const c_char) 
             return reply::<Vec<MediaItem>>(Err(MediaError::Other("null query".into())));
         };
         reply(h.inner.search(&q))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dv_hub_item_sources(
+    handle: *const HubHandle,
+    item_id: *const c_char,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return reply::<Vec<ItemSource>>(Err(MediaError::Other("null handle".into())));
+        };
+        let Some(id) = read_cstr(item_id) else {
+            return reply::<Vec<ItemSource>>(Err(MediaError::Other("null item id".into())));
+        };
+        reply(h.inner.item_sources(&id))
     })
 }
 

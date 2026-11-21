@@ -102,8 +102,28 @@ C ABI 多一组 `dv_hub_*`；界面（`AppServices`）只持有一个 hub，设�
 
 **搜索**走各源自己的接口：飞牛是 `GET /v/api/v1/search/list?q=`（见
 [FNOS-API §4.2.1](FNOS-API.md)），Emby / Jellyfin 是
-`/Users/{uid}/Items?SearchTerm=`。`Hub::search` 逐源合并并加源前缀，
-界面只认一份结果；命中的是集时按父级归并成剧。
+`/Users/{uid}/Items?SearchTerm=`，本地 / 挂载目录按文件名匹配。
+
+`Hub::search` 的实现（2026-11-21 落地）：
+
+| 步骤 | 规则 |
+| --- | --- |
+| 并发 | 每源一条线程，一个源卡住不拖慢整次搜索 |
+| 提升 | 命中的是集 / 季时按 `parentId` 换成整部剧再参与去重 |
+| 去重键 | `normalize_key(title)`（去发布标签、标点、结尾年份）+ 年份 + 归一类型（Movie/Video/Unknown→Movie；Series/Season/Episode→Series）+ 集数（两边都有且不同才不合并） |
+| 主源 | 组内按「有进度 > 源顺序 > 分辨率（4K>1440p>1080p>720p）」排，第一项为主条目，其余进 `MediaItem.sources` |
+| 排序 | 有进度的组提前，其余保持源返回顺序（稳定），最多 120 条 |
+| 失败 | 失败的源进 `SearchResult.failed`（源名 + 错误），界面单独标出；全失败才报错 |
+
+结果的结构是 `SearchResult { items, failed }`（`dv_hub_search`），
+`MediaItem.sources` 里的每一项是 `ItemSource { itemId, sourceId, sourceName, resolution, progress }`。
+界面在卡片左上角标「N 源」，点开进详情，**选源在详情页的「资源」里做**，
+搜索页不弹选源框。
+
+详情页的资源列表单独走 `dv_hub_item_sources(itemId)`：核心用详情标题各源再搜一遍，
+按同一套去重键找回同一部片，返回排好序的 `Vec<ItemSource>`；第一项标「推荐」，
+正在看的那条标「当前」。单集 / 单季不列资源（那是一部剧内部的层级）。
+这样从媒体库、记录、播放页进详情都能看到其它源，不依赖搜索页带过来的数据。
 
 ## 2. 播放内核接入（现状）
 

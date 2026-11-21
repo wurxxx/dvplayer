@@ -57,7 +57,10 @@ struct ShellView: View {
     @ViewBuilder
     private var content: some View {
         if let detail = state.detailItemId {
+            // 详情页里切源会换 itemId：`.id` 让它整页重建，
+            // 免得上一部的选集 / 演职人员残留在新片下面。
             DetailPage(itemId: detail, onBack: { state.detailItemId = nil })
+                .id(detail)
         } else {
             pageContent
         }

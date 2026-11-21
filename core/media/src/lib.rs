@@ -8,6 +8,7 @@ pub mod ffi;
 pub mod hub;
 pub mod models;
 pub mod sources;
+mod text;
 
 pub use error::{MediaError, Result};
 pub use models::*;

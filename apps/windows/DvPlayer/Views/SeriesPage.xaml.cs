@@ -137,6 +137,7 @@ public partial class SeriesPage : Page
         {
             Trace.Write($"detail cache hit id={_itemId}");
             await ApplySnapshotAsync(cached).ConfigureAwait(true);
+            _ = LoadSourcesAsync();
             return;
         }
 
@@ -153,6 +154,7 @@ public partial class SeriesPage : Page
         // 详情一到就先铺头部：背景图、标题、按钮不用等下面那两次 /item/list。
         RenderHeader();
         _ = LoadPeopleAsync();
+        _ = LoadSourcesAsync();
 
         clock.Restart();
         var children = await Task.Run(() => core.Children(_itemId, 1, EpisodePageSize))
@@ -1015,6 +1017,99 @@ public partial class SeriesPage : Page
 
     private void OnMediaInfoScrollRight(object sender, RoutedEventArgs e) =>
         SmoothScroll.ScrollBy(MediaInfoScroller, 720);
+
+    // —— 资源（同一部片的多个来源）——
+
+    /// <summary>
+    /// 详情页「资源」：核心用详情标题跨源找回同一部片，去重规则和搜索一样。
+    /// 只有两源以上才显示；点一张切到那个源的条目。
+    /// </summary>
+    private async Task LoadSourcesAsync()
+    {
+        var core = AppServices.Instance.Core;
+        if (core is null)
+        {
+            return;
+        }
+
+        var result = await Task.Run(() => core.ItemSources(_itemId)).ConfigureAwait(true);
+        if (!result.Ok || result.Data is null || result.Data.Count <= 1)
+        {
+            SourcesSection.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var rows = result.Data;
+        var bestId = rows[0].ItemId;
+
+        SourcesList.ItemsSource = rows.Select(row =>
+        {
+            var current = row.ItemId == _itemId;
+            var badge = current ? "当前" : row.ItemId == bestId ? "推荐" : "";
+
+            return new SourceCardView
+            {
+                Id = row.ItemId,
+                Name = row.SourceName,
+                Resolution = row.Resolution ?? "",
+                ResolutionVisibility = string.IsNullOrWhiteSpace(row.Resolution)
+                    ? Visibility.Collapsed
+                    : Visibility.Visible,
+                Progress = row.Progress > 0.01 ? $"看过 {row.Progress:P0}" : "未看",
+                Badge = badge,
+                BadgeVisibility = badge.Length > 0 ? Visibility.Visible : Visibility.Collapsed,
+                BadgeBrush = (System.Windows.Media.Brush)FindResource(
+                    current ? "AccentBrush" : "MutedBrush"),
+                BadgeBackground = new System.Windows.Media.SolidColorBrush(current
+                    ? System.Windows.Media.Color.FromArgb(0x24, 0xFF, 0xB0, 0x20)
+                    : System.Windows.Media.Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF)),
+                BorderBrush = (System.Windows.Media.Brush)FindResource(
+                    current ? "AccentBrush" : "LineBrush"),
+                BorderThickness = new Thickness(current ? 1.5 : 1),
+            };
+        }).ToList();
+
+        SourcesSection.Visibility = Visibility.Visible;
+        Trace.Write($"sources id={_itemId} count={rows.Count}");
+    }
+
+    private void OnSourceClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrWhiteSpace(id))
+        {
+            return;
+        }
+
+        // 点当前源什么也不做，免得白刷一次详情。
+        if (id == _itemId)
+        {
+            return;
+        }
+
+        NavigationService?.Navigate(new SeriesPage(id));
+    }
+
+    private void OnSourcesScrollLeft(object sender, RoutedEventArgs e) =>
+        SmoothScroll.ScrollBy(SourcesScroller, -520);
+
+    private void OnSourcesScrollRight(object sender, RoutedEventArgs e) =>
+        SmoothScroll.ScrollBy(SourcesScroller, 520);
+
+    /// <summary>资源卡片：源名 + 分辨率 + 进度，当前源描边。</summary>
+    private sealed record SourceCardView
+    {
+        public required string Id { get; init; }
+        public required string Name { get; init; }
+        public required string Resolution { get; init; }
+        public required Visibility ResolutionVisibility { get; init; }
+        public required string Progress { get; init; }
+        public required string Badge { get; init; }
+        public required Visibility BadgeVisibility { get; init; }
+        public required System.Windows.Media.Brush BadgeBrush { get; init; }
+        public required System.Windows.Media.Brush BadgeBackground { get; init; }
+        public required System.Windows.Media.Brush BorderBrush { get; init; }
+        public required Thickness BorderThickness { get; init; }
+    }
 
     // —— 链接 ——
 

@@ -279,6 +279,70 @@
         </Grid>
       </StackPanel>
 
+      <!-- 资源：同一部片在多个源里都有时，点一张切源 -->
+      <StackPanel x:Name="SourcesSection" Margin="40,32,40,0" Visibility="Collapsed">
+        <TextBlock Text="资源" Style="{StaticResource SectionTitle}" />
+
+        <Grid Margin="0,14,0,0">
+          <controls:HorizontalRow x:Name="SourcesScroller">
+            <ItemsControl x:Name="SourcesList">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Width="250" Margin="0,0,14,4" Padding="16,13" CornerRadius="10"
+                          Cursor="Hand" Background="{StaticResource SurfaceBrush}"
+                          BorderBrush="{Binding BorderBrush}" BorderThickness="{Binding BorderThickness}"
+                          Tag="{Binding Id}" MouseLeftButtonUp="OnSourceClick">
+                    <StackPanel>
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Name}" FontSize="13.5" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <Border Background="{Binding BadgeBackground}" CornerRadius="4"
+                                Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                Visibility="{Binding BadgeVisibility}">
+                          <TextBlock Text="{Binding Badge}" FontSize="10.5"
+                                     Foreground="{Binding BadgeBrush}" />
+                        </Border>
+                      </StackPanel>
+
+                      <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Border Background="{StaticResource SurfaceHoverBrush}" CornerRadius="5"
+                                Padding="7,2" VerticalAlignment="Center"
+                                Visibility="{Binding ResolutionVisibility}">
+                          <TextBlock Text="{Binding Resolution}" FontSize="11.5"
+                                     Foreground="{StaticResource MutedBrush}" />
+                        </Border>
+                        <TextBlock Text="{Binding Progress}" FontSize="11.5"
+                                   Foreground="{StaticResource FaintBrush}"
+                                   Margin="8,0,0,0" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </controls:HorizontalRow>
+
+          <Button Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,18"
+                  Click="OnSourcesScrollLeft">
+            <TextBlock Text="&#xE76B;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+          <Button Style="{StaticResource RowArrowButton}"
+                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,18"
+                  Click="OnSourcesScrollRight">
+            <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                       Foreground="{StaticResource TextBrush}" />
+          </Button>
+        </Grid>
+      </StackPanel>
+
       <!-- 演职人员 -->
       <StackPanel x:Name="CastSection" Margin="40,32,40,0" Visibility="Collapsed">
         <TextBlock Text="演职人员" Style="{StaticResource SectionTitle}" />

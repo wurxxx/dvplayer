@@ -291,7 +291,7 @@ internal static class Playlists
         var result = await Task.Run(() => core.Search(title)).ConfigureAwait(true);
         var wanted = title.Trim();
 
-        var series = (result.Data ?? new List<MediaItemDto>())
+        var series = (result.Data?.Items ?? new List<MediaItemDto>())
             .Where(item => item.Kind is "series" or "Series" or "tv" or "TV")
             .ToList();
 
