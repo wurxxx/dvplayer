@@ -167,6 +167,14 @@ public partial class MainWindow : FluentWindow
                 return;
             }
 
+            // --play-check <目录>：五项功能自检，结果写 player.log。
+            if (ArgumentAfter("--play-check") is { Length: > 0 } checkDir)
+            {
+                await RunPlayCheckAsync(playId, checkDir);
+                Close();
+                return;
+            }
+
             var player = await PlayWindow.OpenAsync(this, playId);
 
             if (int.TryParse(ArgumentAfter("--play-seconds"), out var seconds) && seconds > 0)
@@ -332,6 +340,155 @@ public partial class MainWindow : FluentWindow
         await Task.Delay(600);
         UiCapture.Save(player, Path.Combine(dir, "play-info.png"));
 
+        player.Close();
+    }
+
+    /// <summary>
+    /// --play-check <目录> --play-features a,b,c：五项功能的远程自检。
+    ///
+    /// 片头 / 片尾标记要在开窗前写好，起播跳过才走得到；其余项目在出画后逐个执行，
+    /// 状态和结果都写进 player.log（远程只能看日志）。
+    /// </summary>
+    private async Task RunPlayCheckAsync(string itemId, string dir)
+    {
+        Directory.CreateDirectory(dir);
+
+        var shot = await BuildShotPlaylistAsync().ConfigureAwait(true);
+        var playlist = shot?.Items;
+        var seriesTitle = shot?.Title;
+        var features = (ArgumentAfter("--play-features") ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+        // `--play first`：落在 --play-series 的第一集上。
+        if (itemId is "first" or "-")
+        {
+            if (playlist is not { Count: > 0 })
+            {
+                Trace.Write("--play first 需要 --play-series");
+                return;
+            }
+
+            itemId = playlist[0].Id;
+        }
+
+        var markerKey = string.IsNullOrWhiteSpace(seriesTitle) ? itemId : seriesTitle!;
+        var preset = new SkipMarker();
+        foreach (var feature in features)
+        {
+            var parts = feature.Split(':');
+            if (parts.Length == 3 && parts[0] == "mark" && double.TryParse(parts[2], out var at))
+            {
+                if (parts[1] == "intro")
+                {
+                    preset.IntroEnd = at;
+                }
+                else if (parts[1] == "outro")
+                {
+                    preset.OutroStart = at;
+                }
+            }
+        }
+
+        if (!preset.IsEmpty)
+        {
+            SkipMarkers.Save(markerKey, preset);
+            Trace.Write($"features preset key={markerKey} intro={preset.IntroEnd} outro={preset.OutroStart}");
+        }
+
+        // --play-start 0：自检时强制从头上放，别接上次看过的位置。
+        double? startOverride = null;
+        if (double.TryParse(ArgumentAfter("--play-start"), out var startAt))
+        {
+            startOverride = Math.Max(0, startAt);
+        }
+
+        var player = await PlayWindow.OpenAsync(this, itemId, startOverride, playlist, seriesTitle);
+        if (player is null)
+        {
+            Trace.Write("features: 播放窗没打开");
+            return;
+        }
+
+        await Task.Delay(7000);
+        Trace.Write("features state " + player.DescribeFeatureState());
+
+        foreach (var feature in features)
+        {
+            var parts = feature.Split(':');
+            switch (parts[0])
+            {
+                case "aspect" when parts.Length > 1:
+                    player.SetAspectForShot(parts[1]);
+                    break;
+
+                case "sleep" when parts.Length > 1 && double.TryParse(parts[1], out var seconds):
+                    player.SetSleepSecondsForShot(seconds);
+                    break;
+
+                case "danmaku":
+                    player.TestDanmakuForShot();
+                    break;
+
+                case "subsearch":
+                    player.SearchSubtitlesForShot();
+                    break;
+
+                case "subtitle":
+                    await player.SubtitleRoundTripForShot();
+                    break;
+
+                case "skipoutro":
+                    player.SkipOutroForShot();
+                    break;
+
+                case "menu":
+                    if (player.OpenMoreMenuForShot() is { } menu)
+                    {
+                        await Task.Delay(500);
+                        UiCapture.Save(menu, Path.Combine(dir, "play-more.png"));
+                        menu.IsOpen = false;
+                        await Task.Delay(300);
+                    }
+
+                    break;
+
+                case "aspectmenu":
+                    if (player.OpenAspectMenuForShot() is { } aspectMenu)
+                    {
+                        await Task.Delay(500);
+                        UiCapture.Save(aspectMenu, Path.Combine(dir, "play-aspect.png"));
+                        aspectMenu.IsOpen = false;
+                        await Task.Delay(300);
+                    }
+
+                    break;
+
+                case "sleepmenu":
+                    if (player.OpenSleepMenuForShot() is { } sleepMenu)
+                    {
+                        await Task.Delay(500);
+                        UiCapture.Save(sleepMenu, Path.Combine(dir, "play-sleep.png"));
+                        sleepMenu.IsOpen = false;
+                        await Task.Delay(300);
+                    }
+
+                    break;
+            }
+
+            await Task.Delay(500);
+        }
+
+        await Task.Delay(2000);
+        Trace.Write("features state " + player.DescribeFeatureState());
+
+        // 定时关闭会把窗口自己关掉：等它，别提前收摊。
+        var until = DateTime.UtcNow.AddSeconds(12);
+        while (player.IsAlive && DateTime.UtcNow < until)
+        {
+            await Task.Delay(500);
+        }
+
+        Trace.Write($"features closed={!player.IsAlive} state={player.DescribeFeatureState()}");
         player.Close();
     }
 

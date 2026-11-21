@@ -32,6 +32,20 @@ public sealed class AppSettings
     /// <summary>打开播放时是否从上次停下的位置继续。</summary>
     public bool ResumePlayback { get; set; } = true;
 
+    /// <summary>画面比例：fit / fill / stretch / 16:9 / 4:3。</summary>
+    public string? VideoAspect { get; set; }
+
+    /// <summary>弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。</summary>
+    public bool? DanmakuEnabled { get; set; }
+    public string? DanmakuAppId { get; set; }
+    public string? DanmakuAppSecret { get; set; }
+
+    /// <summary>在线字幕（OpenSubtitles）。API Key 注册即得；用户名 / 密码可选。</summary>
+    public string? OpenSubtitlesApiKey { get; set; }
+    public string? OpenSubtitlesUsername { get; set; }
+    public string? OpenSubtitlesPassword { get; set; }
+    public string? SubtitleLanguages { get; set; }
+
     public static string FilePath
     {
         get

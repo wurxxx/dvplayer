@@ -1,0 +1,80 @@
+# M2 · Windows 客户端
+
+Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进程，浮层是
+逐像素透明的独立窗口。播放页的产品规则和 macOS 共用，写在
+[UI-DESIGN.md](UI-DESIGN.md) 的「播放页」一节；这份文档只记 Windows 侧的落点和
+两端的差异。
+
+## 1. 五项功能的落点
+
+| 功能 | 代码 | 说明 |
+| --- | --- | --- |
+| 画面比例 | `Player/PlayerAspect.cs`、`Views/PlayWindow.xaml.cs` | `PlayerAspect` 与 macOS 的枚举一一对应，`ToMpv()` 给 `keepaspect` / `panscan` / `video-aspect-override` 三个值；比例写 `settings.json` 的 `videoAspect` |
+| 定时关闭 | `Views/PlayWindow.xaml.cs` | `_sleepDeadline` / `_sleepAtEof`，`OnTick` 里的 `CheckSleep()`；到点先 toast 再关窗，进度照常回写 |
+| 片头片尾 | `Services/SkipMarkers.cs` | `%LOCALAPPDATA%\dvplayer\skip-markers.json`，按剧名（电影按条目 id）存 `introEnd` / `outroStart`，和 macOS 同格式 |
+| 弹幕 | `Player/Danmaku.cs` | 弹弹play v2 签名（`Base64(SHA256(AppId+Timestamp+Path+AppSecret))`）→ XML 解析 → 写 ASS → `sub-add` + `secondary-sid` |
+| 在线字幕 | `Player/OpenSubtitles.cs` | OpenSubtitles REST v1：搜索 → `/downloads` 取临时链接 → 存缓存 → `sub-add select` |
+
+配置项都在 `Services/AppSettings.cs`：`videoAspect`、`danmakuEnabled` /
+`danmakuAppId` / `danmakuAppSecret`、`openSubtitlesApiKey` /
+`openSubtitlesUsername` / `openSubtitlesPassword`、`subtitleLanguages`。
+
+## 2. 和 macOS 的差异
+
+- **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
+  「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
+  不是 macOS 那种悬停子菜单。
+- **弹幕轨按文件名认**：`sub-add` 在 JSON IPC 里不返回轨道 id，Windows 的
+  `MpvIpc` 也没有命令回复，所以靠 `track-list` 推送，按
+  `external-filename` 含 `DVPlayer-danmaku` 识别并排除出字幕菜单。
+- **弹幕只挂第二字幕**：没有主字幕时把 `sid` 置 `no`；关闭弹幕时按加弹幕前
+  记下的 `sid` 还原。
+- **字幕搜索只下主字幕**：结果直接 `sub-add select`；弹幕还开着时再把
+  `secondary-sid` 绑回去，两者同屏。
+- **没有独立的字幕搜索面板**：受控环境里不方便做 380 宽的右侧面板，
+  「搜索字幕…」在「更多」里就地弹出结果菜单（语言 + 发行名 + 下载数），
+  点一条即下载并选中。
+
+## 3. 远程自检
+
+Windows 主机在 `D:\dvplayer`，没有 `.git`，改完用 zip + scp 覆盖
+`apps\windows`，再 `dotnet build -c Release`。播放相关的自检走两个参数：
+
+```
+DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
+  --play-check D:\dvplayer\shots\feat \
+  --play-features aspect:fill,mark:intro:8,mark:outro:16,danmaku,subtitle,menu,skipoutro,sleep:6 \
+  --play-start 0
+```
+
+- `--play-start 0`：强制从头放，不接续播记录。
+- `mark:intro:<秒>` / `mark:outro:<秒>`：**开窗前**写进 `skip-markers.json`，
+  这样起播才走得到片头跳过。
+- `--play-features` 的项：`aspect:<fit|fill|stretch|16:9|4:3>`、`sleep:<秒>`、
+  `danmaku`（离线解析 + ASS 生成自检）、`subtitle`（搜索 + 下载整轮）、
+  `menu`（截「更多」菜单到 `play-more.png`）、`skipoutro`。
+- 结果全部写 `%LOCALAPPDATA%\dvplayer\player.log`，状态行类似
+  `features state aspect=fill intro=8 outro=16 sleep=0:03 danmaku=... outroPrompt=Visible pos=16`。
+
+### SSH 会话里的画面
+
+远程 SSH 会话拿不到 D3D 交换链（mpv 报 `Failed to create swapchain … 0x887a0022`），
+时间轴不会走，位置类的功能就验不了。设 `DVPLAYER_MPV_HEADLESS=1` 让 mpv 用
+`--vo=null --ao=null`，不输出画面但照常按实时推进 `time-pos`。
+**这个开关只给自检用**，正常启动不要设。
+
+弹幕 / 字幕的真实接口需要凭据（弹弹play AppId + AppSecret、OpenSubtitles API Key）。
+离线自检用 `DVPLAYER_DANDANPLAY_BASE` / `DVPLAYER_OPENSUBTITLES_BASE` 指向本地
+假服务器（仓库里 `scripts/windows/fake-player-api.ps1`，拷到主机上跑），可以完整验证签名之外的每条链路：
+搜索、下载、`sub-add`、`secondary-sid` 绑定、切集重挂。
+
+## 4. 踩过的坑
+
+- `sub-add` 的 IPC 回复是 `null`，拿不到轨道 id；只能等 `observe_property`
+  推 `track-list`，再从 `external-filename` 里认。
+- 弹幕 ASS 的 `{\an8\pos(...)}` 写在 C# 内插字符串里要小心：`{{` 是字面量花括号，
+  再拼 `\` 会被当成表达式；用字符串拼接生成标签最稳。
+- 定时关闭和「本集结束后」是两条路：前者按墙钟计时（暂停也算），后者在
+  `eof-reached` 里直接关窗，不走「接下一集」。
+- 片尾按钮只在 `outroStart ≤ pos < duration - 1` 区间显示，退回去会收起来；
+  点了是把 `time-pos` 推到 `duration - 0.4`，让 mpv 走正常 EOF，不自己写下一集逻辑。

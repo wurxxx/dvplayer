@@ -193,6 +193,19 @@
                  Margin="0,0,0,132" FontSize="13.5" Foreground="#F2FFFFFF"
                  Background="#B3000000" Padding="14,7" Visibility="Collapsed" />
 
+      <!-- 片尾区间到了浮出来；不自动跳，给用户自己决定（和 macOS 一致） -->
+      <Button x:Name="SkipOutroButton" Style="{StaticResource GhostButton}"
+              HorizontalAlignment="Right" VerticalAlignment="Bottom"
+              Margin="0,0,24,118" Padding="14,8" Visibility="Collapsed"
+              Background="#9E000000" Click="OnSkipOutroClick" ToolTip="直接接下一集">
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Text="&#xE893;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                     Foreground="#F2FFFFFF" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <TextBlock Text="跳过片尾" FontSize="12.5" Foreground="#F2FFFFFF"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+      </Button>
+
       <!-- 底部控制条 -->
       <Grid x:Name="Chrome" VerticalAlignment="Bottom" Opacity="1">
         <Border Height="230" VerticalAlignment="Bottom" IsHitTestVisible="False">

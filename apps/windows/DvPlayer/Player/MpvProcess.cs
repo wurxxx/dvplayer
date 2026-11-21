@@ -173,6 +173,14 @@ public sealed class MpvProcess : IDisposable
         yield return "--osc=no";                         // UI 由壳提供
         yield return "--keep-open=yes";                  // 播完留住最后一帧，别闪回桌面
 
+        // 远程自检：SSH 会话里没有可用的 D3D 交换链（swapchain 0x887a0022），
+        // 用 null 输出让时间轴照常走，五项功能才能按位置验证。
+        if (Environment.GetEnvironmentVariable("DVPLAYER_MPV_HEADLESS") == "1")
+        {
+            yield return "--vo=null";
+            yield return "--ao=null";
+        }
+
         yield return $"--input-ipc-server=\\\\.\\pipe\\{pipeName}";
         yield return "--input-default-bindings=no";      // 快捷键归壳，mpv 不抢键盘
         yield return "--input-vo-keyboard=no";

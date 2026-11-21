@@ -82,6 +82,25 @@ public partial class PlayWindow : Window
     private bool _muted;
     private double _speed = 1;
 
+    // —— 画面比例 / 定时关闭 / 片头片尾 / 弹幕 / 在线字幕 ——
+    private PlayerAspect _aspect = PlayerAspect.Fit;
+    private SkipMarker _markers = new();
+    private string _markerKey = "";
+    private DateTime? _sleepDeadline;
+    private bool _sleepAtEof;
+    private double? _pendingIntroSkip;
+    private string? _danmakuFile;
+    private int _danmakuCount;
+    private bool _danmakuEnabled;
+    private int _danmakuBoundTrack = -1;
+    private int _danmakuTrackId = -1;
+    private int _sidBeforeDanmaku;
+    private CancellationTokenSource? _danmakuCts;
+    private bool _danmakuNoticeShown;
+    private readonly List<SubtitleResult> _subtitleResults = new();
+    private bool _subtitleSearching;
+    private CancellationTokenSource? _subtitleCts;
+
     /// <summary>视频层，跟这个窗口保持同一矩形。</summary>
     private PlayerSurfaceWindow? _surface;
 
@@ -130,6 +149,11 @@ public partial class PlayWindow : Window
         _playlist = playlist ?? new List<PlayEpisode>();
         _seriesTitle = seriesTitle;
         _itemId = source.ItemId;
+
+        var settings = AppServices.Instance.Settings;
+        _aspect = PlayerAspectExtensions.Parse(settings.VideoAspect);
+        _danmakuEnabled = settings.DanmakuEnabled ?? false;
+        ResetMarkerKey();
 
         InitializeComponent();
 
@@ -301,8 +325,10 @@ public partial class PlayWindow : Window
         _playlist.Clear();
         _playlist.AddRange(playlist);
         _seriesTitle = seriesTitle;
+        ResetMarkerKey();
 
         RenderPlaylist();
+        UpdateChips();
         UpdatePlaylistSelection();
         ApplySourceToUi(_current);
     }
@@ -953,8 +979,25 @@ public partial class PlayWindow : Window
         var launch = Playback.ToLaunch(source, startSeconds);
         _launchStart = launch.StartSeconds;
         _launchAt = DateTime.UtcNow;
+        _pendingIntroSkip = null;
+        _danmakuCount = 0;
+        _danmakuBoundTrack = -1;
+        _danmakuTrackId = -1;
+        SkipOutroButton.Visibility = Visibility.Collapsed;
+
+        // 起播点落在片头里才跳；续播点已经在片头后面就不动。
+        if (_markers.IntroEnd is { } intro && intro > 1)
+        {
+            var total = source.DurationSeconds > 0 ? source.DurationSeconds : _duration;
+            if ((total <= 0 || intro < total - 1) && launch.StartSeconds < intro - 0.5)
+            {
+                _pendingIntroSkip = intro;
+            }
+        }
+
         Trace.Write($"mpv start url={launch.Url} headers={launch.Headers?.Count ?? 0} " +
-                    $"start={launch.StartSeconds} resume={source.PositionSeconds}");
+                    $"start={launch.StartSeconds} resume={source.PositionSeconds} " +
+                    $"aspect={_aspect.Key()} introSkip={_pendingIntroSkip?.ToString("0") ?? "-"}");
 
         try
         {
@@ -1035,6 +1078,9 @@ public partial class PlayWindow : Window
         {
             ipc.Command("set_property", "mute", true);
         }
+
+        ApplyAspect();
+        _ = LoadDanmakuAsync();
         LoadingPanel.Visibility = Visibility.Collapsed;
     }
 
@@ -1047,6 +1093,8 @@ public partial class PlayWindow : Window
                 case "time-pos" when value.ValueKind == JsonValueKind.Number:
                     _position = value.GetDouble();
                     UpdatePositionUi();
+                    ApplyPendingIntroSkip();
+                    UpdateOutroPrompt();
                     break;
 
                 case "duration" when value.ValueKind == JsonValueKind.Number:
@@ -1121,6 +1169,15 @@ public partial class PlayWindow : Window
         }
 
         Playback.Report(_itemId, EffectiveDuration, EffectiveDuration);
+
+        if (_sleepAtEof)
+        {
+            _sleepAtEof = false;
+            Trace.Write("sleep at end of episode -> close");
+            Close();
+            return;
+        }
+
         AdvanceOrClose();
     }
 
@@ -1152,6 +1209,8 @@ public partial class PlayWindow : Window
         _audioTracks.Clear();
         _subtitleTracks.Clear();
 
+        var subtitles = new List<MpvTrack>();
+
         foreach (var track in value.EnumerateArray())
         {
             var type = track.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
@@ -1169,9 +1228,47 @@ public partial class PlayWindow : Window
                 track.TryGetProperty("demux-channel-count", out var channels) && channels.ValueKind == JsonValueKind.Number
                     ? channels.GetInt32()
                     : null,
-                track.TryGetProperty("selected", out var selected) && selected.ValueKind == JsonValueKind.True);
+                track.TryGetProperty("selected", out var selected) && selected.ValueKind == JsonValueKind.True,
+                track.TryGetProperty("external-filename", out var filename) ? filename.GetString() : null);
 
-            (type == "audio" ? _audioTracks : _subtitleTracks).Add(item);
+            if (type == "audio")
+            {
+                _audioTracks.Add(item);
+            }
+            else
+            {
+                subtitles.Add(item);
+            }
+        }
+
+        // 弹幕 ASS 只走 secondary-sid，不进字幕菜单。
+        MpvTrack? danmaku = null;
+        if (_danmakuFile is not null)
+        {
+            danmaku = subtitles.FirstOrDefault(t => IsDanmakuFile(t.ExternalFilename));
+            if (danmaku is not null)
+            {
+                subtitles.Remove(danmaku);
+            }
+        }
+
+        _subtitleTracks.AddRange(subtitles);
+
+        // 刚 sub-add 进来的弹幕：绑定成第二字幕，别抢主字幕。
+        if (danmaku is not null)
+        {
+            _danmakuTrackId = danmaku.Id;
+            if (_danmakuEnabled && danmaku.Id != _danmakuBoundTrack)
+            {
+                _danmakuBoundTrack = danmaku.Id;
+                _ipc?.Command("set_property", "secondary-sid", danmaku.Id);
+                if (_sidBeforeDanmaku == 0)
+                {
+                    _ipc?.Command("set_property", "sid", "no");
+                }
+
+                Trace.Write($"danmaku bound secondary id={danmaku.Id} primary={_sidBeforeDanmaku}");
+            }
         }
 
         // 只在第一次拿到轨道清单时套用详情页的选择，之后是用户在播放页里改。
@@ -1233,6 +1330,7 @@ public partial class PlayWindow : Window
     private void OnTick(object? sender, EventArgs e)
     {
         HealWindowPair();
+        CheckSleep();
 
         if (++_sinceReport < ReportEverySeconds || _position <= 0)
         {
@@ -1307,6 +1405,21 @@ public partial class PlayWindow : Window
         if (video?.BitRate is { } bitRate && bitRate > 0)
         {
             chips.Add($"{bitRate / 1_000_000.0:0.0}mbps");
+        }
+
+        if (_aspect != PlayerAspect.Fit)
+        {
+            chips.Add(_aspect.Label());
+        }
+
+        if (SleepLabel() is { } sleep)
+        {
+            chips.Add($"定时 {sleep}");
+        }
+
+        if (DanmakuActive)
+        {
+            chips.Add(_danmakuCount > 0 ? $"弹幕 {_danmakuCount}" : "弹幕");
         }
 
         foreach (var chip in chips)
@@ -1777,6 +1890,42 @@ public partial class PlayWindow : Window
             choices.Add(($"下一集：{next.Badge}", false, () => _ = SwitchToAsync(next.Id)));
         }
 
+        choices.Add(("-", false, NoOp));
+        choices.Add(($"画面比例（{_aspect.Label()}）", _aspect != PlayerAspect.Fit, () => OpenAspectMenu()));
+        choices.Add((
+            SleepLabel() is { } sleep ? $"定时关闭（{sleep}）" : "定时关闭",
+            _sleepDeadline is not null || _sleepAtEof,
+            () => OpenSleepMenu()));
+        choices.Add((_danmakuEnabled ? "弹幕：开" : "弹幕：关", _danmakuEnabled,
+            () => SetDanmaku(!_danmakuEnabled)));
+
+        choices.Add(("-", false, NoOp));
+
+        if (_markers.IntroEnd is { } intro)
+        {
+            choices.Add(($"清除片头标记（{Format(intro)}）", false, ClearIntro));
+        }
+        else
+        {
+            choices.Add(("把当前位置设为片头结束", false, MarkIntroEnd));
+        }
+
+        if (_markers.OutroStart is { } outro)
+        {
+            choices.Add(($"清除片尾标记（{Format(outro)}）", false, ClearOutro));
+        }
+        else
+        {
+            choices.Add(("把当前位置设为片尾开始", false, MarkOutroStart));
+        }
+
+        if (!_markers.IsEmpty)
+        {
+            choices.Add(("清除本剧全部标记", false, ClearMarkers));
+        }
+
+        choices.Add(("搜索字幕…", false, () => _ = SearchSubtitlesAsync()));
+        choices.Add(("-", false, NoOp));
         choices.Add((_fullscreen ? "退出全屏" : "全屏", _fullscreen, ToggleFullscreen));
         choices.Add((
             _hardwareDecode ? "硬解码：开（HW / GPU）" : "硬解码：关（软解）",
@@ -1784,6 +1933,45 @@ public partial class PlayWindow : Window
             ToggleHardwareDecode));
         choices.Add(("媒体信息", MediaInfoPanel.Visibility == Visibility.Visible, ToggleMediaInfo));
         choices.Add(("打开日志目录", false, OpenLogFolder));
+
+        return OpenMenu(MoreButton, choices);
+    }
+
+    private static void NoOp()
+    {
+    }
+
+    /// <summary>画面比例二级菜单：WPF 的菜单模板没有子菜单，改成连开一层。</summary>
+    private ContextMenu OpenAspectMenu()
+    {
+        var choices = new List<(string Label, bool Selected, Action Action)>();
+        foreach (var mode in Enum.GetValues<PlayerAspect>())
+        {
+            var value = mode;
+            choices.Add((value.Label(), _aspect == value, () => SetAspect(value)));
+        }
+
+        return OpenMenu(MoreButton, choices);
+    }
+
+    private ContextMenu OpenSleepMenu()
+    {
+        var choices = new List<(string Label, bool Selected, Action Action)>
+        {
+            ("不定时", _sleepDeadline is null && !_sleepAtEof, CancelSleep),
+            ("-", false, NoOp),
+        };
+
+        foreach (var minutes in new[] { 15, 30, 45, 60, 90 })
+        {
+            var value = minutes;
+            var selected = _sleepDeadline is { } deadline &&
+                           Math.Abs((deadline - DateTime.Now).TotalMinutes - value) < 1;
+            choices.Add(($"{value} 分钟后", selected, () => SetSleep(value)));
+        }
+
+        choices.Add(("-", false, NoOp));
+        choices.Add(("本集结束后", _sleepAtEof, SetSleepEndOfEpisode));
 
         return OpenMenu(MoreButton, choices);
     }
@@ -1843,6 +2031,16 @@ public partial class PlayWindow : Window
 
         foreach (var choice in choices)
         {
+            // 一个短横线当分隔线用，省得给菜单再抽一层类型。
+            if (choice.Label == "-")
+            {
+                menu.Items.Add(new Separator
+                {
+                    Style = (Style)FindResource("DarkMenuSeparator"),
+                });
+                continue;
+            }
+
             var item = new MenuItem
             {
                 Header = choice.Label,
@@ -1875,6 +2073,543 @@ public partial class PlayWindow : Window
         ToastText.Visibility = Visibility.Visible;
         await Task.Delay(1800).ConfigureAwait(true);
         ToastText.Visibility = Visibility.Collapsed;
+    }
+
+    // —— 画面比例 / 定时关闭 / 片头片尾 / 弹幕 / 在线字幕 ——
+
+    private bool DanmakuActive => _danmakuEnabled && _danmakuFile is not null;
+
+    /// <summary>标记按剧记；电影没有剧名，就用条目 id（只对这部片生效）。</summary>
+    private void ResetMarkerKey()
+    {
+        _markerKey = string.IsNullOrWhiteSpace(_seriesTitle) ? _itemId : _seriesTitle!;
+        _markers = SkipMarkers.Get(_markerKey);
+    }
+
+    private void ApplyAspect()
+    {
+        if (_ipc is null)
+        {
+            return;
+        }
+
+        var (keepAspect, panscan, aspectOverride) = _aspect.ToMpv();
+        _ipc.Command("set_property", "keepaspect", keepAspect ? "yes" : "no");
+        _ipc.Command("set_property", "panscan", panscan);
+        // video-aspect-override 是逐文件的，换集后要重新套一次。
+        _ipc.Command("set_property", "video-aspect-override", aspectOverride);
+        Trace.Write($"aspect {_aspect.Key()} keep={keepAspect} panscan={panscan:0.00} " +
+                    $"override={aspectOverride}");
+    }
+
+    private void SetAspect(PlayerAspect mode)
+    {
+        _aspect = mode;
+        ApplyAspect();
+
+        var settings = AppServices.Instance.Settings;
+        settings.VideoAspect = mode.Key();
+        settings.Save();
+
+        ShowToast(mode.Label());
+        UpdateChips();
+        ShowChrome();
+    }
+
+    /// <summary>起播点落在片头里才跳；续播点已经在片头后面就不动。</summary>
+    private void ApplyPendingIntroSkip()
+    {
+        if (_pendingIntroSkip is not { } intro)
+        {
+            return;
+        }
+
+        // time-pos 第一帧可能就是 0，等真正出画再判断。
+        if (_position <= 0.2)
+        {
+            return;
+        }
+
+        if (_position >= intro - 0.5)
+        {
+            _pendingIntroSkip = null;
+            return;
+        }
+
+        _pendingIntroSkip = null;
+        _ipc?.Command("set_property", "time-pos", intro);
+        _position = intro;
+        UpdatePositionUi();
+        Trace.Write($"skip intro -> {(int)intro}");
+        ShowToast("已跳过片头");
+    }
+
+    /// <summary>进度进了片尾区间就浮出按钮，退回去再收起来。</summary>
+    private void UpdateOutroPrompt()
+    {
+        var show = false;
+        if (_markers.OutroStart is { } outro && outro > 1)
+        {
+            var duration = EffectiveDuration;
+            if (duration > 0)
+            {
+                show = _position >= outro && _position < duration - 1;
+            }
+        }
+
+        var visible = SkipOutroButton.Visibility == Visibility.Visible;
+        if (visible != show)
+        {
+            SkipOutroButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            Trace.Write($"outro prompt {show} pos={(int)_position}");
+        }
+    }
+
+    /// <summary>跳到片尾末尾，让 mpv 走正常的 EOF：接下一集或关窗。</summary>
+    private void OnSkipOutroClick(object sender, RoutedEventArgs e) => SkipOutroNow();
+
+    private void SkipOutroNow()
+    {
+        SkipOutroButton.Visibility = Visibility.Collapsed;
+
+        var duration = EffectiveDuration;
+        if (duration <= 1)
+        {
+            return;
+        }
+
+        var target = Math.Max(0, duration - 0.4);
+        _ipc?.Command("set_property", "time-pos", target);
+        _position = target;
+        UpdatePositionUi();
+        ShowToast("跳过片尾");
+    }
+
+    private void MarkIntroEnd()
+    {
+        if (_position <= 1)
+        {
+            ShowToast("先播一会儿再标记");
+            return;
+        }
+
+        _markers.IntroEnd = _position;
+        SkipMarkers.Save(_markerKey, _markers);
+        Trace.Write($"mark intro end {(int)_position} key={_markerKey}");
+        ShowToast($"片头结束：{Format(_position)}");
+        UpdateChips();
+        ShowChrome();
+    }
+
+    private void ClearIntro()
+    {
+        _markers.IntroEnd = null;
+        SkipMarkers.Save(_markerKey, _markers);
+        Trace.Write($"clear intro key={_markerKey}");
+        ShowToast("已清除片头标记");
+        UpdateChips();
+        ShowChrome();
+    }
+
+    private void MarkOutroStart()
+    {
+        if (_position <= 1)
+        {
+            ShowToast("先播一会儿再标记");
+            return;
+        }
+
+        _markers.OutroStart = _position;
+        SkipMarkers.Save(_markerKey, _markers);
+        Trace.Write($"mark outro start {(int)_position} key={_markerKey}");
+        ShowToast($"片尾开始：{Format(_position)}");
+        UpdateChips();
+        ShowChrome();
+    }
+
+    private void ClearOutro()
+    {
+        _markers.OutroStart = null;
+        SkipMarkers.Save(_markerKey, _markers);
+        Trace.Write($"clear outro key={_markerKey}");
+        ShowToast("已清除片尾标记");
+        SkipOutroButton.Visibility = Visibility.Collapsed;
+        UpdateChips();
+        ShowChrome();
+    }
+
+    private void ClearMarkers()
+    {
+        _markers = new SkipMarker();
+        SkipMarkers.Save(_markerKey, _markers);
+        Trace.Write($"clear markers key={_markerKey}");
+        ShowToast("已清除本剧标记");
+        SkipOutroButton.Visibility = Visibility.Collapsed;
+        UpdateChips();
+        ShowChrome();
+    }
+
+    private void SetSleep(double minutes)
+    {
+        _sleepAtEof = false;
+        _sleepDeadline = DateTime.Now.AddMinutes(Math.Max(1 / 60.0, minutes));
+        var seconds = Math.Max(1, (int)Math.Round(minutes * 60));
+        Trace.Write($"sleep set {seconds}s");
+        ShowToast(seconds >= 60 ? $"{seconds / 60} 分钟后关闭" : $"{seconds} 秒后关闭");
+        UpdateChips();
+        ShowChrome();
+    }
+
+    private void SetSleepEndOfEpisode()
+    {
+        _sleepDeadline = null;
+        _sleepAtEof = true;
+        Trace.Write("sleep at end of episode");
+        ShowToast("本集结束后关闭");
+        UpdateChips();
+        ShowChrome();
+    }
+
+    private void CancelSleep()
+    {
+        _sleepDeadline = null;
+        _sleepAtEof = false;
+        Trace.Write("sleep cancelled");
+        ShowToast("已取消定时关闭");
+        UpdateChips();
+        ShowChrome();
+    }
+
+    /// <summary>菜单里显示的剩余时间；没设定时就是 null。</summary>
+    private string? SleepLabel()
+    {
+        if (_sleepAtEof)
+        {
+            return "本集结束后";
+        }
+
+        if (_sleepDeadline is not { } deadline)
+        {
+            return null;
+        }
+
+        var remaining = Math.Max(0, (int)Math.Round((deadline - DateTime.Now).TotalSeconds));
+        return $"{remaining / 60}:{remaining % 60:00}";
+    }
+
+    private void CheckSleep()
+    {
+        if (_sleepDeadline is not { } deadline || DateTime.Now < deadline)
+        {
+            return;
+        }
+
+        _sleepDeadline = null;
+        Trace.Write($"sleep fired pos={(int)_position}");
+        ShowToast("定时关闭");
+
+        // 和 macOS 一样先提示一下再关，别让窗口凭空消失。
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (!_closed)
+            {
+                Close();
+            }
+        };
+        timer.Start();
+    }
+
+    /// <summary>选集里这一集的集号（`E02` / `S01E02` 取末尾数字）。</summary>
+    private int? EpisodeNumber()
+    {
+        var episode = _playlist.FirstOrDefault(e => e.Id == _itemId);
+        if (episode is null)
+        {
+            return null;
+        }
+
+        var digits = new string(episode.Badge.Reverse().TakeWhile(char.IsDigit).Reverse().ToArray());
+        return int.TryParse(digits, out var number) ? number : null;
+    }
+
+    /// <summary>季号从选集角标（`S01E02`）里取；电影没有季。</summary>
+    private int? SeasonNumber()
+    {
+        var badge = _playlist.FirstOrDefault(e => e.Id == _itemId)?.Badge;
+        if (badge is null || !badge.StartsWith('S'))
+        {
+            return null;
+        }
+
+        var e = badge.IndexOf('E');
+        if (e <= 1)
+        {
+            return null;
+        }
+
+        return int.TryParse(badge[1..e], out var number) ? number : null;
+    }
+
+    private static bool IsDanmakuFile(string? filename) =>
+        filename is not null &&
+        filename.Contains("DVPlayer-danmaku", StringComparison.OrdinalIgnoreCase);
+
+    private void SetDanmaku(bool enabled)
+    {
+        _danmakuEnabled = enabled;
+
+        var settings = AppServices.Instance.Settings;
+        settings.DanmakuEnabled = enabled;
+        settings.Save();
+
+        if (enabled)
+        {
+            Trace.Write("danmaku enabled");
+            if (_danmakuTrackId > 0)
+            {
+                // 这一集之前已经加过弹幕轨，直接挂回第二字幕。
+                _danmakuBoundTrack = _danmakuTrackId;
+                _ipc?.Command("set_property", "secondary-sid", _danmakuTrackId);
+            }
+            else
+            {
+                _ = LoadDanmakuAsync();
+            }
+        }
+        else
+        {
+            Trace.Write("danmaku disabled");
+            _danmakuCts?.Cancel();
+            _ipc?.Command("set_property", "secondary-sid", "no");
+            _danmakuBoundTrack = -1;
+
+            // 加弹幕时把主字幕可能的「未选」状态改过，关掉时按记下的值还原。
+            if (_sidBeforeDanmaku > 0)
+            {
+                _ipc?.Command("set_property", "sid", _sidBeforeDanmaku);
+            }
+        }
+
+        ShowToast(enabled ? "弹幕：开" : "弹幕：关");
+        UpdateChips();
+        ShowChrome();
+    }
+
+    /// <summary>
+    /// 按「剧名 + 集号」去弹弹play 找弹幕，写成 ASS 交给 mpv 当第二字幕。
+    /// 没配置 AppId / AppSecret 就安静跳过（日志里留一行），不打扰观看。
+    /// </summary>
+    private async Task LoadDanmakuAsync()
+    {
+        _danmakuCts?.Cancel();
+
+        if (!_danmakuEnabled)
+        {
+            return;
+        }
+
+        var series = _seriesTitle;
+        if (string.IsNullOrWhiteSpace(series))
+        {
+            Trace.Write("danmaku skipped: 没有剧名");
+            return;
+        }
+
+        var episode = EpisodeNumber();
+        if (episode is null)
+        {
+            Trace.Write("danmaku skipped: 不知道是第几集");
+            return;
+        }
+
+        var settings = AppServices.Instance.Settings;
+        var appId = settings.DanmakuAppId;
+        var secret = settings.DanmakuAppSecret;
+        if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(secret))
+        {
+            Trace.Write("danmaku skipped: 未配置 danmakuAppId / danmakuAppSecret");
+            if (!_danmakuNoticeShown)
+            {
+                _danmakuNoticeShown = true;
+                ShowToast("弹幕需要配置弹弹play AppId / AppSecret");
+            }
+
+            return;
+        }
+
+        var item = _itemId;
+        var cts = new CancellationTokenSource();
+        _danmakuCts = cts;
+
+        try
+        {
+            var episodeId = await DanmakuService.Shared
+                .EpisodeIdAsync(series!, episode.Value, appId!, secret!, cts.Token)
+                .ConfigureAwait(true);
+            var comments = await DanmakuService.Shared
+                .CommentsAsync(episodeId, appId!, secret!, cts.Token)
+                .ConfigureAwait(true);
+
+            if (cts.IsCancellationRequested || _closed || _itemId != item)
+            {
+                return;
+            }
+
+            var path = DanmakuAss.Write(comments, episodeId);
+            _danmakuFile = path.Replace('\\', '/');
+            _danmakuCount = comments.Count;
+            _danmakuTrackId = -1;
+            _danmakuBoundTrack = -1;
+            _sidBeforeDanmaku = _subtitleTracks.FirstOrDefault(t => t.Selected)?.Id ?? 0;
+
+            // auto：别抢主字幕；加完 track-list 会推一次，ParseTracks 里挂 secondary-sid。
+            _ipc?.Command("sub-add", _danmakuFile, "auto");
+
+            Trace.Write($"danmaku loaded {comments.Count} item={item} episodeId={episodeId}");
+            UpdateChips();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (_closed || _itemId != item)
+            {
+                return;
+            }
+
+            Trace.Write($"danmaku failed: {ex.Message} item={item}");
+            ShowToast(ex.Message);
+        }
+    }
+
+    /// <summary>搜索当前这一集的在线字幕（OpenSubtitles）。</summary>
+    private async Task SearchSubtitlesAsync()
+    {
+        if (_subtitleSearching)
+        {
+            return;
+        }
+
+        var settings = AppServices.Instance.Settings;
+        var apiKey = settings.OpenSubtitlesApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            ShowToast("字幕搜索需要 OpenSubtitles API Key（写在 settings.json）");
+            Trace.Write("subtitles skipped: 未配置 openSubtitlesApiKey");
+            return;
+        }
+
+        _subtitleSearching = true;
+        _subtitleCts?.Cancel();
+        _subtitleCts = new CancellationTokenSource();
+        var token = _subtitleCts.Token;
+        _subtitleResults.Clear();
+        ShowToast("正在搜索字幕…");
+
+        var query = string.IsNullOrWhiteSpace(_seriesTitle) ? _current.Title : _seriesTitle!;
+        var season = SeasonNumber();
+        var episode = EpisodeNumber();
+        Trace.Write($"subtitles search {query} S{season?.ToString() ?? "-"}E{episode?.ToString() ?? "-"}");
+
+        try
+        {
+            var results = await OpenSubtitlesService.Shared.SearchAsync(
+                query, season, episode, apiKey!,
+                settings.OpenSubtitlesUsername, settings.OpenSubtitlesPassword,
+                settings.SubtitleLanguages ?? "zh-cn,zh-tw,en", token).ConfigureAwait(true);
+
+            if (token.IsCancellationRequested || _closed)
+            {
+                return;
+            }
+
+            _subtitleResults.Clear();
+            _subtitleResults.AddRange(results);
+            Trace.Write($"subtitles results={results.Count}");
+            OpenSubtitleResultsMenu();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (_closed)
+            {
+                return;
+            }
+
+            Trace.Write($"subtitles search failed: {ex.Message}");
+            ShowToast(ex.Message);
+        }
+        finally
+        {
+            _subtitleSearching = false;
+        }
+    }
+
+    private void OpenSubtitleResultsMenu()
+    {
+        if (_subtitleResults.Count == 0)
+        {
+            ShowToast("没搜到字幕");
+            return;
+        }
+
+        var choices = new List<(string Label, bool Selected, Action Action)>();
+        foreach (var result in _subtitleResults.Take(20))
+        {
+            var value = result;
+            choices.Add((value.Detail, false, () => _ = DownloadSubtitleAsync(value)));
+        }
+
+        OpenMenu(MoreButton, choices);
+    }
+
+    /// <summary>下载并挂上主字幕；已经挂着的弹幕再绑回去，别被顶掉。</summary>
+    private async Task DownloadSubtitleAsync(SubtitleResult result)
+    {
+        var settings = AppServices.Instance.Settings;
+        var apiKey = settings.OpenSubtitlesApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            ShowToast("字幕搜索需要 OpenSubtitles API Key（写在 settings.json）");
+            return;
+        }
+
+        ShowToast("正在下载字幕…");
+        try
+        {
+            _subtitleCts ??= new CancellationTokenSource();
+            var path = await OpenSubtitlesService.Shared.DownloadAsync(
+                result, apiKey!, settings.OpenSubtitlesUsername,
+                settings.OpenSubtitlesPassword, _subtitleCts.Token).ConfigureAwait(true);
+
+            if (_closed)
+            {
+                return;
+            }
+
+            _ipc?.Command("sub-add", path.Replace('\\', '/'), "select");
+            if (DanmakuActive && _danmakuTrackId > 0)
+            {
+                _ipc?.Command("set_property", "secondary-sid", _danmakuTrackId);
+            }
+
+            ShowToast($"字幕已加载：{result.LanguageLabel}");
+            Trace.Write($"subtitles applied {result.LanguageLabel} {Path.GetFileName(path)}");
+            UpdateChips();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Trace.Write($"subtitles download failed: {ex.Message}");
+            ShowToast(ex.Message);
+        }
     }
 
     // —— 截图 ——
@@ -2025,6 +2760,13 @@ public partial class PlayWindow : Window
         _subtitleTracks.Clear();
         _mediaInfo = null;
         _sinceReport = 0;
+        _pendingIntroSkip = null;
+        _danmakuFile = null;
+        _danmakuCount = 0;
+        _danmakuBoundTrack = -1;
+        _danmakuTrackId = -1;
+        _danmakuCts?.Cancel();
+        SkipOutroButton.Visibility = Visibility.Collapsed;
 
         _seeking = false;
         Seek.Value = 0;
@@ -2060,6 +2802,8 @@ public partial class PlayWindow : Window
             Playback.Report(_itemId, _position, EffectiveDuration);
         }
 
+        _danmakuCts?.Cancel();
+        _subtitleCts?.Cancel();
         _ipc?.Dispose();
         _mpv.Dispose();
 
@@ -2444,6 +3188,72 @@ public partial class PlayWindow : Window
     /// <summary>截图巡检用：打开「更多」菜单。</summary>
     public ContextMenu OpenMoreMenuForShot() => OpenMoreMenu();
 
+    /// <summary>截图巡检用：打开「画面比例」二级菜单。</summary>
+    public ContextMenu OpenAspectMenuForShot() => OpenAspectMenu();
+
+    /// <summary>截图巡检用：打开「定时关闭」二级菜单。</summary>
+    public ContextMenu OpenSleepMenuForShot() => OpenSleepMenu();
+
+    // —— 五项功能的自检入口（--play-check） ——
+
+    /// <summary>自检用：把五项功能的状态串成一行写日志。</summary>
+    public string DescribeFeatureState()
+    {
+        var intro = _markers.IntroEnd is { } i ? ((int)i).ToString() : "-";
+        var outro = _markers.OutroStart is { } o ? ((int)o).ToString() : "-";
+        var danmaku = DanmakuActive ? _danmakuFile! : "-";
+        return $"aspect={_aspect.Key()} intro={intro} outro={outro} " +
+               $"sleep={SleepLabel() ?? "-"} danmaku={danmaku} " +
+               $"outroPrompt={SkipOutroButton.Visibility} pos={(int)_position}";
+    }
+
+    public void SetAspectForShot(string key) => SetAspect(PlayerAspectExtensions.Parse(key));
+
+    /// <summary>自检用：按秒设定时关闭（菜单里是分钟）。</summary>
+    public void SetSleepSecondsForShot(double seconds) => SetSleep(seconds / 60.0);
+
+    public void SearchSubtitlesForShot() => _ = SearchSubtitlesAsync();
+
+    public void SkipOutroForShot() => SkipOutroNow();
+
+    /// <summary>自检用：搜索 + 下载第一条字幕，走完整条链路。</summary>
+    public async Task SubtitleRoundTripForShot()
+    {
+        await SearchSubtitlesAsync();
+        if (_subtitleResults.Count == 0)
+        {
+            Trace.Write("subtitles round-trip: 没有结果");
+            return;
+        }
+
+        await DownloadSubtitleAsync(_subtitleResults[0]);
+    }
+
+    /// <summary>
+    /// 自检用：不带网络地跑一遍弹幕解析 + ASS 生成，确认滚动 / 顶部 / 底部三种都对。
+    /// 真实接口要 AppId / AppSecret，远程机器上没有。
+    /// </summary>
+    public void TestDanmakuForShot()
+    {
+        const string xml =
+            "<i><d p=\"1.5,1,25,16711680,0,0,0,0\">滚动弹幕</d>" +
+            "<d p=\"2,5,25,255,0,0,0,0\">顶部弹幕</d>" +
+            "<d p=\"3,4,25,16777215,0,0,0,0\">底部弹幕</d></i>";
+
+        var comments = DanmakuXml.Parse(xml);
+        var ass = DanmakuAss.Build(comments);
+        var path = DanmakuAss.Write(comments, 999999);
+
+        var valid = comments.Count == 3
+                    && ass.Contains("Dialogue:", StringComparison.Ordinal)
+                    && ass.Contains("\\move(", StringComparison.Ordinal)
+                    && ass.Contains("\\an8", StringComparison.Ordinal)
+                    && ass.Contains("\\an2", StringComparison.Ordinal)
+                    && File.Exists(path);
+
+        Trace.Write($"danmaku self-test comments={comments.Count} valid={valid} file={path}");
+    }
+
     /// <summary>截图巡检用：直接打开媒体信息面板。</summary>
     public void ShowMediaInfoForShot()
     {
@@ -2479,7 +3289,7 @@ public partial class PlayWindow : Window
     private sealed class MpvTrack
     {
         public MpvTrack(int id, string type, string? language, string? title, string? codec,
-            int? channels, bool selected)
+            int? channels, bool selected, string? externalFilename = null)
         {
             Id = id;
             Type = type;
@@ -2488,6 +3298,7 @@ public partial class PlayWindow : Window
             Codec = codec;
             Channels = channels;
             Selected = selected;
+            ExternalFilename = externalFilename;
         }
 
         public int Id { get; }
@@ -2497,6 +3308,8 @@ public partial class PlayWindow : Window
         public string? Codec { get; }
         public int? Channels { get; }
         public bool Selected { get; }
+        /// <summary>外挂字幕文件路径；弹幕 ASS 靠它识别并排除。</summary>
+        public string? ExternalFilename { get; }
 
         /// <summary>菜单文案：语言 / 标题 / 编码 / 声道，缺的跳掉。</summary>
         public string Describe()
