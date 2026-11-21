@@ -205,20 +205,6 @@ final class AppState: ObservableObject {
         await connectAll()
     }
 
-    /// 把本地目录 / ISO 加成媒体库。重名就加序号，避免侧栏两条一样的。
-    func addLocalSource(path: String) async {
-        let raw = (path as NSString).lastPathComponent
-        let base = raw.isEmpty ? "本地文件" : raw
-        var name = base
-        var suffix = 2
-        while settings.sources.contains(where: { $0.name == name }) {
-            name = "\(base) \(suffix)"
-            suffix += 1
-        }
-
-        await saveSource(SourceConfig(name: name, kind: "local", base: path))
-    }
-
     func removeSource(_ id: String) async {
         settings.sources.removeAll { $0.id == id }
         if settings.lastSourceId == id {

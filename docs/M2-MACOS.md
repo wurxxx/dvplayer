@@ -41,8 +41,8 @@
 - 横向行：触控板横滑 + 悬停出左右箭头，按整屏翻、垂直居中，
   内容一屏放得下就不出箭头（`HorizontalRow`）
 - 记录页：通用（继续观看按剧分组 + 视频收藏）/ 观看 / 收藏
-- 本地文件夹源：侧栏「添加本地文件夹…」→ 选目录 → 目录里的视频 / ISO
-  成为媒体库条目（见 `LOCAL-SOURCE.md`）；ISO 条目 `disc=true`。
+- 本地文件夹源：「服务器」页 → 添加 → 类型「本地文件夹」→ 选目录 →
+  目录里的视频 / ISO 成为媒体库条目（见 `LOCAL-SOURCE.md`）；ISO 条目 `disc=true`。
 - 原盘：ISO 条目 → `hdiutil` 挂载 → 读 `BDMV/PLAYLIST/*.mpls` → 弹标题框
   （正片 / 花絮、时长）。随包的 mpv 没有 libbluray，所以播放不是 `bd://`，
   而是把 mpls 里的 `(m2ts, IN_time, 时长)` 拼成一份 mpv EDL 播；关播放窗时

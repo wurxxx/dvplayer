@@ -112,27 +112,6 @@ private struct SidebarView: View {
 
             Spacer(minLength: 12)
 
-            Button(action: chooseLocalFolder) {
-                HStack(spacing: 9) {
-                    Image(systemName: "folder.badge.plus")
-                        .font(.system(size: 12.5))
-                    Text("添加本地文件夹…")
-                        .font(.system(size: 12.5))
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.radiusControl)
-                        .fill(Color.white.opacity(0.045))
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
-
             status
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
@@ -199,20 +178,6 @@ private struct SidebarView: View {
                 }
             }
         }
-    }
-
-    /// 侧栏底部：选一个目录 / ISO 直接加成媒体库，省得绕去设置页。
-    private func chooseLocalFolder() {
-        let panel = NSOpenPanel()
-        panel.title = "添加本地文件夹"
-        panel.message = "目录会整库扫描；也可以直接选一个 ISO 或视频文件。"
-        panel.prompt = "添加"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await state.addLocalSource(path: url.path) }
     }
 
     /// 左下角只留版本；连没连上看服务器列表前面的状态点。

@@ -392,61 +392,6 @@ public partial class MainWindow : FluentWindow
         player.Close();
     }
 
-    /// <summary>侧栏「添加本地文件夹…」：选一个目录直接加成媒体库。</summary>
-    private async void OnAddLocalFolderClick(object sender, RoutedEventArgs e)
-    {
-        var picker = new Microsoft.Win32.OpenFolderDialog
-        {
-            Title = "添加本地文件夹",
-            Multiselect = false,
-        };
-
-        if (picker.ShowDialog(this) != true || string.IsNullOrWhiteSpace(picker.FolderName))
-        {
-            return;
-        }
-
-        var path = picker.FolderName.TrimEnd(Path.DirectorySeparatorChar,
-            Path.AltDirectorySeparatorChar);
-        var name = Path.GetFileName(path);
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = "本地文件";
-        }
-
-        var settings = AppServices.Instance.Settings;
-        var unique = name;
-        var suffix = 2;
-        while (settings.Sources.Any(s => s.Name == unique))
-        {
-            unique = $"{name} {suffix++}";
-        }
-
-        var config = new SourceConfig(
-            "src-" + Guid.NewGuid().ToString("N")[..8],
-            unique,
-            "local",
-            path,
-            string.Empty,
-            string.Empty,
-            Path.GetDirectoryName(AppSettings.FilePath) ?? string.Empty);
-
-        settings.Sources.Add(config);
-        settings.LastSourceId = config.Id;
-        settings.Save();
-
-        var (ok, error) = await AppServices.Instance.ConnectAllAsync();
-        RefreshSourceStatus();
-        if (ok)
-        {
-            OpenSource(config.Id);
-        }
-        else
-        {
-            ConfirmDialog.Alert(this, "添加失败", error ?? "读不到这个目录。");
-        }
-    }
-
     /// <summary>读原盘标题并开播放窗（媒体库里的 ISO 条目也走这条）。</summary>
     private Task<PlayWindow?> OpenDiscAsync(string isoPath, int? titleNumber = null,
         double? startOverride = null, bool silent = false)

@@ -45,9 +45,9 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   `dolby-vision-profile` + `video-params` 的 `transfer` → `DV P5/P7/P8`、
   `HDR10`、`HLG`、`SDR`，服务端刮削的 `ColorRange` 只在 mpv 还没回报时兜底。
   P7 的 FEL/MEL 仍不判（要侧路 ffmpeg + dovi_tool，M0 验证壳里有）。
-- **本地文件夹源**：侧栏底部「添加本地文件夹…」→ 选目录 → 目录里的视频 /
-  ISO 变成媒体库条目（卡片墙、详情、选集、继续观看全部统一，见
-  `LOCAL-SOURCE.md`）。核心按 `Season 01` / `S01E02` 分季分集，`playSource`
+- **本地文件夹源**：「服务器」页 → 添加 → 类型「本地文件夹」→ 选目录 →
+  目录里的视频 / ISO 变成媒体库条目（卡片墙、详情、选集、继续观看全部统一，
+  见 `LOCAL-SOURCE.md`）。核心按 `Season 01` / `S01E02` 分季分集，`playSource`
   给绝对路径；ISO 条目 `disc=true`，界面再读标题。
 - **蓝光原盘**：ISO 条目的标题列表来自 `mpv.com` 打开盘时 libbluray 打的
   `title: N (时长) (xxxxx.mpls)`，不自己挂 ISO；播放用

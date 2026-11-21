@@ -43,21 +43,6 @@
                    FontSize="11.5" Foreground="{StaticResource FaintBrush}"
                    Margin="20,0,18,18" TextTrimming="CharacterEllipsis" />
 
-        <!-- 本地文件夹：选一个目录加成媒体库，ISO / 剧集都按媒体库条目播。 -->
-        <Button x:Name="AddLocalFolderButton" DockPanel.Dock="Bottom"
-                Style="{StaticResource GhostButton}"
-                Margin="14,0,14,12" Padding="12,9"
-                HorizontalContentAlignment="Left"
-                ToolTip="把一个本地目录加进媒体库"
-                Click="OnAddLocalFolderClick">
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Text="&#xE8B7;" FontFamily="{StaticResource IconFont}" FontSize="14"
-                       VerticalAlignment="Center" />
-            <TextBlock Text="添加本地文件夹…" FontSize="13" Margin="10,0,0,0"
-                       VerticalAlignment="Center" />
-          </StackPanel>
-        </Button>
-
         <StackPanel>
           <ListBox x:Name="Nav"
                    Background="Transparent"

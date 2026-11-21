@@ -19,6 +19,14 @@ struct SourcesPage: View {
     /// 本地文件夹源：地址是一个目录（或单个视频 / ISO），没有账号密码。
     private var isLocal: Bool { kind == "local" }
 
+    /// 新增时 `editing` 也有值（拿着表单的临时配置），别把标题写成「编辑」。
+    private var formTitle: String {
+        let exists = editing.map { draft in
+            state.settings.sources.contains { $0.id == draft.id }
+        } ?? false
+        return (exists ? "编辑" : "添加") + (isLocal ? "本地文件夹" : "服务器")
+    }
+
     var body: some View {
         PageScroll {
             VStack(alignment: .leading, spacing: 18) {
@@ -52,7 +60,17 @@ struct SourcesPage: View {
         }
         // 截图巡检：直接把确认卡片弹出来看样式。
         .task {
-            if ProcessInfo.processInfo.environment["DVPLAYER_CONFIRM"] == "1" {
+            // 截图巡检：`DVPLAYER_ADD=1` 启动就展开添加表单，`DVPLAYER_ADD_KIND=local` 切到本地文件夹。
+            let env = ProcessInfo.processInfo.environment
+            if env["DVPLAYER_ADD"] == "1" {
+                beginAdd()
+                if let wanted = env["DVPLAYER_ADD_KIND"], !wanted.isEmpty {
+                    kind = wanted
+                    name = Self.defaultName(for: wanted)
+                }
+            }
+
+            if env["DVPLAYER_CONFIRM"] == "1" {
                 state.askConfirm(
                     title: "删除服务器",
                     message: "删除服务器「飞牛影视」？\n播放记录与已收藏的进度都还在，\n重新添加这个源就能接上。",
@@ -195,7 +213,7 @@ struct SourcesPage: View {
 
     private var form: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(isEditing ? "编辑服务器" : "添加服务器")
+            Text(formTitle)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.text)
 
