@@ -140,6 +140,53 @@ final class PlayerLauncher {
               playlist: [PlayerEpisode] = [],
               seriesTitle: String? = nil,
               hintTitle: String? = nil) {
+        // 本地文件夹源里的 ISO：条目在媒体库里，但播放要先挂载原盘。
+        if isLocalItem(itemId) {
+            Task { @MainActor in
+                guard let core = AppState.shared.core else {
+                    self.startSession(itemId: itemId, startSeconds: startSeconds,
+                                      playlist: playlist, seriesTitle: seriesTitle,
+                                      hintTitle: hintTitle)
+                    return
+                }
+                let source = try? await core.playSource(itemId)
+                if let source, source.disc {
+                    // 自检时用 `DVPLAYER_DISC_TITLE` 指定标题，远程没法点选择框。
+                    let wanted = Int(ProcessInfo.processInfo.environment["DVPLAYER_DISC_TITLE"] ?? "")
+                    DiscUI.open(path: source.url, autoTitle: wanted,
+                                coreItemId: source.itemId,
+                                hintTitle: source.title,
+                                start: source.positionSeconds > 0
+                                    ? Double(source.positionSeconds) : nil)
+                } else {
+                    self.startSession(itemId: itemId, startSeconds: startSeconds,
+                                      playlist: playlist, seriesTitle: seriesTitle,
+                                      hintTitle: hintTitle)
+                }
+            }
+            return
+        }
+
+        startSession(itemId: itemId, startSeconds: startSeconds,
+                     playlist: playlist, seriesTitle: seriesTitle,
+                     hintTitle: hintTitle)
+    }
+
+    /// 条目 id 的源是不是本地文件夹源。
+    private func isLocalItem(_ itemId: String) -> Bool {
+        guard let sourceId = itemId.split(separator: ":", maxSplits: 1).first.map(String.init),
+              !sourceId.isEmpty else {
+            return false
+        }
+        return AppState.shared.settings.sources
+            .first { $0.id == sourceId }?.kind == "local"
+    }
+
+    private func startSession(itemId: String,
+                              startSeconds: Double?,
+                              playlist: [PlayerEpisode],
+                              seriesTitle: String?,
+                              hintTitle: String?) {
         if let existing = controller {
             if existing.session.itemId == itemId, existing.session.error == nil {
                 existing.showWindow(nil)
@@ -190,7 +237,11 @@ final class PlayerLauncher {
     }
 
     /// 播蓝光原盘：视频是挂载 ISO 里的 m2ts（EDL 拼接），关窗时卸载。
-    func playDisc(_ disc: BluRaySession, title: BluRayTitle) {
+    func playDisc(_ disc: BluRaySession,
+                  title: BluRayTitle,
+                  coreItemId: String? = nil,
+                  hintTitle: String? = nil,
+                  start: Double? = nil) {
         if let existing = controller {
             existing.close()
             controller = nil
@@ -205,11 +256,15 @@ final class PlayerLauncher {
         let name = URL(fileURLWithPath: disc.isoPath)
             .deletingPathExtension()
             .lastPathComponent
-        let itemId = "iso:\(name):mpls\(title.id)"
+        let itemId = coreItemId ?? "iso:\(name):mpls\(title.id)"
+        let titleText = hintTitle.map { "\($0) · 标题 \(title.number)" }
+            ?? "\(disc.discName) · 标题 \(title.number)"
         let local = LocalPlayback(itemId: itemId,
-                                  title: "\(disc.discName) · 标题 \(title.number)",
+                                  title: titleText,
                                   url: url.path,
-                                  duration: title.duration)
+                                  duration: title.duration,
+                                  coreItemId: coreItemId,
+                                  startSeconds: start)
         let frame = PlayerWindowController.preferredFrame()
 
         guard let session = PlayerSession(itemId: itemId,

@@ -21,7 +21,11 @@ enum DiscUI {
     }
 
     /// 挂载放到后台：大 ISO 的 hdiutil 可能要一两秒，别卡住侧栏。
-    static func open(path: String, autoTitle: Int? = nil) {
+    static func open(path: String,
+                     autoTitle: Int? = nil,
+                     coreItemId: String? = nil,
+                     hintTitle: String? = nil,
+                     start: Double? = nil) {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let session = try BluRayDisc.open(isoPath: path)
@@ -36,7 +40,10 @@ enum DiscUI {
                         return
                     }
 
-                    PlayerLauncher.shared.playDisc(session, title: title)
+                    PlayerLauncher.shared.playDisc(session, title: title,
+                                                   coreItemId: coreItemId,
+                                                   hintTitle: hintTitle,
+                                                   start: start)
                 }
             } catch {
                 DispatchQueue.main.async {

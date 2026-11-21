@@ -102,6 +102,7 @@ extension MediaText {
         case "emby": return "Emby"
         case "jellyfin": return "Jellyfin"
         case "plex": return "Plex"
+        case "local": return "本地文件夹"
         case "directory": return "本地目录"
         default: return kind
         }

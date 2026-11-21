@@ -6,9 +6,11 @@
 
 pub mod emby;
 pub mod fnos;
+pub mod local;
 
 pub use emby::EmbySource;
 pub use fnos::FnOsSource;
+pub use local::LocalSource;
 
 use serde::{Deserialize, Serialize};
 
@@ -31,10 +33,13 @@ pub struct SourceConfig {
     pub username: String,
     #[serde(default)]
     pub password: String,
+    /// 本地源的进度 / 缓存放这里（两端传 Application Support 目录）。
+    #[serde(default)]
+    pub data_dir: String,
 }
 
 /// 当前实现的适配器类型。界面的「添加源」下拉框直接用它。
-pub const SUPPORTED_KINDS: &[&str] = &["fnos", "emby", "jellyfin"];
+pub const SUPPORTED_KINDS: &[&str] = &["fnos", "emby", "jellyfin", "local"];
 
 /// 媒体源的最小接口。
 ///
@@ -149,6 +154,12 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
             config.base.clone(),
             config.username.clone(),
             config.password.clone(),
+        ))),
+        "local" | "folder" => Some(Box::new(LocalSource::new(
+            config.id.clone(),
+            config.name.clone(),
+            config.base.clone(),
+            config.data_dir.clone(),
         ))),
         _ => None,
     }

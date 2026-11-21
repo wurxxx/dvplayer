@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import DvCore
 
@@ -14,6 +15,9 @@ struct SourcesPage: View {
     @State private var saving = false
 
     private var isEditing: Bool { editing != nil }
+
+    /// 本地文件夹源：地址是一个目录（或单个视频 / ISO），没有账号密码。
+    private var isLocal: Bool { kind == "local" }
 
     var body: some View {
         PageScroll {
@@ -195,7 +199,9 @@ struct SourcesPage: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.text)
 
-            Text("Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。")
+            Text(isLocal
+                 ? "选一个目录：里面的每个视频是一个条目，剧按 Season / S01E01 分季分集。"
+                 : "Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.faint)
 
@@ -206,10 +212,17 @@ struct SourcesPage: View {
                         Text("飞牛影视").tag("fnos")
                         Text("Emby").tag("emby")
                         Text("Jellyfin").tag("jellyfin")
+                        Text("本地文件夹").tag("local")
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(width: 160, alignment: .leading)
+                    .onChange(of: kind) { value in
+                        // 切类型时把默认名称一起换掉，别把「飞牛影视」留给本地目录。
+                        if name == defaultName || name.isEmpty {
+                            name = Self.defaultName(for: value)
+                        }
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -218,20 +231,31 @@ struct SourcesPage: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                FieldLabel(text: "服务器地址")
-                InputField(placeholder: "http://192.168.1.10:8005", text: $base)
-            }
-
-            HStack(spacing: 12) {
+            if isLocal {
                 VStack(alignment: .leading, spacing: 6) {
-                    FieldLabel(text: "用户名（Emby 可留空）")
-                    InputField(placeholder: "用户名", text: $username)
+                    FieldLabel(text: "文件夹 / ISO")
+                    HStack(spacing: 10) {
+                        InputField(placeholder: "/Volumes/Media", text: $base)
+                        Button("选择…") { chooseFolder() }
+                            .buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel(text: "服务器地址")
+                    InputField(placeholder: "http://192.168.1.10:8005", text: $base)
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    FieldLabel(text: "密码 / API Key")
-                    InputField(placeholder: "密码或 API Key", text: $password, secure: true)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel(text: "用户名（Emby 可留空）")
+                        InputField(placeholder: "用户名", text: $username)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel(text: "密码 / API Key")
+                        InputField(placeholder: "密码或 API Key", text: $password, secure: true)
+                    }
                 }
             }
 
@@ -257,6 +281,29 @@ struct SourcesPage: View {
         base = ""
         username = ""
         password = ""
+    }
+
+    private static func defaultName(for kind: String) -> String {
+        kind == "local" ? "本地文件" : MediaText.sourceKindLabel(kind)
+    }
+
+    private var defaultName: String { Self.defaultName(for: kind) }
+
+    /// 选目录或单个 ISO / 视频文件。
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "选择要加入媒体库的文件夹"
+        panel.message = "目录会整库扫描；也可以直接选一个 ISO 或视频文件。"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+
+        if panel.runModal() == .OK, let url = panel.url {
+            base = url.path
+            if name.isEmpty || name == defaultName || name == "飞牛影视" {
+                name = url.lastPathComponent
+            }
+        }
     }
 
     private func beginEdit(_ config: SourceConfig) {

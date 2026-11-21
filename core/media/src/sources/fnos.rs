@@ -920,6 +920,7 @@ impl FnOsSource {
             url: format!("{}/v/api/v1/media/range/{}", self.base, info.media_guid),
             headers: self.auth_headers(),
             is_direct: true,
+            disc: false,
             media_guid: info.media_guid,
             video_guid: empty_to_none(info.video_guid),
             audio_guid: empty_to_none(info.audio_guid),

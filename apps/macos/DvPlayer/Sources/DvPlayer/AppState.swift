@@ -187,7 +187,13 @@ final class AppState: ObservableObject {
 
     // MARK: - 源管理
 
-    func saveSource(_ config: SourceConfig) async {
+    func saveSource(_ incoming: SourceConfig) async {
+        var config = incoming
+        // 本地源一定要有 data_dir，否则进度只活在内存里；界面不用管这件事。
+        if config.kind == "local", (config.dataDir ?? "").isEmpty {
+            config.dataDir = AppSettings.directory.path
+        }
+
         if let index = settings.sources.firstIndex(where: { $0.id == config.id }) {
             settings.sources[index] = config
         } else {
@@ -197,6 +203,20 @@ final class AppState: ObservableObject {
         settings.lastSourceId = config.id
         settings.save()
         await connectAll()
+    }
+
+    /// 把本地目录 / ISO 加成媒体库。重名就加序号，避免侧栏两条一样的。
+    func addLocalSource(path: String) async {
+        let raw = (path as NSString).lastPathComponent
+        let base = raw.isEmpty ? "本地文件" : raw
+        var name = base
+        var suffix = 2
+        while settings.sources.contains(where: { $0.name == name }) {
+            name = "\(base) \(suffix)"
+            suffix += 1
+        }
+
+        await saveSource(SourceConfig(name: name, kind: "local", base: path))
     }
 
     func removeSource(_ id: String) async {

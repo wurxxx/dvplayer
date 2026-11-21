@@ -196,6 +196,9 @@ pub struct PlaySource {
     pub headers: Vec<HttpHeader>,
     #[serde(default)]
     pub is_direct: bool,
+    /// 原盘（ISO / 蓝光目录）：界面要走挂载或 libbluray，而不是直接丢给 mpv。
+    #[serde(default)]
+    pub disc: bool,
     pub media_guid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_guid: Option<String>,

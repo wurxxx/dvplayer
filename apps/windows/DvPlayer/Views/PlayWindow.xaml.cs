@@ -65,6 +65,9 @@ public partial class PlayWindow : Window
     private readonly bool _isLocalDisc;
     private readonly string? _discIsoPath;
 
+    /// <summary>从媒体库点开的本地原盘：条目在核心里，进度要回写核心。</summary>
+    private readonly string? _coreItemId;
+
     private MediaInfoDto? _mediaInfo;
     private readonly List<MpvTrack> _audioTracks = new();
     private readonly List<MpvTrack> _subtitleTracks = new();
@@ -170,7 +173,8 @@ public partial class PlayWindow : Window
         List<PlayEpisode>? playlist = null,
         string? seriesTitle = null,
         bool localDisc = false,
-        string? discIsoPath = null)
+        string? discIsoPath = null,
+        string? coreItemId = null)
     {
         _current = source;
         _startSeconds = startSeconds;
@@ -179,6 +183,7 @@ public partial class PlayWindow : Window
         _itemId = source.ItemId;
         _isLocalDisc = localDisc;
         _discIsoPath = discIsoPath;
+        _coreItemId = coreItemId;
 
         var settings = AppServices.Instance.Settings;
         _aspect = PlayerAspectExtensions.Parse(settings.VideoAspect);
@@ -285,6 +290,18 @@ public partial class PlayWindow : Window
                 return null;
             }
 
+            // 本地文件夹源里的 ISO：条目在媒体库里，播放要先读原盘标题。
+            if (source.Disc)
+            {
+                Trace.Write($"play open disc item={itemId} iso={source.Url}");
+                var placeholder = window;
+                window = null;
+                placeholder.Close();
+                return await OpenDiscAsync(owner, source.Url,
+                    startOverride: source.PositionSeconds > 0 ? source.PositionSeconds : null,
+                    coreItemId: source.ItemId);
+            }
+
             window.BeginPlayback(source, startSeconds);
             return window;
         }
@@ -306,6 +323,58 @@ public partial class PlayWindow : Window
     }
 
     /// <summary>
+    /// 读原盘标题并开播放窗。`titleNumber` 非空时直接播那一个（自检用）；
+    /// 否则单标题直接播、多标题才弹标题选择框。
+    /// </summary>
+    public static async Task<PlayWindow?> OpenDiscAsync(
+        Window? owner,
+        string isoPath,
+        int? titleNumber = null,
+        double? startOverride = null,
+        string? coreItemId = null,
+        bool silent = false)
+    {
+        if (!File.Exists(isoPath))
+        {
+            if (!silent)
+            {
+                ConfirmDialog.Alert(owner, "无法打开原盘", "找不到 ISO 文件：" + isoPath);
+            }
+
+            return null;
+        }
+
+        var (probe, error) = await BluRayDisc.ProbeAsync(isoPath);
+        Trace.Write($"disc probe iso={Path.GetFileName(isoPath)} " +
+                    $"titles={probe?.Titles.Count ?? 0} err={error ?? "-"}");
+
+        if (probe is null)
+        {
+            if (!silent)
+            {
+                ConfirmDialog.Alert(owner, "无法打开原盘", error ?? "读不到原盘标题。");
+            }
+
+            return null;
+        }
+
+        BluRayTitle? title = titleNumber is { } wanted
+            ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted) ?? probe.Titles[0]
+            : null;
+
+        // 只有一条标题就别多一步：直接播。多标题（正片 + 花絮）才让用户选。
+        title ??= probe.Titles.Count == 1
+            ? probe.Titles[0]
+            : DiscTitlesDialog.Pick(owner, isoPath, probe);
+        if (title is null)
+        {
+            return null;
+        }
+
+        return OpenIso(owner, isoPath, title, probe.DiscName, startOverride, coreItemId);
+    }
+
+    /// <summary>
     /// 播一个蓝光原盘标题。原盘不经过媒体库核心：直接拼一个本地播放源，
     /// URL 是 `bd://mpls/<n>`，mpv 靠 `--bluray-device=<iso>` 读盘。
     /// </summary>
@@ -314,12 +383,13 @@ public partial class PlayWindow : Window
         string isoPath,
         BluRayTitle title,
         string? discName = null,
-        double? startOverride = null)
+        double? startOverride = null,
+        string? coreItemId = null)
     {
         var name = Path.GetFileNameWithoutExtension(isoPath);
         var display = string.IsNullOrWhiteSpace(discName) ? name : discName!;
-        var itemId = $"iso:{name}:mpls{title.Mpls}";
-        var start = startOverride ?? LocalProgress.Get(itemId);
+        var itemId = coreItemId ?? $"iso:{name}:mpls{title.Mpls}";
+        var start = startOverride ?? (coreItemId is null ? LocalProgress.Get(itemId) : 0);
 
         var source = new PlaySourceDto(
             itemId,
@@ -327,6 +397,7 @@ public partial class PlayWindow : Window
             $"bd://mpls/{title.Mpls}",
             new List<HttpHeaderDto>(),
             true,
+            false,
             string.Empty,
             null,
             null,
@@ -347,7 +418,7 @@ public partial class PlayWindow : Window
                     $"mpls={title.Mpls} dur={title.DurationSeconds:0} resume={start:0}");
 
         var window = new PlayWindow(source, start > 0 ? start : 0, null, null,
-            localDisc: true, discIsoPath: isoPath);
+            localDisc: true, discIsoPath: isoPath, coreItemId: coreItemId);
         // 先用占位状态挡住 Show() 触发的 OnLoaded，BeginPlayback 再正式起 mpv。
         window._started = true;
         window.AttachSurface(owner);
@@ -362,6 +433,7 @@ public partial class PlayWindow : Window
         string.Empty,
         string.Empty,
         new List<HttpHeaderDto>(),
+        false,
         false,
         string.Empty,
         null,
@@ -1608,6 +1680,13 @@ public partial class PlayWindow : Window
     /// </summary>
     private void ReportProgress(double position, double duration)
     {
+        // 媒体库里的本地条目：进度仍然写核心，只是影片本身要走原盘流程。
+        if (!string.IsNullOrEmpty(_coreItemId))
+        {
+            Playback.Report(_coreItemId!, position, duration);
+            return;
+        }
+
         if (!_isLocalDisc)
         {
             Playback.Report(_itemId, position, duration);

@@ -75,6 +75,10 @@ struct LocalPlayback {
     let title: String
     let url: String
     let duration: Double
+    /// 媒体库里的本地条目（ISO 从媒体库点开时），进度回写到核心而不是本地 JSON。
+    var coreItemId: String?
+    /// 起播点：本地源已经在核心那边存了续播点。
+    var startSeconds: Double?
 }
 
 /// 播放页音轨 / 字幕菜单的一项。id 是 mpv 的轨道 id（选轨直接用它）。
@@ -362,7 +366,7 @@ final class PlayerSession: ObservableObject {
         title = local.title
         duration = local.duration
 
-        let start = LocalProgressStore.get(local.itemId)
+        let start = local.startSeconds ?? LocalProgressStore.get(local.itemId)
         launchStart = start
         launchAt = Date()
         lastReportAt = Date()
@@ -1168,7 +1172,17 @@ final class PlayerSession: ObservableObject {
         guard total > 0 else { return }
         let value = Int(seconds)
 
-        // 原盘核心不认识，续播点写本地文件。
+        // 从媒体库点开的本地原盘：条目在核心里，进度回写核心。
+        if let coreItemId = localSource?.coreItemId {
+            guard let core = AppState.shared.core else { return }
+            NSLog("[Play] report local \(coreItemId) pos=\(value) dur=\(total)")
+            Task {
+                try? await core.reportProgress(coreItemId, position: value, duration: total)
+            }
+            return
+        }
+
+        // 侧栏直接打开的原盘：核心不认识，续播点写本地文件。
         if localSource != nil {
             if value >= total - 1 {
                 LocalProgressStore.clear(item)

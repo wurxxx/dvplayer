@@ -17,15 +17,19 @@ public struct SourceConfig: Codable, Identifiable, Hashable, Sendable {
     public var base: String
     public var username: String
     public var password: String
+    /// 本地源把进度写这里；服务器源留空。可选是为了老配置能直接解出来。
+    public var dataDir: String?
 
     public init(id: String = UUID().uuidString, name: String, kind: String = "fnos",
-                base: String, username: String = "", password: String = "") {
+                base: String, username: String = "", password: String = "",
+                dataDir: String? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.base = base
         self.username = username
         self.password = password
+        self.dataDir = dataDir
     }
 }
 
@@ -171,6 +175,9 @@ public struct PlaySource: Codable, Sendable {
     public let title: String
     public let url: String
     public let headers: [HttpHeader]
+    public let isDirect: Bool
+    /// 原盘：界面要走挂载 / libbluray，而不是直接丢给 mpv。
+    public let disc: Bool
     public let mediaGuid: String
     public let positionSeconds: Int
     public let durationSeconds: Int

@@ -63,6 +63,7 @@ public static class MediaText
         "emby" => "Emby",
         "jellyfin" => "Jellyfin",
         "plex" => "Plex",
+        "local" => "本地文件夹",
         "directory" => "本地目录",
         _ => kind,
     };

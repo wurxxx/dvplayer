@@ -392,81 +392,65 @@ public partial class MainWindow : FluentWindow
         player.Close();
     }
 
-    /// <summary>侧栏「打开原盘…」：选 ISO → 读标题 → 挑一个 → 播。</summary>
-    private async void OnOpenDiscClick(object sender, RoutedEventArgs e)
+    /// <summary>侧栏「添加本地文件夹…」：选一个目录直接加成媒体库。</summary>
+    private async void OnAddLocalFolderClick(object sender, RoutedEventArgs e)
     {
-        var picker = new Microsoft.Win32.OpenFileDialog
+        var picker = new Microsoft.Win32.OpenFolderDialog
         {
-            Title = "打开蓝光原盘",
-            Filter = "蓝光原盘 (*.iso)|*.iso|所有文件 (*.*)|*.*",
-            CheckFileExists = true,
+            Title = "添加本地文件夹",
             Multiselect = false,
         };
 
-        if (picker.ShowDialog(this) == true)
+        if (picker.ShowDialog(this) != true || string.IsNullOrWhiteSpace(picker.FolderName))
         {
-            await OpenDiscAsync(picker.FileName);
+            return;
+        }
+
+        var path = picker.FolderName.TrimEnd(Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(path);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = "本地文件";
+        }
+
+        var settings = AppServices.Instance.Settings;
+        var unique = name;
+        var suffix = 2;
+        while (settings.Sources.Any(s => s.Name == unique))
+        {
+            unique = $"{name} {suffix++}";
+        }
+
+        var config = new SourceConfig(
+            "src-" + Guid.NewGuid().ToString("N")[..8],
+            unique,
+            "local",
+            path,
+            string.Empty,
+            string.Empty,
+            Path.GetDirectoryName(AppSettings.FilePath) ?? string.Empty);
+
+        settings.Sources.Add(config);
+        settings.LastSourceId = config.Id;
+        settings.Save();
+
+        var (ok, error) = await AppServices.Instance.ConnectAllAsync();
+        RefreshSourceStatus();
+        if (ok)
+        {
+            OpenSource(config.Id);
+        }
+        else
+        {
+            ConfirmDialog.Alert(this, "添加失败", error ?? "读不到这个目录。");
         }
     }
 
-    /// <summary>
-    /// 读原盘标题并开播放窗。`titleNumber` 非空时直接播那一个（自检用），
-    /// 否则弹标题选择框。
-    /// </summary>
-    private async Task<PlayWindow?> OpenDiscAsync(string isoPath, int? titleNumber = null,
+    /// <summary>读原盘标题并开播放窗（媒体库里的 ISO 条目也走这条）。</summary>
+    private Task<PlayWindow?> OpenDiscAsync(string isoPath, int? titleNumber = null,
         double? startOverride = null, bool silent = false)
-    {
-        if (!File.Exists(isoPath))
-        {
-            if (!silent)
-            {
-                ConfirmDialog.Alert(this, "无法打开原盘", "找不到 ISO 文件：" + isoPath);
-            }
-
-            return null;
-        }
-
-        OpenDiscButton.IsEnabled = false;
-        var oldCursor = Mouse.OverrideCursor;
-        Mouse.OverrideCursor = Cursors.Wait;
-
-        try
-        {
-            var (probe, error) = await BluRayDisc.ProbeAsync(isoPath);
-            Trace.Write($"disc probe iso={Path.GetFileName(isoPath)} " +
-                        $"titles={probe?.Titles.Count ?? 0} err={error ?? "-"}");
-
-            if (probe is null)
-            {
-                if (!silent)
-                {
-                    ConfirmDialog.Alert(this, "无法打开原盘", error ?? "读不到原盘标题。");
-                }
-
-                return null;
-            }
-
-            BluRayTitle? title = titleNumber is { } wanted
-                ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted) ?? probe.Titles[0]
-                : null;
-
-            // 只有一条标题就别多一步：直接播。多标题（正片 + 花絮）才让用户选。
-            title ??= probe.Titles.Count == 1
-                ? probe.Titles[0]
-                : DiscTitlesDialog.Pick(this, isoPath, probe);
-            if (title is null)
-            {
-                return null;
-            }
-
-            return PlayWindow.OpenIso(this, isoPath, title, probe.DiscName, startOverride);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = oldCursor;
-            OpenDiscButton.IsEnabled = true;
-        }
-    }
+        => PlayWindow.OpenDiscAsync(this, isoPath, titleNumber, startOverride, null, silent);
 
     /// <summary>自检：把标题选择框单独截一张。</summary>
     private async Task CaptureDiscListAsync(string isoPath, string dir)
@@ -1288,6 +1272,9 @@ public partial class MainWindow : FluentWindow
             OpenSource(id);
         }
     }
+
+    /// <summary>给设置页用：加完本地源直接跳到它的首页。</summary>
+    public void OpenSourceById(string id) => OpenSource(id);
 
     private void OpenSource(string id)
     {

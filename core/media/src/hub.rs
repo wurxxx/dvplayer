@@ -520,6 +520,7 @@ mod tests {
                 url: format!("http://{}/{item_id}", self.tag),
                 headers: Vec::new(),
                 is_direct: true,
+                disc: false,
                 media_guid: String::new(),
                 video_guid: None,
                 audio_guid: None,

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -51,6 +52,7 @@ public partial class SourcesPage : Page
         KindFnos.IsEnabled = kinds.Contains("fnos");
         KindEmby.IsEnabled = kinds.Contains("emby");
         KindJellyfin.IsEnabled = kinds.Contains("jellyfin");
+        KindLocal.IsEnabled = kinds.Contains("local");
 
         if (KindFnos.IsEnabled)
         {
@@ -70,6 +72,7 @@ public partial class SourcesPage : Page
     private string SelectedKind() =>
         KindEmby.IsChecked == true ? "emby"
         : KindJellyfin.IsChecked == true ? "jellyfin"
+        : KindLocal.IsChecked == true ? "local"
         : "fnos";
 
     private void SelectKind(string kind)
@@ -77,6 +80,61 @@ public partial class SourcesPage : Page
         KindFnos.IsChecked = kind == "fnos";
         KindEmby.IsChecked = kind == "emby";
         KindJellyfin.IsChecked = kind == "jellyfin";
+        KindLocal.IsChecked = kind == "local";
+        UpdateKindUi();
+    }
+
+    private const string DefaultBase = "http://10.0.0.134:8005";
+
+    private void OnKindChanged(object sender, RoutedEventArgs e) => UpdateKindUi();
+
+    /// <summary>本地文件夹和服务器是两套字段：一个要路径，一个要地址和账号。</summary>
+    private void UpdateKindUi()
+    {
+        // InitializeComponent 里 IsChecked="True" 会先触发一次，那时控件还没建全。
+        if (CredentialPanel is null || BaseLabel is null || AddTitle is null)
+        {
+            return;
+        }
+
+        var local = SelectedKind() == "local";
+        CredentialPanel.Visibility = local ? Visibility.Collapsed : Visibility.Visible;
+        BrowseButton.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
+        LocalHint.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
+        BaseLabel.Text = local ? "文件夹 / ISO" : "服务器地址";
+        AddTitle.Text = (_editingId is null ? "添加" : "编辑") +
+                        (local ? "本地文件夹" : "服务器");
+
+        // 切换类型时别把上一个类型的示例值留在框里。
+        if (local && BaseBox.Text.Trim() == DefaultBase)
+        {
+            BaseBox.Text = string.Empty;
+        }
+        else if (!local && string.IsNullOrWhiteSpace(BaseBox.Text))
+        {
+            BaseBox.Text = DefaultBase;
+        }
+    }
+
+    /// <summary>本地源选目录（ISO 也可以直接在地址框里填路径）。</summary>
+    private void OnBrowseClick(object sender, RoutedEventArgs e)
+    {
+        var picker = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择要加入媒体库的文件夹",
+            Multiselect = false,
+        };
+
+        if (picker.ShowDialog(Window.GetWindow(this)) == true)
+        {
+            BaseBox.Text = picker.FolderName;
+            if (string.IsNullOrWhiteSpace(NameBox.Text) ||
+                NameBox.Text == "飞牛影视" || NameBox.Text == "本地文件")
+            {
+                NameBox.Text = System.IO.Path.GetFileName(
+                    picker.FolderName.TrimEnd(System.IO.Path.DirectorySeparatorChar));
+            }
+        }
     }
 
     private void RefreshSources()
@@ -153,6 +211,10 @@ public partial class SourcesPage : Page
         AddTitle.Text = "添加服务器";
         AddSubmitButton.Content = "添加并连接";
         AddStatus.Text = "";
+        NameBox.Text = "飞牛影视";
+        BaseBox.Text = DefaultBase;
+        UserBox.Text = string.Empty;
+        PassBox.Password = string.Empty;
         SelectKind("fnos");
     }
 
@@ -189,6 +251,7 @@ public partial class SourcesPage : Page
         AddSubmitButton.Content = "保存并连接";
 
         SelectKind(source.Kind);
+        UpdateKindUi();
 
         NameBox.Text = source.Name;
         BaseBox.Text = source.Base;
@@ -260,6 +323,46 @@ public partial class SourcesPage : Page
         var pass = PassBox.Password;
         var kind = SelectedKind();
 
+        // 本地文件夹：校验路径，不要账号密码，进度文件放本机配置目录。
+        if (kind == "local")
+        {
+            if (!Directory.Exists(baseUri) && !File.Exists(baseUri))
+            {
+                AddStatus.Text = "路径不存在，先点「浏览…」选一个文件夹。";
+                return;
+            }
+
+            var localSettings = AppServices.Instance.Settings;
+            var localConfig = new SourceConfig(
+                _editingId ?? "src-" + Guid.NewGuid().ToString("N")[..8],
+                string.IsNullOrWhiteSpace(NameBox.Text) ? "本地文件" : NameBox.Text.Trim(),
+                "local",
+                baseUri,
+                string.Empty,
+                string.Empty,
+                Path.GetDirectoryName(AppSettings.FilePath) ?? string.Empty);
+
+            localSettings.Sources.RemoveAll(s => s.Id == localConfig.Id);
+            localSettings.Sources.Add(localConfig);
+            localSettings.LastSourceId = localConfig.Id;
+            localSettings.Save();
+
+            AddStatus.Text = "正在扫描…";
+            var (localOk, localError) = await ReconnectAsync(null);
+            if (localOk)
+            {
+                CloseAddPanel();
+                StatusText.Text = "已添加本地文件夹：" + localConfig.Name;
+                (Window.GetWindow(this) as MainWindow)?.OpenSourceById(localConfig.Id);
+            }
+            else
+            {
+                AddStatus.Text = "添加失败：" + (localError ?? "读不到这个目录");
+            }
+
+            return;
+        }
+
         if (!Uri.TryCreate(baseUri, UriKind.Absolute, out _))
         {
             AddStatus.Text = "服务器地址无效，例如 http://10.0.0.134:8005";
@@ -301,7 +404,8 @@ public partial class SourcesPage : Page
             kind,
             baseUri,
             user,
-            effectivePass);
+            effectivePass,
+            string.Empty);
 
         // 同一地址同一账号不重复加，按最新提交的为准（编辑自己不算重复）。
         settings.Sources.RemoveAll(s =>

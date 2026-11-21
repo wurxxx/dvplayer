@@ -41,13 +41,13 @@
 - 横向行：触控板横滑 + 悬停出左右箭头，按整屏翻、垂直居中，
   内容一屏放得下就不出箭头（`HorizontalRow`）
 - 记录页：通用（继续观看按剧分组 + 视频收藏）/ 观看 / 收藏
-- 原盘：侧栏「打开原盘…」→ 选 `*.iso` → `hdiutil` 挂载 → 读
-  `BDMV/PLAYLIST/*.mpls` → 弹标题框（正片 / 花絮、时长）。随包的 mpv
-  没有 libbluray，所以播放不是 `bd://`，而是把 mpls 里的
-  `(m2ts, IN_time, 时长)` 拼成一份 mpv EDL 播；关播放窗时卸载 ISO。
-  原盘不查核心、不回写进度，续播点存
-  `~/Library/Application Support/DvPlayer/local-progress.json`。
-  自检：`DVPLAYER_DISC=<iso>` + `DVPLAYER_DISC_TITLE=N`。
+- 本地文件夹源：侧栏「添加本地文件夹…」→ 选目录 → 目录里的视频 / ISO
+  成为媒体库条目（见 `LOCAL-SOURCE.md`）；ISO 条目 `disc=true`。
+- 原盘：ISO 条目 → `hdiutil` 挂载 → 读 `BDMV/PLAYLIST/*.mpls` → 弹标题框
+  （正片 / 花絮、时长）。随包的 mpv 没有 libbluray，所以播放不是 `bd://`，
+  而是把 mpls 里的 `(m2ts, IN_time, 时长)` 拼成一份 mpv EDL 播；关播放窗时
+  卸载 ISO。进度回写核心（本地源）。
+  自检：`DVPLAYER_DISC=<iso>` + `DVPLAYER_DISC_TITLE=N`（不建源直接开 ISO）。
 - 搜索页：跨源搜索；结果卡片直接进详情（全局 `AppState.detailItemId` 路由，切侧栏自动收起）
 - 记录页：「观看」的播放按钮直接 `PlayerLauncher.play(record:)`，收藏卡片进详情
 - 设置页：续播、分辨率角标、自动连接、播放缓冲、核心版本与配置路径

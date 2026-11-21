@@ -471,6 +471,7 @@ impl EmbySource {
             url,
             headers: self.auth_headers(),
             is_direct: true,
+            disc: false,
             media_guid: if media_id.is_empty() {
                 item_id.to_string()
             } else {

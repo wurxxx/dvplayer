@@ -439,7 +439,9 @@ public sealed record SourceConfig(
     string Kind,
     string Base,
     string Username,
-    string Password);
+    string Password,
+    /// <summary>本地源把进度写这里；服务器源留空。</summary>
+    string DataDir = "");
 
 public sealed record SourceInfoDto(string Id, string Name, string Kind);
 
@@ -608,6 +610,7 @@ public sealed record PlaySourceDto(
     string Url,
     List<HttpHeaderDto> Headers,
     bool IsDirect,
+    bool Disc,
     string MediaGuid,
     string? VideoGuid,
     string? AudioGuid,
