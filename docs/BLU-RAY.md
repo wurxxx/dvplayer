@@ -184,6 +184,8 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
   读这行最准，也不用挂载。
 - **播放**：`--bluray-device=<iso>` + `bd://mpls/<n>`；音频/字幕/章节/seek
   全部复用播放页现有 IPC。
+- **打包注意**：随包的 mpv 要同时带 `mpv.com`。GUI 版 `mpv.exe` 没有 stdout，
+  列不出 title（`MpvProcess` 仍回落到 `mpv.exe`，但只用于播放）。
 - **不是媒体库条目**：原盘不查核心的播放源、不拉媒体信息、不回写进度；
   续播点写本地 JSON，播完自动清掉。
 - **自检**：`--play-iso <iso> --play-iso-title 1 --play-check <目录>
