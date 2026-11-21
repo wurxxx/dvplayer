@@ -3158,6 +3158,33 @@ public partial class PlayWindow : Window
 
     private void OnShotClick(object sender, RoutedEventArgs e) => TakeScreenshot();
 
+    /// <summary>自检：让 mpv 把当前解码帧写成 PNG（不依赖桌面能不能截屏）。</summary>
+    public bool SaveVideoFrameForShot(string file)
+    {
+        if (_ipc is null || string.IsNullOrWhiteSpace(file))
+        {
+            return false;
+        }
+
+        try
+        {
+            var folder = Path.GetDirectoryName(file);
+            if (!string.IsNullOrWhiteSpace(folder))
+            {
+                Directory.CreateDirectory(folder);
+            }
+
+            _ipc.Command("screenshot-to-file", file.Replace('\\', '/'), "video");
+            Trace.Write("frame " + file);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("frame failed: " + ex.Message);
+            return false;
+        }
+    }
+
     private void TakeScreenshot()
     {
         if (_ipc is null)

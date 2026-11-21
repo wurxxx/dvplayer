@@ -89,6 +89,7 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
   `menu`（截「更多」菜单到 `play-more.png`）、`overlay`（垫黑截浮层，
   进度条 / 控制条看 `play-overlay.png`）、`skipoutro`。
 - `audioout` / `audiotoggle`：打开音频输出菜单、切一次直通 / HDR 并写日志（无桌面自检用）。
+- `frame`：让 mpv 把当前解码帧写到 `<目录>\video-frame.png`，锁屏 / 无桌面也能验真实画面。
 - `--screenshot <目录> settings --settings-tab play`：设置页直接停在「播放」分组，
   核对缓冲大小这类项。
 - 结果全部写 `%LOCALAPPDATA%\dvplayer\player.log`，状态行类似

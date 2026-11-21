@@ -28,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // 上次异常退出可能留下挂载中的 ISO 临时目录。
+        BluRayDisc.cleanupStaleMounts()
+
         // 起窗就抢焦点，红绿灯才是彩色的（非活动窗口是灰点，深色侧栏上看不清）。
         // 窗口 chrome：没有标题栏，三个按钮浮在侧栏左上角。
         // 系统自带的红绿灯在「没有标题栏 + 内容满窗」时靠不住（非前台会淡成灰点），
@@ -61,6 +64,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 Self.runWindowTest()
+            }
+        }
+
+        // 自检：`DVPLAYER_DISC=<iso>` 不经过媒体库，直接开原盘播放窗。
+        // `DVPLAYER_DISC_TITLE=N` 选第 N 个标题（不给就弹标题框，远程没法点）。
+        if let iso = ProcessInfo.processInfo.environment["DVPLAYER_DISC"], !iso.isEmpty {
+            Task { @MainActor in
+                let env = ProcessInfo.processInfo.environment
+                let wanted = Int(env["DVPLAYER_DISC_TITLE"] ?? "")
+                DiscUI.open(path: iso, autoTitle: wanted)
+
+                // 挂载 + 读 mpls 要一两秒；等播放窗真的出来。
+                var waited = 0
+                while PlayerLauncher.shared.current == nil && waited < 60 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    waited += 1
+                }
+
+                let wait = Double(env["DVPLAYER_PLAY_SECONDS"] ?? "") ?? 6
+                try? await Task.sleep(nanoseconds: UInt64(max(0.5, wait) * 1_000_000_000))
+                if let spec = env["DVPLAYER_PLAY_UI"] {
+                    Self.runPlayerUI(spec)
+                }
+                if let path = env["DVPLAYER_PLAY_FRAME"] {
+                    PlayerLauncher.shared.current?.mpv.screenshotWindow(to: path)
+                }
+                Self.logPlayerState()
+                if let path = env["DVPLAYER_PLAY_SHOT"] {
+                    PlayerLauncher.shared.current?.showChrome()
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    Self.capture(to: path, window: PlayerLauncher.shared.window)
+                }
+                if env["DVPLAYER_EXIT"] == "1" { NSApp.terminate(nil) }
             }
         }
 

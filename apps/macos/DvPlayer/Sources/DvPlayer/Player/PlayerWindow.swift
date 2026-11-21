@@ -189,6 +189,54 @@ final class PlayerLauncher {
         }
     }
 
+    /// 播蓝光原盘：视频是挂载 ISO 里的 m2ts（EDL 拼接），关窗时卸载。
+    func playDisc(_ disc: BluRaySession, title: BluRayTitle) {
+        if let existing = controller {
+            existing.close()
+            controller = nil
+        }
+
+        guard let url = disc.prepare(title) else {
+            AppState.shared.showToast("读不到这个标题的视频片段")
+            disc.detach()
+            return
+        }
+
+        let name = URL(fileURLWithPath: disc.isoPath)
+            .deletingPathExtension()
+            .lastPathComponent
+        let itemId = "iso:\(name):mpls\(title.id)"
+        let local = LocalPlayback(itemId: itemId,
+                                  title: "\(disc.discName) · 标题 \(title.number)",
+                                  url: url.path,
+                                  duration: title.duration)
+        let frame = PlayerWindowController.preferredFrame()
+
+        guard let session = PlayerSession(itemId: itemId,
+                                          startSeconds: nil,
+                                          playlist: [],
+                                          seriesTitle: nil,
+                                          hintTitle: local.title,
+                                          frame: frame,
+                                          local: local) else {
+            disc.detach()
+            AppState.shared.showToast("播放器启动失败，检查 mpv 是否随包带上了")
+            return
+        }
+
+        let window = PlayerWindowController(session: session, frame: frame) { [weak self] in
+            self?.controller = nil
+            disc.detach()
+        }
+        session.onClose = { [weak window] in window?.closePlayer() }
+
+        controller = window
+        window.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window.window?.makeKeyAndOrderFront(nil)
+        Task { await session.start() }
+    }
+
     func close() {
         controller?.close()
         controller = nil

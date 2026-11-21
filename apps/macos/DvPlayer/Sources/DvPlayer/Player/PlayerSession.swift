@@ -69,6 +69,14 @@ struct PlayerEpisode: Identifiable, Hashable {
     }
 }
 
+/// 原盘 / 本地文件的播放源：不经过媒体库核心，URL 是本地文件或一份 EDL。
+struct LocalPlayback {
+    let itemId: String
+    let title: String
+    let url: String
+    let duration: Double
+}
+
 /// 播放页音轨 / 字幕菜单的一项。id 是 mpv 的轨道 id（选轨直接用它）。
 struct PlayerTrack: Identifiable, Hashable {
     let id: Int64
@@ -173,6 +181,12 @@ final class PlayerSession: ObservableObject {
     /// 实际输出的动态范围：DV profile（0 = 不是 DV）与传递函数。
     @Published private(set) var dvProfile: Int = 0
     @Published private(set) var outputTransfer: String = ""
+    /// mpv 解出来的画面参数；原盘没有服务端媒体信息，chips 靠它们。
+    @Published private(set) var videoWidth: Int = 0
+    @Published private(set) var videoHeight: Int = 0
+    @Published private(set) var videoFps: Double = 0
+    @Published private(set) var videoBitrate: Double = 0
+    @Published private(set) var videoCodecName: String = ""
     /// 窗口控制器接这个：适应窗口时按视频形状改窗口。
     var onVideoAspect: ((Double) -> Void)?
     @Published private(set) var sleepDeadline: Date?
@@ -197,6 +211,7 @@ final class PlayerSession: ObservableObject {
     var onClose: (() -> Void)?
     var onToggleFullscreen: (() -> Void)?
 
+    private let localSource: LocalPlayback?
     private var initialStart: Double?
     private var loadToken = 0
     private var tracksApplied = false
@@ -217,19 +232,23 @@ final class PlayerSession: ObservableObject {
           playlist: [PlayerEpisode] = [],
           seriesTitle: String? = nil,
           hintTitle: String? = nil,
-          frame: NSRect) {
-        self.itemId = itemId
+          frame: NSRect,
+          local: LocalPlayback? = nil) {
+        let effectiveId = local?.itemId ?? itemId
+        self.itemId = effectiveId
+        self.localSource = local
         self.initialStart = startSeconds
         self.playlist = playlist
         self.seriesTitle = Self.cleanSeries(seriesTitle)
         self.hintTitle = hintTitle ?? ""
-        self.title = hintTitle ?? "正在播放"
+        self.title = local?.title ?? hintTitle ?? "正在播放"
         let settings = AppSettings.load()
         self.aspect = PlayerAspect(rawValue: settings.videoAspect ?? "") ?? .fit
         self.danmakuEnabled = settings.danmakuEnabled ?? false
-        self.markers = SkipMarkerStore.marker(for: Self.cleanSeries(seriesTitle) ?? itemId)
+        self.markers = SkipMarkerStore.marker(for: Self.cleanSeries(seriesTitle) ?? effectiveId)
 
-        guard let engine = MpvEngine(frame: frame, startSeconds: startSeconds) else {
+        guard let engine = MpvEngine(frame: frame,
+                                     startSeconds: local == nil ? startSeconds : nil) else {
             return nil
         }
         mpv = engine
@@ -269,6 +288,14 @@ final class PlayerSession: ObservableObject {
             self.dvProfile = profile
             self.outputTransfer = transfer
         }
+        engine.onVideoStats = { [weak self] width, height, fps, bitrate, codec in
+            guard let self else { return }
+            self.videoWidth = width
+            self.videoHeight = height
+            self.videoFps = fps
+            self.videoBitrate = bitrate
+            self.videoCodecName = codec
+        }
         engine.onCacheTime = { [weak self] cache in
             guard let self else { return }
             // 刚 seek 回来缓存位置可能还落在进度后面，至少画到已观看那。
@@ -293,7 +320,57 @@ final class PlayerSession: ObservableObject {
     // MARK: - 起播 / 切集
 
     func start() async {
+        if let localSource {
+            await beginLocal(localSource)
+            return
+        }
+
         await begin(itemId: itemId, startSeconds: initialStart)
+    }
+
+    /// 本地播放：不取核心播放源、不拉媒体信息，续播点读本地文件。
+    private func beginLocal(_ local: LocalPlayback) async {
+        loadToken += 1
+        loading = true
+        error = nil
+        eof = false
+        position = 0
+        seekPosition = 0
+        tracksApplied = false
+        audioTracks = []
+        subtitleTracks = []
+        selectedAudioId = 0
+        selectedSubtitleId = 0
+        mediaInfo = nil
+        panel = .none
+        showSkipOutro = false
+        videoAspect = 0
+        dvProfile = 0
+        outputTransfer = ""
+        videoWidth = 0
+        videoHeight = 0
+        videoFps = 0
+        videoBitrate = 0
+        videoCodecName = ""
+        bufferedPosition = 0
+        markers = SkipMarkerStore.marker(for: markerKey)
+        danmakuTask?.cancel()
+        danmakuStatus = nil
+
+        source = nil
+        itemId = local.itemId
+        title = local.title
+        duration = local.duration
+
+        let start = LocalProgressStore.get(local.itemId)
+        launchStart = start
+        launchAt = Date()
+        lastReportAt = Date()
+
+        NSLog("[Play] local load \(local.itemId) from=\(String(format: "%.1f", start)) " +
+              "dur=\(Int(local.duration))")
+        mpv.loadURL(local.url, headers: [:], start: start)
+        startReporting()
     }
 
     private func begin(itemId: String, startSeconds: Double?) async {
@@ -321,6 +398,11 @@ final class PlayerSession: ObservableObject {
         videoAspect = 0
         dvProfile = 0
         outputTransfer = ""
+        videoWidth = 0
+        videoHeight = 0
+        videoFps = 0
+        videoBitrate = 0
+        videoCodecName = ""
         bufferedPosition = 0
         markers = SkipMarkerStore.marker(for: markerKey)
         danmakuTask?.cancel()
@@ -429,18 +511,20 @@ final class PlayerSession: ObservableObject {
 
         // 续播点正好是片尾：mpv 一加载就 EOF，这不是「播完」，从头来一遍。
         let instant = Date().timeIntervalSince(launchAt) < 3
-        if instant, launchStart > 0, duration > 0, launchStart >= duration - 2,
-           let source {
-            NSLog("[Play] eof at resume point -> restart")
-            eof = false
-            position = 0
-            launchStart = 0
-            launchAt = Date()
+        if instant, launchStart > 0, duration > 0, launchStart >= duration - 2 {
+            let url = source?.url ?? localSource?.url
             let headers: [String: String] = Dictionary(
-                source.headers.map { ($0.name, $0.value) },
+                (source?.headers ?? []).map { ($0.name, $0.value) },
                 uniquingKeysWith: { _, last in last })
-            mpv.loadURL(source.url, headers: headers, start: 0)
-            return
+            if let url {
+                NSLog("[Play] eof at resume point -> restart")
+                eof = false
+                position = 0
+                launchStart = 0
+                launchAt = Date()
+                mpv.loadURL(url, headers: headers, start: 0)
+                return
+            }
         }
 
         report(duration > 0 ? duration : Double(source?.durationSeconds ?? 0))
@@ -1075,12 +1159,26 @@ final class PlayerSession: ObservableObject {
     }
 
     private func report(_ seconds: Double) {
-        guard seconds > 0, let core = AppState.shared.core else { return }
+        guard seconds > 0 else { return }
         let item = itemId
-        let total = Int(duration > 0 ? duration : Double(source?.durationSeconds ?? 0))
+        let total = Int(duration > 0
+            ? duration
+            : Double(source?.durationSeconds ?? Int(localSource?.duration ?? 0)))
         // 时长还没解析出来时不写记录：服务器会把它当成 0 秒的片子。
         guard total > 0 else { return }
         let value = Int(seconds)
+
+        // 原盘核心不认识，续播点写本地文件。
+        if localSource != nil {
+            if value >= total - 1 {
+                LocalProgressStore.clear(item)
+            } else {
+                LocalProgressStore.save(item, position: Double(value), duration: Double(total))
+            }
+            return
+        }
+
+        guard let core = AppState.shared.core else { return }
         NSLog("[Play] report \(item) pos=\(value) dur=\(total)")
         Task {
             try? await core.reportProgress(item, position: value, duration: total)
@@ -1157,6 +1255,8 @@ final class PlayerSession: ObservableObject {
 
         if let codec = video?.codec, !codec.isEmpty {
             chips.append(codec)
+        } else if !videoCodecName.isEmpty {
+            chips.append(videoCodecName.uppercased())
         } else if let codec = source?.videoCodec, !codec.isEmpty {
             chips.append(codec.uppercased())
         }
@@ -1170,16 +1270,22 @@ final class PlayerSession: ObservableObject {
 
         if let label = video?.resolutionLabel, !label.isEmpty {
             chips.append(label)
+        } else if videoHeight > 0 {
+            chips.append("\(videoHeight)p")
         } else if let resolution = source?.resolution, !resolution.isEmpty {
             chips.append(resolution)
         }
 
         if let fps = video?.frameRate, fps > 0 {
             chips.append("\(Int(fps.rounded()))FPS")
+        } else if videoFps > 0 {
+            chips.append("\(Int(videoFps.rounded()))FPS")
         }
 
         if let rate = video?.bitRate, rate > 0 {
             chips.append(String(format: "%.1fmbps", Double(rate) / 1_000_000))
+        } else if videoBitrate > 0 {
+            chips.append(String(format: "%.1fmbps", videoBitrate / 1_000_000))
         }
 
         if aspect != .fit {

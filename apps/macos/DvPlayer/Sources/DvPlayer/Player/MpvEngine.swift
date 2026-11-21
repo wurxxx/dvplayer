@@ -39,6 +39,8 @@ final class MpvEngine {
     var onCacheTime: ((Double) -> Void)?
     /// 实际输出的动态范围：DV profile（0 = 不是 DV）+ 传递函数（pq / hlg / bt.1886）。
     var onVideoRange: ((Int, String) -> Void)?
+    /// mpv 解出来的画面参数（宽、高、帧率、比特率、编码）；原盘没有服务端媒体信息。
+    var onVideoStats: ((Int, Int, Double, Double, String) -> Void)?
     /// 视频显示宽高比（已含旋转 / 变形）；「适应窗口」用它把窗口改成同样的形状。
     var onVideoAspect: ((Double) -> Void)?
 
@@ -74,12 +76,18 @@ final class MpvEngine {
     private var eofSent = false
     private var dvProfile = 0
     private var transferName = ""
+    private var videoWidth = 0
+    private var videoHeight = 0
+    private var videoFps = 0.0
+    private var videoBitrate = 0.0
+    private var videoCodecName = ""
     private var startOverride: Double?
 
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
         "track-list", "aid", "sid", "video-params/aspect", "demuxer-cache-time",
         "current-tracks/video", "video-params",
+        "width", "height", "estimated-vf-fps", "video-bitrate",
     ]
 
     init?(frame: NSRect, startSeconds: Double?) {
@@ -193,6 +201,12 @@ final class MpvEngine {
         eofSent = false
         dvProfile = 0
         transferName = ""
+        videoWidth = 0
+        videoHeight = 0
+        videoFps = 0
+        videoBitrate = 0
+        videoCodecName = ""
+        emitVideoStats()
         eofReached = false
         position = 0
         duration = 0          // 上一集的时长别留在 loaded 里
@@ -393,7 +407,21 @@ final class MpvEngine {
                 let profile = (map?["dolby-vision-profile"] as? Int)
                     ?? Int((map?["dolby-vision-profile"] as? Double) ?? 0)
                 dvProfile = profile
+                videoCodecName = map?["codec"] as? String ?? ""
+                emitVideoStats()
                 onVideoRange?(dvProfile, transferName)
+            case "width":
+                videoWidth = intValue(data) ?? 0
+                emitVideoStats()
+            case "height":
+                videoHeight = intValue(data) ?? 0
+                emitVideoStats()
+            case "estimated-vf-fps":
+                videoFps = doubleValue(data) ?? 0
+                emitVideoStats()
+            case "video-bitrate":
+                videoBitrate = doubleValue(data) ?? 0
+                emitVideoStats()
             case "video-params":
                 // mpv 把传递函数放在 gamma 里（pq / hlg / bt.1886），没有 transfer 字段。
                 if let map = data as? [String: Any] {
@@ -491,6 +519,24 @@ final class MpvEngine {
         audioTracks = audio
         subtitleTracks = subtitles
         emitTracks()
+    }
+
+    private func emitVideoStats() {
+        onVideoStats?(videoWidth, videoHeight, videoFps, videoBitrate, videoCodecName)
+    }
+
+    private func intValue(_ data: Any?) -> Int? {
+        if let value = data as? Int { return value }
+        if let value = data as? Double { return Int(value) }
+        if let value = data as? NSNumber { return value.intValue }
+        return nil
+    }
+
+    private func doubleValue(_ data: Any?) -> Double? {
+        if let value = data as? Double { return value }
+        if let value = data as? Int { return Double(value) }
+        if let value = data as? NSNumber { return value.doubleValue }
+        return nil
     }
 
     private func parseTrackId(_ data: Any?) -> Int64 {

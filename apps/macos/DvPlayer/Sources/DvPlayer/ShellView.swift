@@ -110,6 +110,28 @@ private struct SidebarView: View {
             }
 
             Spacer(minLength: 12)
+
+            Button(action: DiscUI.chooseAndPlay) {
+                HStack(spacing: 9) {
+                    Image(systemName: "opticaldisc")
+                        .font(.system(size: 12.5))
+                    Text("打开原盘…")
+                        .font(.system(size: 12.5))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.radiusControl)
+                        .fill(Color.white.opacity(0.045))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
+
             status
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)

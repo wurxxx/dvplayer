@@ -614,6 +614,14 @@ public partial class MainWindow : FluentWindow
                     await Task.Delay(800);
                     break;
 
+                case "frame":
+                    // 原盘 / 网络片都能用：mpv 自己解码出的一帧，锁屏也能验。
+                    Trace.Write("frame requested " +
+                                (player.SaveVideoFrameForShot(
+                                    Path.Combine(dir, "video-frame.png")) ? "ok" : "no ipc"));
+                    await Task.Delay(1500);
+                    break;
+
                 case "audioout":
                     player.ShowChromeForShot();
                     await Task.Delay(1200);

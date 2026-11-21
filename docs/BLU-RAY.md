@@ -165,7 +165,7 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
 
 | # | 缺什么 | 影响 | 计划 |
 | --- | --- | --- | --- |
-| 1 | ~~壳没有 ISO 入口与选集 UI~~ | Windows 已做：侧栏「打开原盘…」→ 读 title → 选集 | macOS 的 mpv 构建不带 libbluray，见 §5.1 |
+| 1 | ~~壳没有 ISO 入口与选集 UI~~ | 两端已做：侧栏「打开原盘…」→ 读 title → 选集 | Windows 走 libbluray（§5.1），macOS 挂载 + EDL（§5.2） |
 | 2 | `Mount-DiskImage` 只支持本地 ISO | NAS 上的原盘要先下载 | 产品里应支持"边读边播"或缓存到本地；mpv 的 `bd://` 配 UNC 路径需要 Windows 先能读该路径 |
 | 3 | BD-J 菜单不支持 | 不能点原盘菜单 | mpv/libbluray 不带 Java 运行时；只能直接选 title，产品 UI 用选集列表替代 |
 | 4 | 无缝分支（seamless branching） | 多版本剪辑的衔接可能不完美 | 依赖 libbluray，暂不承诺 |
@@ -190,8 +190,20 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
   --play-features overlay --play-start 0`；只截标题框用
   `--disc-list <iso> --disc-shot <目录>`。
 
+## 5.2 正式壳入口（macOS）
+
 macOS 随包的 mpv 没有 libbluray（`--list-options` 里没有 `--bluray-device`），
-所以 macOS 入口要另走「挂载 ISO + 读 mpls + 播 m2ts」的路子，暂未接。
+所以不能复用 §5.1 的 `bd://`。做法是：
+
+- `hdiutil attach -readonly -nobrowse -mountpoint <临时目录> <iso>` 挂载；
+- 自己解析 `BDMV/PLAYLIST/*.mpls`（大端，`IN_time`/`OUT_time` 按 45 kHz），
+  时长与 Windows 的 libbluray 结果一致；
+- 选标题后把每一段写成 mpv EDL：
+  `edl://!no_chapters;<m2ts>,<起始秒>,<时长>;...`（落成临时 `.edl` 文件，
+  避免路径转义），这样多段播放列表也能连起来播；
+- 关播放窗时 `hdiutil detach` 并删掉临时 EDL / 挂载点；
+- 原盘进度同样存本地 JSON（`~/Library/Application Support/DvPlayer/local-progress.json`）。
+- 自检：`DVPLAYER_DISC=<iso> DVPLAYER_DISC_TITLE=N DVPLAYER_PLAY_SHOT=<png>`。
 
 
 ## 6. 与 4K/8K/HDR 的关系

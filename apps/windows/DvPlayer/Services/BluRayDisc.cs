@@ -96,6 +96,7 @@ public static partial class BluRayDisc
         foreach (var arg in new[]
                  {
                      "--no-config",
+                     "--terminal=yes",
                      "--vo=null",
                      "--ao=null",
                      "--osc=no",
