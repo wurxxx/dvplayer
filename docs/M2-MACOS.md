@@ -31,6 +31,8 @@
   收藏（这个源收藏的视频）
 - 网格：类别（全部 / 剧集 / 电影 / 风格 / 文件夹）、排序 + 升降序、风格标签、
   页内搜索、分页；右侧常显一条自绘滚动条（可点可拖，见下面的坑）
+- 卡片副标题的片长用中文可读格式：「电影 · 2 小时 12 分钟」/「45 分钟」，
+  和 Windows 的 `MediaText.Runtime` 一致；播放页进度 / 剩余时间仍然用时间码
 - 详情页：整块横版图铺满、渐变淡到页面底色、动作按钮（播放 / 重头看 / 收藏 /
   标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条）、
   演职人员（96 宽头像卡，点开看作品，可继续往下钻详情）、豆瓣链接、
@@ -131,8 +133,13 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   `request_id`，回复按 id 分发；事件切回主线程（`property-change` /
   `file-loaded` / `end-file`）。
 - `MpvEngine`：起进程、订阅属性（`time-pos` / `duration` / `pause` /
-  `eof-reached` / `speed` / `volume` / `mute` / `track-list` / `aid` / `sid`），
+  `eof-reached` / `speed` / `volume` / `mute` / `track-list` / `aid` / `sid` /
+  `paused-for-cache`），
   暴露 loadfile / seek / 音量 / 静音 / 倍速 / 选轨 / 截图 / `shutdown`。
+- 打开 / 切集先铺不透明黑底（片名 +「正在打开…」+ 转圈），首帧判定看
+  `time-pos > 起播点 + 0.5`（片头跳过后从跳到的位置算），`file-loaded` 不再
+  直接收黑底；播放中卡住（`paused-for-cache`）只在画面中间浮一个
+  「正在缓冲…」小胶囊，不盖画面、不藏控制条。
 - `PlayerSession`：起播、切集、EOF 接下一集、进度回写（10 秒一次）、
   轨道解析与中文默认、规格 chips、截图、浮层自动隐藏。
 - `PlayerWindowController`：透明浮层窗 + geometry 同步 + 假全屏 + 键盘 / 滚轮。
@@ -182,6 +189,8 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | 环境变量 | 作用 |
 | --- | --- |
 | `DVPLAYER_PAGE=records\|search\|sources\|settings` | 启动直接落在某页（见 `AppState`） |
+| `DVPLAYER_LIBRARY=<库 id>` | 直接打开某个库的网格（配合 `DVPLAYER_CAT` 截图） |
+| `DVPLAYER_CAT=全部\|剧集\|电影\|风格\|文件夹` | 网格页直接落到某个类别 |
 | `DVPLAYER_RECORD_TAB=favorites\|watch` | 记录页直接停在「收藏」/「观看」分段，截图回归用 |
 | `DVPLAYER_PLAY=<itemId>` | 等核心连上后直接开播放窗 |
 | `DVPLAYER_PLAY_CONTAINER=<剧集 id>` | 先列这一季的集，再带 playlist 打开（模拟详情页） |
@@ -204,6 +213,8 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_SHOT=<png>` / `DVPLAYER_PLAY_SHOT_DELAY=` | 截播放窗的 SwiftUI 浮层 |
 | `DVPLAYER_PLAY_SECONDS=<秒>` | 到点打印 `[PlayTest]` 状态（位置 / 时长 / 轨道 / playlist） |
 | `DVPLAYER_NO_VO=1` | 加 `--vo=null`：锁屏 / 无图形会话时只跑解码 + IPC |
+| `DVPLAYER_OPENING_HOLD=1` | 假装首帧一直没来，验证打开遮罩一直不透明 |
+| `DVPLAYER_BUFFERING_HOLD=1` | 出画后强制显示「正在缓冲…」小胶囊 |
 
 日志前缀：`[Play] open / load / loaded / tracks / select / eof / report`、`[PlayTest]`。
 mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的

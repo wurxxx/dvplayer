@@ -22,7 +22,7 @@ struct PlayerEpisode: Identifiable, Hashable {
     init(item: MediaItem, number: Int, season: Int?) {
         let badge = season.map { String(format: "S%02dE%02d", $0, number) }
             ?? String(format: "E%02d", number)
-        let runtime = item.runtimeSeconds.map { "\($0 / 60):\(String(format: "%02d", $0 % 60))" }
+        let runtime = MediaText.runtime(item.runtimeSeconds)
         let meta = [item.resolution, runtime]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
@@ -151,6 +151,8 @@ final class PlayerSession: ObservableObject {
 
     // —— 状态 ——
     @Published var loading = true
+    /// mpv 在等缓存（`paused-for-cache`）：出画后在播放窗中间显示一个小状态。
+    @Published private(set) var buffering = false
     @Published var error: String?
     @Published var position: Double = 0
     @Published var duration: Double = 0
@@ -222,6 +224,14 @@ final class PlayerSession: ObservableObject {
     private var isStopped = false
     private var launchStart: Double = 0
     private var launchAt = Date()
+    /// 首帧判定基准：起播点；片头跳过后改到跳到的位置。
+    private var loadingFloor: Double = 0
+    /// 巡检用：假装首帧一直没来（`DVPLAYER_OPENING_HOLD=1`），验证慢网络遮罩。
+    private static let openingHold =
+        ProcessInfo.processInfo.environment["DVPLAYER_OPENING_HOLD"] == "1"
+    /// 巡检用：出画后强制显示「正在缓冲…」状态（`DVPLAYER_BUFFERING_HOLD=1`）。
+    private static let bufferingHold =
+        ProcessInfo.processInfo.environment["DVPLAYER_BUFFERING_HOLD"] == "1"
     private var lastReportAt = Date.distantPast
     private var hideTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
@@ -264,9 +274,13 @@ final class PlayerSession: ObservableObject {
             guard let self else { return }
             self.paused = paused
         }
+        engine.onBuffering = { [weak self] value in
+            self?.buffering = value
+        }
         engine.onLoaded = { [weak self] duration in
             guard let self else { return }
-            self.loading = false
+            // 这里只代表文件头拿到了，不代表已经出了第一帧（慢网络下还会继续缓冲）。
+            // 黑底等 handlePosition 看到播放位置真的往前走再收。
             if duration > 1 {
                 self.duration = duration
             }
@@ -336,6 +350,7 @@ final class PlayerSession: ObservableObject {
     private func beginLocal(_ local: LocalPlayback) async {
         loadToken += 1
         loading = true
+        buffering = false
         error = nil
         eof = false
         position = 0
@@ -369,24 +384,13 @@ final class PlayerSession: ObservableObject {
         let start = local.startSeconds ?? LocalProgressStore.get(local.itemId)
         launchStart = start
         launchAt = Date()
+        loadingFloor = start
         lastReportAt = Date()
 
         NSLog("[Play] local load \(local.itemId) from=\(String(format: "%.1f", start)) " +
               "dur=\(Int(local.duration))")
         mpv.loadURL(local.url, headers: [:], start: start)
         startReporting()
-        armLoadingFallback()
-    }
-
-    /// 兜底：mpv 卡住 / 一直不出画时 `@file-loaded` 不会来，别让黑底永久盖着。
-    private func armLoadingFallback() {
-        let token = loadToken
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
-            guard let self, self.loading, !self.isStopped, self.loadToken == token else { return }
-            NSLog("[Play] loading fallback fired item=\(self.itemId)")
-            self.loading = false
-        }
     }
 
     private func begin(itemId: String, startSeconds: Double?) async {
@@ -399,6 +403,7 @@ final class PlayerSession: ObservableObject {
         loadToken += 1
         let token = loadToken
         loading = true
+        buffering = false
         error = nil
         eof = false
         position = 0
@@ -426,8 +431,6 @@ final class PlayerSession: ObservableObject {
 
         NSLog("[Play] open \(itemId) playlist=\(playlist.count) start=\(startSeconds.map { String($0) } ?? "resume")")
 
-        armLoadingFallback()
-
         do {
             let source = try await core.playSource(itemId)
             guard token == loadToken, !isStopped else { return }
@@ -445,6 +448,7 @@ final class PlayerSession: ObservableObject {
             }
             launchStart = start
             launchAt = Date()
+            loadingFloor = start
             // 从起播开始计时：否则第一个位置回调用「很久没报过」立刻上报一次，
             // 这时 duration 还没下来，会把记录写成 0。
             lastReportAt = Date()
@@ -505,9 +509,15 @@ final class PlayerSession: ObservableObject {
         self.position = position
         seekPosition = position
 
-        // 有的流不给 file-loaded，拿到位置也说明已经出画了。
-        if loading && position > 0.05 {
+        // 首帧判定看播放位置有没有真的往前走：慢网络下 mpv 会先报续播点
+        // （或者 0），但一帧都还没出来，这时收黑底就会透出桌面。
+        if loading, !Self.openingHold, position > loadingFloor + 0.5 {
             loading = false
+            NSLog("[Play] loading finish pos=\(String(format: "%.1f", position)) " +
+                  "floor=\(String(format: "%.1f", loadingFloor))")
+            if Self.bufferingHold {
+                buffering = true
+            }
         }
 
         if Date().timeIntervalSince(lastReportAt) >= Self.reportEvery, position > 0 {
@@ -980,6 +990,8 @@ final class PlayerSession: ObservableObject {
         mpv.seek(to: intro)
         position = intro
         seekPosition = intro
+        // 片头跳过算一次大跳转，首帧判定从跳到的位置重新算。
+        loadingFloor = intro
         NSLog("[Play] skip intro -> \(Int(intro)) start=\(Int(launchStart))")
         toast("已跳过片头")
     }

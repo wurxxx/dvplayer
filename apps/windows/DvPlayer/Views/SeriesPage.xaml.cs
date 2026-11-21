@@ -1648,17 +1648,8 @@ public partial class SeriesPage : Page
         return MediaText.LooksLikeFileName(raw) ? $"第 {number} 集" : MediaText.TrimExtension(raw);
     }
 
-    /// <summary>「1小时38分钟」这种长时长，详情页顶部用。</summary>
-    private static string FormatRuntime(long seconds)
-    {
-        var span = TimeSpan.FromSeconds(seconds);
-        if (span.TotalHours >= 1)
-        {
-            return $"{(int)span.TotalHours} 小时 {span.Minutes} 分钟";
-        }
-
-        return $"{Math.Max(1, span.Minutes)} 分钟";
-    }
+    /// <summary>「1 小时 38 分钟」这种长时长，详情页顶部用。</summary>
+    private static string FormatRuntime(long seconds) => MediaText.Runtime(seconds);
 
     private static string FormatDuration(long? seconds) => seconds is > 0
         ? TimeSpan.FromSeconds(seconds.Value).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss")

@@ -91,6 +91,13 @@ struct BrowseView: View {
             }
         }
         .task(id: reloadKey) { await load(reset: true) }
+        // 截图巡检：`DVPLAYER_CAT=电影` 直接落到某个类别。
+        .onAppear {
+            if let cat = ProcessInfo.processInfo.environment["DVPLAYER_CAT"],
+               !cat.isEmpty, cat != category {
+                category = cat
+            }
+        }
     }
 
     private var reloadKey: String {

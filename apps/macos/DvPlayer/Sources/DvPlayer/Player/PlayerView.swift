@@ -95,6 +95,11 @@ struct PlayerView: View {
                     .padding(.bottom, 118)
             }
 
+            // 播放中缓冲：只显示一个小状态，画面和浮层都留着（打开阶段由黑底负责）。
+            if session.buffering && !session.loading {
+                bufferingPanel
+            }
+
             if let toast = session.toast {
                 toastView(toast)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -102,6 +107,7 @@ struct PlayerView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: session.loading)
+        .animation(.easeOut(duration: 0.18), value: session.buffering)
         .background(
             GeometryReader { proxy in
                 Color.clear
@@ -892,7 +898,11 @@ struct PlayerView: View {
     // MARK: - 提示
 
     private var loadingPanel: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 11) {
+            ProgressView()
+                .controlSize(.regular)
+                .tint(Color.white.opacity(0.85))
+
             Text(session.title)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(Color.white.opacity(0.9))
@@ -903,6 +913,24 @@ struct PlayerView: View {
                 .foregroundStyle(Color.white.opacity(0.6))
         }
         .padding(28)
+    }
+
+    /// 播放中缓冲的小胶囊：有画面时只标记状态，不盖黑整窗。
+    private var bufferingPanel: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(Color.white.opacity(0.9))
+            Text("正在缓冲…")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.white.opacity(0.92))
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.62), in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .allowsHitTesting(false)
+        .transition(.opacity)
     }
 
     private func errorPanel(_ message: String) -> some View {

@@ -95,6 +95,8 @@ public partial class PlayWindow : Window
 
     /// <summary>本次起播的续播点与起播时刻：用来认出「一开就播完」的假片尾。</summary>
     private double _launchStart;
+    /// <summary>首帧判定基准：起播点；片头跳过后改到跳到的位置。</summary>
+    private double _openingBase;
     private DateTime _launchAt = DateTime.UtcNow;
     private bool _seeking;
     private bool _volumeDragging;
@@ -106,8 +108,20 @@ public partial class PlayWindow : Window
     /// <summary>首帧已经到了：控制条这时才允许出现。打开 / 切集期间黑底盖着。</summary>
     private bool _ready;
 
-    /// <summary>黑底兜底定时器：10 秒内没等到首帧也把黑底收掉。</summary>
-    private CancellationTokenSource? _openingCts;
+    /// <summary>
+    /// 巡检用：假装首帧一直没来（`DVPLAYER_OPENING_HOLD=1`）。
+    /// 慢网络挡不了，靠这个验证遮罩会一直不透明。
+    /// </summary>
+    private static readonly bool OpeningHold =
+        Environment.GetEnvironmentVariable("DVPLAYER_OPENING_HOLD") == "1";
+
+    /// <summary>巡检用：出画后强制显示「正在缓冲…」状态（`DVPLAYER_BUFFERING_HOLD=1`）。</summary>
+    private static readonly bool BufferingHold =
+        Environment.GetEnvironmentVariable("DVPLAYER_BUFFERING_HOLD") == "1";
+
+    /// <summary>mpv 在等缓存（`paused-for-cache`）。出画后在播放窗中间显示一个小状态。</summary>
+    private bool _buffering;
+    private CancellationTokenSource? _bufferingCts;
     private bool _hardwareDecode = true;
     private bool _muted;
     private double _speed = 1;
@@ -1237,6 +1251,7 @@ public partial class PlayWindow : Window
             };
         }
         _launchStart = launch.StartSeconds;
+        _openingBase = launch.StartSeconds;
         _launchAt = DateTime.UtcNow;
         _pendingIntroSkip = null;
         _danmakuCount = 0;
@@ -1306,10 +1321,12 @@ public partial class PlayWindow : Window
         }
 
         // 控制条不是必需品：IPC 连不上也让它继续播。
+        // 拿不到 time-pos，只能多等一会儿再收黑底（慢网络下仍有透桌面的可能，
+        // 但这条路径本来就异常；正常起播一定有 IPC）。
         if (!await ready.ConfigureAwait(true) || session != _session)
         {
             LoadingStatus.Text = "已开始播放（控制通道未连上）";
-            await Task.Delay(1200).ConfigureAwait(true);
+            await Task.Delay(3000).ConfigureAwait(true);
             FinishOpening();
             return;
         }
@@ -1340,7 +1357,7 @@ public partial class PlayWindow : Window
                      "width", "height", "video-params/aspect", "demuxer-cache-time",
                      "audio-device-list", "audio-device", "audio-spdif",
                      "target-colorspace-hint", "current-tracks/video", "video-params",
-                     "estimated-vf-fps", "video-bitrate",
+                     "estimated-vf-fps", "video-bitrate", "paused-for-cache",
                  })
         {
             ipc.Observe(name);
@@ -1370,8 +1387,9 @@ public partial class PlayWindow : Window
             {
                 case "time-pos" when value.ValueKind == JsonValueKind.Number:
                     _position = value.GetDouble();
-                    // mpv 开始解码播放了，黑底可以收；等它比 IPC 连上更接近首帧。
-                    if (!_ready)
+                    // 首帧判定看播放位置有没有真的往前走：慢网络下 mpv 会先报续播点
+                    // （或者 0），但一帧都还没出来，这时收黑底就会透出桌面。
+                    if (!_ready && !OpeningHold && _position > _openingBase + 0.5)
                     {
                         FinishOpening();
                     }
@@ -1463,6 +1481,10 @@ public partial class PlayWindow : Window
                 case "pause" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
                     _paused = value.GetBoolean();
                     PlayPauseGlyph.Text = _paused ? "\uE768" : "\uE769";
+                    break;
+
+                case "paused-for-cache" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                    SetBuffering(value.GetBoolean());
                     break;
 
                 case "mute" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
@@ -2842,6 +2864,8 @@ public partial class PlayWindow : Window
         _pendingIntroSkip = null;
         _ipc?.Command("set_property", "time-pos", intro);
         _position = intro;
+        // 片头跳过算一次大跳转，首帧判定从跳到的位置重新算。
+        _openingBase = intro;
         UpdatePositionUi();
         Trace.Write($"skip intro -> {(int)intro}");
         ShowToast("已跳过片头");
@@ -3679,33 +3703,119 @@ public partial class PlayWindow : Window
         _ready = false;
         _chromeVisible = false;
 
-        // 兜底：mpv 卡住 / 不出画面时 time-pos 永远不来，别让黑底一直盖着。
-        _openingCts?.Cancel();
-        _openingCts = new CancellationTokenSource();
-        var token = _openingCts.Token;
-        _ = Task.Delay(TimeSpan.FromSeconds(10), token).ContinueWith(task =>
-        {
-            if (task.IsCanceled)
-            {
-                return;
-            }
-
-            Dispatcher.BeginInvoke(() =>
-            {
-                if (!_ready)
-                {
-                    FinishOpening();
-                }
-            });
-        }, TaskScheduler.Default);
+        // 慢网络下 time-pos 会一直停在续播点，黑底要留到播放位置真的往前走。
+        // 这里不设时限定时器：没出画就一直是「正在打开…」+ 转圈（Esc 可以关窗）。
+        _buffering = false;
+        _bufferingCts?.Cancel();
+        BufferingPanel.BeginAnimation(OpacityProperty, null);
+        BufferingPanel.Visibility = Visibility.Collapsed;
 
         LoadingPanel.Visibility = Visibility.Visible;
         LoadingStatus.Text = "正在打开…";
+        StartSpinner();
 
         OpeningCover.BeginAnimation(OpacityProperty, null);
         OpeningCover.Opacity = 1;
         OpeningCover.Visibility = Visibility.Visible;
         SetChromeOpacity(0);
+    }
+
+    private void StartSpinner()
+    {
+        var spin = new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(900))
+        {
+            RepeatBehavior = RepeatBehavior.Forever,
+        };
+        SpinnerRotate.BeginAnimation(RotateTransform.AngleProperty, spin);
+    }
+
+    private void StopSpinner() =>
+        SpinnerRotate.BeginAnimation(RotateTransform.AngleProperty, null);
+
+    /// <summary>
+    /// mpv 报「在等缓存」。打开阶段黑底自己写着「正在打开…」，不出这个状态；
+    /// 出画后卡住才在播放窗中间浮一个小胶囊，画面和控制条都不盖掉。
+    /// </summary>
+    private void SetBuffering(bool value)
+    {
+        if (_buffering == value)
+        {
+            return;
+        }
+
+        _buffering = value;
+        _bufferingCts?.Cancel();
+
+        if (!value)
+        {
+            HideBuffering();
+            return;
+        }
+
+        if (!_ready)
+        {
+            return;
+        }
+
+        // 拖动 / 切轨会短暂换一下缓存，只停不到 400ms 就不弹。
+        var cts = new CancellationTokenSource();
+        _bufferingCts = cts;
+        _ = ShowBufferingAsync(cts.Token);
+    }
+
+    private async Task ShowBufferingAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(400, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (!token.IsCancellationRequested && _buffering && _ready)
+        {
+            ShowBuffering();
+        }
+    }
+
+    private void ShowBuffering()
+    {
+        BufferingPanel.BeginAnimation(OpacityProperty, null);
+        BufferingPanel.Opacity = 1;
+        BufferingPanel.Visibility = Visibility.Visible;
+
+        var spin = new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(900))
+        {
+            RepeatBehavior = RepeatBehavior.Forever,
+        };
+        BufferingSpin.BeginAnimation(RotateTransform.AngleProperty, spin);
+    }
+
+    private void HideBuffering()
+    {
+        if (BufferingPanel.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(160))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        };
+        fade.Completed += (_, _) =>
+        {
+            if (_buffering)
+            {
+                return;
+            }
+
+            BufferingPanel.Visibility = Visibility.Collapsed;
+            BufferingPanel.Opacity = 1;
+            BufferingSpin.BeginAnimation(RotateTransform.AngleProperty, null);
+        };
+        BufferingPanel.BeginAnimation(OpacityProperty, fade);
     }
 
     /// <summary>首帧到了：黑底淡出，控制条淡入。</summary>
@@ -3717,8 +3827,16 @@ public partial class PlayWindow : Window
         }
 
         _ready = true;
-        _openingCts?.Cancel();
+        Trace.Write($"opening finish pos={_position:0.0} launch={_launchStart:0.0} " +
+                    $"after={(DateTime.UtcNow - _launchAt).TotalSeconds:0.0}s");
+        StopSpinner();
         LoadingPanel.Visibility = Visibility.Collapsed;
+
+        // 打开期间 mpv 就在等缓存：出画后直接把播放窗的缓冲状态亮出来。
+        if (_buffering)
+        {
+            ShowBuffering();
+        }
 
         var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220))
         {
@@ -3738,6 +3856,11 @@ public partial class PlayWindow : Window
         OpeningCover.BeginAnimation(OpacityProperty, fade);
 
         ShowChrome();
+
+        if (BufferingHold)
+        {
+            _ = Dispatcher.BeginInvoke(() => SetBuffering(true));
+        }
     }
 
     /// <summary>控制条淡入 / 淡出，别硬切。</summary>
@@ -3792,6 +3915,10 @@ public partial class PlayWindow : Window
     private void ShowError(string message)
     {
         _ready = false;
+        _buffering = false;
+        _bufferingCts?.Cancel();
+        HideBuffering();
+        StopSpinner();
         OpeningCover.BeginAnimation(OpacityProperty, null);
         OpeningCover.Opacity = 1;
         OpeningCover.Visibility = Visibility.Visible;

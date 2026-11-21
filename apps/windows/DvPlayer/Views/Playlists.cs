@@ -324,7 +324,7 @@ internal static class Playlists
                         {
                             item.Resolution,
                             item.RuntimeSeconds is { } runtime
-                                ? $"{runtime / 60}:{runtime % 60:00}"
+                                ? MediaText.Runtime(runtime)
                                 : null,
                         }
                         .Where(part => !string.IsNullOrWhiteSpace(part))),

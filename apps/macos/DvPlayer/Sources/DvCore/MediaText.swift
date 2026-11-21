@@ -70,12 +70,17 @@ public enum MediaText {
         return String(format: "E%02d", episode)
     }
 
-    /// 「1 小时 44 分」这种时长说明。
+    /// 「1 小时 44 分钟」这种时长说明（卡片、列表用）。
+    ///
+    /// 列表不写 `1:44`——那是时间点，片长用中文更好读；
+    /// 播放页的进度和剩余时间仍然走 `duration` 的时间码。
     public static func runtime(_ seconds: Int?) -> String? {
         guard let seconds, seconds > 0 else { return nil }
         let minutes = (seconds + 30) / 60
         if minutes >= 60 {
-            return "\(minutes / 60) 小时 \(minutes % 60) 分"
+            let hours = minutes / 60
+            let rest = minutes % 60
+            return rest > 0 ? "\(hours) 小时 \(rest) 分钟" : "\(hours) 小时"
         }
         return "\(minutes) 分钟"
     }
@@ -132,9 +137,8 @@ extension MediaText {
 
         if let episodes = item.episodeCount ?? item.localEpisodeCount, episodes > 0 {
             parts.append("\(episodes) 集")
-        } else if let runtime = item.runtimeSeconds, runtime > 0 {
-            let minutes = runtime / 60
-            parts.append(minutes >= 60 ? "\(minutes / 60):\(String(format: "%02d", minutes % 60))" : "\(minutes) 分钟")
+        } else if let runtime = MediaText.runtime(item.runtimeSeconds) {
+            parts.append(runtime)
         }
 
         // 季数只对剧集本身有意义；单集也带着 5 季这种字段，别显示。

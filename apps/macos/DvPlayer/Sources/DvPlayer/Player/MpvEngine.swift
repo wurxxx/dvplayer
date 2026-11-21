@@ -28,6 +28,8 @@ final class MpvEngine {
     // —— 回调（主线程） ——
     var onPosition: ((Double, Double) -> Void)?
     var onPause: ((Bool) -> Void)?
+    /// mpv 在等缓存（`paused-for-cache`），播放中卡顿时显示一个小状态。
+    var onBuffering: ((Bool) -> Void)?
     var onLoaded: ((Double) -> Void)?
     var onEOF: (() -> Void)?
     var onTracks: (([RawTrack], [RawTrack], Int64, Int64) -> Void)?
@@ -86,7 +88,7 @@ final class MpvEngine {
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
         "track-list", "aid", "sid", "video-params/aspect", "demuxer-cache-time",
-        "current-tracks/video", "video-params",
+        "current-tracks/video", "video-params", "paused-for-cache",
         "width", "height", "estimated-vf-fps", "video-bitrate",
     ]
 
@@ -436,6 +438,9 @@ final class MpvEngine {
                 let value = (data as? Bool) ?? ((data as? Int) == 1)
                 paused = value
                 onPause?(value)
+            case "paused-for-cache":
+                let value = (data as? Bool) ?? ((data as? Int) == 1)
+                onBuffering?(value)
             case "eof-reached":
                 let value = (data as? Bool) ?? ((data as? Int) == 1)
                 eofReached = value

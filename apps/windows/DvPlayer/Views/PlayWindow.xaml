@@ -28,6 +28,19 @@
          就绪后这层淡出（FinishOpening），控制条那时候才淡入。 -->
     <Border x:Name="OpeningCover" Background="#FF000000">
       <StackPanel x:Name="LoadingPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <!-- 转圈：慢网络下要让人看出「还在动」，不是卡死的黑窗 -->
+        <Grid x:Name="LoadingSpinner" Width="30" Height="30" Margin="0,0,0,18"
+              HorizontalAlignment="Center">
+          <Ellipse Width="30" Height="30" Stroke="#26FFFFFF" StrokeThickness="2" />
+          <Ellipse Width="30" Height="30" Stroke="#E6FFFFFF" StrokeThickness="2"
+                   StrokeDashArray="12 40" StrokeDashCap="Round"
+                   RenderTransformOrigin="0.5,0.5">
+            <Ellipse.RenderTransform>
+              <RotateTransform x:Name="SpinnerRotate" />
+            </Ellipse.RenderTransform>
+          </Ellipse>
+        </Grid>
+
         <TextBlock x:Name="LoadingTitle" Text="" FontFamily="{StaticResource DisplayFont}"
                    FontSize="22" Foreground="#E6FFFFFF" TextAlignment="Center"
                    TextWrapping="Wrap" MaxWidth="720" />
@@ -344,6 +357,28 @@
         </StackPanel>
       </Grid>
     </Grid>
+
+    <!-- 播放中缓冲：只在已经出画后显示，浮在画面上，不盖黑整窗 -->
+    <Border x:Name="BufferingPanel" HorizontalAlignment="Center" VerticalAlignment="Center"
+            Background="#CC101014" BorderBrush="#22FFFFFF" BorderThickness="1"
+            CornerRadius="18" Padding="18,11" Visibility="Collapsed" Opacity="0"
+            IsHitTestVisible="False">
+      <StackPanel Orientation="Horizontal">
+        <Grid Width="18" Height="18" VerticalAlignment="Center">
+          <Ellipse Width="18" Height="18" Stroke="#33FFFFFF" StrokeThickness="2" />
+          <Ellipse Width="18" Height="18" Stroke="#E6FFFFFF" StrokeThickness="2"
+                   StrokeDashArray="8 24" StrokeDashCap="Round"
+                   RenderTransformOrigin="0.5,0.5">
+            <Ellipse.RenderTransform>
+              <RotateTransform x:Name="BufferingSpin" />
+            </Ellipse.RenderTransform>
+          </Ellipse>
+        </Grid>
+
+        <TextBlock Text="正在缓冲…" FontSize="13" Foreground="#E6FFFFFF"
+                   VerticalAlignment="Center" Margin="10,0,0,0" />
+      </StackPanel>
+    </Border>
 
     <!-- 错误 -->
     <Border x:Name="ErrorPanel" Visibility="Collapsed" MaxWidth="560"

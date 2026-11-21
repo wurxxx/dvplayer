@@ -24,6 +24,12 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
   「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
   不是 macOS 那种悬停子菜单。
+- **打开 / 切集遮罩**：`PlayWindow` 的 `OpeningCover` 一直是不透明黑，首帧判定看
+  「播放位置真的推进」（`time-pos > 起播点 + 0.5`，片头跳过后从跳到的位置算），
+  慢网络下 `time-pos` 停在续播点不会误收黑底；期间文案一直是「正在打开…」+ 转圈。
+  **播放中**卡住（mpv `paused-for-cache`，停超过 400ms）则在画面中间浮一个
+  「正在缓冲…」小胶囊，画面、控制条都不盖掉。回归：`--play <id> --play-cover-shot
+  <目录>`（配合 `DVPLAYER_OPENING_HOLD=1` 假装首帧不来，截 1.5 / 12 / 31 秒三张）。
 - **详情页「存储位置」**：`MediaInfo.Path` 放在媒体信息之后；电影 / 单集显示完整
   文件路径，剧集 / 季只显示目录。飞牛取 `/stream` 的 `file_stream.path`，Emby 取
   `PlaybackInfo` 的 `Path`（退回条目的 `Path`），本地源直接给文件路径。
@@ -107,6 +113,10 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 - `frame`：让 mpv 把当前解码帧写到 `<目录>\video-frame.png`，锁屏 / 无桌面也能验真实画面。
 - `--screenshot <目录> settings --settings-tab play`：设置页直接停在「播放」分组，
   核对缓冲大小这类项。
+- `--play-cover-shot <目录>`：抓打开遮罩。设 `DVPLAYER_OPENING_HOLD=1`（假装首帧
+  不来）时，1.5 / 12 / 31 秒三张都必须是纯黑 + 片名 +「正在打开…」+ 转圈，不能透出桌面。
+- `DVPLAYER_BUFFERING_HOLD=1`：出画后强制显示中间的「正在缓冲…」小胶囊（验证播放中
+  卡顿时只浮状态、不盖画面）。
 - 结果全部写 `%LOCALAPPDATA%\dvplayer\player.log`，状态行类似
   `features state aspect=fill intro=8 outro=16 sleep=0:03 danmaku=... outroPrompt=Visible pos=16`。
 

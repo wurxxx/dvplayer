@@ -208,6 +208,41 @@ public partial class MainWindow : FluentWindow
         var playId = ArgumentAfter("--play");
         if (playId is not null)
         {
+            // --play-cover-shot <目录>：抓打开遮罩（慢网络下不能透出桌面）。1.5 秒一张，
+            // 12 秒再一张，31 秒第三张，验证「一直没出画面时黑底始终不透明」。
+            if (ArgumentAfter("--play-cover-shot") is { Length: > 0 } coverDir)
+            {
+                Directory.CreateDirectory(coverDir);
+                var coverPlayer = await PlayWindow.OpenAsync(this, playId);
+                Trace.Write($"cover shot open player={coverPlayer is not null}");
+                await Task.Delay(1500);
+                Trace.Write($"cover shot 1 player={coverPlayer is not null} alive={coverPlayer?.IsAlive}");
+                if (coverPlayer is { IsAlive: true })
+                {
+                    UiCapture.SaveDesktop(Path.Combine(coverDir, "opening-desktop.png"));
+                    UiCapture.Save(coverPlayer, Path.Combine(coverDir, "opening.png"));
+                }
+
+                await Task.Delay(10500);
+                Trace.Write($"cover shot 12 player={coverPlayer is not null} alive={coverPlayer?.IsAlive}");
+                if (coverPlayer is { IsAlive: true })
+                {
+                    UiCapture.SaveDesktop(Path.Combine(coverDir, "opening-12s-desktop.png"));
+                    UiCapture.Save(coverPlayer, Path.Combine(coverDir, "opening-12s.png"));
+                }
+
+                await Task.Delay(19000);
+                Trace.Write($"cover shot 31 player={coverPlayer is not null} alive={coverPlayer?.IsAlive}");
+                if (coverPlayer is { IsAlive: true })
+                {
+                    UiCapture.Save(coverPlayer, Path.Combine(coverDir, "opening-31s.png"));
+                }
+
+                coverPlayer?.Close();
+                Close();
+                return;
+            }
+
             // --play-shot <目录>：把播放页的控制条 / 选集 / 菜单各截一张。
             if (ArgumentAfter("--play-shot") is { Length: > 0 } playDir)
             {

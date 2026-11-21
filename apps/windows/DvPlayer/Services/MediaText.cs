@@ -125,6 +125,25 @@ public static class MediaText
         return (series, number);
     }
 
+    /// <summary>
+    /// 卡片 / 列表里的时长：「2 小时 30 分钟」「45 分钟」。
+    ///
+    /// 列表不写 `2:30`——那不是时间点，是片长，中文用户一眼更能读。
+    /// 播放页的进度（`2:30:00`）和剩余时间仍然走时间码格式。
+    /// </summary>
+    public static string Runtime(long seconds)
+    {
+        var minutes = (long)Math.Round(Math.Max(0, seconds) / 60.0, MidpointRounding.AwayFromZero);
+        if (minutes >= 60)
+        {
+            var hours = minutes / 60;
+            var rest = minutes % 60;
+            return rest > 0 ? $"{hours} 小时 {rest} 分钟" : $"{hours} 小时";
+        }
+
+        return $"{Math.Max(1, minutes)} 分钟";
+    }
+
     /// <summary>卡片副标题：「剧集 · 81 集 · 10 季」。</summary>
     public static string Describe(MediaItemDto item)
     {
@@ -136,12 +155,9 @@ public static class MediaText
         {
             parts.Add($"{episodes} 集");
         }
-        else if (item.RuntimeSeconds is > 0)
+        else if (item.RuntimeSeconds is { } seconds && seconds > 0)
         {
-            var time = TimeSpan.FromSeconds(item.RuntimeSeconds.Value);
-            parts.Add(time.TotalHours >= 1
-                ? $"{(int)time.TotalHours}:{time.Minutes:00}"
-                : $"{time.Minutes} 分钟");
+            parts.Add(Runtime(seconds));
         }
 
         if (item.SeasonCount is > 1)
