@@ -28,7 +28,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | Emby | `/Users/*` + `X-Emby-Token` | **适配器已完成，待联调** | 见 [EMBY-API.md](EMBY-API.md) |
 | Jellyfin | 与 Emby 同源 | **适配器已完成，待联调** | 与 Emby 共用 `emby.rs`，只多认一个 `Authorization` 头 |
 | Plex | `/library/*` + `X-Plex-Token` | 未开始 | 需要独立适配器 |
-| SMB / NFS / WebDAV | 系统挂载 + 本地扫描 | **已接入**（macOS 已实测 SMB；Windows 待编译验证） | 无刮削，按 `SxxExx` / `第 N 集` 认集号；挂载后复用本地文件夹源，见 [LOCAL-SOURCE.md](LOCAL-SOURCE.md) §6 |
+| SMB / NFS / WebDAV | 系统挂载 + 本地扫描 | **已接入**（macOS 实测 SMB 全链路；Windows 已编译通过，SMB 表单与失败回显已验） | 无刮削，按 `SxxExx` / `第 N 集` 认集号；挂载后复用本地文件夹源，见 [LOCAL-SOURCE.md](LOCAL-SOURCE.md) §6 |
 
 同一部片出现在多个源时怎么选、搜索怎么合并，见
 [ARCHITECTURE.md](ARCHITECTURE.md) §1.2。

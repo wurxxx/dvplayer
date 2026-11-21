@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace DvPlayer.Services;
@@ -251,6 +252,7 @@ internal static class NetMount
         lock (Gate)
         {
             if (Mounted.TryGetValue(id, out var existing) &&
+                existing is not null &&
                 existing.Length >= 2 && existing[1] == ':' &&
                 Directory.Exists(existing + "\\"))
             {
