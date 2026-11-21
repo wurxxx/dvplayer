@@ -130,7 +130,7 @@ struct PlayerView: View {
                     .padding(.bottom, 132)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: session.loading)
+        .animation(.easeOut(duration: 0.14), value: session.loading)
         .animation(.easeOut(duration: 0.18), value: session.buffering)
         .background(
             GeometryReader { proxy in

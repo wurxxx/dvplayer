@@ -149,11 +149,15 @@ macOS 见 [ADR-0010](adr/0010-macos-mpv-subprocess.md)。要点是让 mpv 自己
 | --- | --- |
 | 窗口出现 | 整窗淡入 180ms（Windows `Window.Opacity` / macOS `alphaValue`） |
 | 解析播放源 / 起 mpv | 浮层铺一层**不透明黑**，中间是片名 +「正在打开…」，控制条不显示 |
-| 首帧到达 | 黑底淡出 220ms（macOS 250ms），控制条淡入 180ms |
-| 兜底 | 10 秒还没首帧（mpv 卡住 / 控制通道没连上）也把黑底收掉，不留黑屏 |
+| 声画起播 | mpv 带 `--pause=yes` 起播：音频比首帧早约 0.5 秒，先不放开播放 |
+| VO 就绪 | `vo-configured` 变 true 后 unpause，声音和画面从这一刻一起开始 |
+| 首帧到达 | 黑底淡出 140ms，控制条淡入 180ms |
+| 兜底 | 4 秒还没等到 VO 就绪就先 unpause；黑底仍等首帧 / 位置。控制通道连不上直接报错重试 |
 
-首帧的判定：Windows 用 IPC 的头一条 `time-pos`（比「IPC 连上」更接近出画），
-macOS 用 `@file-loaded`。切集走同一条路径：先盖黑底，再等新的首帧。
+首帧的判定：两端都看 IPC 的 `video-frame-info`（VO 真正交出一帧），
+位置 `time-pos > 起播点 + 0.5` 作为兜底（无头 / 特殊 VO）。切集走同一条路径：
+先盖黑底，新进程同样先暂停、VO 就绪再放开。无头自检（`DVPLAYER_MPV_HEADLESS=1`
+/ `DVPLAYER_NO_VO=1`）不暂停。
 黑底在浮层里面画，所以视频窗口还没就位时也看不到桌面。
 
 ### 2.1 两端的 IPC 契约（已落地）

@@ -143,10 +143,11 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   `eof-reached` / `speed` / `volume` / `mute` / `track-list` / `aid` / `sid` /
   `paused-for-cache`），
   暴露 loadfile / seek / 音量 / 静音 / 倍速 / 选轨 / 截图 / `shutdown`。
-- 打开 / 切集先铺不透明黑底（片名 +「正在打开…」+ 转圈），首帧判定看
-  `time-pos > 起播点 + 0.5`（片头跳过后从跳到的位置算），`file-loaded` 不再
-  直接收黑底；播放中卡住（`paused-for-cache`）只在画面中间浮一个
-  「正在缓冲…」小胶囊，不盖画面、不藏控制条。
+- 打开 / 切集先铺不透明黑底（片名 +「正在打开…」+ 转圈）。起播时 mpv 先
+  `pause=yes`，`vo-configured` 就绪后 unpause，声音和画面一起开始；首帧看
+  `video-frame-info`，`time-pos > 起播点 + 0.5`（片头跳过后从跳到的位置算）
+  兜底，`file-loaded` 不再直接收黑底。播放中卡住（`paused-for-cache`）只在
+  画面中间浮一个「正在缓冲…」小胶囊，不盖画面、不藏控制条。
 - 打开阶段三个窗口圆点（关闭 / 最小化 / 全屏）照常显示，顶部 30px 拖窗区
   也不被黑底挡住；单击黑底只把窗口选中，不切暂停。黑底上双击走**最大化 /
   还原**（`actions.zoom()`），和 Windows 一致；进假全屏会把三个圆点收掉，

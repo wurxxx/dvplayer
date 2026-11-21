@@ -305,7 +305,7 @@ final class PlayerSession: ObservableObject {
         engine.onLoaded = { [weak self] duration in
             guard let self else { return }
             // 这里只代表文件头拿到了，不代表已经出了第一帧（慢网络下还会继续缓冲）。
-            // 黑底等 handlePosition 看到播放位置真的往前走再收。
+            // 黑底等 `video-frame-info` 或 handlePosition 确认真的出画再收。
             if duration > 1 {
                 self.duration = duration
             }
@@ -315,6 +315,12 @@ final class PlayerSession: ObservableObject {
             self.applyTrackPrefsIfNeeded()
             self.skipIntroIfNeeded()
             self.loadDanmakuIfNeeded()
+        }
+        engine.onFirstFrame = { [weak self, weak engine] in
+            // 换集时旧进程可能还有一帧在路上：只认当前这个 mpv。
+            guard let self, let engine, self.mpv === engine,
+                  !Self.openingHold else { return }
+            self.finishLoading("first-frame")
         }
         engine.onEOF = { [weak self] in
             self?.handleEOF()
@@ -580,15 +586,10 @@ final class PlayerSession: ObservableObject {
         self.position = position
         seekPosition = position
 
-        // 首帧判定看播放位置有没有真的往前走：慢网络下 mpv 会先报续播点
-        // （或者 0），但一帧都还没出来，这时收黑底就会透出桌面。
+        // 兜底：有些 VO 不报 video-frame-info（比如无头），就等播放位置真的往前走。
+        // 慢网络下 mpv 会先报续播点（或者 0），但一帧都还没出来，这时不能收黑底。
         if loading, !Self.openingHold, position > loadingFloor + 0.5 {
-            loading = false
-            NSLog("[Play] loading finish pos=\(String(format: "%.1f", position)) " +
-                  "floor=\(String(format: "%.1f", loadingFloor))")
-            if Self.bufferingHold {
-                buffering = true
-            }
+            finishLoading("position")
         }
 
         if Date().timeIntervalSince(lastReportAt) >= Self.reportEvery, position > 0 {
@@ -602,6 +603,17 @@ final class PlayerSession: ObservableObject {
             if inOutro != showSkipOutro {
                 showSkipOutro = inOutro
             }
+        }
+    }
+
+    /// 首帧到了：收掉不透明黑底。`video-frame-info` 先到就用它，位置兜底。
+    private func finishLoading(_ reason: String) {
+        guard loading else { return }
+        loading = false
+        NSLog("[Play] loading finish reason=\(reason) pos=\(String(format: "%.1f", position)) " +
+              "floor=\(String(format: "%.1f", loadingFloor))")
+        if Self.bufferingHold {
+            buffering = true
         }
     }
 

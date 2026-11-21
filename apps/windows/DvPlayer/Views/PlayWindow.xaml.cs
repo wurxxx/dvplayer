@@ -116,6 +116,17 @@ public partial class PlayWindow : Window
     private bool _ready;
 
     /// <summary>
+    /// 起播时 mpv 是暂停的（`--pause=yes`），等首帧到了再放开：
+    /// 音频比首帧早约 0.5 秒，直接播就成了「声音先出、画面晚一秒」。
+    /// </summary>
+    private static readonly bool PauseUntilFirstFrame =
+        Environment.GetEnvironmentVariable("DVPLAYER_MPV_HEADLESS") != "1";
+
+    /// <summary>这一轮起播的暂停还没放开（首帧 / 超时 / 用户操作三选一）。</summary>
+    private bool _openingPaused;
+    private DispatcherTimer? _openingGate;
+
+    /// <summary>
     /// 巡检用：假装首帧一直没来（`DVPLAYER_OPENING_HOLD=1`）。
     /// 慢网络挡不了，靠这个验证遮罩会一直不透明。
     /// </summary>
@@ -1336,6 +1347,7 @@ public partial class PlayWindow : Window
         try
         {
             _tracksApplied = false;
+            _openingPaused = PauseUntilFirstFrame;
             _mpv.Start(_hwnd, launch);
 
             // mpv 的子窗口是异步建出来的：先试一次，再补一次。
@@ -1348,6 +1360,19 @@ public partial class PlayWindow : Window
             Trace.Write("mpv start failed: " + ex.Message);
             ShowError(ex.Message);
             return;
+        }
+
+        // 首帧一直不来（慢网络 / 解码卡住）就放开播放，宁可声画不同步也别卡住。
+        _openingGate?.Stop();
+        if (_openingPaused)
+        {
+            _openingGate = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+            _openingGate.Tick += (_, _) =>
+            {
+                _openingGate?.Stop();
+                ReleaseOpeningPause("timeout");
+            };
+            _openingGate.Start();
         }
 
         _ = AttachIpcAsync();
@@ -1367,14 +1392,18 @@ public partial class PlayWindow : Window
             return;
         }
 
-        // 控制条不是必需品：IPC 连不上也让它继续播。
-        // 拿不到 time-pos，只能多等一会儿再收黑底（慢网络下仍有透桌面的可能，
-        // 但这条路径本来就异常；正常起播一定有 IPC）。
         if (!await ready.ConfigureAwait(true) || session != _session)
         {
-            LoadingStatus.Text = "已开始播放（控制通道未连上）";
-            await Task.Delay(3000).ConfigureAwait(true);
-            FinishOpening();
+            if (session != _session)
+            {
+                return;
+            }
+
+            // 起播时 mpv 停在第一帧，控制通道没连上就没人能放开它：
+            // 与其留个永远不动的黑屏，不如报错让用户重试。
+            Trace.Write("ipc connect failed");
+            _mpv.Stop();
+            ShowError("播放器控制通道没连上，请重试。");
             return;
         }
 
@@ -1404,7 +1433,8 @@ public partial class PlayWindow : Window
                      "width", "height", "video-params/aspect", "demuxer-cache-time",
                      "audio-device-list", "audio-device", "audio-spdif",
                      "target-colorspace-hint", "current-tracks/video", "video-params",
-                     "estimated-vf-fps", "video-bitrate", "paused-for-cache",
+                     "vo-configured", "video-frame-info", "estimated-vf-fps", "video-bitrate",
+                     "paused-for-cache",
                  })
         {
             ipc.Observe(name);
@@ -1438,7 +1468,7 @@ public partial class PlayWindow : Window
                     // （或者 0），但一帧都还没出来，这时收黑底就会透出桌面。
                     if (!_ready && !OpeningHold && _position > _openingBase + 0.5)
                     {
-                        FinishOpening();
+                        FinishOpening("position");
                     }
                     UpdatePositionUi();
                     ApplyPendingIntroSkip();
@@ -1511,6 +1541,23 @@ public partial class PlayWindow : Window
                 case "video-bitrate" when value.ValueKind == JsonValueKind.Number:
                     _videoBitrate = value.GetDouble();
                     UpdateChips();
+                    break;
+
+                case "vo-configured" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                    // 起播时 mpv 是暂停的，VO 就绪后再放开：声音不会抢在画面前面。
+                    if (value.GetBoolean() && !_ready && !OpeningHold)
+                    {
+                        ReleaseOpeningPause("vo-ready");
+                    }
+                    break;
+
+                case "video-frame-info" when value.ValueKind == JsonValueKind.Object:
+                    // 这个属性只有 VO 真正拿到一帧后才出现，比等 time-pos 走 0.5 秒
+                    // 早约半秒。放开暂停后它和声音几乎同时到，正好收黑底。
+                    if (!_ready && !OpeningHold)
+                    {
+                        FinishOpening("first-frame");
+                    }
                     break;
 
                 case "video-params" when value.ValueKind == JsonValueKind.Object:
@@ -2134,6 +2181,10 @@ public partial class PlayWindow : Window
         {
             return;
         }
+
+        // 起播阶段用户自己按了暂停键：别让首帧回调再改一次状态。
+        _openingPaused = false;
+        _openingGate?.Stop();
 
         _paused = !_paused;
         _ipc.Command("set_property", "pause", _paused);
@@ -3671,6 +3722,7 @@ public partial class PlayWindow : Window
         _ticker.Stop();
         _hideTimer.Stop();
         _dragTimer.Stop();
+        _openingGate?.Stop();
 
         if (!_eof && _position > 0)
         {
@@ -3950,8 +4002,23 @@ public partial class PlayWindow : Window
         BufferingPanel.BeginAnimation(OpacityProperty, fade);
     }
 
+    /// <summary>放开起播时的暂停：声音和画面从这里一起开始。</summary>
+    private void ReleaseOpeningPause(string reason)
+    {
+        if (!_openingPaused)
+        {
+            return;
+        }
+
+        _openingPaused = false;
+        _openingGate?.Stop();
+        _ipc?.Command("set_property", "pause", false);
+        Trace.Write($"opening unpause reason={reason} " +
+                    $"after={(DateTime.UtcNow - _launchAt).TotalSeconds:0.00}s");
+    }
+
     /// <summary>首帧到了：黑底淡出，控制条淡入。</summary>
-    private void FinishOpening()
+    private void FinishOpening(string reason = "ready")
     {
         if (_ready)
         {
@@ -3959,7 +4026,10 @@ public partial class PlayWindow : Window
         }
 
         _ready = true;
-        Trace.Write($"opening finish pos={_position:0.0} launch={_launchStart:0.0} " +
+        _openingGate?.Stop();
+        ReleaseOpeningPause(reason);
+        Trace.Write($"opening finish reason={reason} pos={_position:0.0} " +
+                    $"launch={_launchStart:0.0} " +
                     $"after={(DateTime.UtcNow - _launchAt).TotalSeconds:0.0}s");
         StopSpinner();
         LoadingPanel.Visibility = Visibility.Collapsed;
@@ -3970,7 +4040,7 @@ public partial class PlayWindow : Window
             ShowBuffering();
         }
 
-        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220))
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(140))
         {
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
         };

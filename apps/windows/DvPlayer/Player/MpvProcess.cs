@@ -198,6 +198,15 @@ public sealed class MpvProcess : IDisposable
         yield return "--osc=no";                         // UI 由壳提供
         yield return "--keep-open=yes";                  // 播完留住最后一帧，别闪回桌面
 
+        // 起播先停在第一帧：音频约 0.4 秒就出声，而首帧要 1 秒左右，直接播
+        // 会「声音先出来、画面晚约 1 秒」。壳等 `vo-configured` 就绪（或 4 秒
+        // 兜底）后才 unpause，声音和画面就一起开始。
+        // 无头自检没有真实 VO，收不到 VO 就绪，保持原来的直接播放。
+        if (Environment.GetEnvironmentVariable("DVPLAYER_MPV_HEADLESS") != "1")
+        {
+            yield return "--pause=yes";
+        }
+
         // 远程自检：SSH 会话里没有可用的 D3D 交换链（swapchain 0x887a0022），
         // 用 null 输出让时间轴照常走，五项功能才能按位置验证。
         if (Environment.GetEnvironmentVariable("DVPLAYER_MPV_HEADLESS") == "1")

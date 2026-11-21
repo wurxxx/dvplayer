@@ -41,6 +41,8 @@ final class MpvEngine {
     /// mpv 在等缓存（`paused-for-cache`），播放中卡顿时显示一个小状态。
     var onBuffering: ((Bool) -> Void)?
     var onLoaded: ((Double) -> Void)?
+    /// VO 真正显示出第一帧（mpv 的 `video-frame-info` 出现）。
+    var onFirstFrame: (() -> Void)?
     var onEOF: (() -> Void)?
     var onTracks: (([RawTrack], [RawTrack], Int64, Int64) -> Void)?
     var onSpeed: ((Double) -> Void)?
@@ -99,6 +101,16 @@ final class MpvEngine {
     private var videoBitrate = 0.0
     private var videoCodecName = ""
     private var startOverride: Double?
+    /// 无头自检（`--vo=null`）没有真实出画，别等首帧。
+    private static let pauseUntilFirstFrame =
+        ProcessInfo.processInfo.environment["DVPLAYER_NO_VO"] != "1"
+    /// 起播先停在第一帧，等 VO 真的出画再 unpause（声音就不会抢跑）。
+    private var waitingFirstFrame = false
+    /// loadfile 后这段时间内 VO 还会重画上一集的帧，不能当成新首帧。
+    private var firstFrameNotBefore = Date.distantPast
+    /// 这一轮已经把 `onFirstFrame` 报出去了（`video-frame-info` 每秒会变很多次）。
+    private var firstFrameSent = false
+    private var firstFrameTimeout: DispatchWorkItem?
     /// mpv 报上来的音频输出设备；`audio-device-list` 一有就填。
     private(set) var audioDevices: [AudioDeviceInfo] = []
     private(set) var audioDevice: String = ""
@@ -108,7 +120,8 @@ final class MpvEngine {
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
         "track-list", "aid", "sid", "video-params/aspect", "demuxer-cache-time",
-        "current-tracks/video", "video-params", "paused-for-cache",
+        "current-tracks/video", "video-params", "vo-configured", "video-frame-info",
+        "paused-for-cache",
         "width", "height", "estimated-vf-fps", "video-bitrate",
         "audio-device-list", "audio-device", "audio-spdif", "target-colorspace-hint",
     ]
@@ -252,6 +265,7 @@ final class MpvEngine {
         subtitleId = 0
         startOverride = start > 1 ? start : 0
         lastPositionEmit = 0
+        firstFrameSent = false
 
         // 请求头：每集可能不一样（飞牛带 token）。
         let fields = headers.map { "\($0.key): \($0.value)" }.joined(separator: ",")
@@ -259,7 +273,10 @@ final class MpvEngine {
 
         // 服务器的代理设置：设了就一直用，切集换成新源时会重新设。
         ipc.command(["set_property", "http-proxy", Self.normalizeProxy(proxy)])
-        ipc.command(["set_property", "pause", "no"])
+
+        // 起播先停在第一帧：音频约 0.4 秒就出声，而首帧要 1 秒左右，
+        // 直接播会「声音先出来、画面晚约 1 秒」。
+        ipc.command(["set_property", "pause", Self.pauseUntilFirstFrame ? "yes" : "no"])
 
         // `start` 是 option：先设再 loadfile，比给 loadfile 传 options 稳
         // （mpv 的 loadfile options 在 IPC 里要传数组，逗号串会被当成非法值）。
@@ -267,10 +284,49 @@ final class MpvEngine {
             ? String(format: "%.3f", startOverride ?? 0)
             : "none"
         ipc.command(["set_property", "start", startValue])
-        ipc.command(["set_property", "pause", "no"])
+        ipc.command(["set_property", "pause", Self.pauseUntilFirstFrame ? "yes" : "no"])
 
         NSLog("[Play] mpv load \(url.prefix(72))… start=\(startValue)")
         ipc.command(["loadfile", url, "replace"])
+        if Self.pauseUntilFirstFrame {
+            waitFirstFrame()
+        }
+    }
+
+    // MARK: - 首帧闸门
+
+    /// 起播先暂停，VO 就绪（`vo-configured`）再放开；超时兜底不让黑屏卡死。
+    private func waitFirstFrame() {
+        firstFrameTimeout?.cancel()
+        waitingFirstFrame = true
+        firstFrameNotBefore = Date().addingTimeInterval(0.09)
+        let generation = loadGeneration
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.waitingFirstFrame,
+                  self.loadGeneration == generation else { return }
+            NSLog("[Play] 等首帧超时，直接开始播放")
+            self.releaseFirstFrameWait()
+        }
+        firstFrameTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: timeout)
+    }
+
+    /// 放开起播暂停：声音和画面从这里一起开始。
+    private func releaseFirstFrameWait() {
+        guard waitingFirstFrame else { return }
+        waitingFirstFrame = false
+        firstFrameTimeout?.cancel()
+        firstFrameTimeout = nil
+        NSLog("[Play] 首帧放开 pause")
+        ipc.command(["set_property", "pause", "no"])
+    }
+
+    /// 用户自己按了播放 / 暂停：别再让首帧回调改状态。
+    private func cancelFirstFrameWait() {
+        guard waitingFirstFrame else { return }
+        waitingFirstFrame = false
+        firstFrameTimeout?.cancel()
+        firstFrameTimeout = nil
     }
 
     /// 代理地址允许只写 `127.0.0.1:7890`；空表示直连（mpv 要的是空串）。
@@ -285,14 +341,17 @@ final class MpvEngine {
     }
 
     func play() {
+        cancelFirstFrameWait()
         ipc.command(["set_property", "pause", "no"])
     }
 
     func pause() {
+        cancelFirstFrameWait()
         ipc.command(["set_property", "pause", "yes"])
     }
 
     func togglePause() {
+        cancelFirstFrameWait()
         ipc.command(["set_property", "pause", paused ? "no" : "yes"])
     }
 
@@ -450,6 +509,7 @@ final class MpvEngine {
     func shutdown() {
         guard !shuttingDown else { return }
         shuttingDown = true
+        cancelFirstFrameWait()
         ipc.command(["quit"])
         ipc.close()
 
@@ -508,6 +568,22 @@ final class MpvEngine {
             case "video-bitrate":
                 videoBitrate = doubleValue(data) ?? 0
                 emitVideoStats()
+            case "vo-configured":
+                // 暂停状态下 mpv 也会把 VO 配好，但不会给第一帧；VO 一就绪就放开，
+                // 声音和画面从这一秒一起开始（实测相差不到 10ms）。
+                guard (data as? Bool) == true else { return }
+                releaseFirstFrameWait()
+            case "video-frame-info":
+                // 只有 VO 真正拿到一帧后这个属性才存在；音频通常比它先出。
+                guard data is [String: Any], isLoaded else { return }
+                if waitingFirstFrame {
+                    // 切集时 VO 已经配好了，mpv 会先把上一集的最后一帧重画一次。
+                    guard Date() >= firstFrameNotBefore else { return }
+                    releaseFirstFrameWait()
+                }
+                guard !firstFrameSent else { return }
+                firstFrameSent = true
+                onFirstFrame?()
             case "video-params":
                 // mpv 把传递函数放在 gamma 里（pq / hlg / bt.1886），没有 transfer 字段。
                 if let map = data as? [String: Any] {
