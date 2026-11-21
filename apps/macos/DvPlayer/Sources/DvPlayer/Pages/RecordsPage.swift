@@ -11,7 +11,12 @@ struct RecordsPage: View {
         case favorites = "收藏"
     }
 
-    @State private var tab: Tab = .general
+    /// 截图巡检用：`DVPLAYER_RECORD_TAB=favorites|watch` 直接落在某个分段。
+    @State private var tab: Tab = switch ProcessInfo.processInfo.environment["DVPLAYER_RECORD_TAB"] {
+    case "favorites": .favorites
+    case "watch": .watch
+    default: .general
+    }
     @State private var loading = false
 
     private var continuing: [PlayRecord] {

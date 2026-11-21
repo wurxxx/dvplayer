@@ -9,6 +9,8 @@
     <RootNamespace>DvPlayer</RootNamespace>
     <AssemblyName>DvPlayer</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- exe / 任务栏 / Alt-Tab 的图标；图由 scripts/make-icon.py 生成。 -->
+    <ApplicationIcon>Assets\DvPlayer.ico</ApplicationIcon>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 

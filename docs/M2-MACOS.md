@@ -178,6 +178,8 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 
 | 环境变量 | 作用 |
 | --- | --- |
+| `DVPLAYER_PAGE=records\|search\|sources\|settings` | 启动直接落在某页（见 `AppState`） |
+| `DVPLAYER_RECORD_TAB=favorites\|watch` | 记录页直接停在「收藏」/「观看」分段，截图回归用 |
 | `DVPLAYER_PLAY=<itemId>` | 等核心连上后直接开播放窗 |
 | `DVPLAYER_PLAY_CONTAINER=<剧集 id>` | 先列这一季的集，再带 playlist 打开（模拟详情页） |
 | `DVPLAYER_PLAY_RECORD=1` | 从第一条观看记录续播（模拟「继续观看」，选集由 `PlaylistLoader` 补） |
