@@ -26,9 +26,10 @@ enum DiscUI {
             do {
                 let session = try BluRayDisc.open(isoPath: path)
                 DispatchQueue.main.async {
+                    // 只有一条标题就别多一步：直接播；多标题才弹选择框。
                     let title = autoTitle.flatMap { wanted in
                         session.titles.first { $0.number == wanted }
-                    } ?? chooseTitle(session)
+                    } ?? (session.titles.count == 1 ? session.titles[0] : chooseTitle(session))
 
                     guard let title else {
                         session.detach()

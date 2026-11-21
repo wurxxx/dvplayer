@@ -450,7 +450,10 @@ public partial class MainWindow : FluentWindow
                 ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted) ?? probe.Titles[0]
                 : null;
 
-            title ??= DiscTitlesDialog.Pick(this, isoPath, probe);
+            // 只有一条标题就别多一步：直接播。多标题（正片 + 花絮）才让用户选。
+            title ??= probe.Titles.Count == 1
+                ? probe.Titles[0]
+                : DiscTitlesDialog.Pick(this, isoPath, probe);
             if (title is null)
             {
                 return null;
