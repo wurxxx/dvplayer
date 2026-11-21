@@ -10,6 +10,9 @@ samples/*
 apps/macos/m0-render/m0-render
 *.log
 *.png
+# 品牌图标要入库（其余截图不提交）
+!assets/branding/*.png
+!apps/windows/DvPlayer/Assets/*.png
 *.hevc
 *.mkv
 *.mp4

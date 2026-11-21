@@ -26,10 +26,9 @@
 
         <StackPanel DockPanel.Dock="Top" Margin="18,20,18,16">
           <StackPanel Orientation="Horizontal">
-            <Border Width="32" Height="32" CornerRadius="9" Background="{StaticResource AccentBrush}">
-              <TextBlock Text="&#xE786;" FontFamily="{StaticResource IconFont}" FontSize="15"
-                         Foreground="#1A1200" HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
+            <!-- 品牌图和 exe 图标是同一份位图（scripts/make-icon.py 生成） -->
+            <Image Source="Assets/DvPlayer-256.png" Width="32" Height="32"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
             <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
               <TextBlock Text="DV Player" FontFamily="{StaticResource DisplayFont}"
                          FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />

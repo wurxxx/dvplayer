@@ -163,6 +163,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `prefix/lib` | libass / libav* / libsw*（解码；`libmpv` 不再拷） |
 | `prefix-vk/lib` | `libplacebo.387`（Vulkan 后端）、`libMoltenVK`、`libvulkan.1.4.363` |
 | `prefix-vk/bin/mpv` | 播放器本体 → `Contents/Frameworks/mpv` |
+| `assets/branding/DvPlayer-256.png` | 侧栏品牌图 → `Contents/Resources/`（和 Windows 的 exe 图标同一份设计） |
 
 - ICD 配置 `MoltenVK_icd.json` 一起拷进 `Frameworks`，
   `library_path` 改成相对名 `libMoltenVK.dylib`；运行时 `VK_ICD_FILENAMES` 指向它。

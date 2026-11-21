@@ -18,6 +18,11 @@
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
+  <!-- 侧栏左上角的品牌图（和 ApplicationIcon 同一份设计，scripts/make-icon.py 生成）。 -->
+  <ItemGroup>
+    <Resource Include="Assets\DvPlayer-256.png" />
+  </ItemGroup>
+
   <!-- 共享媒体库核心由 scripts/windows/build-core.ps1 生成，构建后拷到输出目录。 -->
   <PropertyGroup>
     <MediaCoreDir>$(MSBuildThisFileDirectory)..\..\..\core\target\x86_64-pc-windows-gnu\release\</MediaCoreDir>

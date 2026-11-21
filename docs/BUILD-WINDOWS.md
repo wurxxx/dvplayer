@@ -100,9 +100,10 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\build-core.ps1
 `apps/windows/DvPlayer/DvPlayer.csproj` 有一个 `CopyMediaCore` target，
 `dotnet build` 时会把它拷到输出目录；找不到就发一条 warning。
 
-exe 的图标来自 `Assets/DvPlayer.ico`（`ApplicationIcon`），由
-`python3 scripts/make-icon.py` 生成：琥珀圆角块 + 摄像机（和侧栏 logo 一致），
-16–32 px 用简化成三角形的版本。换配色只需改脚本里的 `AMBER_*` / `INK` 再跑一次。
+exe 的图标来自 `Assets/DvPlayer.ico`（`ApplicationIcon`），侧栏左上角的品牌图用
+同一份设计的 `Assets/DvPlayer-256.png`，都由 `python3 scripts/make-icon.py` 生成：
+琥珀圆角块 + 摄像机，16–32 px 用简化成三角形的版本。换配色只需改脚本里的
+`AMBER_*` / `INK` 再跑一次（会同时更新 `assets/branding/` 下给 macOS 用的那份）。
 
 ## 无桌面环境的 UI 回归
 

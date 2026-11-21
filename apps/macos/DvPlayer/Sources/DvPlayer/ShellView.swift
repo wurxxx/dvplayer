@@ -123,14 +123,24 @@ private struct SidebarView: View {
 
     private var brand: some View {
         HStack(spacing: 11) {
-            RoundedRectangle(cornerRadius: 9)
-                .fill(Theme.accent)
-                .frame(width: 32, height: 32)
-                .overlay(
-                    Image(systemName: "play.rectangle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color(hex: 0x1A1200))
-                )
+            // 和 Windows / exe 图标同一份位图（scripts/make-icon.py 生成）。
+            Group {
+                if let icon = BrandAssets.icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                } else {
+                    // 直接跑 Swift 可执行文件（没有 .app 资源）时的兜底。
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(Theme.accent)
+                        .overlay(
+                            Image(systemName: "play.rectangle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(Color(hex: 0x1A1200))
+                        )
+                }
+            }
+            .frame(width: 32, height: 32)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("DV Player")
@@ -285,4 +295,16 @@ struct WindowControls: View {
         .buttonStyle(.plain)
         .help(glyph == "xmark" ? "关闭" : (glyph == "minus" ? "最小化" : "缩放"))
     }
+}
+
+
+/// 品牌图：打包进 `Contents/Resources/DvPlayer-256.png`（build.sh 从
+/// `assets/branding/` 拷过来）。没有就退回侧栏自绘的图标。
+enum BrandAssets {
+    static let icon: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "DvPlayer-256", withExtension: "png") else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
+    }()
 }

@@ -23,7 +23,10 @@ except ImportError:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "apps" / "windows" / "DvPlayer" / "Assets" / "DvPlayer.ico"
-PREVIEW = ROOT / "apps" / "windows" / "DvPlayer" / "Assets" / "DvPlayer-256.png"
+# 品牌图两份：仓库里共享的 256 PNG（macOS 打包用），和 Windows 工程里的一份
+# （WPF 的 `Image Source` 只认工程内资源）。
+PREVIEW = ROOT / "assets" / "branding" / "DvPlayer-256.png"
+WINDOWS_PREVIEW = ROOT / "apps" / "windows" / "DvPlayer" / "Assets" / "DvPlayer-256.png"
 
 AMBER_TOP = (255, 194, 74, 255)     # #FFC24A
 AMBER_BOTTOM = (245, 160, 0, 255)   # #F5A000
@@ -150,7 +153,11 @@ def write_ico(path: Path, frames: list[Image.Image]) -> None:
 def main() -> None:
     master = draw_master()
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    master.resize((256, 256), Image.LANCZOS).save(PREVIEW)
+    preview = master.resize((256, 256), Image.LANCZOS)
+    PREVIEW.parent.mkdir(parents=True, exist_ok=True)
+    preview.save(PREVIEW)
+    WINDOWS_PREVIEW.parent.mkdir(parents=True, exist_ok=True)
+    preview.save(WINDOWS_PREVIEW)
 
     # ICO 里每个尺寸都单独画，避免小图糊掉。
     frames = [draw_small(size) if size <= 32 else master.resize((size, size), Image.LANCZOS)
@@ -158,6 +165,7 @@ def main() -> None:
     write_ico(OUT, frames)
     print(f"已生成：{OUT}")
     print(f"预览：  {PREVIEW}")
+    print(f"       {WINDOWS_PREVIEW}")
 
 
 if __name__ == "__main__":
