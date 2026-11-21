@@ -531,6 +531,33 @@ struct PlayerView: View {
                 }
             }
 
+            Menu("音频输出（\(session.audioOutputLabel)）") {
+                if session.audioDevices.isEmpty {
+                    Text("还没读到音频设备，稍后再试")
+                }
+
+                ForEach(session.audioDevices) { device in
+                    let label = device.name == "auto" ? "系统默认（自动选择）" : device.label
+                    Button {
+                        session.setAudioDevice(device.name)
+                    } label: {
+                        if session.audioDevice == device.name {
+                            Label(label, systemImage: "checkmark")
+                        } else {
+                            Text(label)
+                        }
+                    }
+                }
+
+                Divider()
+                Button(session.audioPassthrough ? "音频直通：开" : "音频直通：关") {
+                    session.toggleAudioPassthrough()
+                }
+                Button(session.hdrPassthrough ? "HDR 直通：开" : "HDR 直通：关") {
+                    session.toggleHdrPassthrough()
+                }
+            }
+
             Menu(session.sleepLabel.map { "定时关闭（\($0)）" } ?? "定时关闭") {
                 Button("不定时") { session.cancelSleep() }
                 Divider()

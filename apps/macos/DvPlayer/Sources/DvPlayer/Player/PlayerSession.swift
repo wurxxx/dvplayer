@@ -167,6 +167,12 @@ final class PlayerSession: ObservableObject {
     @Published var muted = false
     @Published var eof = false
 
+    // —— 音频输出 / 直通 / HDR ——
+    @Published private(set) var audioDevices: [AudioDeviceInfo] = []
+    @Published private(set) var audioDevice: String = ""
+    @Published private(set) var audioPassthrough = false
+    @Published private(set) var hdrPassthrough = false
+
     // —— 轨道 ——
     @Published private(set) var audioTracks: [PlayerTrack] = []
     @Published private(set) var subtitleTracks: [PlayerTrack] = []
@@ -264,6 +270,9 @@ final class PlayerSession: ObservableObject {
         let settings = AppSettings.load()
         self.aspect = PlayerAspect(rawValue: settings.videoAspect ?? "") ?? .fit
         self.danmakuEnabled = settings.danmakuEnabled ?? false
+        self.audioPassthrough = settings.audioPassthrough ?? false
+        self.hdrPassthrough = settings.hdrPassthrough ?? false
+        self.audioDevice = settings.audioDevice ?? ""
         self.markers = SkipMarkerStore.marker(for: Self.cleanSeries(seriesTitle) ?? effectiveId)
 
         guard let engine = MpvEngine(frame: frame,
@@ -295,6 +304,7 @@ final class PlayerSession: ObservableObject {
                 self.duration = duration
             }
             NSLog("[Play] loaded \(self.itemId) duration=\(Int(self.duration))s")
+            self.syncAudioConfig()
             self.applyAspect()
             self.applyTrackPrefsIfNeeded()
             self.skipIntroIfNeeded()
@@ -324,6 +334,11 @@ final class PlayerSession: ObservableObject {
             self.videoBitrate = bitrate
             self.videoCodecName = codec
         }
+        engine.onAudioConfig = { [weak self] in
+            self?.syncAudioConfig(verbose: false)
+        }
+        // 观察的回调可能先于这一行到达，也可能晚到；先搬一次已有的值。
+        syncAudioConfig(verbose: false)
         engine.onCacheTime = { [weak self] cache in
             guard let self else { return }
             // 刚 seek 回来缓存位置可能还落在进度后面，至少画到已观看那。
@@ -757,6 +772,56 @@ final class PlayerSession: ObservableObject {
 
     func selectAudio(_ trackId: Int64) {
         selectAudio(trackId, remember: true)
+    }
+
+    // MARK: - 音频输出 / 直通 / HDR
+
+    /// 当前音频输出的短标签（「更多」菜单和 toast 用）。
+    var audioOutputLabel: String {
+        let device = audioDevices.first { $0.name == audioDevice }
+        var label = device?.label
+            ?? (audioDevice.isEmpty || audioDevice == "auto" ? "系统默认" : audioDevice)
+        if audioPassthrough { label += " · 直通" }
+        if hdrPassthrough { label += " · HDR" }
+        return label
+    }
+
+    func setAudioDevice(_ name: String) {
+        mpv.setAudioDevice(name)
+        audioDevice = name
+        syncAudioConfig()
+        toast("音频输出：\(audioOutputLabel)")
+        showChrome()
+    }
+
+    func toggleAudioPassthrough() {
+        let enabled = !audioPassthrough
+        mpv.setAudioPassthrough(enabled)
+        audioPassthrough = enabled
+        syncAudioConfig()
+        toast(enabled ? "音频直通：开" : "音频直通：关")
+        showChrome()
+    }
+
+    func toggleHdrPassthrough() {
+        let enabled = !hdrPassthrough
+        mpv.setHdrPassthrough(enabled)
+        hdrPassthrough = enabled
+        syncAudioConfig()
+        toast(enabled ? "HDR 直通：开（系统要开 HDR）" : "HDR 直通：关")
+        showChrome()
+    }
+
+    /// 把 mpv 的值搬回这里（mpv 可能拒绝 / 归一化某个参数）。
+    private func syncAudioConfig(verbose: Bool = true) {
+        audioDevices = mpv.audioDevices
+        audioDevice = mpv.audioDevice
+        audioPassthrough = mpv.audioPassthrough
+        hdrPassthrough = mpv.hdrPassthrough
+        guard verbose else { return }
+        NSLog("[Play] audio device=\(audioDevice.isEmpty ? "-" : audioDevice) " +
+              "passthrough=\(audioPassthrough) hdr=\(hdrPassthrough) " +
+              "devices=\(audioDevices.count)")
     }
 
     private func selectAudio(_ trackId: Int64, remember: Bool) {

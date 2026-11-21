@@ -15,6 +15,16 @@ struct RawTrack {
     let externalFilename: String?
 }
 
+/// mpv `audio-device-list` 里的一条输出设备。
+struct AudioDeviceInfo: Identifiable, Equatable {
+    let name: String
+    let description: String
+    var id: String { name }
+
+    /// 菜单上显示的名字：没有描述就用 mpv 的设备名。
+    var label: String { description.isEmpty ? name : description }
+}
+
 /// 播放引擎：拉起 `mpv` 子进程（gpu-next + Vulkan），通过 JSON IPC 控制。
 ///
 /// 和 Windows 的 `MpvProcess` 同一个思路：视频由 mpv 自己开窗，
@@ -45,6 +55,8 @@ final class MpvEngine {
     var onVideoStats: ((Int, Int, Double, Double, String) -> Void)?
     /// 视频显示宽高比（已含旋转 / 变形）；「适应窗口」用它把窗口改成同样的形状。
     var onVideoAspect: ((Double) -> Void)?
+    /// 音频输出相关状态变了（设备列表 / 当前设备 / 直通开关）。
+    var onAudioConfig: (() -> Void)?
 
     // —— 状态 ——
     private(set) var isLoaded = false
@@ -87,12 +99,18 @@ final class MpvEngine {
     private var videoBitrate = 0.0
     private var videoCodecName = ""
     private var startOverride: Double?
+    /// mpv 报上来的音频输出设备；`audio-device-list` 一有就填。
+    private(set) var audioDevices: [AudioDeviceInfo] = []
+    private(set) var audioDevice: String = ""
+    private(set) var audioPassthrough = false
+    private(set) var hdrPassthrough = false
 
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
         "track-list", "aid", "sid", "video-params/aspect", "demuxer-cache-time",
         "current-tracks/video", "video-params", "paused-for-cache",
         "width", "height", "estimated-vf-fps", "video-bitrate",
+        "audio-device-list", "audio-device", "audio-spdif", "target-colorspace-hint",
     ]
 
     init?(frame: NSRect, startSeconds: Double?) {
@@ -127,9 +145,21 @@ final class MpvEngine {
             // 出问题看这个文件：mpv 是子进程，stderr 在 .app 里看不到。
             "--log-file=\(NSTemporaryDirectory())dvplayer-mpv.log",
         ]
+        // 音频输出 / 直通 / HDR 跟着设置走：换集重启 mpv 也一直是用户选的。
+        let settings = AppSettings.load()
+        if settings.audioPassthrough ?? false {
+            args.append("--audio-spdif=ac3,eac3,dts,dts-hd,truehd")
+        }
+        if settings.hdrPassthrough ?? false {
+            args.append("--target-colorspace-hint=yes")
+        }
+        if let device = settings.audioDevice, !device.isEmpty {
+            args.append("--audio-device=\(device)")
+        }
+
         // 缓冲大小跟着设置走：默认 512MB，蓝光原盘可以调到 2G / 4G。
         // 网络流才需要预读，本地文件给多了只是白占内存。
-        var bufferMb = min(max(AppSettings.load().bufferSizeMb ?? 512, 128), 8192)
+        var bufferMb = min(max(settings.bufferSizeMb ?? 512, 128), 8192)
         // 自检用：无桌面环境验证三层进度条时，把缓冲压小才看得到「未观看」那一段。
         if let forced = Int(ProcessInfo.processInfo.environment["DVPLAYER_BUFFER_MB"] ?? ""),
            forced > 0 {
@@ -282,6 +312,42 @@ final class MpvEngine {
 
     func setSpeed(_ speed: Double) {
         ipc.command(["set_property", "speed", String(format: "%.3f", speed)])
+    }
+
+    // MARK: - 音频输出 / 直通 / HDR
+
+    /// 换音频输出设备（mpv 的 `audio-device` 名字，`auto` 是系统默认）。
+    func setAudioDevice(_ name: String) {
+        ipc.command(["set_property", "audio-device", name])
+        audioDevice = name
+
+        var settings = AppSettings.load()
+        settings.audioDevice = name
+        settings.save()
+        onAudioConfig?()
+    }
+
+    /// 音频直通：交给功放解 AC3 / EAC3 / DTS / TrueHD。
+    func setAudioPassthrough(_ enabled: Bool) {
+        ipc.command(["set_property", "audio-spdif",
+                     enabled ? "ac3,eac3,dts,dts-hd,truehd" : ""])
+        audioPassthrough = enabled
+
+        var settings = AppSettings.load()
+        settings.audioPassthrough = enabled
+        settings.save()
+        onAudioConfig?()
+    }
+
+    /// HDR 直通：`target-colorspace-hint`，系统开了 HDR 才真的进 PQ。
+    func setHdrPassthrough(_ enabled: Bool) {
+        ipc.command(["set_property", "target-colorspace-hint", enabled ? "yes" : "no"])
+        hdrPassthrough = enabled
+
+        var settings = AppSettings.load()
+        settings.hdrPassthrough = enabled
+        settings.save()
+        onAudioConfig?()
     }
 
     func selectAudio(_ trackId: Int64) {
@@ -452,6 +518,23 @@ final class MpvEngine {
                     }
                 }
                 onVideoRange?(dvProfile, transferName)
+            case "audio-device-list":
+                guard let list = data as? [[String: Any]] else { return }
+                audioDevices = list.compactMap { item in
+                    guard let name = item["name"] as? String, !name.isEmpty else { return nil }
+                    return AudioDeviceInfo(name: name,
+                                           description: item["description"] as? String ?? "")
+                }
+                onAudioConfig?()
+            case "audio-device":
+                audioDevice = data as? String ?? ""
+                onAudioConfig?()
+            case "audio-spdif":
+                audioPassthrough = !((data as? String) ?? "").isEmpty
+                onAudioConfig?()
+            case "target-colorspace-hint":
+                hdrPassthrough = (data as? Bool) ?? ((data as? Int) == 1)
+                onAudioConfig?()
             case "pause":
                 let value = (data as? Bool) ?? ((data as? Int) == 1)
                 paused = value

@@ -354,6 +354,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     session.selectSubtitle(session.subtitleTracks[index].id)
                 }
                 NSLog("[PlayTest] subtitle=\(index) -> \(session.selectedSubtitleId) of \(session.subtitleTracks.count)")
+            case "audioout":
+                NSLog("[PlayTest] audio devices=\(session.audioDevices.count) "
+                      + "current=\(session.audioDevice.isEmpty ? "-" : session.audioDevice) "
+                      + "passthrough=\(session.audioPassthrough) hdr=\(session.hdrPassthrough)")
+                for device in session.audioDevices {
+                    NSLog("[PlayTest] audio device \(device.name) | \(device.description)")
+                }
+            case "audiodevice":
+                let index = Int(parts.count > 1 ? parts[1] : "") ?? 0
+                if session.audioDevices.indices.contains(index) {
+                    session.setAudioDevice(session.audioDevices[index].name)
+                }
+                NSLog("[PlayTest] audio device -> \(session.audioDevice) of \(session.audioDevices.count)")
+            case "audiotoggle":
+                session.toggleAudioPassthrough()
+                session.toggleHdrPassthrough()
+                NSLog("[PlayTest] audio toggle passthrough=\(session.audioPassthrough) "
+                      + "hdr=\(session.hdrPassthrough) label=\(session.audioOutputLabel)")
             case "aspect":
                 if let mode = PlayerAspect(rawValue: parts.count > 1 ? parts[1] : "fit") {
                     session.setAspect(mode)

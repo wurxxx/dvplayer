@@ -130,7 +130,7 @@ mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、�
 
 现状：浏览、播放、五项功能（弹幕 / 片头片尾 / 定时关闭 / 画面比例 / 字幕搜索）
 与 Windows 对齐，见 [M2-MACOS.md](M2-MACOS.md)；未完成的是**画面目视验收**
-（本机 Vulkan 交换链在无显示 / 锁屏会话里不出帧）、HDR 真屏、音频输出与直通开关、
+（本机 Vulkan 交换链在无显示 / 锁屏会话里不出帧）、HDR 真屏与直通听感、
 公证与 Sparkle 自动更新。
 
 ### M4 — 共性层
@@ -162,7 +162,6 @@ mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、�
 | MSIX 打包与自动更新 | Windows 现在只有 `dotnet build` + 手拷目录（M1 B14） |
 | macOS 公证 + Sparkle | `.app` 未签名、未做自动更新（§4 M3） |
 | Plex 适配器 | `/library/*` + `X-Plex-Token`，与 Emby 差异大，单独一个适配器（M1 B15） |
-| macOS 音频输出 / 音频直通 / HDR 开关 | Windows 已做（M1 B13），macOS 播放页「更多」里还没有；`MpvEngine` 也没传 `target-colorspace-hint` |
 | FEL / MEL 徽标 | 需要侧路 ffmpeg + dovi_tool 读第一个 RPU 的 `disable_residual_flag`；现在只标 `DV P7` |
 | Android / TV | Media3 管线、TV 焦点、libass NDK，目前只有 README 与选型 |
 | M4 跨端同步 | 播放记录 / 收藏 / 续播点跨源、跨端合并；现在只回写播放的那个源 |

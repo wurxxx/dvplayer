@@ -235,6 +235,9 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_UI=mark:intro\|outro\|clear` | 按当前位置标记片头结束 / 片尾开始 / 清除 |
 | `DVPLAYER_PLAY_UI=skipoutro` | 触发「跳过片尾」（seek 到片长 − 0.4 秒） |
 | `DVPLAYER_PLAY_UI=danmaku:on\|off` | 开关弹幕（需要弹弹play 凭据） |
+| `DVPLAYER_PLAY_UI=audioout` | 打印音频输出设备列表与当前直通状态 |
+| `DVPLAYER_PLAY_UI=audiotoggle` | 切一次音频直通 + HDR 直通（走 set_property + 落盘） |
+| `DVPLAYER_PLAY_UI=audiodevice:N` | 选第 N 个音频输出设备 |
 | `DVPLAYER_PLAY_UI=speed:1.5` / `mute` | 改倍速 / 静音（验证顶栏状态），多项用逗号连起来 |
 | `DVPLAYER_BUFFER_MB=<MB>` | 临时覆盖播放缓冲（自检时压小才看得到未缓冲段） |
 | `DVPLAYER_PLAY_UI=danmakufile:<ass>` | 直接挂一份本地弹幕 ASS（不联网，自检用） |
@@ -252,7 +255,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的
 stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开关。
 
-### 4.5 画面比例 / 定时关闭 / 片头片尾
+### 4.5 画面比例 / 定时关闭 / 片头片尾 / 音频输出
 
 - **画面比例**：`PlayerSession.aspect`（`fit` / `fill` / `stretch` / `16:9` / `4:3`）
   → `MpvEngine.setAspect` 发 `keepaspect` / `panscan` / `video-aspect-override`。
@@ -285,6 +288,15 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
   `skipIntroIfNeeded()`（只有起播点早于片头结束才跳）；`handlePosition` 里进入
   片尾区间置 `showSkipOutro`，浮层右下角出「跳过片尾」，点了 seek 到片长 − 0.4 秒，
   由 EOF 走正常的接下一集 / 关窗逻辑。
+- **音频输出 / 音频直通 / HDR 直通**（和 Windows B13 对齐）：播放页「更多 →
+  音频输出」列出 mpv 的 `audio-device-list`（当前设备打勾，`auto` 显示成
+  「系统默认（自动选择）」），下面两个开关切 `audio-spdif` 与
+  `target-colorspace-hint`。三项都落 `settings.json`（`audioDevice` /
+  `audioPassthrough` / `hdrPassthrough`），`MpvEngine` 起 mpv 时当命令行参数带上，
+  换集重启保持。mpv 的观察值会回写状态（拒绝或归一化时界面跟着变），
+  切换后 `[Play] audio device=… passthrough=… hdr=… devices=N` 落日志。
+  自检：`DVPLAYER_PLAY_UI=audioout` 打印设备列表，`audiotoggle` 切两个开关，
+  `audiodevice:<序号>` 选设备。
 
 ### 4.6 弹幕与在线字幕
 
@@ -388,9 +400,9 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
    拖动 / 缩放 / 假全屏的手感。
 3. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，
    真正的 PQ 输出要在 HDR 显示器上看一次。
-4. **音频输出 / 直通 / HDR 开关**：Windows 已有（M1 B13），macOS 播放页「更多」里
-   还没有。补 `audio-device-list` 菜单、`audio-spdif`、`target-colorspace-hint`
-   三个参数，落 `settings.json`（HDR 输出目前根本没开，默认 tone-map 到 SDR）。
+4. ~~音频输出 / 直通 / HDR 开关~~ **已完成**（2026-11-21，与 Windows B13 对齐）：
+   「更多 → 音频输出」列设备、两个开关切 `audio-spdif` / `target-colorspace-hint`，
+   落 `settings.json`；真机听感与 HDR 真屏仍待设备（§5 第 3 项）。
 5. **公证与 Sparkle**：`.app` 未签名、未做自动更新。
 
 ## 6. 旧的下一步（已完成）

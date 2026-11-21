@@ -19,6 +19,15 @@ public struct AppSettings: Codable, Sendable {
     /// 用可选值是为了老配置能直接解出来。
     public var videoAspect: String?
 
+    /// 音频输出设备（mpv 的 `audio-device` 名字）；空 = 系统默认。
+    public var audioDevice: String?
+
+    /// 音频直通（AC3 / EAC3 / DTS / TrueHD 交给功放解码）。
+    public var audioPassthrough: Bool?
+
+    /// HDR 直通（mpv 的 `target-colorspace-hint`，系统开了 HDR 才有效）。
+    public var hdrPassthrough: Bool?
+
     /// 弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。
     public var danmakuEnabled: Bool?
     public var danmakuAppId: String?
