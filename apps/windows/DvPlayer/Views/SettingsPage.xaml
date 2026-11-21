@@ -196,9 +196,6 @@
                 </ComboBox>
               </Grid>
 
-              <TextBlock Text="Windows 端用 mpv 自管窗口（--wid）渲染，不维护 libmpv 私有补丁；能直连的资源直接给 mpv，不让服务器转码。"
-                         FontSize="12.5" Foreground="{StaticResource FaintBrush}"
-                         TextWrapping="Wrap" Margin="0,18,0,0" LineHeight="18" />
             </StackPanel>
           </Border>
 
