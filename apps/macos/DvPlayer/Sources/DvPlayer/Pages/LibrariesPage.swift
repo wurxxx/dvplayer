@@ -436,8 +436,11 @@ struct LibrariesPage: View {
         defer { loading = false }
 
         var built: [LibrarySection] = []
+        // 首页每行默认按「添加时间」倒序，和点进库里的默认排序一致。
+        // 不传排序时各家服务器默认值不一样（飞牛入库倒序、Emby 按名称）。
+        let addedQuery = ListQuery(sort: "added", descending: true)
         for library in state.libraries(of: sourceId) {
-            let page = try? await core.items(library.id, pageSize: 18)
+            let page = try? await core.items(library.id, pageSize: 18, query: addedQuery)
             built.append(LibrarySection(library: library, items: page?.items ?? []))
         }
         sections = built

@@ -44,6 +44,11 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   `127.0.0.1:7890`）。这个源的接口请求（核心 `http_client`）、海报下载
   （`PosterLoader` 按代理缓存 `HttpClient`）和播放（mpv `--http-proxy`）全走它；
   已配置过的老源会原样带过来。
+- **源首页每行默认「添加时间」倒序**：首页每个库的预览显式传
+  `sort=added&descending=true`（飞牛 → `create_time DESC`，Emby →
+  `DateCreated` 降序），和点进库里的默认排序一致。以前不传排序，各家服务器用
+  自己的默认值（飞牛的默认是入库倒序，别的版本 / 别的源不一定），
+  nas 的库看起来就和飞牛不一样。
 - **详情页「存储位置」**：`MediaInfo.Path` 放在媒体信息之后；电影 / 单集显示完整
   文件路径，剧集 / 季只显示目录。飞牛取 `/stream` 的 `file_stream.path`，Emby 取
   `PlaybackInfo` 的 `Path`（退回条目的 `Path`），本地源直接给文件路径。

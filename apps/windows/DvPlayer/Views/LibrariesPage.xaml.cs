@@ -271,10 +271,14 @@ public partial class LibrariesPage : Page
         LibrariesCount.Text = $"{_libraries.Count} 个";
 
         // 各库首页和播放记录同时发：记录不依赖库列表，没必要排在后面。
+        // 首页每行默认按「添加时间」倒序，和点进库里的默认排序一致；
+        // 不传排序时各家服务器默认值不一样（飞牛入库倒序、Emby 按名称），
+        // nas 的飞牛库会跟飞牛源显示不一样。
+        var addedQuery = new ListQuery { Sort = "added", Descending = true };
         var recordsTask = Task.Run(core.Records);
         var pages = await Task.WhenAll(_libraries.Select(library => Task.Run(() =>
         {
-            var page = core.Items(library.Id, 1, PreviewPerLibrary);
+            var page = core.Items(library.Id, 1, PreviewPerLibrary, addedQuery);
             return (Library: library, Page: page);
         }))).ConfigureAwait(true);
 
