@@ -35,6 +35,11 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   音量 / 音轨 / 字幕 / 倍速 / 全屏收起来，只留传输 + 进度 + 「更多」；这些工具
   作为菜单项补进「更多」（音量 ±10、音轨… / 字幕… / 倍速… 连开一层）。
   窄窗左右边距和两个时间标签同时收窄，进度条才留得下。
+- **记录页的卡片墙**：「观看」也是 `Controls/PosterGrid`（`CardRatio="1.7778"`
+  = 16:9 横卡、`MinCardWidth="220"`），不再用固定 248 宽的 `WrapPanel`；
+  「收藏」本来就是同一组件。`PosterGrid` 新增 `CardRatio` / `MinCardWidth`
+  两个依赖属性，列数与卡片高度都由它们算，窗口变宽铺满、不留右侧空白。
+  外层 `ScrollViewer` 里套一层 `StackPanel`，网格才能拿到视口宽度。
 - **进度条三层**：`Views/PlayWindow.xaml` 里 `SeekHost` 垫三条 `Border`
   （未观看 `#3DFFFFFF` / 已缓冲 `#A6FFFFFF` / 已观看 `AccentBrush`），上面盖
   只画滑块的 `SeekBarHit` Slider；`UpdateSeekBars()` 按 `demuxer-cache-time`

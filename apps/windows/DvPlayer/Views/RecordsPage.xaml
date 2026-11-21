@@ -168,77 +168,77 @@
       </StackPanel>
     </ScrollViewer>
 
-    <!-- 观看：全部记录，横向卡片行 -->
+    <!-- 观看：全部记录，16:9 横卡网格（和媒体库共用 PosterGrid 的铺满算法） -->
     <ScrollViewer x:Name="WatchPanel" Grid.Row="2" VerticalScrollBarVisibility="Hidden"
-                  Visibility="Collapsed">
-      <ItemsControl x:Name="WatchList" Margin="0,8,0,28">
-        <ItemsControl.ItemsPanel>
-          <ItemsPanelTemplate>
-            <WrapPanel />
-          </ItemsPanelTemplate>
-        </ItemsControl.ItemsPanel>
-        <ItemsControl.ItemTemplate>
-          <DataTemplate>
-            <StackPanel Width="248" Margin="0,0,14,22">
-              <Border Height="140" CornerRadius="10" Background="{Binding Background}"
-                      SnapsToDevicePixels="True" Tag="{Binding ItemId}"
-                      Cursor="Hand" MouseLeftButtonUp="OnCardClick">
-              <Border.ContextMenu>
-                <ContextMenu Style="{StaticResource DarkContextMenu}">
-                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="播放"
-                            Click="OnMenuPlay">
-                    <MenuItem.Icon>
-                      <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <Separator Style="{StaticResource DarkMenuSeparator}" />
-                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="添加到收藏夹"
-                            Click="OnMenuFavorite">
-                    <MenuItem.Icon>
-                      <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
-                            Click="OnMenuWatched">
-                    <MenuItem.Icon>
-                      <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为未观看"
-                            Click="OnMenuUnwatched">
-                    <MenuItem.Icon>
-                      <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <Separator Style="{StaticResource DarkMenuSeparator}" />
-                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="移除观看记录"
-                            Click="OnMenuRemoveRecord">
-                    <MenuItem.Icon>
-                      <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                </ContextMenu>
-              </Border.ContextMenu>
-                <Grid ClipToBounds="True">
-                  <TextBlock Text="{Binding Initial}" FontSize="42" FontWeight="SemiBold"
-                             Foreground="#2AFFFFFF" HorizontalAlignment="Center"
-                             VerticalAlignment="Center"
-                             Visibility="{Binding PlaceholderVisibility}" />
+                  HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
+      <StackPanel>
+        <controls:PosterGrid x:Name="WatchList" Margin="0,8,0,28"
+                             CardRatio="1.7778" MinCardWidth="220">
+          <controls:PosterGrid.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Width="{Binding CardSlot, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
+                          Margin="{Binding CardMargin, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}">
+                <Border Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
+                        Height="{Binding CardHeight, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
+                        CornerRadius="10" Background="{Binding Background}"
+                        SnapsToDevicePixels="True" Tag="{Binding ItemId}"
+                        Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+                <Border.ContextMenu>
+                  <ContextMenu Style="{StaticResource DarkContextMenu}">
+                    <MenuItem Style="{StaticResource DarkMenuItem}" Header="播放"
+                              Click="OnMenuPlay">
+                      <MenuItem.Icon>
+                        <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <Separator Style="{StaticResource DarkMenuSeparator}" />
+                    <MenuItem Style="{StaticResource DarkMenuItem}" Header="添加到收藏夹"
+                              Click="OnMenuFavorite">
+                      <MenuItem.Icon>
+                        <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                              Click="OnMenuWatched">
+                      <MenuItem.Icon>
+                        <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为未观看"
+                              Click="OnMenuUnwatched">
+                      <MenuItem.Icon>
+                        <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <Separator Style="{StaticResource DarkMenuSeparator}" />
+                    <MenuItem Style="{StaticResource DarkMenuItem}" Header="移除观看记录"
+                              Click="OnMenuRemoveRecord">
+                      <MenuItem.Icon>
+                        <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </ContextMenu>
+                </Border.ContextMenu>
+                  <Grid ClipToBounds="True">
+                    <TextBlock Text="{Binding Initial}" FontSize="42" FontWeight="SemiBold"
+                               Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding PlaceholderVisibility}" />
 
-                  <Border VerticalAlignment="Bottom" HorizontalAlignment="Right"
-                          Margin="0,0,10,10" Background="#8C000000" CornerRadius="6"
-                          Padding="7,3">
-                    <StackPanel Orientation="Horizontal">
-                      <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="10.5" Foreground="#E6FFFFFF"
-                                 VerticalAlignment="Center" />
-                      <TextBlock Text="{Binding Time}" FontSize="11.5" Foreground="#E6FFFFFF"
-                                 Margin="4,0,0,0" />
+                    <Border VerticalAlignment="Bottom" HorizontalAlignment="Right"
+                            Margin="0,0,10,10" Background="#8C000000" CornerRadius="6"
+                            Padding="7,3">
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="10.5" Foreground="#E6FFFFFF"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Time}" FontSize="11.5" Foreground="#E6FFFFFF"
+                                   Margin="4,0,0,0" />
                     </StackPanel>
                   </Border>
 
@@ -257,59 +257,62 @@
                          TextTrimming="CharacterEllipsis" />
             </StackPanel>
           </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+        </controls:PosterGrid.ItemTemplate>
+      </controls:PosterGrid>
+      </StackPanel>
     </ScrollViewer>
 
     <!-- 收藏：竖版海报网格 -->
     <ScrollViewer x:Name="FavoriteScroll" Grid.Row="2" VerticalScrollBarVisibility="Hidden"
-                  Visibility="Collapsed">
-      <controls:PosterGrid x:Name="FavoriteList" Margin="0,8,0,28">
-        <controls:PosterGrid.ItemTemplate>
-          <DataTemplate>
-            <StackPanel Margin="0,0,0,22"
-                        Width="{Binding CardSlot, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}">
-              <Border CornerRadius="10" Background="{Binding Background}" SnapsToDevicePixels="True"
-                      Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
-                      Height="{Binding CardHeight, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
-                      Tag="{Binding Id}" Cursor="Hand" MouseLeftButtonUp="OnCardClick">
-              <Border.ContextMenu>
-                <ContextMenu Style="{StaticResource DarkContextMenu}">
-                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="取消收藏"
-                            Click="OnMenuUnfavorite">
-                    <MenuItem.Icon>
-                      <TextBlock Text="&#xE735;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
-                            Click="OnMenuWatched">
-                    <MenuItem.Icon>
-                      <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
-                                 FontSize="13" Foreground="{StaticResource MutedBrush}" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                </ContextMenu>
-              </Border.ContextMenu>
-                <Grid>
-                  <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
-                             Foreground="#2AFFFFFF" HorizontalAlignment="Center"
-                             VerticalAlignment="Center"
-                             Visibility="{Binding PlaceholderVisibility}" />
-                </Grid>
-              </Border>
-              <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
-                         Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
-                         Foreground="{StaticResource TextBrush}"
-                         TextTrimming="CharacterEllipsis" />
-              <TextBlock Text="{Binding Sub}" FontSize="12"
-                         Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
-                         Foreground="{StaticResource FaintBrush}" Margin="1,2,0,0"
-                         TextTrimming="CharacterEllipsis" />
+                  HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
+      <StackPanel>
+        <controls:PosterGrid x:Name="FavoriteList" Margin="0,8,0,28">
+          <controls:PosterGrid.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Margin="0,0,0,22"
+                          Width="{Binding CardSlot, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}">
+                <Border CornerRadius="10" Background="{Binding Background}" SnapsToDevicePixels="True"
+                        Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
+                        Height="{Binding CardHeight, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
+                        Tag="{Binding Id}" Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+                <Border.ContextMenu>
+                  <ContextMenu Style="{StaticResource DarkContextMenu}">
+                    <MenuItem Style="{StaticResource DarkMenuItem}" Header="取消收藏"
+                              Click="OnMenuUnfavorite">
+                      <MenuItem.Icon>
+                        <TextBlock Text="&#xE735;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
+                              Click="OnMenuWatched">
+                      <MenuItem.Icon>
+                        <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </ContextMenu>
+                </Border.ContextMenu>
+                  <Grid>
+                    <TextBlock Text="{Binding Initial}" FontSize="38" FontWeight="SemiBold"
+                               Foreground="#2AFFFFFF" HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding PlaceholderVisibility}" />
+                  </Grid>
+                </Border>
+                <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
+                           Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
+                           Foreground="{StaticResource TextBrush}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Sub}" FontSize="12"
+                           Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
+                           Foreground="{StaticResource FaintBrush}" Margin="1,2,0,0"
+                           TextTrimming="CharacterEllipsis" />
             </StackPanel>
           </DataTemplate>
         </controls:PosterGrid.ItemTemplate>
       </controls:PosterGrid>
+      </StackPanel>
     </ScrollViewer>
 
     <!-- 收藏：空态 -->

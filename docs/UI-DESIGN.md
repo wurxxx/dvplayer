@@ -212,10 +212,14 @@
   `set_property geometry` 同步（40ms 合并）。全屏是「假全屏」——两个窗口铺满屏幕
   + 隐藏菜单栏 / Dock，不进系统 fullscreen space。浮层那一套视觉规则和 Windows 完全一致；
 - **海报网格**：一律用 `Controls/PosterGrid`，不要在页面里自己算列宽。
-  它按可用宽度算列数（`floor(宽度 / (175 + 16))`），卡片宽度铺满格子、高 2:3，
-  窗口变宽不会在右侧留白；翻到下一列时卡片缩回去。卡片模板里绑
-  `CardWidth` / `CardHeight` / `CardSlot`（`RelativeSource AncestorType=controls:PosterGrid`）。
-  页面只提供 `ItemTemplate`，别各写一份尺寸计算；
+  它按可用宽度算列数（`floor(宽度 / (MinCardWidth + 16))`），卡片宽度铺满格子，
+  窗口变宽不会在右侧留白；翻到下一列时卡片缩回去。默认是 2:3 竖版海报，
+  `CardRatio`（宽 / 高）可以换成别的比例，`MinCardWidth` 改列宽下限——
+  记录页「观看」就是 `CardRatio="1.7778"`（16:9 横卡）+ `MinCardWidth="220"`。
+  卡片模板里绑 `CardWidth` / `CardHeight` / `CardSlot`（`RelativeSource
+  AncestorType=controls:PosterGrid`），页面只提供 `ItemTemplate`，别各写一份
+  尺寸计算；`ScrollViewer` 里要给网格套一层 `StackPanel`（或在模板里撑满），
+  否则 `ActualWidth` 可能停在内容自己的期望宽度，算少一列；
 - **图片**：海报按容器解码，不放大低分辨率图；Hero 优先横版图。
 
 ## 4. 回归

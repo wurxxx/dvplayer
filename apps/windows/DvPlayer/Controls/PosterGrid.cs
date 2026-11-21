@@ -22,8 +22,20 @@ public class PosterGrid : ItemsControl
     /// <summary>卡片之间的横向间距。</summary>
     public const double Gap = 16;
 
-    /// <summary>卡片最小宽度。窗口窄到放不下几列时以它为准。</summary>
-    public const double MinCardWidth = 175;
+    /// <summary>
+    /// 卡片最小宽度。窗口窄到放不下几列时以它为准。
+    /// 竖版海报默认 175；16:9 横卡（观看记录）要设大一点，不然窄窗口会挤成小豆腐块。
+    /// </summary>
+    public static readonly DependencyProperty MinCardWidthProperty = DependencyProperty.Register(
+        nameof(MinCardWidth), typeof(double), typeof(PosterGrid),
+        new PropertyMetadata(175d, OnLayoutChanged));
+
+    /// <summary>
+    /// 卡片宽高比（宽 / 高）。默认 2/3 是竖版海报 2:3；16:9 横卡填 1.7778。
+    /// </summary>
+    public static readonly DependencyProperty CardRatioProperty = DependencyProperty.Register(
+        nameof(CardRatio), typeof(double), typeof(PosterGrid),
+        new PropertyMetadata(2d / 3d, OnLayoutChanged));
 
     public static readonly DependencyProperty CardWidthProperty = DependencyProperty.Register(
         nameof(CardWidth), typeof(double), typeof(PosterGrid),
@@ -45,6 +57,20 @@ public class PosterGrid : ItemsControl
     {
         ItemsPanel = new ItemsPanelTemplate(new FrameworkElementFactory(typeof(WrapPanel)));
         SizeChanged += (_, e) => Update(e.NewSize.Width);
+    }
+
+    /// <summary>卡片最小宽度。</summary>
+    public double MinCardWidth
+    {
+        get => (double)GetValue(MinCardWidthProperty);
+        set => SetValue(MinCardWidthProperty, value);
+    }
+
+    /// <summary>卡片宽高比（宽 / 高）。</summary>
+    public double CardRatio
+    {
+        get => (double)GetValue(CardRatioProperty);
+        set => SetValue(CardRatioProperty, value);
     }
 
     /// <summary>海报宽度。列数变化时重算。</summary>
@@ -75,24 +101,37 @@ public class PosterGrid : ItemsControl
         private set => SetValue(CardMarginProperty, value);
     }
 
+    /// <summary>上一次套用的比例：只改比例不改窗口宽度时也要重算高度。</summary>
+    private double _appliedRatio = 2d / 3d;
+
+    private static void OnLayoutChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var grid = (PosterGrid)d;
+        grid.Update(grid.ActualWidth);
+    }
+
     private void Update(double available)
     {
-        if (available < MinCardWidth + Gap)
+        var minWidth = Math.Max(40, MinCardWidth);
+        var ratio = CardRatio > 0.05 ? CardRatio : 2d / 3d;
+
+        if (available < minWidth + Gap)
         {
             return;
         }
 
-        var columns = Math.Max(1, (int)Math.Floor(available / (MinCardWidth + Gap)));
+        var columns = Math.Max(1, (int)Math.Floor(available / (minWidth + Gap)));
         var slot = Math.Floor(available / columns * 100) / 100;
         var width = Math.Max(1, slot - Gap);
 
-        if (Math.Abs(width - CardWidth) < 0.5)
+        if (Math.Abs(width - CardWidth) < 0.5 && Math.Abs(ratio - _appliedRatio) < 0.0001)
         {
             return;
         }
 
+        _appliedRatio = ratio;
         CardWidth = width;
-        CardHeight = Math.Round(width * 1.5);
+        CardHeight = Math.Max(1, Math.Round(width / ratio));
         CardSlot = slot;
     }
 }
