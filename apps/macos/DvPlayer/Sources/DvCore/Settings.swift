@@ -11,6 +11,10 @@ public struct AppSettings: Codable, Sendable {
     public var showResolution: Bool = true
     public var resumePlayback: Bool = true
 
+    /// 画面比例模式（`fit` / `fill` / `stretch` / `16:9` / `4:3`）。
+    /// 用可选值是为了老配置能直接解出来。
+    public var videoAspect: String?
+
     public init() {}
 
     public static var directory: URL {

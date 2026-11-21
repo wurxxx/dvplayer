@@ -79,6 +79,39 @@ struct PlayerTrack: Identifiable, Hashable {
     let isDefault: Bool
 }
 
+/// 画面比例。`fill` 是裁切填满（panscan），`stretch` 不保持宽高比。
+enum PlayerAspect: String, CaseIterable, Identifiable {
+    case fit
+    case fill
+    case stretch
+    case ratio16x9
+    case ratio4x3
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+            case .fit: return "适应窗口"
+            case .fill: return "填充窗口（裁切）"
+            case .stretch: return "拉伸铺满"
+            case .ratio16x9: return "强制 16:9"
+            case .ratio4x3: return "强制 4:3"
+        }
+    }
+
+    var keepAspect: Bool { self != .stretch }
+
+    var panscan: Double { self == .fill ? 1 : 0 }
+
+    var aspectOverride: String {
+        switch self {
+            case .ratio16x9: return "16:9"
+            case .ratio4x3: return "4:3"
+            default: return "no"
+        }
+    }
+}
+
 /// 播放页的状态：mpv 视图 + 控制条 / 选集要用的所有值。
 ///
 /// 回调都从 `MpvEngine` 的主线程回调进来，所以这里不切队列。
@@ -130,6 +163,15 @@ final class PlayerSession: ObservableObject {
     @Published var isScrubbing = false
     @Published var seekPosition: Double = 0
 
+    // —— 画面比例 / 定时关闭 / 片头片尾 ——
+    @Published private(set) var aspect: PlayerAspect
+    @Published private(set) var sleepDeadline: Date?
+    /// 定时关闭选的是「本集结束后」。
+    @Published private(set) var sleepEndOfEpisode = false
+    @Published private(set) var markers = SkipMarker()
+    /// 进度进了片尾区间，浮出「跳过片尾」。
+    @Published var showSkipOutro = false
+
     // —— 由窗口控制器接上的动作 ——
     var onClose: (() -> Void)?
     var onToggleFullscreen: (() -> Void)?
@@ -161,6 +203,8 @@ final class PlayerSession: ObservableObject {
         self.seriesTitle = Self.cleanSeries(seriesTitle)
         self.hintTitle = hintTitle ?? ""
         self.title = hintTitle ?? "正在播放"
+        self.aspect = PlayerAspect(rawValue: AppSettings.load().videoAspect ?? "") ?? .fit
+        self.markers = SkipMarkerStore.marker(for: Self.cleanSeries(seriesTitle) ?? itemId)
 
         guard let engine = MpvEngine(frame: frame, startSeconds: startSeconds) else {
             return nil
@@ -181,7 +225,9 @@ final class PlayerSession: ObservableObject {
                 self.duration = duration
             }
             NSLog("[Play] loaded \(self.itemId) duration=\(Int(self.duration))s")
+            self.applyAspect()
             self.applyTrackPrefsIfNeeded()
+            self.skipIntroIfNeeded()
         }
         engine.onEOF = { [weak self] in
             self?.handleEOF()
@@ -232,6 +278,8 @@ final class PlayerSession: ObservableObject {
         selectedSubtitleId = 0
         mediaInfo = nil
         panel = .none
+        showSkipOutro = false
+        markers = SkipMarkerStore.marker(for: markerKey)
 
         NSLog("[Play] open \(itemId) playlist=\(playlist.count) start=\(startSeconds.map { String($0) } ?? "resume")")
 
@@ -294,6 +342,8 @@ final class PlayerSession: ObservableObject {
         if let cleaned = Self.cleanSeries(seriesTitle) {
             self.seriesTitle = cleaned
         }
+        // 剧名可能晚到（续播后台补选集），到了再按剧名取一次标记。
+        markers = SkipMarkerStore.marker(for: markerKey)
         if let source {
             title = displayTitle(source, itemId: itemId)
         }
@@ -319,6 +369,14 @@ final class PlayerSession: ObservableObject {
             lastReportAt = Date()
             report(position)
         }
+
+        // 片尾区间到了就浮「跳过片尾」，退回去再收起来。
+        if let outro = markers.outroStart, outro > 1, duration > 0 {
+            let inOutro = position >= outro && position < duration - 1
+            if inOutro != showSkipOutro {
+                showSkipOutro = inOutro
+            }
+        }
     }
 
     private func handleEOF() {
@@ -341,6 +399,13 @@ final class PlayerSession: ObservableObject {
         }
 
         report(duration > 0 ? duration : Double(source?.durationSeconds ?? 0))
+
+        if sleepEndOfEpisode {
+            sleepEndOfEpisode = false
+            NSLog("[Play] sleep at end of episode -> close")
+            requestClose()
+            return
+        }
 
         let index = playlist.firstIndex { $0.id == itemId }
         if let index, index + 1 < playlist.count {
@@ -594,6 +659,151 @@ final class PlayerSession: ObservableObject {
         }
     }
 
+    // MARK: - 画面比例 / 定时关闭 / 片头片尾
+
+    /// 标记按剧记；电影没有剧名，就用条目 id（等于只对这部片生效）。
+    var markerKey: String { seriesTitle ?? itemId }
+
+    private func applyAspect() {
+        mpv.setAspect(keepAspect: aspect.keepAspect,
+                      panscan: aspect.panscan,
+                      aspectOverride: aspect.aspectOverride)
+        NSLog("[Play] aspect \(aspect.rawValue) keep=\(aspect.keepAspect ? "yes" : "no") "
+              + "panscan=\(String(format: "%.2f", aspect.panscan)) override=\(aspect.aspectOverride)")
+    }
+
+    func setAspect(_ mode: PlayerAspect) {
+        aspect = mode
+        applyAspect()
+        var settings = AppSettings.load()
+        settings.videoAspect = mode.rawValue
+        settings.save()
+        toast(mode.label)
+        showChrome()
+    }
+
+    /// 定时关闭：到点先提示一下再关窗，进度照常回写。
+    func setSleep(minutes: Double) {
+        sleepEndOfEpisode = false
+        sleepDeadline = Date().addingTimeInterval(max(1, minutes * 60))
+        let seconds = max(1, Int((minutes * 60).rounded()))
+        NSLog("[Play] sleep set \(seconds)s")
+        toast(seconds >= 60 ? "\(seconds / 60) 分钟后关闭" : "\(seconds) 秒后关闭")
+        showChrome()
+    }
+
+    func setSleepEndOfEpisode() {
+        sleepDeadline = nil
+        sleepEndOfEpisode = true
+        NSLog("[Play] sleep set end-of-episode")
+        toast("本集结束后关闭")
+        showChrome()
+    }
+
+    func cancelSleep() {
+        sleepDeadline = nil
+        sleepEndOfEpisode = false
+        NSLog("[Play] sleep cancelled")
+        toast("已取消定时关闭")
+        showChrome()
+    }
+
+    /// 菜单里显示的剩余时间；没设定时就是 nil。
+    var sleepLabel: String? {
+        if sleepEndOfEpisode { return "本集结束后" }
+        guard let deadline = sleepDeadline else { return nil }
+        let remaining = max(0, Int(deadline.timeIntervalSinceNow.rounded()))
+        return String(format: "%d:%02d", remaining / 60, remaining % 60)
+    }
+
+    private func checkSleep() {
+        guard let deadline = sleepDeadline, Date() >= deadline else { return }
+        sleepDeadline = nil
+        NSLog("[Play] sleep fired pos=\(Int(position))")
+        toast("定时关闭")
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            self?.requestClose()
+        }
+    }
+
+    func markIntroEnd() {
+        guard position > 1 else {
+            toast("先播一会儿再标记")
+            return
+        }
+        markers.introEnd = position
+        SkipMarkerStore.save(markers, for: markerKey)
+        NSLog("[Play] mark intro end \(Int(position)) key=\(markerKey)")
+        toast("片头结束：\(clock(position))")
+        showChrome()
+    }
+
+    func clearIntro() {
+        markers.introEnd = nil
+        SkipMarkerStore.save(markers, for: markerKey)
+        NSLog("[Play] clear intro key=\(markerKey)")
+        toast("已清除片头标记")
+        showChrome()
+    }
+
+    func markOutroStart() {
+        guard position > 1 else {
+            toast("先播一会儿再标记")
+            return
+        }
+        markers.outroStart = position
+        SkipMarkerStore.save(markers, for: markerKey)
+        NSLog("[Play] mark outro start \(Int(position)) key=\(markerKey)")
+        toast("片尾开始：\(clock(position))")
+        showChrome()
+    }
+
+    func clearOutro() {
+        markers.outroStart = nil
+        SkipMarkerStore.save(markers, for: markerKey)
+        NSLog("[Play] clear outro key=\(markerKey)")
+        toast("已清除片尾标记")
+        showChrome()
+    }
+
+    func clearMarkers() {
+        markers = SkipMarker()
+        SkipMarkerStore.save(markers, for: markerKey)
+        NSLog("[Play] clear markers key=\(markerKey)")
+        toast("已清除本剧标记")
+        showChrome()
+    }
+
+    /// 起播 / 切集时从片头位置进来才跳；续播点已经在片头后面就不动。
+    private func skipIntroIfNeeded() {
+        guard let intro = markers.introEnd, intro > 1 else { return }
+        let total = duration > 1 ? duration : Double(source?.durationSeconds ?? 0)
+        guard total <= 0 || intro < total - 1 else { return }
+        guard launchStart < intro - 0.5 else { return }
+
+        mpv.seek(to: intro)
+        position = intro
+        seekPosition = intro
+        NSLog("[Play] skip intro -> \(Int(intro)) start=\(Int(launchStart))")
+        toast("已跳过片头")
+    }
+
+    func skipOutro() {
+        showSkipOutro = false
+        let target = max(0, duration - 0.4)
+        seek(to: target)
+        toast("跳过片尾")
+    }
+
+    private func clock(_ seconds: Double) -> String {
+        let total = Int(max(0, seconds))
+        if total >= 3600 {
+            return String(format: "%d:%02d:%02d", total / 3600, total % 3600 / 60, total % 60)
+        }
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
     // MARK: - 收尾
 
     func requestClose() {
@@ -639,7 +849,10 @@ final class PlayerSession: ObservableObject {
     }
 
     private func tick() {
-        guard !isStopped, position > 0 else { return }
+        guard !isStopped else { return }
+        // 定时关闭和位置无关：暂停着也要到点关。
+        checkSleep()
+        guard position > 0 else { return }
         if Date().timeIntervalSince(lastReportAt) >= Self.reportEvery {
             lastReportAt = Date()
             report(position)
@@ -738,6 +951,14 @@ final class PlayerSession: ObservableObject {
 
         if let rate = video?.bitRate, rate > 0 {
             chips.append(String(format: "%.1fmbps", Double(rate) / 1_000_000))
+        }
+
+        if aspect != .fit {
+            chips.append(aspect.label)
+        }
+
+        if let sleep = sleepLabel {
+            chips.append("定时 \(sleep)")
         }
 
         return chips

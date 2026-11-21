@@ -226,6 +226,15 @@ final class MpvEngine {
         ipc.command(["set_property", "sid", trackId > 0 ? String(trackId) : "no"])
     }
 
+    /// 画面比例：`keepaspect` 控制是否保持宽高比，`panscan=1` 是裁切填满，
+    /// `video-aspect-override` 强制一个比例（`no` 表示不覆盖）。
+    /// `video-aspect-override` 是逐文件的，换集后要重新套一次。
+    func setAspect(keepAspect: Bool, panscan: Double, aspectOverride: String) {
+        ipc.command(["set_property", "keepaspect", keepAspect ? "yes" : "no"])
+        ipc.command(["set_property", "panscan", String(format: "%.2f", panscan)])
+        ipc.command(["set_property", "video-aspect-override", aspectOverride])
+    }
+
     /// mpv 自己截一帧（解码输出，不含后处理）。
     func screenshot(to path: String) {
         takeScreenshot(path, kind: "video")

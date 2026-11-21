@@ -71,6 +71,14 @@ struct PlayerView: View {
                     .padding(.vertical, 40)
             }
 
+            // 片尾区间到了浮出来，不自动跳，给用户自己决定。
+            if session.showSkipOutro {
+                skipOutroButton
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 118)
+            }
+
             if let toast = session.toast {
                 toastView(toast)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -226,6 +234,30 @@ struct PlayerView: View {
 
     // MARK: - 菜单
 
+    private var skipOutroButton: some View {
+        Button {
+            session.skipOutro()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "forward.end.fill")
+                    .font(.system(size: 11))
+                Text("跳过片尾")
+                    .font(.system(size: 12.5, weight: .medium))
+            }
+            .foregroundStyle(Color.white.opacity(0.95))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.62),
+                        in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help("直接接下一集")
+    }
+
     private var audioMenu: some View {
         Menu {
             if session.audioTracks.isEmpty {
@@ -318,6 +350,50 @@ struct PlayerView: View {
         Menu {
             Button("上一集") { session.previousEpisode() }
             Button("下一集") { session.nextEpisode() }
+            Divider()
+
+            Menu("画面比例（\(session.aspect.label)）") {
+                ForEach(PlayerAspect.allCases) { mode in
+                    Button {
+                        session.setAspect(mode)
+                    } label: {
+                        if session.aspect == mode {
+                            Label(mode.label, systemImage: "checkmark")
+                        } else {
+                            Text(mode.label)
+                        }
+                    }
+                }
+            }
+
+            Menu(session.sleepLabel.map { "定时关闭（\($0)）" } ?? "定时关闭") {
+                Button("不定时") { session.cancelSleep() }
+                Divider()
+                Button("15 分钟后") { session.setSleep(minutes: 15) }
+                Button("30 分钟后") { session.setSleep(minutes: 30) }
+                Button("45 分钟后") { session.setSleep(minutes: 45) }
+                Button("60 分钟后") { session.setSleep(minutes: 60) }
+                Button("90 分钟后") { session.setSleep(minutes: 90) }
+                Divider()
+                Button("本集结束后") { session.setSleepEndOfEpisode() }
+            }
+
+            Divider()
+
+            if let intro = session.markers.introEnd {
+                Button("清除片头标记（\(timeText(intro))）") { session.clearIntro() }
+            } else {
+                Button("把当前位置设为片头结束") { session.markIntroEnd() }
+            }
+            if let outro = session.markers.outroStart {
+                Button("清除片尾标记（\(timeText(outro))）") { session.clearOutro() }
+            } else {
+                Button("把当前位置设为片尾开始") { session.markOutroStart() }
+            }
+            if !session.markers.isEmpty {
+                Button("清除本剧全部标记") { session.clearMarkers() }
+            }
+
             Divider()
             Button("媒体信息") { session.togglePanel(.info) }
             Button("截图") { session.screenshot() }

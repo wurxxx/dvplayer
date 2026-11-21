@@ -260,6 +260,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     session.selectSubtitle(session.subtitleTracks[index].id)
                 }
                 NSLog("[PlayTest] subtitle=\(index) -> \(session.selectedSubtitleId) of \(session.subtitleTracks.count)")
+            case "aspect":
+                if let mode = PlayerAspect(rawValue: parts.count > 1 ? parts[1] : "fit") {
+                    session.setAspect(mode)
+                }
+                NSLog("[PlayTest] aspect=\(session.aspect.rawValue)")
+            case "sleep":
+                if let minutes = Double(parts.count > 1 ? parts[1] : ""), minutes > 0 {
+                    session.setSleep(minutes: minutes)
+                } else {
+                    session.cancelSleep()
+                }
+                NSLog("[PlayTest] sleep=\(session.sleepLabel ?? "-")")
+            case "sleepepisode":
+                session.setSleepEndOfEpisode()
+                NSLog("[PlayTest] sleep=\(session.sleepLabel ?? "-")")
+            case "nosleep":
+                session.cancelSleep()
+                NSLog("[PlayTest] sleep=\(session.sleepLabel ?? "-")")
+            case "mark":
+                switch parts.count > 1 ? parts[1] : "" {
+                    case "intro": session.markIntroEnd()
+                    case "outro": session.markOutroStart()
+                    case "clear": session.clearMarkers()
+                    default: break
+                }
+                NSLog("[PlayTest] markers intro=\(session.markers.introEnd.map { Int($0) } ?? -1) "
+                      + "outro=\(session.markers.outroStart.map { Int($0) } ?? -1)")
+            case "skipoutro":
+                session.skipOutro()
+                NSLog("[PlayTest] skipoutro pos=\(Int(session.position))")
             default:
                 break
         }
@@ -279,6 +309,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               + "audio=\(session.audioTracks.count)/aid=\(session.selectedAudioId) "
               + "subs=\(session.subtitleTracks.count)/sid=\(session.selectedSubtitleId) "
               + "playlist=\(session.playlist.count) fullscreen=\(session.isFullscreen) "
+              + "aspect=\(session.aspect.rawValue) sleep=\(session.sleepLabel ?? "-") "
+              + "intro=\(session.markers.introEnd.map { Int($0) } ?? -1) "
+              + "outro=\(session.markers.outroStart.map { Int($0) } ?? -1) "
+              + "skipoutro=\(session.showSkipOutro) "
               + "error=\(session.error ?? "-")")
     }
 

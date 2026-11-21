@@ -176,6 +176,10 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_RECORD_WAIT=<秒>` | 续播时等选集补完再打印状态（飞牛 `/item/list` 慢，默认不等） |
 | `DVPLAYER_PLAY_SEEK=<秒>` | 起播 2.5 秒后跳转 |
 | `DVPLAYER_PLAY_UI=episodes\|info\|audio:N\|subtitle:N\|pause\|fullscreen\|close` | 拨浮层 / 切轨（N 是轨序号，字幕 -1 为关闭） |
+| `DVPLAYER_PLAY_UI=aspect:fit\|fill\|stretch\|ratio16x9\|ratio4x3` | 切画面比例 |
+| `DVPLAYER_PLAY_UI=sleep:15` / `sleepepisode` / `nosleep` | 设定时关闭（分钟，可带小数） |
+| `DVPLAYER_PLAY_UI=mark:intro\|outro\|clear` | 按当前位置标记片头结束 / 片尾开始 / 清除 |
+| `DVPLAYER_PLAY_UI=skipoutro` | 触发「跳过片尾」（seek 到片长 − 0.4 秒） |
 | `DVPLAYER_PLAY_FRAME=<png>` | 让 mpv 抓窗口帧（`screenshot-to-file ... window`，含 gpu-next 后处理） |
 | `DVPLAYER_PLAY_SHOT=<png>` / `DVPLAYER_PLAY_SHOT_DELAY=` | 截播放窗的 SwiftUI 浮层 |
 | `DVPLAYER_PLAY_SECONDS=<秒>` | 到点打印 `[PlayTest]` 状态（位置 / 时长 / 轨道 / playlist） |
@@ -185,7 +189,22 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的
 stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开关。
 
-### 4.5 播放页的坑
+### 4.5 画面比例 / 定时关闭 / 片头片尾
+
+- **画面比例**：`PlayerSession.aspect`（`fit` / `fill` / `stretch` / `16:9` / `4:3`）
+  → `MpvEngine.setAspect` 发 `keepaspect` / `panscan` / `video-aspect-override`。
+  `video-aspect-override` 是逐文件的，每次 `file-loaded` 都重套一次；选择存
+  `AppSettings.videoAspect`。
+- **定时关闭**：`sleepDeadline` / `sleepEndOfEpisode` 两个状态；`tick()`（1 秒）里
+  检查，到点提示后关窗（`requestClose`，进度照常回写）；「本集结束后」在
+  `handleEOF` 里关窗、不接下一集。剩余时间进 chips（`定时 12:34`）。
+- **片头片尾**：`SkipMarkers.swift` 的 `SkipMarkerStore` 按剧名（电影按条目 id）存
+  `~/Library/Application Support/DvPlayer/skip-markers.json`。`onLoaded` 里
+  `skipIntroIfNeeded()`（只有起播点早于片头结束才跳）；`handlePosition` 里进入
+  片尾区间置 `showSkipOutro`，浮层右下角出「跳过片尾」，点了 seek 到片长 − 0.4 秒，
+  由 EOF 走正常的接下一集 / 关窗逻辑。
+
+### 4.6 播放页的坑
 
 - **`--no-config` 之外还必须 `--idle=yes`**：壳是先起进程、再通过 IPC `loadfile`，
   命令行上没有文件名，不带 `--idle=yes` 时 mpv 直接打印用法退出（IPC 连不上）。
