@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # 构建 macOS 上的 Vulkan 版 mpv（gpu-next + macvk），装进 prefix-vk/。
 #
-# 这是 M0 的 DV 验证工具，不是产品运行时：
+# 这份 mpv 既是验证工具，也是产品运行时：
 #   macOS 的 libmpv render API 只有 legacy gpu（没有 gpu-next 后端），
-#   所以 gpu-next 只能走 mpv 自己的窗口（cocoa-cb + Vulkan/Metal）。
-#   P5/P7 的色彩与 FEL 都要在这条路径上验证。
+#   gpu-next 只能走 mpv 自己的窗口（cocoa-cb + Vulkan/Metal）。
+#   apps/macos/DvPlayer/build.sh 会把它、libplacebo、MoltenVK 与
+#   Vulkan loader 一起打进 .app（ADR-0010）。P5/P7 的色彩与 FEL 也在这条路径上验证。
 #
 # 可重入：每一步都有「已存在就跳过」的判断。
 # 需要：cmake（脚本会自动 pip 安装）、meson/ninja、swiftc、Xcode 命令行工具。

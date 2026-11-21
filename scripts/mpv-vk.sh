@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 用 prefix-vk 里的 Vulkan 版 mpv（gpu-next + macvk）运行。
 #
-# 这是 M0 的「DV 验证工具」，不是产品运行时：
+# 这是命令行验证入口；产品里同一份 mpv 由 DvPlayer.app 以子进程拉起（ADR-0010）：
 #   macOS 的 render API 只有 legacy gpu，gpu-next 只能走 mpv 自己的窗口
 #   （cocoa-cb + Vulkan/Metal）。
 #
