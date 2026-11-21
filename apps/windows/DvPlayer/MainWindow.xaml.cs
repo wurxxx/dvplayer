@@ -435,6 +435,14 @@ public partial class MainWindow : FluentWindow
                     player.SearchSubtitlesForShot();
                     break;
 
+                case "overlay":
+                    player.ShowChromeForShot();
+                    player.SetShotBackground(true);
+                    await Task.Delay(600);
+                    UiCapture.Save(player, Path.Combine(dir, "play-overlay.png"));
+                    player.SetShotBackground(false);
+                    break;
+
                 case "subtitle":
                     await player.SubtitleRoundTripForShot();
                     break;

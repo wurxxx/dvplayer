@@ -84,6 +84,7 @@ public partial class PlayWindow : Window
 
     // —— 画面比例 / 定时关闭 / 片头片尾 / 弹幕 / 在线字幕 ——
     private PlayerAspect _aspect = PlayerAspect.Fit;
+    private bool _compactChrome;
     private double _videoAspect;
     private int _videoWidth;
     private int _videoHeight;
@@ -509,7 +510,11 @@ public partial class PlayWindow : Window
         }
 
         LocationChanged += (_, _) => SyncSurface();
-        SizeChanged += (_, _) => SyncSurface();
+        SizeChanged += (_, _) =>
+        {
+            SyncSurface();
+            UpdateChromeLayout();
+        };
     }
 
     // —— 窗口尺寸 / 全屏 / 视频层同步 ——
@@ -536,6 +541,66 @@ public partial class PlayWindow : Window
         ApplyBounds(bounds);
         _windowedBounds = bounds;
         SyncSurface();
+    }
+
+    /// <summary>
+    /// 窗口窄（竖屏短剧）时把控制条换成两行：一行传输 + 进度，一行工具按钮。
+    /// 控件本身不复制，只是在两个 Grid 之间换父节点。
+    /// </summary>
+    private void UpdateChromeLayout()
+    {
+        var compact = Width > 0 && Width < 700;
+        if (compact == _compactChrome)
+        {
+            return;
+        }
+
+        _compactChrome = compact;
+        var controls = new FrameworkElement[]
+        {
+            PrevButton, PlayPauseButton, NextButton, PositionText, Seek, DurationText,
+            MuteButton, Volume, AudioButton, SubtitleButton, SpeedButton, FullscreenButton,
+            MoreButton,
+        };
+
+        foreach (var control in controls)
+        {
+            if (control.Parent is Panel parent)
+            {
+                parent.Children.Remove(control);
+            }
+        }
+
+        WideControls.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        CompactControls.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
+
+        if (!compact)
+        {
+            for (var i = 0; i < controls.Length; i++)
+            {
+                Grid.SetRow(controls[i], 0);
+                Grid.SetColumn(controls[i], i);
+                WideControls.Children.Add(controls[i]);
+            }
+
+            return;
+        }
+
+        // 第一行：上一集 / 播放 / 下一集 / 当前时间 / 进度 / 时长。
+        for (var i = 0; i < 6; i++)
+        {
+            Grid.SetRow(controls[i], 0);
+            Grid.SetColumn(controls[i], i);
+            CompactTop.Children.Add(controls[i]);
+        }
+
+        // 第二行：静音 / 音量 / 音轨 / 字幕 / 倍速 / 全屏 / 更多。
+        for (var i = 6; i < controls.Length; i++)
+        {
+            Grid.SetRow(controls[i], 0);
+            Grid.SetColumn(controls[i], i - 6);
+            CompactBottom.Children.Add(controls[i]);
+        }
     }
 
     private void ApplyBounds(Rect bounds)

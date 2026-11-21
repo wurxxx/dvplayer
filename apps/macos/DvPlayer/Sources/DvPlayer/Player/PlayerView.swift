@@ -9,6 +9,8 @@ import DvCore
 struct PlayerView: View {
     @ObservedObject var session: PlayerSession
     let actions: PlayerActions
+    /// 浮层宽度：竖屏短剧的窗口只有 400 来像素，底部控制条要换两行。
+    @State private var viewWidth: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -92,6 +94,13 @@ struct PlayerView: View {
                     .padding(.bottom, 132)
             }
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { viewWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { width in viewWidth = width }
+            }
+        )
         .onAppear { session.showChrome() }
     }
 
@@ -148,83 +157,35 @@ struct PlayerView: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !session.chips.isEmpty {
-                HStack(spacing: 7) {
-                    ForEach(session.chips, id: \.self) { chip in
-                        Text(chip)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Color.white.opacity(0.9))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.4),
-                                        in: RoundedRectangle(cornerRadius: 4))
-                            .allowsHitTesting(false)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 7) {
+                        ForEach(session.chips, id: \.self) { chip in
+                            Text(chip)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Color.white.opacity(0.9))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.black.opacity(0.4),
+                                            in: RoundedRectangle(cornerRadius: 4))
+                                .allowsHitTesting(false)
+                        }
                     }
                 }
             }
 
-            HStack(spacing: 6) {
-                PlayerBarButton(icon: "backward.end.fill", size: 13) {
-                    session.previousEpisode()
+            if isCompact {
+                // 竖屏窗口：传输 + 进度一行，工具按钮一行。
+                VStack(spacing: 8) {
+                    playRow
+                    toolsRow
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .help("上一集（PageUp）")
-
-                PlayerBarButton(icon: session.paused ? "play.fill" : "pause.fill", size: 16) {
-                    session.togglePause()
+            } else {
+                HStack(spacing: 6) {
+                    playRow
+                    toolsRow
+                        .layoutPriority(1)
                 }
-                .help("播放 / 暂停（空格）")
-
-                PlayerBarButton(icon: "forward.end.fill", size: 13) {
-                    session.nextEpisode()
-                }
-                .help("下一集（PageDown）")
-
-                Text(timeText(session.seekPosition))
-                    .font(.system(size: 12.5))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.white.opacity(0.9))
-                    .frame(width: 56, alignment: .leading)
-                    .padding(.leading, 4)
-
-                Slider(value: Binding(get: { session.seekPosition },
-                                      set: { session.seekPosition = $0 }),
-                       in: 0...max(1, session.duration)) { editing in
-                    session.setScrubbing(editing)
-                }
-                .tint(.white)
-                .controlSize(.small)
-
-                Text(timeText(session.duration))
-                    .font(.system(size: 12.5))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.white.opacity(0.7))
-                    .frame(width: 66, alignment: .leading)
-
-                PlayerBarButton(icon: session.muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                                size: 13) {
-                    session.toggleMute()
-                }
-                .help("静音（M）")
-
-                Slider(value: Binding(get: { session.volume },
-                                      set: { session.setVolume($0) }),
-                       in: 0...100)
-                    .frame(width: 84)
-                    .tint(.white)
-                    .controlSize(.small)
-
-                audioMenu
-                subtitleMenu
-                speedMenu
-
-                PlayerBarButton(icon: session.isFullscreen
-                                    ? "arrow.down.right.and.arrow.up.left"
-                                    : "arrow.up.left.and.arrow.down.right",
-                                size: 13) {
-                    session.toggleFullscreen()
-                }
-                .help("全屏（F / 双击画面）")
-
-                moreMenu
             }
         }
         .padding(.horizontal, 24)
@@ -237,6 +198,79 @@ struct PlayerView: View {
         }
         .opacity(session.chromeVisible ? 1 : 0)
         .animation(.easeOut(duration: 0.15), value: session.chromeVisible)
+    }
+
+    private var isCompact: Bool { viewWidth > 0 && viewWidth < 640 }
+
+    private var playRow: some View {
+        HStack(spacing: 6) {
+            PlayerBarButton(icon: "backward.end.fill", size: 13) {
+                session.previousEpisode()
+            }
+            .help("上一集（PageUp）")
+
+            PlayerBarButton(icon: session.paused ? "play.fill" : "pause.fill", size: 16) {
+                session.togglePause()
+            }
+            .help("播放 / 暂停（空格）")
+
+            PlayerBarButton(icon: "forward.end.fill", size: 13) {
+                session.nextEpisode()
+            }
+            .help("下一集（PageDown）")
+
+            Text(timeText(session.seekPosition))
+                .font(.system(size: 12.5))
+                .monospacedDigit()
+                .foregroundStyle(Color.white.opacity(0.9))
+                .frame(width: 56, alignment: .leading)
+                .padding(.leading, 4)
+
+            Slider(value: Binding(get: { session.seekPosition },
+                                  set: { session.seekPosition = $0 }),
+                   in: 0...max(1, session.duration)) { editing in
+                session.setScrubbing(editing)
+            }
+            .tint(.white)
+            .controlSize(.small)
+
+            Text(timeText(session.duration))
+                .font(.system(size: 12.5))
+                .monospacedDigit()
+                .foregroundStyle(Color.white.opacity(0.7))
+                .frame(width: 66, alignment: .leading)
+        }
+    }
+
+    private var toolsRow: some View {
+        HStack(spacing: 6) {
+            PlayerBarButton(icon: session.muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                            size: 13) {
+                session.toggleMute()
+            }
+            .help("静音（M）")
+
+            Slider(value: Binding(get: { session.volume },
+                                  set: { session.setVolume($0) }),
+                   in: 0...100)
+                .frame(width: 84)
+                .tint(.white)
+                .controlSize(.small)
+
+            audioMenu
+            subtitleMenu
+            speedMenu
+
+            PlayerBarButton(icon: session.isFullscreen
+                                ? "arrow.down.right.and.arrow.up.left"
+                                : "arrow.up.left.and.arrow.down.right",
+                            size: 13) {
+                session.toggleFullscreen()
+            }
+            .help("全屏（F / 双击画面）")
+
+            moreMenu
+        }
     }
 
     // MARK: - 菜单
