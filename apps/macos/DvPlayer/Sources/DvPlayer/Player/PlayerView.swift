@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import DvCore
 
-/// 播放页的浮层（视频由 `DVMpvView` 画在下面）。
+/// 播放页的浮层（视频在 mpv 自己的窗口里，这个视图透明地盖在它上面）。
 ///
 /// 布局照 Windows 的 `PlayWindow.xaml`：顶部片名 + 右上角窗口按钮、
 /// 底部规格标签和控制条、右侧截图 / 选集、右侧选集面板、媒体信息面板。

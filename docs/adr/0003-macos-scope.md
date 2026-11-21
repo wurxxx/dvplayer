@@ -1,6 +1,6 @@
 # ADR-0003 macOS 首版范围：render API + HDR10
 
-- 状态：已接受
+- 状态：已被 [ADR-0010](0010-macos-mpv-subprocess.md) 取代（2026-11-21）
 - 日期：2026-11-19
 
 ## 背景

@@ -110,13 +110,13 @@ C ABI 多一组 `dv_hub_*`；界面（`AppServices`）只持有一个 hub，设�
 | 平台 | 接入方式 | 代码 |
 | --- | --- | --- |
 | Windows | 起官方 `mpv.exe`：`--wid=<子窗口>`，控制走 `--input-ipc-server=<命名管道>` 的 JSON IPC，进程用 Job Object 绑在壳上 | `apps/windows/DvPlayer/Player/`（`MpvProcess` / `MpvIpc` / `MpvHost`） |
-| macOS | 链 libmpv 用 render API（ADR-0003），M0 已在 `m0-render` 上验到出画 | `apps/macos/m0-render/` |
+| macOS | 起带 Vulkan 的 `mpv` 子进程（gpu-next + macvk），视频在 mpv 自己的窗口，壳贴一层透明浮层；控制走 unix socket 上的 JSON IPC（ADR-0010） | `apps/macos/DvPlayer/Sources/DvPlayer/Player/`（`MpvEngine` / `MpvIPC` / `PlayerWindow`） |
 | Android / TV | Media3，进程内 | 未开始 |
 
-Windows 为什么用子进程而不是链 libmpv：见 [ADR-0009](adr/0009-windows-mpv-subprocess.md)。
-要点是 `--wid` 只要求一个父 HWND，子进程照样让 mpv 自己建 VO 和 swapchain，
-拿得到 `gpu-next` 的 FEL；换 mpv 版本只是换个 exe，不碰 MSVC 工具链与 C++ 运行时。
-`core/mpv` 的 C++ 封装因此只留给 macOS。
+两端都用子进程：Windows 见 [ADR-0009](adr/0009-windows-mpv-subprocess.md)，
+macOS 见 [ADR-0010](adr/0010-macos-mpv-subprocess.md)。要点是让 mpv 自己建 VO
+和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）；换 mpv 版本
+只是换个可执行文件，不碰 libmpv 的 C++ 工具链。`core/mpv` 的 C++ 封装不再需要。
 
 ### 2.1 macOS 的 libmpv 接口（未落地，仅设计）
 
@@ -192,12 +192,14 @@ macOS 注意：`mpv_render_context_set_update_callback` 里只做
 
 ## 5. macOS
 
-- SwiftUI + `NSViewRepresentable` 包 `NSOpenGLView`，CGL 3.2 core。
-- `mpv_render_context_create` 用 `MPV_RENDER_API_TYPE_OPENGL`。
-- `MPV_RENDER_PARAM_OPENGL_FBO` + `FLIP_Y`。
-- `hwdec=videotoolbox`；VideoToolbox 的矩形纹理路径是已知坑，M0 要压测 4K60。
-- v1 不接 Metal、不接 MoltenVK。
-- HDR10 走 `target-colorspace-hint`；不行就退固定 SDR tone-map 并在 UI 明示。
+- mpv 以子进程运行：`--vo=gpu-next --gpu-api=vulkan --gpu-context=macvk`，
+  视频在 mpv 自己的窗口（cocoa-cb），行内 Vulkan loader + MoltenVK 随包分发。
+- 壳是另一个窗口：`isOpaque = false`、`level = normal + 1`，SwiftUI 浮层透明处透出视频；
+  窗口 move / resize 用 40ms 合并后 `set_property geometry` 跟随。
+- 控制走 unix socket 上的 JSON IPC，协议与 Windows 的 `MpvIpc` 相同。
+- 全屏是「假全屏」：两个窗口铺满屏幕 + 隐藏菜单栏 / Dock，不用系统 fullscreen space。
+- Dolby Vision P5/P7 由 gpu-next 的 `pl_shader_dovi_reshape()` 处理；HDR10 走
+  `target-colorspace-hint`，SDR 屏上是固定 tone-map。
 
 ## 6. Android / TV
 

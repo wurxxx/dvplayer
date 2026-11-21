@@ -94,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         Self.runPlayerUI(spec)
                     }
                     if let path = env["DVPLAYER_PLAY_FRAME"] {
-                        PlayerLauncher.shared.current?.mpv.captureFrame(to: path)
+                        PlayerLauncher.shared.current?.mpv.screenshotWindow(to: path)
                     }
                     Self.logPlayerState()
                     if let path = env["DVPLAYER_PLAY_SHOT"] {
@@ -138,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 if let path = env["DVPLAYER_PLAY_FRAME"] {
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
-                    PlayerLauncher.shared.current?.mpv.captureFrame(to: path)
+                    PlayerLauncher.shared.current?.mpv.screenshotWindow(to: path)
                     NSLog("[PlayTest] frame \(path)")
                 }
 

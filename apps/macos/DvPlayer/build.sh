@@ -36,33 +36,76 @@ install_name_tool -id @rpath/libdvplayer_media.dylib \
 install_name_tool -change "$CORE_ID" @rpath/libdvplayer_media.dylib \
     "$APP/Contents/MacOS/DvPlayer"
 
-# libmpv 和它的依赖（libass / libav* / libplacebo / libsw*）。
-# prefix/lib 里这些 dylib 的 install name 都是本机绝对路径，拷进包后统一改成
-# @rpath/<名字>，否则换台机器就找不到。
+# 播放器：mpv 以子进程运行，需要它和它的依赖一起进包。
+#   prefix/lib     libass / libav* / libsw*（解码）
+#   prefix-vk/lib  libplacebo（带 Vulkan 后端）+ Vulkan loader + MoltenVK
+# 这些 dylib 的 install name 都是本机绝对路径，统一改成 @rpath/<真实文件名>，
+# 否则换台机器就找不到。
 MPV_LIB="$ROOT/prefix/lib"
-if [[ -f "$MPV_LIB/libmpv.2.dylib" ]]; then
-    # prefix/lib 里既有 libfoo.dylib 这种副本，也有 libfoo.9.dylib -> libfoo.9.0.1.dylib 的软链。
-    # 只拷真实文件（软链不拷），引用名再映射到真实名。
-    for lib in "$MPV_LIB"/*.dylib; do
-        [[ -L "$lib" ]] && continue
-        cp "$lib" "$APP/Contents/Frameworks/"
-    done
+VK_LIB="$ROOT/prefix-vk/lib"
+MPV_BIN="$ROOT/prefix-vk/bin/mpv"
 
-    # 依赖名 -> 包里的真实文件名（`libavcodec.63.dylib` -> `libavcodec.63.1.102.dylib`）。
-    real_name() {
-        python3 -c 'import os,sys; print(os.path.basename(os.path.realpath(sys.argv[1])))' \
-            "$MPV_LIB/$1"
-    }
-
-    for file in "$APP/Contents/Frameworks"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
-        install_name_tool -id "@rpath/$(basename "$file")" "$file" 2>/dev/null || true
-        while read -r dep; do
-            [[ -z "$dep" ]] && continue
-            install_name_tool -change "$dep" "@rpath/$(real_name "$(basename "$dep")")" "$file"
-        done < <(otool -L "$file" | tail -n +2 | awk '{print $1}' | grep "^$MPV_LIB/" || true)
-    done
+if [[ ! -x "$MPV_BIN" ]]; then
+    echo "缺少播放器：$MPV_BIN" >&2
+    echo "先跑 scripts/build-vk-macos.sh" >&2
+    exit 1
 fi
 
+# prefix/lib：只拷真实文件（`libavcodec.63.dylib` 是软链，真实文件带完整版本号）。
+for lib in "$MPV_LIB"/*.dylib; do
+    [[ -L "$lib" ]] && continue
+    [[ "$(basename "$lib")" == "libmpv.2.dylib" ]] && continue   # 不再用 render API
+    cp "$lib" "$APP/Contents/Frameworks/"
+done
+
+# prefix-vk：libplacebo 用 VK 版；loader 与 MoltenVK 是 DV 路径的必需品。
+cp "$VK_LIB/libplacebo.387.dylib" "$APP/Contents/Frameworks/"
+cp "$VK_LIB/libMoltenVK.dylib" "$APP/Contents/Frameworks/"
+VK_LOADER="$(python3 -c 'import os,sys; print(os.path.basename(os.path.realpath(sys.argv[1])))' "$VK_LIB/libvulkan.1.dylib")"
+cp "$VK_LIB/$VK_LOADER" "$APP/Contents/Frameworks/"
+
+# mpv 自己 + ICD 配置（library_path 用相对路径，跟着 .app 走）。
+cp "$MPV_BIN" "$APP/Contents/Frameworks/mpv"
+python3 - "$ROOT/prefix-vk/share/vulkan/icd.d/MoltenVK_icd.json" \
+         "$APP/Contents/Frameworks/MoltenVK_icd.json" <<'ICD'
+import json, sys
+source, target = sys.argv[1], sys.argv[2]
+data = json.load(open(source))
+data["ICD"]["library_path"] = "libMoltenVK.dylib"
+json.dump(data, open(target, "w"), indent=4)
+ICD
+
+# 依赖名 -> 包里的真实文件名（`libavcodec.63.dylib` -> `libavcodec.63.1.102.dylib`）。
+# 两个目录都要查：libplacebo / loader 只在 prefix-vk 里。
+real_name() {
+    local base="$1" dir
+    for dir in "$VK_LIB" "$MPV_LIB"; do
+        if [[ -e "$dir/$base" ]]; then
+            python3 -c 'import os,sys; print(os.path.basename(os.path.realpath(sys.argv[1])))' \
+                "$dir/$base"
+            return
+        fi
+    done
+    echo "$base"
+}
+
+for file in "$APP/Contents/Frameworks"/*.dylib "$APP/Contents/Frameworks/mpv" \
+            "$APP/Contents/MacOS/DvPlayer"; do
+    install_name_tool -id "@rpath/$(basename "$file")" "$file" 2>/dev/null || true
+    # mpv 在 Frameworks 目录里，@executable_path 就是这一层。
+    install_name_tool -add_rpath "@executable_path" "$file" 2>/dev/null || true
+
+    while read -r dep; do
+        [[ -z "$dep" ]] && continue
+        install_name_tool -change "$dep" "@rpath/$(real_name "$(basename "$dep")")" "$file"
+    done < <(otool -L "$file" | tail -n +2 | awk '{print $1}' \
+             | grep -E "^($MPV_LIB|$VK_LIB)/" || true)
+
+    # libplacebo 直接引用 @rpath/libvulkan.1.dylib；包里只有带完整版本号的那份。
+    install_name_tool -change "@rpath/libvulkan.1.dylib" "@rpath/$VK_LOADER" "$file" 2>/dev/null || true
+done
+
+codesign --force --sign - "$APP/Contents/Frameworks/mpv" >/dev/null 2>&1 || true
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "已生成：$APP"

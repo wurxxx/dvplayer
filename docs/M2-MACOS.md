@@ -1,21 +1,23 @@
 # M2 · macOS 客户端
 
-> 状态：壳、浏览链路、播放页都可用（2026-11-21）；HDR10 只验过管线，DV 未做。
+> 状态：壳、浏览链路、播放页都可用（2026-11-21）；播放走 mpv 子进程 + 浮层窗
+> （[ADR-0010](adr/0010-macos-mpv-subprocess.md)），DV 路径与 Windows 同一条；
+> 锁屏状态下已端到端跑通，画面待解锁后目视验收。
 > 产物：`apps/macos/DvPlayer`（Swift Package + `build.sh` 出 `.app`）。
 
 ## 1. 范围
 
-和 Windows 端一样的界面与行为，播放内核换成本机的 libmpv：
+和 Windows 端一样的界面与行为，播放内核是本机编的 mpv（gpu-next + Vulkan）：
 
 | 层 | 选型 | 说明 |
 | --- | --- | --- |
 | UI | SwiftUI + AppKit | 视觉规范沿用 [UI-DESIGN.md](UI-DESIGN.md)，色板 / 字号 / 组件一致 |
 | 业务 | 共享核心 `core/media` | C ABI + JSON，和 Windows 是同一份 Rust 库 |
-| 视频 | libmpv render API + `NSOpenGLView` | 见 [m0-render](../apps/macos/m0-render/)；v1 只做 HDR10，无 DV |
+| 视频 | mpv 子进程 + Vulkan/macvk | gpu-next 出画，Dolby Vision 整形走这里（ADR-0010） |
 | 窗口 | 单窗口 + 无标题栏 | 侧栏 216 + 内容区，和 Windows 同骨架；窗口按钮自己画 |
 
-`--wid` 在 macOS 上不可靠（ADR-0009），所以播放页走 render API：壳画出视频帧，
-控件直接叠在 SwiftUI 层上，不像 Windows 那样需要两个窗口。
+`--wid` 在 macOS 上不可靠，render API 又只有 legacy `gpu` 后端（拿不到 DV），
+所以播放页改成「mpv 自己开窗口 + 我们贴一个透明浮层」，和 Windows 同一套骨架。
 
 ## 2. 已完成（浏览链路）
 
@@ -100,37 +102,71 @@
 
 ### 4.1 管线
 
-和 Windows 的「mpv 自己开窗口 + 壳贴上去」不同，macOS 走 render API（ADR-0009）：
+视频和控件是两个窗口（[ADR-0010](adr/0010-macos-mpv-subprocess.md)）：
 
 ```
 core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
         │
-        ├─► DVMpvView (ObjC++, Sources/MpvKit)
-        │     mpv_create → mpv_initialize → mpv_render_context_create(OPENGL)
-        │     事件线程 mpv_wait_event → 属性观察 → 主线程回调
-        │     drawRect: mpv_render_context_render(FBO) → flushBuffer
+        ├─► MpvEngine（拉子进程 Contents/Frameworks/mpv）
+        │     --vo=gpu-next --gpu-api=vulkan --gpu-context=macvk
+        │     --geometry=<浮层 frame> --input-ipc-server=<unix socket>
+        │     窗口 move/resize → 40ms 合并 → set_property geometry
         │
-        └─► PlayerView (SwiftUI，NSHostingView 叠在 NSOpenGLView 上)
-              顶栏片名 / 左上自绘三圆点 / 右侧截图·选集 /
-              底部 chips + 控制条 / 选集面板 / 媒体信息面板 / 3 秒淡出
+        └─► PlayerWindowController（NSWindow，isOpaque=false，level=normal+1）
+              PlayerView（SwiftUI）：顶栏 / 控制条 / 选集 / 媒体信息 / 3 秒淡出
+              透明处透出底下的 mpv 窗口
 ```
 
+- `MpvIPC`：unix socket 上的 JSON IPC。一条连接既发命令又收事件；命令带
+  `request_id`，回复按 id 分发；事件切回主线程（`property-change` /
+  `file-loaded` / `end-file`）。
+- `MpvEngine`：起进程、订阅属性（`time-pos` / `duration` / `pause` /
+  `eof-reached` / `speed` / `volume` / `mute` / `track-list` / `aid` / `sid`），
+  暴露 loadfile / seek / 音量 / 静音 / 倍速 / 选轨 / 截图 / `shutdown`。
 - `PlayerSession`：起播、切集、EOF 接下一集、进度回写（10 秒一次）、
   轨道解析与中文默认、规格 chips、截图、浮层自动隐藏。
-- `PlayerWindowController`：单播放窗、自绘红黄绿、键盘、全屏、顶部 30px 拖窗区。
+- `PlayerWindowController`：透明浮层窗 + geometry 同步 + 假全屏 + 键盘 / 滚轮。
 - `PlaylistLoader`：继续观看只有一条记录，要顺着 `parentId`（或剧名）把整季找回来；
   先播记录本身，选集后台补上（播放中 core 被拉流挤到 11–22 秒，不能挡起播）。
 - 入口：详情页「播放 / 重头看 / 选集卡」、记录页与库首页的「继续观看」卡片。
 
-### 4.2 打包
+### 4.2 窗口与全屏
 
-`build.sh` 把 `prefix/lib` 里 libmpv 和它的依赖（libass / libav* / libplacebo / libsw*）
-一起拷进 `Contents/Frameworks`。这些 dylib 的 install name 是本机绝对路径，
-统一改写成 `@rpath/<真实文件名>`：`libavcodec.63.dylib` 是软链，真实文件叫
-`libavcodec.63.1.102.dylib`，所以引用名要用 `realpath` 映射到真实名，否则
-dyld 找不到。改完用 `DYLD_PRINT_LIBRARIES=1` 确认没有一条来自 `prefix/lib`。
+- 浮层窗口 `isOpaque = false`、`hasShadow = false`、
+  `level = NSWindow.Level(rawValue: normal + 1)`，才盖得住另一个进程的 mpv 窗口；
+  `--focus-on=never` + `NSApp.activate` 保证焦点在壳这边，键盘 / 滚轮都能收到。
+- 移动 / 缩放：`windowDidMove` / `windowDidResize` 触发 `syncGeometry()`，
+  40ms 合并后发 `set_property geometry WxH+X+Y`（左上原点，主屏坐标）；拖动结束时
+  `windowDidEndLiveResize` 强制同步一次（`force: true` 不走节流）。
+- 窗口按钮：自绘三个圆点，缩放走 `zoom()`（屏幕可见区域最大化，单独记一个
+  `zoomSavedFrame`，不和全屏的 `savedFrame` 混用）。
+- **假全屏**：系统 fullscreen space 只收本进程的窗口，mpv 那个窗口进不去。
+  所以两个窗口都铺满 `screen.frame`，同时 `NSApp.presentationOptions =
+  [.autoHideMenuBar, .autoHideDock]`；退出时恢复 `[]` 和原 frame。
+- 关闭窗：`windowWillClose` 里先摘事件监听，再 `session.stop()` →
+  `MpvEngine.shutdown()`（发 `quit`，最多等 2 秒，不退就 `terminate`）。
 
-### 4.3 自检参数
+### 4.3 打包
+
+`build.sh` 往 `.app` 里带三份东西：
+
+| 来源 | 内容 |
+| --- | --- |
+| `prefix/lib` | libass / libav* / libsw*（解码；`libmpv` 不再拷） |
+| `prefix-vk/lib` | `libplacebo.387`（Vulkan 后端）、`libMoltenVK`、`libvulkan.1.4.363` |
+| `prefix-vk/bin/mpv` | 播放器本体 → `Contents/Frameworks/mpv` |
+
+- ICD 配置 `MoltenVK_icd.json` 一起拷进 `Frameworks`，
+  `library_path` 改成相对名 `libMoltenVK.dylib`；运行时 `VK_ICD_FILENAMES` 指向它。
+- 所有 dylib 的 install name 都是本机绝对路径，统一改写成 `@rpath/<真实文件名>`
+  （`libavcodec.63.dylib` 是软链，真实文件叫 `libavcodec.63.1.102.dylib`，
+  用 `realpath` 映射）；`libplacebo` 引用的 `@rpath/libvulkan.1.dylib`
+  也改指包里那份带版本号的 loader。
+- 每个文件补 `@rpath`：`/executable_path/../Frameworks`（壳）与
+  `@executable_path`（mpv 本身就在 Frameworks 里）。
+- 成品 48MB，`otool -L` 全过一遍没有 `prefix*` 残留。
+
+### 4.4 自检参数
 
 | 环境变量 | 作用 |
 | --- | --- |
@@ -139,44 +175,54 @@ dyld 找不到。改完用 `DYLD_PRINT_LIBRARIES=1` 确认没有一条来自 `pr
 | `DVPLAYER_PLAY_RECORD=1` | 从第一条观看记录续播（模拟「继续观看」，选集由 `PlaylistLoader` 补） |
 | `DVPLAYER_PLAY_SEEK=<秒>` | 起播 2.5 秒后跳转 |
 | `DVPLAYER_PLAY_UI=episodes\|info\|audio:N\|subtitle:N\|pause\|fullscreen\|close` | 拨浮层 / 切轨（N 是轨序号，字幕 -1 为关闭） |
-| `DVPLAYER_PLAY_FRAME=<png>` | 读回 GL 前台缓冲存 PNG——截图工具拍不到 `NSOpenGLView`，这个才是屏幕上的画面 |
+| `DVPLAYER_PLAY_FRAME=<png>` | 让 mpv 抓窗口帧（`screenshot-to-file ... window`，含 gpu-next 后处理） |
 | `DVPLAYER_PLAY_SHOT=<png>` / `DVPLAYER_PLAY_SHOT_DELAY=` | 截播放窗的 SwiftUI 浮层 |
 | `DVPLAYER_PLAY_SECONDS=<秒>` | 到点打印 `[PlayTest]` 状态（位置 / 时长 / 轨道 / playlist） |
-| `DVPLAYER_MPV_LOG=1` | 打 mpv 日志与 GL 帧计数（`[gl] draws=`） |
+| `DVPLAYER_NO_VO=1` | 加 `--vo=null`：锁屏 / 无图形会话时只跑解码 + IPC |
+| `DVPLAYER_MPV_LOG=1` | 打 mpv 日志 |
 
-日志前缀：`[Play] open / load / loaded / tracks / select / eof / report`、`[PlayTest]`、`[gl]`。
+日志前缀：`[Play] open / load / loaded / tracks / select / eof / report`、`[PlayTest]`。
+mpv 自己的日志在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的 stderr 在
+`.app` 里看不到，出问题先看这个）。
 
-### 4.4 播放页的坑
+### 4.5 播放页的坑
 
+- **`--no-config` 之外还必须 `--idle=yes`**：壳是先起进程、再通过 IPC `loadfile`，
+  命令行上没有文件名，不带 `--idle=yes` 时 mpv 直接打印用法退出（IPC 连不上）。
+- **`loadfile` 的 options 在 IPC 里不能用逗号串**：`start=96.000,pause=no`
+  会报 `The loadfile option must be an integer`。改成先 `set_property start`
+  再 `loadfile <url> replace`。
+- **这个构建禁了 lua，没有 `osc` / `no-osc` 选项**：传了会 `Error parsing option`
+  直接退出。不留 OSC 是因为浮层就是我们的 OSC。
 - **`keep-open` 播完会停在暂停态**：续播点正好在片尾时 `loadfile` 同一文件，
-  `pause` 不会自己复位，起播就卡住不动。`MPV_EVENT_FILE_LOADED` 里显式
-  `pause=no` 一次；「片尾续播点」另有一条兜底：起播 3 秒内 EOF 且起点在片尾，
-  直接从 0 重放。
+  `pause` 不会自己复位，起播就卡住不动。`file-loaded` 里显式 `pause=no` 一次；
+  「片尾续播点」另有一条兜底：起播 3 秒内 EOF 且起点在片尾，直接从 0 重放。
 - **EOF 后 `time-pos` 会复位**：关窗 / `stop()` 里再上报一次 `position` 会把刚写好的
   「已看完」覆盖成 1 秒。EOF 之后不再按 position 上报，只在 `!eof` 时回写。
 - **起播立刻上报会把时长写成 0**：`lastReportAt` 从 `.distantPast` 起步时，
   第一个位置回调就触发上报，而 `duration` 还没下来。改成从起播时刻计时，
   并且 `total <= 0` 时干脆不写。
-- **`CALayer.render` 拍不到 `NSOpenGLView`**：播放窗截图里视频区是黑的，
-  浮层正常。验画面用 `DVMpvView -captureFrameTo:`（`glReadPixels` 读回前台缓冲）。
+- **`duration` 会留上一集的值**：`file-loaded` 比新的 `duration` 属性先到，
+  切集时要先把 `duration` 清 0，否则日志和记录会写上一集的长度。
 - **播放窗截图会被主窗口盖住**：`capture` 会把其它可见窗口当弹层叠上去。
   现在只叠 `level != .normal` 或 `NSPanel` 的窗口（popover / 菜单）。
-- **坐标系翻转的判据**：主窗口的 `contentView` 是 SwiftUI hosting（flipped，要翻一次），
-  播放窗是普通 `NSView` 容器（不用翻）。按 `view.isFlipped` 判断，不能只看
-  `target === view`。
+  播放窗自己就是 `level = normal + 1`，所以它不会被别的普通窗口压住。
 - **选集面板要落到当前集**：`ScrollViewReader` + `onAppear` / `onChange(of: itemId)`
   滚到正在播的那一集；列表用 `PlayerEpisode.list(from:season:)` 排号（和详情页
   `makeRows` 同一套「漏号用最小未占用号补」规则），否则飞牛的倒序会让 E70 排在最前。
-- **全屏要求窗口是 key**：从终端 / 自检启动时 app 不在前台，`toggleFullScreen` 不生效
-  （日志里 `key=false`）。正常点击时窗口是 key，不受影响；自检这条只能人工看。
+- **锁屏时 Vulkan 拿不到 swapchain**：mpv 建完 pipeline 就卡住，`--length` 也不退出。
+  不是代码问题（ADR-0006 在 11-19 同一台机器上验过），自检改用 `DVPLAYER_NO_VO=1`。
 
 ## 5. 下一步
 
-1. **DV**：Profile 5 的 RPU 整形（和 Windows 一样走 `--vf=format` + tone-map，
-   或等 core 的 dovi 解析接进来）；macOS 目前只保证 HDR10 管线（`target-colorspace-hint`）。
-2. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，
+1. **DV 目视验收**：架构已经换成 gpu-next（ADR-0010），P5 不再偏紫是 ADR-0006
+   在本机验过的结论；解锁后要用 `DVPLAYER_PLAY_FRAME` 抓一帧和
+   [M0 §5.3](M0.md) 的紫色基准对照一次，再补进这里。
+2. **解锁后的播放页观感**：mpv 出画、浮层覆盖、geometry 跟随、`--no-border`、
+   拖动 / 缩放 / 假全屏的手感。
+3. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，
    真正的 PQ 输出要在 HDR 显示器上看一次。
-3. 播放页细节对齐：顶栏右侧的倍速 / 静音指示（Windows 有，macOS 现在只在底部）、
+4. 播放页细节对齐：顶栏右侧的倍速 / 静音指示（Windows 有，macOS 现在只在底部）、
    进度条缓冲段。
 
 ## 6. 旧的下一步（已完成）

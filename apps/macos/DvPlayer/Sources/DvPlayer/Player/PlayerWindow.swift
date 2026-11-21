@@ -151,18 +151,25 @@ final class PlayerLauncher {
             controller = nil
         }
 
-        let session = PlayerSession(itemId: itemId,
-                                    startSeconds: startSeconds,
-                                    playlist: playlist,
-                                    seriesTitle: seriesTitle,
-                                    hintTitle: hintTitle)
-        let window = PlayerWindowController(session: session) { [weak self] in
+        let frame = PlayerWindowController.preferredFrame()
+        guard let session = PlayerSession(itemId: itemId,
+                                          startSeconds: startSeconds,
+                                          playlist: playlist,
+                                          seriesTitle: seriesTitle,
+                                          hintTitle: hintTitle,
+                                          frame: frame) else {
+            AppState.shared.showToast("播放器启动失败，检查 mpv 是否随包带上了")
+            return
+        }
+
+        let window = PlayerWindowController(session: session, frame: frame) { [weak self] in
             self?.controller = nil
         }
         session.onClose = { [weak window] in window?.closePlayer() }
 
         controller = window
         window.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
         window.window?.makeKeyAndOrderFront(nil)
         Task { await session.start() }
     }
@@ -202,6 +209,11 @@ final class PlayerLauncher {
 
 // MARK: - 窗口
 
+/// 播放窗是「浮层」：视频由 mpv 自己的窗口画，这个窗口透明地盖在它上面。
+///
+/// 为什么分两个窗口：macOS 上拿 Dolby Vision 必须走 gpu-next，而 gpu-next
+/// 只有 mpv 自己的窗口（cocoa-cb + Vulkan）能用，render API 够不到。
+/// 代价就是位置 / 大小 / 全屏都要自己跟 mpv 同步（`syncGeometry`）。
 @MainActor
 final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     let session: PlayerSession
@@ -210,15 +222,29 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     private var keyMonitor: Any?
     private var wheelMonitor: Any?
     private var lastWheelAt = Date.distantPast
-    private var fullscreenObservers: [NSObjectProtocol] = []
+    private var syncTask: DispatchWorkItem?
+    private var savedFrame: NSRect?
+    private var zoomSavedFrame: NSRect?
     private var closeRequested = false
 
-    init(session: PlayerSession, onClosed: @escaping () -> Void) {
+    /// 新播放窗的初始位置：居中，最多 1280×720，四周留点边。
+    static func preferredFrame() -> NSRect {
+        let visible = NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1280, height: 720)
+        let width = min(1280, max(720, visible.width - 96))
+        let height = min(720, max(405, visible.height - 96))
+        return NSRect(x: visible.midX - width / 2,
+                      y: visible.midY - height / 2,
+                      width: width,
+                      height: height)
+    }
+
+    init(session: PlayerSession, frame: NSRect, onClosed: @escaping () -> Void) {
         self.session = session
         self.onClosed = onClosed
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720),
+            contentRect: frame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false)
@@ -226,10 +252,16 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
-        window.backgroundColor = .black
         window.minSize = NSSize(width: 720, height: 405)
-        window.collectionBehavior.insert(.fullScreenPrimary)
         window.center()
+
+        // 透明浮层：底下的 mpv 窗口透出来。
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+
+        // 比普通窗口高一级，才盖得住 mpv 自己的窗口（另一个进程）。
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue + 1)
 
         // 和主窗口一样自绘三个按钮，系统红绿灯藏掉。
         window.standardWindowButton(.closeButton)?.isHidden = true
@@ -245,7 +277,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         buildContentView()
         installKeyMonitor()
         installWheelMonitor()
-        observeFullscreen()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -253,22 +284,17 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     private func buildContentView() {
         guard let window else { return }
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 1280, height: 720))
+        let container = NSView(frame: window.contentRect(forFrameRect: window.frame))
         container.autoresizingMask = [.width, .height]
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.black.cgColor
-
-        let video = session.mpv
-        video.frame = container.bounds
-        video.autoresizingMask = [.width, .height]
-        container.addSubview(video)
+        container.layer?.backgroundColor = NSColor.clear.cgColor
 
         let root = PlayerView(
             session: session,
             actions: PlayerActions(
                 close: { [weak self] in self?.closePlayer() },
                 minimize: { [weak self] in self?.window?.miniaturize(nil) },
-                zoom: { [weak self] in self?.window?.zoom(nil) },
+                zoom: { [weak self] in self?.zoom() },
                 toggleFullscreen: { [weak self] in self?.toggleFullscreen() },
                 dragWindow: { [weak self] event in self?.window?.performDrag(with: event) }))
             .environmentObject(AppState.shared)
@@ -284,6 +310,28 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = container
         window.initialFirstResponder = hosting
         window.makeFirstResponder(hosting)
+
+        // mpv 先把窗口摆好，浮层再盖上去。
+        syncGeometry(force: true)
+    }
+
+    /// 浮层显示 / 移动 / 缩放 → 告诉 mpv 挪窗口。高频拖动按 40ms 合并。
+    private func syncGeometry(force: Bool = false) {
+        if force {
+            syncTask?.cancel()
+            applyGeometry()
+            return
+        }
+
+        syncTask?.cancel()
+        let task = DispatchWorkItem { [weak self] in self?.applyGeometry() }
+        syncTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: task)
+    }
+
+    private func applyGeometry() {
+        guard let window, !session.isFullscreenSwitching else { return }
+        session.mpv?.syncGeometry(to: window.frame)
     }
 
     func closePlayer() {
@@ -292,14 +340,41 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window?.close()
     }
 
+    /// 缩放按钮：按屏幕可见区域的最大化（不是系统全屏，全屏另有一套）。
+    func zoom() {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        if window.frame == screen.visibleFrame {
+            window.setFrame(zoomSavedFrame ?? Self.preferredFrame(), display: true)
+        } else {
+            zoomSavedFrame = window.frame
+            window.setFrame(screen.visibleFrame, display: true)
+        }
+        syncGeometry(force: true)
+    }
+
+    /// 假全屏：视频是另一个进程的窗口，进不了同一个 fullscreen space。
+    /// 所以把两个窗口都铺满屏幕，并临时隐藏菜单栏 / Dock。
     func toggleFullscreen() {
         guard let window else { return }
-        // 全屏要求窗口是 key（自检跑在后台时它不是）。
-        if !window.isKeyWindow {
-            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-            window.makeKeyAndOrderFront(nil)
+
+        session.isFullscreenSwitching = true
+        defer { session.isFullscreenSwitching = false }
+
+        if let saved = savedFrame, session.isFullscreen {
+            savedFrame = nil
+            NSApp.presentationOptions = []
+            window.setFrame(saved, display: true, animate: false)
+            session.isFullscreen = false
+        } else {
+            savedFrame = window.frame
+            NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock]
+            let screen = window.screen ?? NSScreen.main
+            window.setFrame(screen?.frame ?? window.frame, display: true, animate: false)
+            session.isFullscreen = true
         }
-        window.toggleFullScreen(nil)
+
+        window.makeKeyAndOrderFront(nil)
+        syncGeometry(force: true)
     }
 
     // MARK: 键盘
@@ -374,24 +449,23 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    // MARK: 全屏
+    // MARK: NSWindowDelegate
 
-    private func observeFullscreen() {
-        guard let window else { return }
-        let center = NotificationCenter.default
-        fullscreenObservers.append(center.addObserver(
-            forName: NSWindow.didEnterFullScreenNotification,
-            object: window, queue: .main) { [weak self] _ in
-                self?.session.isFullscreen = true
-            })
-        fullscreenObservers.append(center.addObserver(
-            forName: NSWindow.didExitFullScreenNotification,
-            object: window, queue: .main) { [weak self] _ in
-                self?.session.isFullscreen = false
-            })
+    func windowDidMove(_ notification: Notification) {
+        syncGeometry()
     }
 
-    // MARK: NSWindowDelegate
+    func windowDidResize(_ notification: Notification) {
+        syncGeometry()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        syncGeometry(force: true)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        syncGeometry(force: true)
+    }
 
     func windowWillClose(_ notification: Notification) {
         if let keyMonitor {
@@ -402,10 +476,11 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             NSEvent.removeMonitor(wheelMonitor)
             self.wheelMonitor = nil
         }
-        for observer in fullscreenObservers {
-            NotificationCenter.default.removeObserver(observer)
+        syncTask?.cancel()
+
+        if savedFrame != nil {
+            NSApp.presentationOptions = []
         }
-        fullscreenObservers.removeAll()
 
         session.stop()
         onClosed()

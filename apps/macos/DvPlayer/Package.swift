@@ -3,7 +3,8 @@ import PackageDescription
 
 /// 依赖都在仓库里现成编好的：
 /// - `core/target/release/libdvplayer_media.dylib`：共享媒体核心（Rust，C ABI）
-/// - `prefix/lib/libmpv.2.dylib`：M0 编的 libmpv（render API 出画）
+/// - `prefix-vk/bin/mpv`：gpu-next + Vulkan 的 mpv，**以子进程方式运行**，不在编译期链接
+///   （macOS 上只有 mpv 自己的窗口能走 gpu-next，Dolby Vision 整形也在这里）
 ///
 /// 用 `-L` 相对路径而不是绝对路径，换了机器目录也能编。
 let repo = "../../.."
@@ -28,30 +29,10 @@ let package = Package(
             ]
         ),
 
-        // libmpv 渲染封装（ObjC++）：mpv 只解码，画面画进 NSOpenGLView。
-        .target(
-            name: "MpvKit",
-            path: "Sources/MpvKit",
-            publicHeadersPath: "include",
-            cxxSettings: [
-                .unsafeFlags(["-fobjc-arc", "-I\(repo)/prefix/include"]),
-            ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-L\(repo)/prefix/lib", "-lmpv",
-                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
-                ]),
-                .linkedFramework("Cocoa"),
-                .linkedFramework("OpenGL"),
-                .linkedFramework("QuartzCore"),
-                .linkedFramework("CoreVideo"),
-            ]
-        ),
-
         // 壳。
         .executableTarget(
             name: "DvPlayer",
-            dependencies: ["DvCore", "MpvKit"],
+            dependencies: ["DvCore"],
             path: "Sources/DvPlayer",
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),

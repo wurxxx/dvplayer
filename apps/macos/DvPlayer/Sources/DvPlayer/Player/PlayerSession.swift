@@ -2,7 +2,6 @@ import AppKit
 import Foundation
 import SwiftUI
 import DvCore
-import MpvKit
 
 /// 播放页右侧「选集」里的一集（和 Windows 的 `PlayEpisode` 对齐）。
 struct PlayerEpisode: Identifiable, Hashable {
@@ -82,7 +81,7 @@ struct PlayerTrack: Identifiable, Hashable {
 
 /// 播放页的状态：mpv 视图 + 控制条 / 选集要用的所有值。
 ///
-/// 回调都从 `DVMpvView` 的主线程 block 进来，所以这里不切队列。
+/// 回调都从 `MpvEngine` 的主线程回调进来，所以这里不切队列。
 @MainActor
 final class PlayerSession: ObservableObject {
 
@@ -92,8 +91,8 @@ final class PlayerSession: ObservableObject {
         case info
     }
 
-    // —— mpv ——
-    let mpv: DVMpvView
+    // —— mpv（子进程 + IPC，视频在 mpv 自己的窗口里） ——
+    private(set) var mpv: MpvEngine!
 
     // —— 正在播的 ——
     @Published private(set) var itemId: String
@@ -126,6 +125,8 @@ final class PlayerSession: ObservableObject {
     @Published var panel: Panel = .none
     @Published var toast: String?
     @Published var isFullscreen = false
+    /// 全屏切换那一拍不要跟着窗口 frame 同步（否则 mpv 会被中间态拽一下）。
+    var isFullscreenSwitching = false
     @Published var isScrubbing = false
     @Published var seekPosition: Double = 0
 
@@ -148,11 +149,12 @@ final class PlayerSession: ObservableObject {
     private static let resumeThreshold = 5.0
     private static let reportEvery: TimeInterval = 10
 
-    init(itemId: String,
-         startSeconds: Double?,
-         playlist: [PlayerEpisode] = [],
-         seriesTitle: String? = nil,
-         hintTitle: String? = nil) {
+    init?(itemId: String,
+          startSeconds: Double?,
+          playlist: [PlayerEpisode] = [],
+          seriesTitle: String? = nil,
+          hintTitle: String? = nil,
+          frame: NSRect) {
         self.itemId = itemId
         self.initialStart = startSeconds
         self.playlist = playlist
@@ -160,17 +162,19 @@ final class PlayerSession: ObservableObject {
         self.hintTitle = hintTitle ?? ""
         self.title = hintTitle ?? "正在播放"
 
-        let view = DVMpvView(frame: .zero)
-        mpv = view
+        guard let engine = MpvEngine(frame: frame, startSeconds: startSeconds) else {
+            return nil
+        }
+        mpv = engine
 
-        view.onPosition = { [weak self] position, duration in
+        engine.onPosition = { [weak self] position, duration in
             self?.handlePosition(position, duration)
         }
-        view.onPause = { [weak self] paused in
+        engine.onPause = { [weak self] paused in
             guard let self else { return }
             self.paused = paused
         }
-        view.onLoaded = { [weak self] duration in
+        engine.onLoaded = { [weak self] duration in
             guard let self else { return }
             self.loading = false
             if duration > 1 {
@@ -179,21 +183,21 @@ final class PlayerSession: ObservableObject {
             NSLog("[Play] loaded \(self.itemId) duration=\(Int(self.duration))s")
             self.applyTrackPrefsIfNeeded()
         }
-        view.onEOF = { [weak self] in
+        engine.onEOF = { [weak self] in
             self?.handleEOF()
         }
-        view.onTracks = { [weak self] audio, subs, aid, sid in
+        engine.onTracks = { [weak self] audio, subs, aid, sid in
             self?.handleTracks(audio, subs, aid, sid)
         }
-        view.onSpeed = { [weak self] speed in
+        engine.onSpeed = { [weak self] speed in
             self?.speed = speed
         }
-        view.onVolume = { [weak self] volume, muted in
+        engine.onVolume = { [weak self] volume, muted in
             guard let self else { return }
             self.volume = volume
             self.muted = muted
         }
-        view.onError = { [weak self] message in
+        engine.onError = { [weak self] message in
             guard let self else { return }
             self.loading = false
             self.error = message
@@ -350,8 +354,8 @@ final class PlayerSession: ObservableObject {
         requestClose()
     }
 
-    private func handleTracks(_ audio: [DVMpvTrack],
-                              _ subtitles: [DVMpvTrack],
+    private func handleTracks(_ audio: [RawTrack],
+                              _ subtitles: [RawTrack],
                               _ aid: Int64,
                               _ sid: Int64) {
         let hadTracks = !self.audioTracks.isEmpty || !self.subtitleTracks.isEmpty
@@ -367,7 +371,7 @@ final class PlayerSession: ObservableObject {
                 .compactMap { $0 }
                 .filter { !$0.isEmpty }
                 .joined(separator: " · ")
-            return PlayerTrack(id: raw.trackId, name: name, detail: detail,
+            return PlayerTrack(id: raw.id, name: name, detail: detail,
                                language: language, title: title, isDefault: raw.isDefault)
         }
 
@@ -381,7 +385,7 @@ final class PlayerSession: ObservableObject {
                 .compactMap { $0 }
                 .filter { !$0.isEmpty }
                 .joined(separator: " · ")
-            return PlayerTrack(id: raw.trackId, name: name, detail: detail,
+            return PlayerTrack(id: raw.id, name: name, detail: detail,
                                language: language, title: title, isDefault: raw.isDefault)
         }
 

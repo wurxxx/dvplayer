@@ -38,7 +38,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 平台 | UI | 视频面 | 播放内核 | 格式能力 |
 | --- | --- | --- | --- | --- |
 | Windows | .NET 10 + WPF + WPF-UI | mpv 子 HWND（`wid`），mpv 自管 swapchain | 官方 `mpv.exe` 子进程 + JSON IPC（ADR-0009，`vo=gpu-next`） | DV P7 FEL 完整；HDR10 / HDR10+ / HLG；硬解看 GPU（已验 4K120 / 8K60） |
-| macOS | SwiftUI + AppKit | libmpv render API + NSOpenGLView | libmpv（legacy `gpu`） | v1 只做 HDR10，无 DV（render API 拿不到 gpu-next）；进度见 [M2-MACOS.md](M2-MACOS.md) |
+| macOS | SwiftUI + AppKit | mpv 自己的窗口（cocoa-cb + Vulkan），壳贴透明浮层 | `mpv` 子进程 + JSON IPC（ADR-0010，行内 Vulkan loader + MoltenVK） | gpu-next：DV P5/P7、HDR10；解码走 VideoToolbox；进度见 [M2-MACOS.md](M2-MACOS.md) |
 | Android / TV | Kotlin + Compose for TV | SurfaceView / SurfaceTexture | Media3 (ExoPlayer) | 取决于设备解码器；DV 按机型，P7 回退 BL 并标注 |
 
 关键结论（详见 ADR）：
@@ -46,7 +46,8 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 - 桌面端**零 fork**，不维护 libmpv 私有补丁。
 - Windows 走 `wid` 子窗口，因为 mpv 0.42 的 gpu-next（FEL 所在）只在播放器自己的 VO 路径上，
   libmpv 的 render API 仍然只有 legacy `gpu` 后端。
-- macOS 的 `--wid` 不可靠，因此 macOS 走 render API，代价是拿不到 DV，v1 只做 HDR10。
+- macOS 的 `--wid` 不可靠，render API 又只有 legacy `gpu`，所以改成「mpv 自己开窗口 +
+  透明浮层窗」，Vulkan/MoltenVK 随包分发（ADR-0010）。
 - WinUI 3 被排除：WinUI 3 窗口内的子 HWND 收不到输入（microsoft-ui-xaml#9912），
   与 `wid` 方案冲突。
 
@@ -95,7 +96,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 
 1. FEL 真的被重建（截帧 A/B + PSNR），不是只播 BL。
 2. Windows 的 `wid` 子窗口路径能起播、能拿到 FEL。
-3. macOS 的 render API 能正确输出（HDR10 或退 SDR）。
+3. macOS 的 Vulkan 路径能正确输出（P5 颜色、HDR10 或退 SDR）。
 
 验收标准与执行记录见 [M0.md](M0.md)。
 
@@ -120,7 +121,7 @@ Media3 管线、DV 探测与回退、TV 焦点与 Leanback、下载与续播、l
 
 ### M3 — macOS
 
-render API 全链路、HDR10 或 SDR 回退、公证与 Sparkle。
+mpv 子进程 + 浮层窗全链路（ADR-0010）、DV / HDR10 或 SDR 回退、公证与 Sparkle。
 
 ### M4 — 共性层
 
@@ -138,9 +139,9 @@ render API 全链路、HDR10 或 SDR 回退、公证与 Sparkle。
 
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
-| libmpv render API 无 gpu-next | 桌面嵌入拿不到 DV/FEL | Windows 用 `wid`；macOS 接受 v1 无 DV |
+| libmpv render API 无 gpu-next | 进程内嵌入拿不到 DV/FEL | 两端都改用 mpv 子进程 + IPC，让 mpv 自己建 VO（ADR-0009 / ADR-0010） |
 | libplacebo / FFmpeg soname 变动 | 升级即崩 | vendored 固定版本，不依赖系统库 |
-| macOS 无 Metal 后端 | HDR/EDR 效果受限 | v1 只做 HDR10，DV 延后 |
+| macOS 无 OpenGL 的 GPU context | 进程内渲染不可行 | 走 Vulkan/macvk + gpu-next（ADR-0010） |
 | Android DV 碎片化 | 同 APK 行为不一致 | 运行时探测 + BL 回退 + 明确提示 |
 | 编解码专利 + Dolby 授权 | 商业分发风险 | 商业版走 Dolby 官方 SDK 或法务评估 |
 | Intel Mac 无 HDR 显示器 | macOS HDR 无法目视验收 | 外接 HDR 屏或先验 SDR 映射 |
@@ -158,6 +159,7 @@ render API 全链路、HDR10 或 SDR 回退、公证与 Sparkle。
 | ADR-0007 | 正式壳是媒体库聚合客户端（M0 壳只做验证） |
 | ADR-0008 | 共享媒体库核心：Rust + C ABI，四端复用 |
 | ADR-0009 | Windows 改用 mpv 子进程 + JSON IPC（修正 ADR-0001 的备选判断） |
+| ADR-0010 | macOS 改用 mpv 子进程 + 透明浮层窗（取代 ADR-0003，拿到 DV） |
 
 ## 8. 目录结构
 
