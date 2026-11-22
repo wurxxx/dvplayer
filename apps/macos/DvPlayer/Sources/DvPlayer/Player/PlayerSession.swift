@@ -81,6 +81,67 @@ struct LocalPlayback {
     var startSeconds: Double?
 }
 
+/// 一张挂载中的原盘：播放器右侧「标题」面板靠它切标题。
+///
+/// 和 Windows 一样，条目 id 是 `iso:<盘名>:mpls<N>`；每个标题一份
+/// 本地进度（从媒体库点开时回写到核心的 ISO 条目）。切标题不用卸载盘，
+/// 重新 `prepare` 一份 EDL 再重启 mpv 即可。
+struct DiscPlayback {
+    let disc: BluRaySession
+    /// 从媒体库点开时核心给的片名；直接打开 ISO 时没有。
+    let hintTitle: String?
+    let coreItemId: String?
+
+    var displayName: String {
+        if let hint = hintTitle, !hint.isEmpty {
+            return hint
+        }
+        return disc.discName
+    }
+
+    private var isoName: String {
+        URL(fileURLWithPath: disc.isoPath).deletingPathExtension().lastPathComponent
+    }
+
+    func itemId(for title: BluRayTitle) -> String {
+        "iso:\(isoName):mpls\(title.id)"
+    }
+
+    func title(for itemId: String) -> BluRayTitle? {
+        disc.titles.first { self.itemId(for: $0) == itemId }
+    }
+
+    /// 为一个标题生成播放源（EDL 写到临时目录）。
+    func local(_ title: BluRayTitle, start: Double?) -> LocalPlayback? {
+        guard let url = disc.prepare(title) else { return nil }
+        return LocalPlayback(itemId: itemId(for: title),
+                             title: "\(displayName) · 标题 \(title.number)",
+                             url: url.path,
+                             duration: title.duration,
+                             coreItemId: coreItemId,
+                             startSeconds: start)
+    }
+
+    /// 右侧面板里的标题：正片在前（长的先），花絮按标题号。
+    func playlist() -> [PlayerEpisode] {
+        let features = disc.titles
+            .filter(disc.isFeature)
+            .sorted { $0.duration > $1.duration }
+        let extras = disc.titles
+            .filter { !disc.isFeature($0) }
+            .sorted { $0.number < $1.number }
+
+        return (features + extras).map { title in
+            PlayerEpisode(id: itemId(for: title),
+                          badge: "标题 \(title.number)",
+                          meta: "\(disc.isFeature(title) ? "正片" : "花絮")"
+                              + " · \(title.durationLabel)",
+                          posterPath: nil,
+                          title: "\(displayName) · 标题 \(title.number)")
+        }
+    }
+}
+
 /// 播放页音轨 / 字幕菜单的一项。id 是 mpv 的轨道 id（选轨直接用它）。
 struct PlayerTrack: Identifiable, Hashable {
     let id: Int64
@@ -230,7 +291,9 @@ final class PlayerSession: ObservableObject {
     var onClose: (() -> Void)?
     var onToggleFullscreen: (() -> Void)?
 
-    private let localSource: LocalPlayback?
+    private var localSource: LocalPlayback?
+    /// 原盘：切标题时重新生成 EDL，不卸载盘。
+    private let discSource: DiscPlayback?
     private var initialStart: Double?
     private var loadToken = 0
     /// 音轨 / 字幕各自套用一次：字幕轨常比音轨晚到，不能共用标记。
@@ -268,10 +331,12 @@ final class PlayerSession: ObservableObject {
           seriesTitle: String? = nil,
           hintTitle: String? = nil,
           frame: NSRect,
-          local: LocalPlayback? = nil) {
+          local: LocalPlayback? = nil,
+          disc: DiscPlayback? = nil) {
         let effectiveId = local?.itemId ?? itemId
         self.itemId = effectiveId
         self.localSource = local
+        self.discSource = disc
         self.initialStart = startSeconds
         self.playlist = playlist
         self.seriesTitle = Self.cleanSeries(seriesTitle)
@@ -423,6 +488,7 @@ final class PlayerSession: ObservableObject {
         danmakuStatus = nil
 
         source = nil
+        localSource = local
         itemId = local.itemId
         title = local.title
         duration = local.duration
@@ -533,8 +599,33 @@ final class PlayerSession: ObservableObject {
 
     func switchTo(itemId: String) {
         guard itemId != self.itemId || error != nil else { return }
+
+        // 原盘：同一个窗口换标题，重新生成 EDL 再重启 mpv，不查核心。
+        if let discSource {
+            guard let title = discSource.title(for: itemId) else {
+                toast("找不到这个标题")
+                return
+            }
+
+            // 切走前把当前标题的进度记下，切回来还能续。
+            report(position)
+            // 侧栏直开的原盘读本地进度；媒体库条目只有一个续播点，切标题从头来。
+            let start: Double? = discSource.coreItemId == nil ? nil : 0
+            guard let local = discSource.local(title, start: start) else {
+                toast("读不到这个标题的视频片段")
+                return
+            }
+
+            NSLog("[Play] disc switch \(itemId) title=\(title.number) mpls=\(title.id)")
+            Task { await beginLocal(local) }
+            return
+        }
+
         Task { await begin(itemId: itemId, startSeconds: 0) }
     }
+
+    /// 右边面板这一趟列的是原盘标题还是剧集。
+    var isDisc: Bool { discSource != nil }
 
     /// 错误面板的「重试」：地址没取到就重新取；播放器进程退出就换个新进程。
     func retry() {
@@ -651,6 +742,14 @@ final class PlayerSession: ObservableObject {
         if sleepEndOfEpisode {
             sleepEndOfEpisode = false
             NSLog("[Play] sleep at end of episode -> close")
+            requestClose()
+            return
+        }
+
+        // 原盘的标题是正片 / 花絮，不是剧集：播完这一段就收工，
+        // 不自动跳到下一个标题。想换标题在右侧面板里点。
+        if discSource != nil {
+            NSLog("[Play] eof disc \(itemId) -> close (titles=\(playlist.count))")
             requestClose()
             return
         }
@@ -953,7 +1052,7 @@ final class PlayerSession: ObservableObject {
 
     func previousEpisode() {
         guard let index = playlist.firstIndex(where: { $0.id == itemId }), index > 0 else {
-            toast("已经是第一集")
+            toast(isDisc ? "已经是第一个标题" : "已经是第一集")
             return
         }
         switchTo(itemId: playlist[index - 1].id)
@@ -962,7 +1061,7 @@ final class PlayerSession: ObservableObject {
     func nextEpisode() {
         guard let index = playlist.firstIndex(where: { $0.id == itemId }),
               index + 1 < playlist.count else {
-            toast("已经是最后一集")
+            toast(isDisc ? "已经是最后一个标题" : "已经是最后一集")
             return
         }
         switchTo(itemId: playlist[index + 1].id)

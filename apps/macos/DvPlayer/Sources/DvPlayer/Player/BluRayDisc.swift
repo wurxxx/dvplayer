@@ -48,7 +48,7 @@ final class BluRaySession {
     let discName: String
     let titles: [BluRayTitle]
 
-    private var edlURL: URL?
+    private var edlURLs: [URL] = []
     private var detached = false
 
     init(isoPath: String, mountPoint: URL, discName: String, titles: [BluRayTitle]) {
@@ -89,7 +89,7 @@ final class BluRaySession {
             return nil
         }
 
-        edlURL = url
+        edlURLs.append(url)
         return url
     }
 
@@ -98,10 +98,11 @@ final class BluRaySession {
         guard !detached else { return }
         detached = true
 
-        if let edlURL {
-            try? FileManager.default.removeItem(at: edlURL)
-            self.edlURL = nil
+        // 切标题会生成多份 EDL，全部清掉。
+        for url in edlURLs {
+            try? FileManager.default.removeItem(at: url)
         }
+        edlURLs.removeAll()
 
         BluRayDisc.unmount(mountPoint)
     }

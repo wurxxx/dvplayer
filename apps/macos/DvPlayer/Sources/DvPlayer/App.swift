@@ -377,6 +377,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch parts[0] {
             case "episodes":
                 session.togglePanel(.episodes)
+            case "next":
+                session.nextEpisode()
+                NSLog("[PlayTest] next item=\(session.itemId)")
+            case "prev":
+                session.previousEpisode()
+                NSLog("[PlayTest] prev item=\(session.itemId)")
             case "info":
                 session.togglePanel(.info)
             case "pause":

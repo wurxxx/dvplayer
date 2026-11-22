@@ -144,11 +144,12 @@
                           Tag="{Binding Id}" MouseLeftButtonUp="OnEpisodePick">
                     <Grid>
                       <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="132" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                       </Grid.ColumnDefinitions>
 
-                      <Border Width="132" Height="74" CornerRadius="7"
+                      <Border Width="{Binding ThumbWidth}" Height="{Binding ThumbHeight}"
+                              CornerRadius="7"
                               Background="{Binding Background}" SnapsToDevicePixels="True">
                         <Grid ClipToBounds="True">
                           <TextBlock Text="{Binding Initial}" FontSize="22" FontWeight="SemiBold"

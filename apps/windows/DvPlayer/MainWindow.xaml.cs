@@ -457,6 +457,17 @@ public partial class MainWindow : FluentWindow
 
         player.ShowChromeForShot();
         await Task.Delay(700);
+
+        // --play-bounds WxH：把播放窗摆成窄窗口（竖屏短剧的 400 来像素宽），
+        // 验证右侧面板会跟着收窄，不会左边被切掉。
+        if (ArgumentAfter("--play-bounds")?.Split('x') is { Length: 2 } bounds &&
+            double.TryParse(bounds[0], out var boundsWidth) &&
+            double.TryParse(bounds[1], out var boundsHeight))
+        {
+            player.SetBoundsForShot(boundsWidth, boundsHeight);
+            await Task.Delay(400);
+        }
+
         Trace.Write("player bounds " + player.DescribeBounds());
 
         // 真实画面：从桌面抓，才能同时看到视频和浮层（RTB 只有浮层）。
@@ -465,10 +476,13 @@ public partial class MainWindow : FluentWindow
         player.SetShotBackground(true);
         UiCapture.Save(player, Path.Combine(dir, "play.png"));
 
-        if (playlist is { Count: > 0 })
+        // 播放器自己可能带着列表：剧集的选集，或原盘的标题（--play 直接点 ISO）。
+        if (player.EpisodeCount > 0)
         {
             player.ShowEpisodesForShot();
             await Task.Delay(900);
+
+            Trace.Write("episodes panel " + player.DescribeEpisodesPanel());
 
             // 透明底要等分层窗口重画一帧，立刻抓会拿到上一帧（全黑）。
             player.SetShotBackground(false);

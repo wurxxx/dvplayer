@@ -246,51 +246,42 @@ final class PlayerLauncher {
     }
 
     /// 播蓝光原盘：视频是挂载 ISO 里的 m2ts（EDL 拼接），关窗时卸载。
-    func playDisc(_ disc: BluRaySession,
-                  title: BluRayTitle,
-                  coreItemId: String? = nil,
-                  hintTitle: String? = nil,
-                  start: Double? = nil) {
+    /// 默认标题之外，同盘的其它标题作为右侧「标题」面板随播放器一起打开。
+    func playDisc(_ disc: DiscPlayback, title: BluRayTitle, start: Double? = nil) {
         if let existing = controller {
             existing.close()
             controller = nil
         }
 
-        guard let url = disc.prepare(title) else {
+        guard let local = disc.local(title, start: start) else {
             AppState.shared.showToast("读不到这个标题的视频片段")
-            disc.detach()
+            disc.disc.detach()
             return
         }
 
-        let name = URL(fileURLWithPath: disc.isoPath)
-            .deletingPathExtension()
-            .lastPathComponent
-        let itemId = coreItemId ?? "iso:\(name):mpls\(title.id)"
-        let titleText = hintTitle.map { "\($0) · 标题 \(title.number)" }
-            ?? "\(disc.discName) · 标题 \(title.number)"
-        let local = LocalPlayback(itemId: itemId,
-                                  title: titleText,
-                                  url: url.path,
-                                  duration: title.duration,
-                                  coreItemId: coreItemId,
-                                  startSeconds: start)
+        let playlist = disc.disc.titles.count > 1 ? disc.playlist() : []
         let frame = PlayerWindowController.preferredFrame()
 
-        guard let session = PlayerSession(itemId: itemId,
+        guard let session = PlayerSession(itemId: local.itemId,
                                           startSeconds: nil,
-                                          playlist: [],
+                                          playlist: playlist,
                                           seriesTitle: nil,
                                           hintTitle: local.title,
                                           frame: frame,
-                                          local: local) else {
-            disc.detach()
+                                          local: local,
+                                          disc: disc) else {
+            disc.disc.detach()
             AppState.shared.showToast("播放器启动失败，检查 mpv 是否随包带上了")
             return
         }
 
+        NSLog("[Play] disc open \(local.itemId) title=\(title.number) " +
+              "mpls=\(title.id) resume=\(Int(local.startSeconds ?? 0)) " +
+              "titles=\(playlist.count)")
+
         let window = PlayerWindowController(session: session, frame: frame) { [weak self] in
             self?.controller = nil
-            disc.detach()
+            disc.disc.detach()
         }
         session.onClose = { [weak window] in window?.closePlayer() }
 

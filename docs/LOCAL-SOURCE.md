@@ -51,7 +51,8 @@
 - ISO：`playSource` 带 `disc: true`，界面走原来的原盘流程——
   Windows 用 `mpv.com` 读 title 后 `bd://mpls/<n>`（`BLU-RAY.md` §5.1），
   macOS `hdiutil` 挂载 + `mpls` → EDL（§5.2）。
-  只有一条标题直接播，多标题才弹选择框；续播点仍按这一集的条目 id 回写。
+  打开直接播默认标题（最长的正片），其它标题在播放器右侧「标题」面板切；
+  播完直接关窗。续播点仍按这一集的条目 id 回写。
 
 ## 4. 进度和记录
 

@@ -11,6 +11,8 @@ struct PlayerView: View {
     let actions: PlayerActions
     /// 浮层宽度：竖屏短剧的窗口只有 400 来像素，底部控制条要换两行。
     @State private var viewWidth: CGFloat = 0
+    /// 浮层高度：右侧面板高度跟着它走，矮窗口里别被上下切掉。
+    @State private var viewHeight: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -94,21 +96,21 @@ struct PlayerView: View {
                 episodesPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 74)
-                    .padding(.vertical, 40)
+                    .padding(.vertical, panelInsetV)
             }
 
             if session.panel == .info {
                 infoPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 74)
-                    .padding(.vertical, 40)
+                    .padding(.vertical, panelInsetV)
             }
 
             if session.panel == .subtitles {
                 subtitlesPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 74)
-                    .padding(.vertical, 40)
+                    .padding(.vertical, panelInsetV)
             }
 
             // 片尾区间到了浮出来，不自动跳，给用户自己决定。
@@ -135,8 +137,12 @@ struct PlayerView: View {
         .background(
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { viewWidth = proxy.size.width }
+                    .onAppear {
+                        viewWidth = proxy.size.width
+                        viewHeight = proxy.size.height
+                    }
                     .onChange(of: proxy.size.width) { width in viewWidth = width }
+                    .onChange(of: proxy.size.height) { height in viewHeight = height }
             }
         )
         .onAppear { session.showChrome() }
@@ -207,7 +213,8 @@ struct PlayerView: View {
                 session.screenshot()
             }
             if session.playlist.count > 1 {
-                PlayerCircleButton(icon: "list.bullet.rectangle", tip: "选集",
+                PlayerCircleButton(icon: "list.bullet.rectangle",
+                                   tip: session.isDisc ? "标题" : "选集",
                                    active: session.panel == .episodes) {
                     session.togglePanel(.episodes)
                 }
@@ -265,6 +272,25 @@ struct PlayerView: View {
     }
 
     private var isCompact: Bool { viewWidth > 0 && viewWidth < 640 }
+
+    // MARK: - 右侧面板尺寸
+    //
+    // 竖屏短剧的窗口只有 380～420 宽，固定 380 宽 + 右边 74 的留白会把面板左边切掉。
+    // 宽度按窗口收窄（最窄 280），高度按窗口限高（最矮 200，列表自己滚动）。
+
+    private var panelWidth: CGFloat {
+        min(380, max(280, viewWidth - 74 - 12))
+    }
+
+    private var panelInsetV: CGFloat { viewHeight >= 640 ? 40 : 16 }
+
+    private var panelMaxHeight: CGFloat {
+        max(200, min(580, viewHeight - panelInsetV * 2))
+    }
+
+    /// 面板窄的时候缩略图跟着缩，别把标题 / 时长挤没。
+    private var thumbWidth: CGFloat { panelWidth < 340 ? 100 : 132 }
+    private var thumbHeight: CGFloat { (thumbWidth * 74 / 132).rounded() }
 
     private var playRow: some View {
         HStack(spacing: 6) {
@@ -717,8 +743,8 @@ struct PlayerView: View {
                 }
             }
         }
-        .frame(width: 380)
-        .frame(maxHeight: 580)
+        .frame(width: panelWidth)
+        .frame(maxHeight: panelMaxHeight)
         .background(Color(hex: 0x141419).opacity(0.96),
                     in: RoundedRectangle(cornerRadius: Theme.radiusCard))
         .overlay {
@@ -730,11 +756,13 @@ struct PlayerView: View {
     private var episodesPanel: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("选集")
+                Text(session.isDisc ? "标题" : "选集")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.text)
                 Spacer()
-                Text("\(session.playlist.count) 集")
+                Text(session.isDisc
+                     ? "\(session.playlist.count) 个标题"
+                     : "\(session.playlist.count) 集")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.faint)
             }
@@ -771,8 +799,8 @@ struct PlayerView: View {
                 }
             }
         }
-        .frame(width: 380)
-        .frame(maxHeight: 580)
+        .frame(width: panelWidth)
+        .frame(maxHeight: panelMaxHeight)
         .background(Color(hex: 0x141419).opacity(0.96),
                     in: RoundedRectangle(cornerRadius: Theme.radiusCard))
         .overlay {
@@ -788,7 +816,7 @@ struct PlayerView: View {
         } label: {
             HStack(spacing: 12) {
                 PosterImage(path: episode.posterPath, title: episode.title)
-                    .frame(width: 132, height: 74)
+                    .frame(width: thumbWidth, height: thumbHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -859,8 +887,8 @@ struct PlayerView: View {
                 .padding(.bottom, 16)
             }
         }
-        .frame(width: 380)
-        .frame(maxHeight: 520)
+        .frame(width: panelWidth)
+        .frame(maxHeight: min(panelMaxHeight, 520))
         .background(Color(hex: 0x141419).opacity(0.96),
                     in: RoundedRectangle(cornerRadius: Theme.radiusCard))
         .overlay {

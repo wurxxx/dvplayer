@@ -818,6 +818,7 @@ public partial class PlayWindow : Window
         {
             SyncSurface();
             UpdateChromeLayout();
+            UpdateEpisodePanelSize();
             UpdateSeekBars();
         };
     }
@@ -877,6 +878,42 @@ public partial class PlayWindow : Window
             : new Thickness(24, 0, 24, 18);
         PositionText.Width = compact ? 46 : 58;
         DurationText.Width = compact ? 52 : 66;
+    }
+
+    /// <summary>
+    /// 右侧选集 / 标题面板跟着窗口走：竖屏短剧的窗口只有 400 来像素宽，
+    /// 固定 380 宽 + 右侧 74 的留白会让面板左边被切掉；矮窗口还要限高。
+    /// 列表自己滚动，面板始终完整可见。
+    /// </summary>
+    private void UpdateEpisodePanelSize()
+    {
+        var width = ActualWidth > 0 ? ActualWidth : Width;
+        var height = ActualHeight > 0 ? ActualHeight : Height;
+
+        // 构造时窗口还没量过，Width/Height 是 NaN：保持 XAML 里的默认值，
+        // 等 SizeChanged 再按真实尺寸算。
+        if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        // 右边 74 留给截图 / 选集按钮，左边至少留 12，别贴着画面边缘。
+        EpisodePanel.Width = Math.Clamp(width - 74 - 12, 280, 380);
+
+        // 上下留白：大窗口 40，矮窗口收一点；高度不够就让列表滚动。
+        var inset = height >= 640 ? 40 : 16;
+        EpisodePanel.MaxHeight = Math.Clamp(height - inset * 2, 200, 580);
+
+        // 面板窄的时候缩略图跟着缩，别把标题 / 时长挤没。
+        var thumb = EpisodePanel.Width < 340 ? 100.0 : 132.0;
+        var thumbHeight = Math.Round(thumb * 74 / 132);
+        if (EpisodeList.ItemsSource is List<EpisodeRow> rows)
+        {
+            foreach (var row in rows)
+            {
+                row.SetThumb(thumb, thumbHeight);
+            }
+        }
     }
 
     private void ApplyBounds(Rect bounds)
@@ -3759,6 +3796,7 @@ public partial class PlayWindow : Window
 
         EpisodeList.ItemsSource = rows;
         _ = Task.WhenAll(rows.Select(row => row.ApplyPosterAsync(row.PosterPath)));
+        UpdateEpisodePanelSize();
     }
 
     private void UpdatePlaylistSelection()
@@ -3777,6 +3815,7 @@ public partial class PlayWindow : Window
     private void OnEpisodesClick(object sender, RoutedEventArgs e)
     {
         MediaInfoPanel.Visibility = Visibility.Collapsed;
+        UpdateEpisodePanelSize();
         EpisodePanel.Visibility = EpisodePanel.Visibility == Visibility.Visible
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -3843,7 +3882,11 @@ public partial class PlayWindow : Window
 
             // 切走之前把当前标题的进度记下，下次切回来还能续。
             ReportProgress(_position, EffectiveDuration);
-            source = DiscSource(isoPath, discTitle, _discDisplayName ?? "", 0);
+
+            // 侧栏直开的原盘：每个标题各存一份本地进度，切回来接着看。
+            // 媒体库条目（进度在核心）只有一个续播点，切标题从头开始。
+            var resume = _coreItemId is null ? LocalProgress.Get(itemId) : 0;
+            source = DiscSource(isoPath, discTitle, _discDisplayName ?? "", resume);
         }
         else
         {
@@ -4616,6 +4659,16 @@ public partial class PlayWindow : Window
     /// <summary>截图巡检用：右侧面板里有多少条（原盘标题 / 剧集集数）。</summary>
     public int EpisodeCount => _playlist.Count;
 
+    /// <summary>截图巡检用：把窗口摆成指定大小（模拟竖屏短剧的窄窗口）。</summary>
+    public void SetBoundsForShot(double width, double height)
+    {
+        var bounds = new Rect(Left, Top, Math.Max(320, width), Math.Max(240, height));
+        ApplyBounds(bounds);
+        _windowedBounds = bounds;
+        SyncSurface();
+        UpdateEpisodePanelSize();
+    }
+
     /// <summary>截图巡检用：当前播放源的标题。</summary>
     public string CurrentTitle => _current.Title;
 
@@ -4787,12 +4840,31 @@ public partial class PlayWindow : Window
     private sealed class EpisodeRow : CardVisual
     {
         private bool _selected;
+        private double _thumbWidth = 132;
+        private double _thumbHeight = 74;
 
         public string Id { get; init; } = "";
         public string Badge { get; init; } = "";
         public string Meta { get; init; } = "";
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
+
+        /// <summary>缩略图尺寸：窄面板时由播放窗调小。</summary>
+        public double ThumbWidth => _thumbWidth;
+        public double ThumbHeight => _thumbHeight;
+
+        public void SetThumb(double width, double height)
+        {
+            if (Math.Abs(_thumbWidth - width) < 0.5 && Math.Abs(_thumbHeight - height) < 0.5)
+            {
+                return;
+            }
+
+            _thumbWidth = width;
+            _thumbHeight = height;
+            Raise(nameof(ThumbWidth));
+            Raise(nameof(ThumbHeight));
+        }
 
         public bool IsSelected
         {
