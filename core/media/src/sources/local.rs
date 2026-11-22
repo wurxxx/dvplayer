@@ -48,6 +48,8 @@ pub struct LocalSource {
     /// 进度文件放这里；留空就只记在内存里（重启丢失）。
     data_dir: Option<PathBuf>,
     index: Index,
+    /// 进度是「读整个 JSON → 改一条 → 写回」：并发上报不加锁会互相覆盖。
+    progress_gate: std::sync::Mutex<()>,
 }
 
 #[derive(Default)]
@@ -82,6 +84,25 @@ struct Episode {
     title: String,
 }
 
+/// 一条进度是否算「看完了」（95% 以上）。
+/// 放在 impl 外面，调用方可以先读一次进度文件，再批量判断。
+fn finished_entry(progress: &ProgressFile, rel: &str) -> bool {
+    match progress.items.get(&format!("f/{}", encode_id(rel))) {
+        Some(entry) if entry.duration > 0 => {
+            entry.position as f64 / entry.duration as f64 >= 0.95
+        }
+        _ => false,
+    }
+}
+
+fn position_in(progress: &ProgressFile, item_id: &str) -> (u64, u64) {
+    let entry = progress.items.get(item_id);
+    (
+        entry.map(|e| e.position).unwrap_or(0),
+        entry.map(|e| e.duration).unwrap_or(0),
+    )
+}
+
 impl LocalSource {
     pub fn new(id: String, name: String, root: String, data_dir: String) -> Self {
         let root = PathBuf::from(root);
@@ -90,13 +111,15 @@ impl LocalSource {
         } else {
             Some(PathBuf::from(data_dir))
         };
-        let index = scan(&root);
+        // 这里不扫盘：接进 hub 时会调用 login()，那时再扫。
+        // 以前 new 扫一遍、login 又扫一遍，网络挂载（SMB/NFS）的连接时间直接翻倍。
         Self {
             id,
             name,
             root,
             data_dir,
-            index,
+            index: Index::default(),
+            progress_gate: std::sync::Mutex::new(()),
         }
     }
 
@@ -144,13 +167,15 @@ impl LocalSource {
 
     /// 详情页 / 续播要播的那一集：第一集没看完的；全看完了就第一集。
     fn next_episode<'a>(&self, show: &'a Show) -> Option<&'a Episode> {
+        // 进度文件只读一次：以前每集各读一遍，100 集就要解析 100 次 JSON。
+        let progress = self.load_progress();
         let all = show.seasons.iter().flat_map(|s| s.episodes.iter());
         let mut first = None;
         for episode in all {
             if first.is_none() {
                 first = Some(episode);
             }
-            if !self.is_finished(&episode.rel) {
+            if !finished_entry(&progress, &episode.rel) {
                 return Some(episode);
             }
         }
@@ -158,13 +183,7 @@ impl LocalSource {
     }
 
     fn is_finished(&self, rel: &str) -> bool {
-        let progress = self.load_progress();
-        match progress.items.get(&format!("f/{}", encode_id(rel))) {
-            Some(entry) if entry.duration > 0 => {
-                entry.position as f64 / entry.duration as f64 >= 0.95
-            }
-            _ => false,
-        }
+        finished_entry(&self.load_progress(), rel)
     }
 
     // —— 进度 ——
@@ -172,19 +191,32 @@ impl LocalSource {
     fn progress_file(&self) -> Option<PathBuf> {
         // 文件名不能叫 local-progress.json：两端「直接打开原盘」的续播点
         // 用的是那个名字（结构也不一样），放同一个文件会互相覆盖。
-        self.data_dir
-            .as_ref()
-            .map(|dir| dir.join("local-library-progress.json"))
+        // 也不能所有本地源共用一个文件：多个目录源的条目 id 都是 f/… / d/…，
+        // 共用会读到对方的进度。按源 id 分文件，id 里的非法字符换成下划线。
+        self.data_dir.as_ref().map(|dir| {
+            dir.join(format!(
+                "local-library-progress-{}.json",
+                safe_file_stem(&self.id)
+            ))
+        })
     }
 
     fn load_progress(&self) -> ProgressFile {
         let Some(path) = self.progress_file() else {
             return ProgressFile::default();
         };
-        let Ok(bytes) = fs::read(&path) else {
-            return ProgressFile::default();
-        };
-        serde_json::from_slice(&bytes).unwrap_or_default()
+
+        if let Ok(bytes) = fs::read(&path) {
+            return serde_json::from_slice(&bytes).unwrap_or_default();
+        }
+
+        // 升级兼容：旧版本所有本地源共用 local-library-progress.json。
+        // 新文件还没写出来时先读一次旧的，别让升级把进度清空。
+        let legacy = path.with_file_name("local-library-progress.json");
+        fs::read(legacy)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
     }
 
     fn save_progress(&self, progress: &ProgressFile) {
@@ -205,16 +237,16 @@ impl LocalSource {
     }
 
     fn position_of(&self, item_id: &str) -> (u64, u64) {
-        let progress = self.load_progress();
-        let entry = progress.items.get(item_id);
-        (
-            entry.map(|e| e.position).unwrap_or(0),
-            entry.map(|e| e.duration).unwrap_or(0),
-        )
+        position_in(&self.load_progress(), item_id)
     }
 
     /// 写一条进度；`meta` 带上标题、所属剧等，`records()` 直接用。
     fn put_progress(&self, item_id: &str, position: u64, duration: u64) {
+        // 同一进程里两个上报并发时，读-改-写会丢掉后写的那一条。
+        let _guard = self
+            .progress_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut progress = self.load_progress();
         let meta = self.meta_of(item_id);
         let at = now();
@@ -282,8 +314,9 @@ impl LocalSource {
 
     fn film_item(&self, film: &Film) -> MediaItem {
         let id = format!("f/{}", encode_id(&film.rel));
-        let (position, duration) = self.position_of(&id);
+        // 一次读进度：以前 position_of + load_progress 各读一次文件。
         let progress = self.load_progress();
+        let (position, duration) = position_in(&progress, &id);
         let last_played = progress.items.get(&id).map(|e| e.at);
         let runtime = if duration > 0 { Some(duration) } else { None };
 
@@ -326,18 +359,20 @@ impl LocalSource {
             .iter()
             .flat_map(|s| s.episodes.iter())
             .collect();
+
+        // 整部剧只读一次进度：以前每集判断一次「看完」，100 集读 100 次文件。
+        let progress = self.load_progress();
         let watched = episodes
             .iter()
-            .filter(|e| self.is_finished(&e.rel))
+            .filter(|e| finished_entry(&progress, &e.rel))
             .count();
-        let progress = if episodes.is_empty() {
+        let progress_ratio = if episodes.is_empty() {
             0.0
         } else {
             watched as f64 / episodes.len() as f64
         };
 
-        let last_played = self
-            .load_progress()
+        let last_played = progress
             .items
             .values()
             .filter(|e| e.series.as_deref() == Some(show.title.as_str()))
@@ -358,7 +393,7 @@ impl LocalSource {
             parent_title: None,
             year: show.year,
             runtime_seconds: None,
-            progress,
+            progress: progress_ratio,
             is_favorite: false,
             overview: None,
             resolution: None,
@@ -379,10 +414,12 @@ impl LocalSource {
     }
 
     fn season_item(&self, show: &Show, season: &Season) -> MediaItem {
+        // 一季只读一次进度。
+        let progress = self.load_progress();
         let watched = season
             .episodes
             .iter()
-            .filter(|e| self.is_finished(&e.rel))
+            .filter(|e| finished_entry(&progress, &e.rel))
             .count();
         MediaItem {
             id: format!("d/{}@{}", encode_id(&show.rel), season.number),
@@ -423,8 +460,8 @@ impl LocalSource {
 
     fn episode_item(&self, show: &Show, season: &Season, episode: &Episode) -> MediaItem {
         let id = format!("f/{}", encode_id(&episode.rel));
-        let (position, duration) = self.position_of(&id);
         let progress = self.load_progress();
+        let (position, duration) = position_in(&progress, &id);
         let last_played = progress.items.get(&id).map(|e| e.at);
 
         MediaItem {
@@ -702,9 +739,47 @@ impl MediaSource for LocalSource {
             });
         }
 
+        // 单集也是 `f/` 前缀，但不在 films 里：单独认一次。
+        // 以前这里直接落到最后返回「本地源没有这个条目」，
+        // 而 play_source / media_info 都认单集，三处行为不一致。
+        if let Some((show, season, episode)) = self.episode_by_id(item_id) {
+            let (_, duration) = self.position_of(item_id);
+            return Ok(MediaDetail {
+                id: item_id.to_string(),
+                title: episode.title.clone(),
+                kind: MediaKind::Episode,
+                original_title: None,
+                overview: None,
+                poster_path: self.poster_path(&episode.rel),
+                backdrop_path: None,
+                logo_path: None,
+                rating: None,
+                release_date: show.year.map(|y| format!("{y}-01-01")),
+                runtime_seconds: (duration > 0).then_some(duration),
+                season_count: None,
+                local_season_count: None,
+                episode_count: Some(season.episodes.len() as i32),
+                local_episode_count: Some(season.episodes.len() as i32),
+                status: None,
+                resolution: resolution_label(&episode.rel),
+                audio_type: None,
+                color_range: None,
+                play_item_id: Some(item_id.to_string()),
+                single_child_id: None,
+                is_favorite: None,
+                is_watched: self.is_finished(&episode.rel).then_some(true),
+            });
+        }
+
         if let Some((show, season)) = self.season_by_id(item_id) {
-            let play = self
-                .next_episode(show)
+            // 这一季里第一集没看完的。以前用全剧的 next_episode，
+            // 从第 2 季点进去，播放键可能指向第 1 季的集。
+            let progress = self.load_progress();
+            let play = season
+                .episodes
+                .iter()
+                .find(|e| !finished_entry(&progress, &e.rel))
+                .or_else(|| season.episodes.first())
                 .map(|e| format!("f/{}", encode_id(&e.rel)));
             return Ok(MediaDetail {
                 id: item_id.to_string(),
@@ -817,6 +892,10 @@ impl MediaSource for LocalSource {
     }
 
     fn remove_play_record(&self, item_id: &str) -> Result<()> {
+        let _guard = self
+            .progress_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut progress = self.load_progress();
         progress.items.remove(item_id);
         self.save_progress(&progress);
@@ -829,10 +908,11 @@ impl MediaSource for LocalSource {
         }
         if let Some((show, season)) = self.season_by_id(item_id) {
             // 播这一季里第一集没看完的，别跳到别的季去。
+            let progress = self.load_progress();
             let episode = season
                 .episodes
                 .iter()
-                .find(|e| !self.is_finished(&e.rel))
+                .find(|e| !finished_entry(&progress, &e.rel))
                 .or_else(|| season.episodes.first())
                 .ok_or_else(|| MediaError::Other("这一季里没有视频".into()))?;
             return self.play_episode(show, episode);
@@ -1344,14 +1424,47 @@ fn decode_id(id: &str) -> String {
     id.replace("%3A", ":").replace("%40", "@").replace("%25", "%")
 }
 
+/// 源 id → 能安全放进文件名的片段（进度文件按源分开存）。
+fn safe_file_stem(id: &str) -> String {
+    let mut out = String::with_capacity(id.len());
+    for c in id.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+
+    if out.is_empty() {
+        "default".to_string()
+    } else {
+        out
+    }
+}
+
 /// `file://` + 百分号编码，中文路径也能被两端的图片加载器打开。
 fn file_url(path: &Path) -> String {
-    let mut text = path.to_string_lossy().replace('\\', "/");
-    if !text.starts_with('/') {
-        text.insert(0, '/');
+    let raw = path.to_string_lossy();
+    let text = raw.replace('\\', "/");
+    let parts: Vec<&str> = text.split('/').filter(|p| !p.is_empty()).collect();
+
+    // UNC（`\\server\share\a`）要保留主机位：`file://server/share/a`。
+    // 以前一律按「绝对路径」拼成 `file:///server/share/a`，主机名变成了路径的一部分，
+    // Windows 上从网络共享打开的图片/ISO 全部打不开。
+    if raw.starts_with("\\\\") || raw.starts_with("//") {
+        let mut out = String::from("file://");
+        if let Some((host, rest)) = parts.split_first() {
+            out.push_str(&percent_encode(host));
+            for part in rest {
+                out.push('/');
+                out.push_str(&percent_encode(part));
+            }
+        }
+        return out;
     }
+
     let mut out = String::from("file://");
-    for part in text.split('/').filter(|p| !p.is_empty()) {
+    for part in parts {
         out.push('/');
         out.push_str(&percent_encode(part));
     }

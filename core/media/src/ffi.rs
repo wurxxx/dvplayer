@@ -302,7 +302,17 @@ pub extern "C" fn dv_image_source(handle: *mut SourceHandle, path: *const c_char
 
 /// 聚合句柄：持有 0..N 个已登录的媒体源。
 pub struct HubHandle {
-    inner: MediaHub,
+    /// 同一句柄会被 UI、海报线程、进度上报并发调用：
+    /// 统一用锁串行进出，避免同时造出 `&mut MediaHub` / `&MediaHub`。
+    inner: std::sync::Mutex<MediaHub>,
+}
+
+impl HubHandle {
+    fn hub(&self) -> std::sync::MutexGuard<'_, MediaHub> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 /// 新建一个空的聚合句柄（还没有源）。
@@ -310,7 +320,7 @@ pub struct HubHandle {
 pub extern "C" fn dv_hub_new() -> *mut HubHandle {
     catch_unwind(AssertUnwindSafe(|| {
         Box::into_raw(Box::new(HubHandle {
-            inner: MediaHub::new(),
+            inner: std::sync::Mutex::new(MediaHub::new()),
         }))
     }))
     .unwrap_or(ptr::null_mut())
@@ -331,7 +341,7 @@ pub extern "C" fn dv_hub_free(handle: *mut HubHandle) {
 #[no_mangle]
 pub extern "C" fn dv_hub_add(handle: *mut HubHandle, config: *const c_char) -> *mut c_char {
     guard(|| {
-        let Some(h) = (unsafe { handle.as_mut() }) else {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<()>(Err(MediaError::Other("null handle".into())));
         };
 
@@ -346,7 +356,7 @@ pub extern "C" fn dv_hub_add(handle: *mut HubHandle, config: *const c_char) -> *
             }
         };
 
-        match h.inner.add(&parsed) {
+        match h.hub().add(&parsed) {
             Ok(()) => reply(Ok(serde_json::json!({
                 "id": parsed.id,
                 "name": parsed.name,
@@ -364,7 +374,7 @@ pub extern "C" fn dv_hub_add(handle: *mut HubHandle, config: *const c_char) -> *
 #[no_mangle]
 pub extern "C" fn dv_hub_add_many(handle: *mut HubHandle, configs: *const c_char) -> *mut c_char {
     guard(|| {
-        let Some(h) = (unsafe { handle.as_mut() }) else {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
                 "null handle".into(),
             )));
@@ -385,7 +395,7 @@ pub extern "C" fn dv_hub_add_many(handle: *mut HubHandle, configs: *const c_char
             }
         };
 
-        reply(Ok(h.inner.add_many(&parsed)))
+        reply(Ok(h.hub().add_many(&parsed)))
     })
 }
 
@@ -406,7 +416,7 @@ pub extern "C" fn dv_hub_add_many_stream(
     user_data: *mut c_void,
 ) -> *mut c_char {
     guard(|| {
-        let Some(h) = (unsafe { handle.as_mut() }) else {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
                 "null handle".into(),
             )));
@@ -442,7 +452,7 @@ pub extern "C" fn dv_hub_add_many_stream(
             cb(cstr.as_ptr(), user as *mut c_void);
         };
 
-        reply(Ok(h.inner.add_many_stream(&parsed, emit)))
+        reply(Ok(h.hub().add_many_stream(&parsed, emit)))
     })
 }
 
@@ -453,7 +463,7 @@ pub extern "C" fn dv_hub_sources(handle: *const HubHandle) -> *mut c_char {
         let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<crate::hub::SourceInfo>(Err(MediaError::Other("null handle".into())));
         };
-        reply(Ok(h.inner.sources()))
+        reply(Ok(h.hub().sources()))
     })
 }
 
@@ -470,7 +480,7 @@ pub extern "C" fn dv_hub_libraries(handle: *const HubHandle) -> *mut c_char {
         let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<Vec<MediaLibrary>>(Err(MediaError::Other("null handle".into())));
         };
-        reply(h.inner.libraries())
+        reply(h.hub().libraries())
     })
 }
 
@@ -490,7 +500,7 @@ pub extern "C" fn dv_hub_items(
             return reply::<Paged<MediaItem>>(Err(MediaError::Other("null library id".into())));
         };
         let opts = read_query(query);
-        reply(h.inner.items(&id, page, page_size, &opts))
+        reply(h.hub().items(&id, page, page_size, &opts))
     })
 }
 
@@ -503,7 +513,7 @@ pub extern "C" fn dv_hub_search(handle: *const HubHandle, query: *const c_char) 
         let Some(q) = read_cstr(query) else {
             return reply::<Vec<MediaItem>>(Err(MediaError::Other("null query".into())));
         };
-        reply(h.inner.search(&q))
+        reply(h.hub().search(&q))
     })
 }
 
@@ -519,7 +529,7 @@ pub extern "C" fn dv_hub_item_sources(
         let Some(id) = read_cstr(item_id) else {
             return reply::<Vec<ItemSource>>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.item_sources(&id))
+        reply(h.hub().item_sources(&id))
     })
 }
 
@@ -539,7 +549,7 @@ pub extern "C" fn dv_hub_children(
             return reply::<Paged<MediaItem>>(Err(MediaError::Other("null parent id".into())));
         };
         let opts = read_query(query);
-        reply(h.inner.children(&id, page, page_size, &opts))
+        reply(h.hub().children(&id, page, page_size, &opts))
     })
 }
 
@@ -552,7 +562,7 @@ pub extern "C" fn dv_hub_genres(handle: *const HubHandle, scope_id: *const c_cha
         let Some(id) = read_cstr(scope_id) else {
             return reply::<Vec<Genre>>(Err(MediaError::Other("null scope id".into())));
         };
-        reply(h.inner.genres(&id))
+        reply(h.hub().genres(&id))
     })
 }
 
@@ -565,7 +575,7 @@ pub extern "C" fn dv_hub_detail(handle: *const HubHandle, item_id: *const c_char
         let Some(id) = read_cstr(item_id) else {
             return reply::<MediaDetail>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.detail(&id))
+        reply(h.hub().detail(&id))
     })
 }
 
@@ -581,7 +591,7 @@ pub extern "C" fn dv_hub_person_works(
         let Some(id) = read_cstr(person_id) else {
             return reply::<Vec<MediaItem>>(Err(MediaError::Other("null person id".into())));
         };
-        reply(h.inner.person_works(&id))
+        reply(h.hub().person_works(&id))
     })
 }
 
@@ -597,7 +607,7 @@ pub extern "C" fn dv_hub_people(
         let Some(id) = read_cstr(item_id) else {
             return reply::<Vec<Person>>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.people(&id))
+        reply(h.hub().people(&id))
     })
 }
 
@@ -613,7 +623,7 @@ pub extern "C" fn dv_hub_media_info(
         let Some(id) = read_cstr(item_id) else {
             return reply::<MediaInfo>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.media_info(&id))
+        reply(h.hub().media_info(&id))
     })
 }
 
@@ -629,7 +639,7 @@ pub extern "C" fn dv_hub_play_source(
         let Some(id) = read_cstr(item_id) else {
             return reply::<PlaySource>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.play_source(&id))
+        reply(h.hub().play_source(&id))
     })
 }
 
@@ -647,7 +657,7 @@ pub extern "C" fn dv_hub_report_progress(
         let Some(id) = read_cstr(item_id) else {
             return reply::<()>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.report_progress(&id, position, duration))
+        reply(h.hub().report_progress(&id, position, duration))
     })
 }
 
@@ -665,7 +675,7 @@ pub extern "C" fn dv_hub_report_stopped(
         let Some(id) = read_cstr(item_id) else {
             return reply::<()>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.report_stopped(&id, position, duration))
+        reply(h.hub().report_stopped(&id, position, duration))
     })
 }
 
@@ -682,7 +692,7 @@ pub extern "C" fn dv_hub_set_favorite(
         let Some(id) = read_cstr(item_id) else {
             return reply::<()>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.set_favorite(&id, favorite != 0))
+        reply(h.hub().set_favorite(&id, favorite != 0))
     })
 }
 
@@ -699,7 +709,7 @@ pub extern "C" fn dv_hub_set_watched(
         let Some(id) = read_cstr(item_id) else {
             return reply::<()>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.set_watched(&id, watched != 0))
+        reply(h.hub().set_watched(&id, watched != 0))
     })
 }
 
@@ -715,7 +725,7 @@ pub extern "C" fn dv_hub_remove_record(
         let Some(id) = read_cstr(item_id) else {
             return reply::<()>(Err(MediaError::Other("null item id".into())));
         };
-        reply(h.inner.remove_play_record(&id))
+        reply(h.hub().remove_play_record(&id))
     })
 }
 
@@ -729,7 +739,7 @@ pub extern "C" fn dv_hub_favorites(
         let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<Paged<MediaItem>>(Err(MediaError::Other("null handle".into())));
         };
-        reply(h.inner.favorites(page, page_size))
+        reply(h.hub().favorites(page, page_size))
     })
 }
 
@@ -739,7 +749,7 @@ pub extern "C" fn dv_hub_records(handle: *const HubHandle) -> *mut c_char {
         let Some(h) = (unsafe { handle.as_ref() }) else {
             return reply::<Vec<PlayRecord>>(Err(MediaError::Other("null handle".into())));
         };
-        reply(h.inner.records())
+        reply(h.hub().records())
     })
 }
 
@@ -755,7 +765,7 @@ pub extern "C" fn dv_hub_image_source(
         let Some(p) = read_cstr(path) else {
             return reply::<ImageSource>(Err(MediaError::Other("null image path".into())));
         };
-        reply(h.inner.image_source(&p))
+        reply(h.hub().image_source(&p))
     })
 }
 

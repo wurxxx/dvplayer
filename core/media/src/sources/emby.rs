@@ -263,7 +263,8 @@ impl EmbySource {
         opts: &ListQuery,
     ) -> Result<Paged<MediaItem>> {
         let user = self.user_id()?;
-        let start = ((page.max(1) - 1) * page_size.max(1)).to_string();
+        // 用 i64 算偏移：page/size 都是 i32，极端值相乘会溢出成负数。
+        let start = (i64::from(page.max(1) - 1) * i64::from(page_size.max(1))).to_string();
         let limit = page_size.to_string();
 
         let include_types: Vec<&str> = match opts.kinds.as_slice() {
@@ -520,7 +521,11 @@ impl EmbySource {
                 &format!("/Items/{item_id}/PlaybackInfo"),
                 &serde_json::json!({ "UserId": user }),
             )
-            .unwrap_or_default();
+            .map_err(|err| {
+                // 以前 `unwrap_or_default()` 把错误吞掉，返回一个没有 MediaSourceId、
+                // 没有轨道、时长 0 的「成功」，播放器只能黑屏。
+                MediaError::Other(format!("读取播放信息失败：{err}"))
+            })?;
 
         let media = info.media_sources.first().cloned().unwrap_or_default();
         let media_id = media.id.clone();
@@ -536,12 +541,11 @@ impl EmbySource {
         }
 
         // 静态直连：原文件不转码，容器与轨道都由 mpv 自己解。
+        // token 走 `X-Emby-Token` 请求头（见 PlaySource.headers），
+        // 不拼进 URL：URL 会进日志 / 错误文本，等于把 token 写进文件。
         let mut url = format!("{}/Videos/{item_id}/stream?Static=true", self.base);
         if !media_id.is_empty() {
             url.push_str(&format!("&MediaSourceId={}", percent_encode(&media_id)));
-        }
-        if let Some(token) = &self.token {
-            url.push_str(&format!("&api_key={}", percent_encode(token)));
         }
 
         let streams = if media.media_streams.is_empty() {
@@ -1048,9 +1052,10 @@ impl EmbySource {
     /// 移除观看记录：只清续播点，不动已看标记。
     pub fn remove_play_record(&self, item_id: &str) -> Result<()> {
         let user = self.user_id()?;
+        // 不送 `Played: false`：那会把已看完的集改回未看。
+        // 只把进度清零，UserData 的其他字段保持原样。
         let body = serde_json::json!({
             "PlaybackPositionTicks": 0,
-            "Played": false,
         });
         self.send(
             Method::POST,

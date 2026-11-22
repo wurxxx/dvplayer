@@ -373,7 +373,7 @@ impl FnOsSource {
         Ok(list
             .into_iter()
             .map(|d| {
-                let duration = d.duration.max(0) as u64;
+                let duration = d.duration.unwrap_or(0).max(0) as u64;
                 PlayRecord {
                     item_id: d.guid,
                     title: d.title.clone(),
@@ -393,9 +393,9 @@ impl FnOsSource {
                         .or_else(|| parse_episode_number(&d.title)),
                     poster_path: d.poster.or_else(|| d.poster_list.and_then(|p| p.into_iter().next())),
                     // 飞牛把「看到第几秒」放在 ts，watched 只表示是否看完。
-                    position_seconds: d.ts.max(0) as u64,
+                    position_seconds: d.ts.unwrap_or(0).max(0) as u64,
                     duration_seconds: duration,
-                    last_played: if d.watched_ts > 0 { Some(d.watched_ts) } else { None },
+                    last_played: d.watched_ts.filter(|v| *v > 0),
                 }
             })
             .collect())
@@ -553,9 +553,12 @@ impl FnOsSource {
                 .and_then(|m| m.resolutions.as_ref()),
         );
 
-        let progress = if d.duration > 0 && d.ts > 0 {
-            (d.ts as f64 / d.duration as f64).clamp(0.0, 1.0)
-        } else if d.watched > 0 {
+        let duration = d.duration.unwrap_or(0);
+        let ts = d.ts.unwrap_or(0);
+
+        let progress = if duration > 0 && ts > 0 {
+            (ts as f64 / duration as f64).clamp(0.0, 1.0)
+        } else if d.watched.unwrap_or(0) > 0 {
             1.0
         } else {
             0.0
@@ -578,12 +581,12 @@ impl FnOsSource {
                 .as_deref()
                 .and_then(|s| s.get(..4))
                 .and_then(|s| s.parse().ok()),
-            runtime_seconds: (d.duration > 0).then_some(d.duration as u64),
+            runtime_seconds: (duration > 0).then_some(duration as u64),
             progress,
-            is_favorite: d.is_favorite > 0,
+            is_favorite: d.is_favorite.unwrap_or(0) > 0,
             overview: empty_to_none(d.overview.unwrap_or_default()),
             resolution,
-            last_played: (d.watched_ts > 0).then_some(d.watched_ts),
+            last_played: d.watched_ts.filter(|v| *v > 0),
 
             season_number: d.season_number.filter(|v| *v > 0),
             episode_number,
@@ -653,10 +656,12 @@ impl FnOsSource {
             single_child_guid: Option<String>,
             #[serde(default)]
             media_stream: Option<MediaStreamDto>,
+            // 飞牛这三个也可能直接给 null：用 i32 会让整条详情解析失败，
+            // 表面看是「详情为空」，实际一个 null 字段就全丢了。
             #[serde(default)]
-            is_favorite: i32,
+            is_favorite: Option<i32>,
             #[serde(default)]
-            is_watched: i32,
+            is_watched: Option<i32>,
         }
 
         let path = format!("/item/{}", item_id);
@@ -714,8 +719,8 @@ impl FnOsSource {
             ),
             play_item_id: empty_to_none(d.play_item_guid.unwrap_or_default()),
             single_child_id: empty_to_none(d.single_child_guid.unwrap_or_default()),
-            is_favorite: Some(d.is_favorite > 0),
-            is_watched: Some(d.is_watched > 0),
+            is_favorite: d.is_favorite.map(|v| v > 0),
+            is_watched: d.is_watched.map(|v| v > 0),
         })
     }
 
@@ -736,8 +741,10 @@ impl FnOsSource {
             audio_guid: String,
             #[serde(default)]
             subtitle_guid: String,
+            // 服务端会把这些数值给成 null（list 里的 ts 已是 Option），
+            // 非 Option 会让整条 play_info 解析失败、play_source 直接报错。
             #[serde(default)]
-            ts: i64,
+            ts: Option<i64>,
             #[serde(default)]
             item: Option<DetailDto>,
             #[serde(default)]
@@ -755,7 +762,7 @@ impl FnOsSource {
             #[serde(default)]
             backdrops: String,
             #[serde(default)]
-            duration: i64,
+            duration: Option<i64>,
             #[serde(default)]
             media_stream: Option<StreamMetaDto>,
         }
@@ -853,7 +860,7 @@ impl FnOsSource {
             overview: String::new(),
             posters: String::new(),
             backdrops: String::new(),
-            duration: 0,
+            duration: None,
             media_stream: None,
         });
 
@@ -933,8 +940,8 @@ impl FnOsSource {
             video_guid: empty_to_none(info.video_guid),
             audio_guid: empty_to_none(info.audio_guid),
             subtitle_guid: empty_to_none(info.subtitle_guid),
-            position_seconds: info.ts.max(0) as u64,
-            duration_seconds: detail.duration.max(0) as u64,
+            position_seconds: info.ts.unwrap_or(0).max(0) as u64,
+            duration_seconds: detail.duration.unwrap_or(0).max(0) as u64,
             overview: empty_to_none(detail.overview),
             poster_path: poster,
             resolution,
@@ -1302,6 +1309,17 @@ impl FnOsSource {
                 ),
             })?;
 
+        // 飞牛把业务错误放在 HTTP 200 的 `code` 里（token 过期、无权限等）：
+        // 以前直接读 data，data 为空时界面显示「没有内容」，看不出是登录失效。
+        if envelope.code != 0 {
+            return Err(MediaError::Api {
+                code: envelope.code,
+                msg: envelope
+                    .msg
+                    .unwrap_or_else(|| "飞牛接口返回错误".into()),
+            });
+        }
+
         Ok(envelope)
     }
 }
@@ -1459,17 +1477,17 @@ struct ItemDto {
     #[serde(default)]
     tv_title: Option<String>,
     #[serde(default)]
-    is_favorite: i32,
+    is_favorite: Option<i32>,
     #[serde(default)]
-    watched: i32,
+    watched: Option<i32>,
     #[serde(default)]
-    watched_ts: i64,
+    watched_ts: Option<i64>,
     /// 总时长（秒）。
     #[serde(default)]
-    duration: i64,
+    duration: Option<i64>,
     /// 上次看到的位置（秒）。飞牛的续播进度放在这里。
     #[serde(default)]
-    ts: i64,
+    ts: Option<i64>,
     #[serde(default)]
     media_stream: Option<MediaStreamDto>,
 

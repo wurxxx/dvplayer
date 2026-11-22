@@ -26,7 +26,9 @@ fn main() {
                     item.episode_number,
                     item.runtime_seconds,
                     item.progress,
-                    item.poster_path.as_deref().map(|p| &p[..p.len().min(20)]),
+                    item.poster_path
+                        .as_deref()
+                        .map(|p| p.chars().take(20).collect::<String>()),
                     item.title
                 );
             }

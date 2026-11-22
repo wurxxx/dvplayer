@@ -310,47 +310,61 @@ impl MediaHub {
         let mut groups: Vec<Group> = Vec::new();
 
         // 并发跑，一个源卡住不拖慢整次搜索。
+        let labels: Vec<(usize, String, String)> = self
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(priority, entry)| {
+                (priority, entry.id.clone(), entry.source.name().to_string())
+            })
+            .collect();
+
         let results = std::thread::scope(|scope| {
             let handles: Vec<_> = self
                 .entries
                 .iter()
-                .enumerate()
-                .map(|(priority, entry)| {
-                    scope.spawn(move || (priority, entry, entry.source.search(query)))
-                })
+                .map(|entry| scope.spawn(move || entry.source.search(query)))
                 .collect();
 
             handles
                 .into_iter()
-                .filter_map(|handle| handle.join().ok())
+                .map(|handle| handle.join())
                 .collect::<Vec<_>>()
         });
 
-        for (priority, entry, result) in results {
-            match result {
-                Ok(items) => {
+        for (joined, (priority, source_id, source_name)) in results.into_iter().zip(labels) {
+            match joined {
+                Ok(Ok(items)) => {
                     for mut item in items {
                         // 命中的是集 / 季：按父级归并成一部剧。
                         promote_episode(&mut item);
-                        qualify_items(&entry.id, std::slice::from_mut(&mut item));
+                        qualify_items(&source_id, std::slice::from_mut(&mut item));
 
                         let candidate = Candidate {
-                            source_id: entry.id.clone(),
-                            source_name: entry.source.name().to_string(),
+                            source_id: source_id.clone(),
+                            source_name: source_name.clone(),
                             priority,
                             item,
                         };
                         let key = GroupKey::of(&candidate.item);
-                        match groups.iter_mut().find(|group| group.key.matches(&key)) {
-                            Some(group) => group.push(candidate),
+                        let found = groups.iter_mut().position(|group| group.key.absorb(&key));
+                        match found {
+                            Some(index) => groups[index].push(candidate),
                             None => groups.push(Group::new(key, candidate)),
                         }
                     }
                 }
-                Err(err) => failed.push(SourceFailure {
-                    source_id: entry.id.clone(),
-                    source_name: entry.source.name().to_string(),
+                Ok(Err(err)) => failed.push(SourceFailure {
+                    source_id,
+                    source_name,
                     error: err.to_string(),
+                }),
+                // 某个源的搜索线程 panic 了：不能当成「没有结果」，
+                // 否则用户看到的是「本服务器没有这部片」。
+                Err(_) => failed.push(SourceFailure {
+                    source_id,
+                    source_name,
+                    error: "搜索时源内部错误".to_string(),
                 }),
             }
         }
@@ -502,9 +516,9 @@ impl MediaHub {
         let (entry, raw) = self.route(person_id)?;
         let mut items = entry.source.person_works(raw)?;
 
-        for item in &mut items {
-            item.poster_path = qualify_opt(&entry.id, item.poster_path.take());
-        }
+        // 和列表/搜索一样把 id、parent_id、海报都加源前缀：壳点「演员作品」时
+        // 直接把这个 id 交给 detail()，没有前缀会在路由处报「缺少源前缀」。
+        qualify_items(&entry.id, &mut items);
 
         Ok(items)
     }
@@ -602,6 +616,8 @@ impl MediaHub {
             |entry| entry.source.records(),
             |entry, mut record| {
                 record.item_id = qualify(&entry.id, &record.item_id);
+                // 续播要拿 parent_id 去列选集：不加前缀核心不认，壳侧还得自己补。
+                record.parent_id = qualify_opt(&entry.id, record.parent_id);
                 record.poster_path = qualify_opt(&entry.id, record.poster_path);
                 record
             },
@@ -726,6 +742,36 @@ impl GroupKey {
             && self.kind == other.kind
             && compatible(self.year, other.year)
             && compatible(self.episodes, other.episodes)
+    }
+
+    /// 作为「组键」比较时用：缺的一边先用候选补齐，再判断。
+    /// 以前年份缺失等于永远匹配，先到的无年份条目会把同名的不同年份电影全吞进来；
+    /// 补齐后，后面遇到明确不同年份的片子会新开一组。
+    ///
+    /// 判完才写回：`position(|g| g.key.absorb(&key))` 会对沿途每个分组都试一遍，
+    /// 失败也把候选的年份/集数留在组键上，后面本该合并的条目就会新开一组（结果重复）。
+    fn absorb(&mut self, other: &Self) -> bool {
+        if self.title != other.title || self.kind != other.kind {
+            return false;
+        }
+
+        let year = if self.year.is_none() { other.year } else { self.year };
+        if !compatible(year, other.year) {
+            return false;
+        }
+
+        let episodes = if self.episodes.is_none() {
+            other.episodes
+        } else {
+            self.episodes
+        };
+        if !compatible(episodes, other.episodes) {
+            return false;
+        }
+
+        self.year = year;
+        self.episodes = episodes;
+        true
     }
 }
 
@@ -886,6 +932,36 @@ impl Group {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key(title: &str, year: Option<i32>, episodes: Option<i32>) -> GroupKey {
+        GroupKey {
+            title: crate::text::normalize_key(title),
+            year,
+            kind: MediaKind::Series,
+            episodes,
+        }
+    }
+
+    #[test]
+    fn absorb_does_not_pollute_group_on_failed_match() {
+        // 组里已有「10 集」，候选是另一个年份、12 集：不该合并。
+        let mut group = key("running man", None, Some(10));
+        let candidate = key("running man", Some(2023), Some(12));
+        assert!(!group.absorb(&candidate));
+
+        // 上次失败不能把 2023 留在组键上：同一年、10 集的条目仍应合并。
+        let later = key("running man", Some(2023), Some(10));
+        assert!(group.absorb(&later));
+        assert_eq!(group.year, Some(2023));
+        assert_eq!(group.episodes, Some(10));
+    }
+
+    #[test]
+    fn absorb_keeps_conflicting_year_apart() {
+        let mut group = key("same name", Some(2023), None);
+        assert!(!group.absorb(&key("same name", Some(2024), None)));
+        assert_eq!(group.year, Some(2023));
+    }
 
     #[test]
     fn qualify_and_split_roundtrip() {
