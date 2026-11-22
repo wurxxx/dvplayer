@@ -145,33 +145,6 @@ DvPlayer-0.1.0-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
 绿色版：把 zip 解到空目录，直接 `DvPlayer.exe --screenshot <目录>`；不要只复制
 exe，`mpv\`、`*.dll`、`runtimeconfig.json` 都要在。
 
-### MSIX（可选）
-
-`apps/windows/packaging/build-msix.ps1` 仍保留：用 NuGet 里的
-`Microsoft.Windows.SDK.BuildTools` 取 `makeappx` / `signtool`，生成自签名
-`.msix`，`-UpdateUrl` 还会写一份 `.appinstaller` 更新源。
-
-注意本机是**非交互 SSH（Session 0）**：`Add-AppxPackage` 会在 PLM 初始化阶段
-报 `0x80070005`，用户桌面里双击安装通常没这个问题。远程验证可以改用：
-
-```powershell
-# 管理员
-Add-AppxProvisionedPackage -Online -PackagePath <msix> -SkipLicense
-# 等 Status 从 DeploymentInProgress 变成 Ok
-Get-AppxPackage -AllUsers Luckywur.DvPlayer
-```
-
-自签名证书在 `%LOCALAPPDATA%\dvplayer\msix\`（pfx + 密码 + cer，不入库），
-首次安装前要把 cer 放进 `Cert:\LocalMachine\TrustedPeople`：
-
-```powershell
-Import-Certificate -FilePath <cer> -CertStoreLocation Cert:\LocalMachine\TrustedPeople
-```
-
-自动更新（`.appinstaller` 的 `OnLaunch` / `AutomaticBackgroundTask`）需要把
-`.appinstaller` 和 `.msix` 放到 https 地址；目前仓库只负责生成，发布地址定了
-再接。
-
 ## 无桌面环境的 UI 回归
 
 ```powershell
