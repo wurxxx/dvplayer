@@ -15,6 +15,9 @@ struct SourcesPage: View {
     @State private var proxy = ""
     @State private var saving = false
 
+    /// 拖动时鼠标下的目标源，用来画落点高亮。
+    @State private var dropTargetId: String?
+
     private var isEditing: Bool { editing != nil }
 
     /// 表单里的源已经在设置里（编辑）；新增时 `editing` 也非空，但那是草稿。
@@ -103,9 +106,28 @@ struct SourcesPage: View {
                 } else {
                     ForEach(state.settings.sources) { config in
                         // 拖到另一个源上就占它的位置，顺序写回设置。
+                        let isTarget = dropTargetId == config.id
                         sourceCard(config)
+                            .scaleEffect(isTarget ? 1.015 : 1)
+                            .animation(.easeOut(duration: 0.12), value: isTarget)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: Theme.radiusCard)
+                                    .stroke(Theme.accent, lineWidth: isTarget ? 1.5 : 0)
+                            }
                             .onDrag { NSItemProvider(object: config.id as NSString) }
-                            .onDrop(of: [.text], isTargeted: nil) { providers in
+                            .onDrop(
+                                of: [.text],
+                                isTargeted: Binding(
+                                    get: { dropTargetId == config.id },
+                                    set: { targeted in
+                                        if targeted {
+                                            dropTargetId = config.id
+                                        } else if dropTargetId == config.id {
+                                            dropTargetId = nil
+                                        }
+                                    }
+                                )
+                            ) { providers in
                                 dropSource(providers, onto: config.id)
                             }
                     }

@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using DvPlayer.Dialogs;
 using DvPlayer.Services;
 
@@ -226,6 +228,8 @@ public partial class SourcesPage : Page
     private Point _sourceDragStart;
     private SourceCard? _sourceDragCard;
     private bool _sourceDragging;
+    private FrameworkElement? _dragSourceCardVisual;
+    private FrameworkElement? _dragHoverCardVisual;
 
     private void OnSourceGridPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -249,8 +253,113 @@ public partial class SourcesPage : Page
             return;
         }
 
-        _sourceDragging = true;
-        Cursor = Cursors.SizeAll;
+        if (!_sourceDragging)
+        {
+            _sourceDragging = true;
+            Cursor = Cursors.SizeAll;
+            _dragSourceCardVisual = CardContainer(_sourceDragCard.Id);
+            if (_dragSourceCardVisual is not null)
+            {
+                _dragSourceCardVisual.Opacity = 0.5;
+            }
+        }
+
+        UpdateHoverVisual(DataContextAt<SourceCard>(SourceGrid, position));
+    }
+
+    /// <summary>拖动时把鼠标下的目标卡片略微放大，给一个明确的落点。</summary>
+    private void UpdateHoverVisual(SourceCard? hover)
+    {
+        if (hover is null || hover.Id == _sourceDragCard?.Id)
+        {
+            RestoreCardVisual(_dragHoverCardVisual);
+            _dragHoverCardVisual = null;
+            return;
+        }
+
+        var container = CardContainer(hover.Id);
+        if (ReferenceEquals(container, _dragHoverCardVisual) || container is null)
+        {
+            return;
+        }
+
+        RestoreCardVisual(_dragHoverCardVisual);
+        container.RenderTransformOrigin = new Point(0.5, 0.5);
+        container.RenderTransform = new ScaleTransform(1.025, 1.025);
+        _dragHoverCardVisual = container;
+    }
+
+    private static void RestoreCardVisual(FrameworkElement? element)
+    {
+        if (element is null)
+        {
+            return;
+        }
+
+        element.Opacity = 1;
+        element.RenderTransform = Transform.Identity;
+    }
+
+    private FrameworkElement? CardContainer(string id)
+    {
+        for (var i = 0; i < SourceGrid.Items.Count; i++)
+        {
+            if (SourceGrid.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement element &&
+                element.DataContext is SourceCard card && card.Id == id)
+            {
+                return element;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>记录每张卡片重排前的位置，用来做位移动画。</summary>
+    private Dictionary<string, Point> CaptureCardPositions()
+    {
+        var map = new Dictionary<string, Point>();
+        for (var i = 0; i < SourceGrid.Items.Count; i++)
+        {
+            if (SourceGrid.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement element &&
+                element.DataContext is SourceCard card)
+            {
+                map[card.Id] = element.TranslatePoint(new Point(0, 0), SourceGrid);
+            }
+        }
+
+        return map;
+    }
+
+    /// <summary>重排后从旧位置滑到新位置，而不是瞬间跳过去。</summary>
+    private void AnimateReorder(Dictionary<string, Point> before)
+    {
+        SourceGrid.UpdateLayout();
+        for (var i = 0; i < SourceGrid.Items.Count; i++)
+        {
+            if (SourceGrid.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement element ||
+                element.DataContext is not SourceCard card ||
+                !before.TryGetValue(card.Id, out var old))
+            {
+                continue;
+            }
+
+            var now = element.TranslatePoint(new Point(0, 0), SourceGrid);
+            var dx = old.X - now.X;
+            var dy = old.Y - now.Y;
+            if (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5)
+            {
+                continue;
+            }
+
+            var transform = new TranslateTransform(dx, dy);
+            element.RenderTransform = transform;
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var duration = TimeSpan.FromMilliseconds(240);
+            transform.BeginAnimation(TranslateTransform.XProperty,
+                new DoubleAnimation(0, duration) { EasingFunction = ease });
+            transform.BeginAnimation(TranslateTransform.YProperty,
+                new DoubleAnimation(0, duration) { EasingFunction = ease });
+        }
     }
 
     private void OnSourceGridPreviewMouseUp(object sender, MouseButtonEventArgs e)
@@ -260,6 +369,10 @@ public partial class SourcesPage : Page
         _sourceDragging = false;
         _sourceDragCard = null;
         Cursor = Cursors.Arrow;
+        RestoreCardVisual(_dragSourceCardVisual);
+        RestoreCardVisual(_dragHoverCardVisual);
+        _dragSourceCardVisual = null;
+        _dragHoverCardVisual = null;
 
         if (!dragging || source is null)
         {
@@ -304,6 +417,7 @@ public partial class SourcesPage : Page
             return;
         }
 
+        var before = CaptureCardPositions();
         var item = sources[from];
         sources.RemoveAt(from);
         sources.Insert(to, item);
@@ -311,6 +425,7 @@ public partial class SourcesPage : Page
 
         RefreshSources();
         (Window.GetWindow(this) as MainWindow)?.RefreshSourceStatus();
+        Dispatcher.BeginInvoke(() => AnimateReorder(before), DispatcherPriority.Loaded);
     }
 
     /// <summary>左侧列表拖动排序后，这里跟着换顺序。</summary>

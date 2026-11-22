@@ -256,14 +256,17 @@ final class AppState: ObservableObject {
             return
         }
 
-        let item = settings.sources.remove(at: from)
-        settings.sources.insert(item, at: to)
-        settings.save()
+        // 带动画换位：卡片 / 侧栏条目之间平滑让位，不是瞬间跳过去。
+        withAnimation(.easeInOut(duration: 0.24)) {
+            let item = settings.sources.remove(at: from)
+            settings.sources.insert(item, at: to)
 
-        // 侧栏直接读 connections，顺序也跟着换，不用等重连。
-        let order = Dictionary(uniqueKeysWithValues:
-            settings.sources.enumerated().map { ($1.id, $0) })
-        connections.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
+            // 侧栏直接读 connections，顺序也跟着换，不用等重连。
+            let order = Dictionary(uniqueKeysWithValues:
+                settings.sources.enumerated().map { ($1.id, $0) })
+            connections.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
+        }
+        settings.save()
     }
 
     /// 库里列表 + 观看记录 + 收藏（收藏页要用）。

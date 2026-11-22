@@ -85,6 +85,8 @@ struct ShellView: View {
 
 private struct SidebarView: View {
     @EnvironmentObject private var state: AppState
+    /// 拖动时鼠标下的服务器，用来画落点高亮。
+    @State private var dropTargetId: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -188,12 +190,26 @@ private struct SidebarView: View {
                         ? Theme.faint
                         : (connection.ok ? Theme.success : Theme.danger),
                     sourceKind: connection.kind,
-                    size: 13.5
+                    size: 13.5,
+                    highlighted: dropTargetId == connection.id
                 ) {
                     state.openSource(connection.id)
                 }
+                .animation(.easeOut(duration: 0.12), value: dropTargetId)
                 .onDrag { NSItemProvider(object: connection.id as NSString) }
-                .onDrop(of: [.text], isTargeted: nil) { providers in
+                .onDrop(
+                    of: [.text],
+                    isTargeted: Binding(
+                        get: { dropTargetId == connection.id },
+                        set: { targeted in
+                            if targeted {
+                                dropTargetId = connection.id
+                            } else if dropTargetId == connection.id {
+                                dropTargetId = nil
+                            }
+                        }
+                    )
+                ) { providers in
                     guard let provider = providers.first else { return false }
                     _ = provider.loadObject(ofClass: NSString.self) { object, _ in
                         guard let id = object as? String else { return }
@@ -222,6 +238,8 @@ private struct SidebarItem: View {
     /// 服务器项：名字左边放这个源自己的图标，连接状态点叠在图标右下角。
     var sourceKind: String?
     var size: CGFloat = 14
+    /// 拖动时的落点高亮。
+    var highlighted: Bool = false
     let action: () -> Void
 
     @State private var hovering = false
@@ -265,9 +283,14 @@ private struct SidebarItem: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: Theme.radiusControl)
-                .fill(selected ? Color.white.opacity(0.07)
-                               : (hovering ? Color.white.opacity(0.04) : .clear))
+                .fill(highlighted ? Theme.accent.opacity(0.16)
+                      : (selected ? Color.white.opacity(0.07)
+                                  : (hovering ? Color.white.opacity(0.04) : .clear)))
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.radiusControl)
+                .stroke(Theme.accent, lineWidth: highlighted ? 1 : 0)
+        }
         .contentShape(Rectangle())
         .onTapGesture { action() }
         .onHover { hovering = $0 }

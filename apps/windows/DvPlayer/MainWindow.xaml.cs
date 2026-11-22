@@ -6,6 +6,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shell;
 using System.Windows.Threading;
 using DvPlayer.Controls;
@@ -1385,6 +1386,8 @@ public partial class MainWindow : FluentWindow
     private SourceNavItem? _sourceNavDragItem;
     private bool _sourceNavDragging;
     private bool _sourceDraggedNow;
+    private FrameworkElement? _navDragVisual;
+    private FrameworkElement? _navHoverVisual;
 
     private void OnSourceNavPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -1412,11 +1415,101 @@ public partial class MainWindow : FluentWindow
         // 进入拖动状态：松手时再落位，免得每移动一格就重建一次列表。
         if (!_sourceNavDragging)
         {
-            Trace.Write("navdrag start " + _sourceNavDragItem.Id);
+            _sourceNavDragging = true;
+            Cursor = Cursors.SizeAll;
+            _navDragVisual = NavContainer(_sourceNavDragItem.Id);
+            if (_navDragVisual is not null)
+            {
+                _navDragVisual.Opacity = 0.5;
+            }
         }
 
-        _sourceNavDragging = true;
-        Cursor = Cursors.SizeAll;
+        // 鼠标下的目标项稍微放大，给一个落点提示。
+        var hover = DataContextAt<SourceNavItem>(SourceNav, position);
+        if (hover is null || hover.Id == _sourceNavDragItem?.Id)
+        {
+            RestoreNavVisual(_navHoverVisual);
+            _navHoverVisual = null;
+        }
+        else if (!ReferenceEquals(_navHoverVisual, NavContainer(hover.Id)))
+        {
+            RestoreNavVisual(_navHoverVisual);
+            _navHoverVisual = NavContainer(hover.Id);
+            if (_navHoverVisual is not null)
+            {
+                _navHoverVisual.RenderTransformOrigin = new Point(0, 0.5);
+                _navHoverVisual.RenderTransform = new ScaleTransform(1.02, 1.02);
+            }
+        }
+    }
+
+    private static void RestoreNavVisual(FrameworkElement? element)
+    {
+        if (element is null)
+        {
+            return;
+        }
+
+        element.Opacity = 1;
+        element.RenderTransform = Transform.Identity;
+    }
+
+    private FrameworkElement? NavContainer(string id)
+    {
+        for (var i = 0; i < SourceNav.Items.Count; i++)
+        {
+            if (SourceNav.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement element &&
+                element.DataContext is SourceNavItem item && item.Id == id)
+            {
+                return element;
+            }
+        }
+
+        return null;
+    }
+
+    private Dictionary<string, Point> CaptureNavPositions()
+    {
+        var map = new Dictionary<string, Point>();
+        for (var i = 0; i < SourceNav.Items.Count; i++)
+        {
+            if (SourceNav.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement element &&
+                element.DataContext is SourceNavItem item)
+            {
+                map[item.Id] = element.TranslatePoint(new Point(0, 0), SourceNav);
+            }
+        }
+
+        return map;
+    }
+
+    private void AnimateNavReorder(Dictionary<string, Point> before)
+    {
+        SourceNav.UpdateLayout();
+        for (var i = 0; i < SourceNav.Items.Count; i++)
+        {
+            if (SourceNav.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement element ||
+                element.DataContext is not SourceNavItem item ||
+                !before.TryGetValue(item.Id, out var old))
+            {
+                continue;
+            }
+
+            var now = element.TranslatePoint(new Point(0, 0), SourceNav);
+            var dy = old.Y - now.Y;
+            if (Math.Abs(dy) < 0.5)
+            {
+                continue;
+            }
+
+            var transform = new TranslateTransform(0, dy);
+            element.RenderTransform = transform;
+            transform.BeginAnimation(TranslateTransform.YProperty,
+                new DoubleAnimation(0, TimeSpan.FromMilliseconds(240))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                });
+        }
     }
 
     private void OnSourceNavPreviewMouseUp(object sender, MouseButtonEventArgs e)
@@ -1426,6 +1519,10 @@ public partial class MainWindow : FluentWindow
         _sourceNavDragging = false;
         _sourceNavDragItem = null;
         Cursor = Cursors.Arrow;
+        RestoreNavVisual(_navDragVisual);
+        RestoreNavVisual(_navHoverVisual);
+        _navDragVisual = null;
+        _navHoverVisual = null;
 
         if (!dragging || source is null)
         {
@@ -1458,6 +1555,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        var before = CaptureNavPositions();
         var item = sources[from];
         sources.RemoveAt(from);
         sources.Insert(to, item);
@@ -1465,6 +1563,7 @@ public partial class MainWindow : FluentWindow
 
         RefreshSourceStatus();
         (ContentFrame.Content as SourcesPage)?.ReloadOrder();
+        Dispatcher.BeginInvoke(() => AnimateNavReorder(before), DispatcherPriority.Loaded);
     }
 
     /// <summary>鼠标位置下面的数据项（沿视觉树往上找 DataContext）。</summary>
