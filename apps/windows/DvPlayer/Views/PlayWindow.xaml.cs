@@ -72,9 +72,15 @@ public partial class PlayWindow : Window
     private readonly string? _coreItemId;
 
     private MediaInfoDto? _mediaInfo;
+    /// <summary>媒体信息请求已经结束（成功与否），字幕自动选择不用再等它。</summary>
+    private bool _mediaInfoLoaded;
+    /// <summary>已经记录过的选中字幕，避免每次 track-list 都刷一行日志。</summary>
+    private int _loggedSubtitle = -1;
     private readonly List<MpvTrack> _audioTracks = new();
     private readonly List<MpvTrack> _subtitleTracks = new();
-    private bool _tracksApplied;
+    /// <summary>音轨 / 字幕各自套用一次。字幕轨常常比音轨晚到，不能合并成一个标志。</summary>
+    private bool _audioPrefsApplied;
+    private bool _subtitlePrefsApplied;
 
     private double _position;
     private double _duration;
@@ -1346,7 +1352,8 @@ public partial class PlayWindow : Window
 
         try
         {
-            _tracksApplied = false;
+            _audioPrefsApplied = false;
+            _subtitlePrefsApplied = false;
             _openingPaused = PauseUntilFirstFrame;
             _mpv.Start(_hwnd, launch);
 
@@ -1742,6 +1749,15 @@ public partial class PlayWindow : Window
 
         _subtitleTracks.AddRange(subtitles);
 
+        // 有一条字幕被选中时记一笔，用来确认自动选字幕真的生效。
+        if (_subtitleTracks.FirstOrDefault(t => t.Selected) is { } chosen &&
+            chosen.Id != _loggedSubtitle)
+        {
+            _loggedSubtitle = chosen.Id;
+            Trace.Write($"subtitle selected id={chosen.Id} lang={chosen.Language} " +
+                        $"title={chosen.Title}");
+        }
+
         // 刚 sub-add 进来的弹幕：绑定成第二字幕，别抢主字幕。
         if (danmaku is not null)
         {
@@ -1759,13 +1775,9 @@ public partial class PlayWindow : Window
             }
         }
 
-        // 只在第一次拿到轨道清单时套用详情页的选择，之后是用户在播放页里改。
-        // 没有音轨的文件也要能套用字幕选择，所以两个清单任一非空即可。
-        if (!_tracksApplied && (_audioTracks.Count > 0 || _subtitleTracks.Count > 0))
-        {
-            _tracksApplied = true;
-            ApplyTrackPrefs();
-        }
+        // 每次轨道清单更新都试一次，内部按音轨 / 字幕各自只套用一次。
+        // 外挂字幕常比音轨晚到，字幕没出现时不能把「已套用」标记掉。
+        ApplyTrackPrefs();
     }
 
     /// <summary>详情页选了音轨 / 字幕，起播后立刻切过去。</summary>
@@ -1776,28 +1788,102 @@ public partial class PlayWindow : Window
             return;
         }
 
-        if (TrackPrefs.Audio(_itemId) is { } audio && audio >= 0 && audio < _audioTracks.Count)
+        if (!_audioPrefsApplied && _audioTracks.Count > 0)
         {
-            _ipc.Command("set_property", "aid", _audioTracks[audio].Id);
+            _audioPrefsApplied = true;
+            if (TrackPrefs.Audio(_itemId) is { } audio && audio >= 0 && audio < _audioTracks.Count)
+            {
+                _ipc.Command("set_property", "aid", _audioTracks[audio].Id);
+            }
         }
 
-        if (TrackPrefs.Subtitle(_itemId) is { } subtitle)
+        if (_subtitlePrefsApplied)
         {
-            _ipc.Command("set_property", "sid", subtitle == TrackPrefs.SubtitleOff
-                ? "no"
-                : subtitle >= 0 && subtitle < _subtitleTracks.Count
-                    ? _subtitleTracks[subtitle].Id
-                    : "auto");
+            return;
         }
-        else if (_subtitleTracks.FirstOrDefault(t => TrackPrefs.IsChinese(t.Language, t.Title))
+
+        // 明确选了「关闭」：不依赖字幕轨，直接关。
+        var saved = TrackPrefs.Subtitle(_itemId);
+        if (saved == TrackPrefs.SubtitleOff)
+        {
+            _subtitlePrefsApplied = true;
+            _ipc.Command("set_property", "sid", "no");
+            return;
+        }
+
+        // 字幕轨还没出现（外挂字幕 / 原盘字幕索引较慢）：等下一次轨道清单。
+        if (_subtitleTracks.Count == 0)
+        {
+            return;
+        }
+
+        // 没手动选时，自动选择要读服务器的字幕表；媒体信息还在路上就先等，
+        // 否则会把「已套用」标记掉，等表到了也不再选。
+        var server = _mediaInfo?.Subtitles;
+        if (saved is null && server is null && !_mediaInfoLoaded)
+        {
+            return;
+        }
+
+        _subtitlePrefsApplied = true;
+
+        // 播放页里手动选过：按服务器字幕表的下标对到 mpv 轨。
+        if (saved is { } manual)
+        {
+            _ipc.Command("set_property", "sid", SubtitleSid(manual));
+            Trace.Write($"subtitle saved index={manual} sid={SubtitleSid(manual)}");
+            return;
+        }
+
+        // 没手动选：和详情页同一套规则（简体优先 / 中文 / 默认）。
+        // 原盘 remux 的 mpv 轨常常只报 `HDMV PGS_SUBTITLE`、语言为空，
+        // 光按 mpv 的 lang 猜不到中文，得借服务器的字幕表（ffprobe 读到语言）。
+        if (server is { Count: > 0 })
+        {
+            var index = TrackPrefs.ResolveSubtitle(_itemId, server);
+            Trace.Write($"subtitle resolve index={index} server={server.Count} " +
+                        $"mpv={_subtitleTracks.Count}");
+            if (index != TrackPrefs.SubtitleOff)
+            {
+                _ipc.Command("set_property", "sid", SubtitleSid(index));
+                return;
+            }
+        }
+
+        // 服务器也没给出可识别的字幕：mpv 自己带了语言信息就选中文兜底。
+        if (_subtitleTracks.FirstOrDefault(t => TrackPrefs.IsChinese(t.Language, t.Title))
                  is { } chinese)
         {
-            // 详情页没来得及读媒体信息就起播（续播、从播放页切集）时的兜底：
-            // 有中文字幕就自动打开，不用用户每次手动选。
             _ipc.Command("set_property", "sid", chinese.Id);
             Trace.Write($"subtitle auto zh id={chinese.Id} lang={chinese.Language} " +
                         $"title={chinese.Title}");
         }
+    }
+
+    /// <summary>
+    /// 服务器字幕表的下标 → mpv 的 sid。轨序一致时直接用下标；
+    /// 数量不同（比如弹幕 ASS 混进来）时按语言 / 标题找，找不到就让 mpv 自己选。
+    /// </summary>
+    private object SubtitleSid(int index)
+    {
+        if (index >= 0 && index < _subtitleTracks.Count)
+        {
+            return _subtitleTracks[index].Id;
+        }
+
+        if (_mediaInfo?.Subtitles is { } server && index >= 0 && index < server.Count)
+        {
+            var wanted = server[index];
+            var match = _subtitleTracks.FirstOrDefault(t =>
+                wanted.Language is not null &&
+                string.Equals(t.Language, wanted.Language, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                return match.Id;
+            }
+        }
+
+        return "auto";
     }
 
     private void UpdatePositionUi()
@@ -1901,8 +1987,12 @@ public partial class PlayWindow : Window
         }
 
         _mediaInfo = result.Ok ? result.Data : null;
+        _mediaInfoLoaded = true;
         UpdateChips();
         UpdateMediaInfoText();
+
+        // 字幕的自动选择要读服务器的语言表，媒体信息晚到就再套一次。
+        ApplyTrackPrefs();
     }
 
     /// <summary>
@@ -3681,10 +3771,13 @@ public partial class PlayWindow : Window
         _duration = 0;
         _bufferedPosition = 0;
         _eof = false;
-        _tracksApplied = false;
+        _audioPrefsApplied = false;
+        _subtitlePrefsApplied = false;
+        _loggedSubtitle = -1;
         _audioTracks.Clear();
         _subtitleTracks.Clear();
         _mediaInfo = null;
+        _mediaInfoLoaded = false;
         _sinceReport = 0;
         _pendingIntroSkip = null;
         _danmakuFile = null;

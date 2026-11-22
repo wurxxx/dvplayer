@@ -232,6 +232,11 @@ public partial class SourcesPage : Page
     private FrameworkElement? _dragSourceCardVisual;
     private FrameworkElement? _dragHoverCardVisual;
     private Point _dragGhostOffset;
+    /// <summary>
+    /// 拖动开始时各卡片槽位（按位置记录，不随重排动画变化）。
+    /// 落点按槽位算，卡片滑动时命中的旧位置不会造成来回跳。
+    /// </summary>
+    private List<Rect>? _cardSlots;
 
     private void OnSourceGridPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -259,6 +264,7 @@ public partial class SourcesPage : Page
         {
             _sourceDragging = true;
             Cursor = Cursors.SizeAll;
+            _cardSlots = CaptureCardSlots();
             _dragSourceCardVisual = CardContainer(_sourceDragCard.Id);
             if (_dragSourceCardVisual is not null)
             {
@@ -273,11 +279,31 @@ public partial class SourcesPage : Page
         Canvas.SetLeft(DragGhost, layerPoint.X - _dragGhostOffset.X);
         Canvas.SetTop(DragGhost, layerPoint.Y - _dragGhostOffset.Y);
 
-        // 经过别的源就实时让位：它先换过去，后面的卡片用位移动画补上。
-        var hover = DataContextAt<SourceCard>(SourceGrid, position);
-        if (hover is not null && hover.Id != _sourceDragCard.Id)
+        // 经过别的源就实时让位：按最近槽位判断，鼠标停在某一格时
+        // 换过去后那一格正好是拖着的这张卡，不会再来回换。
+        if (_cardSlots is { Count: > 0 } slots)
         {
-            MoveSource(_sourceDragCard.Id, hover.Id);
+            var nearest = 0;
+            var best = double.MaxValue;
+            for (var i = 0; i < slots.Count; i++)
+            {
+                var bounds = slots[i];
+                var dx = position.X - (bounds.Left + bounds.Width / 2);
+                var dy = position.Y - (bounds.Top + bounds.Height / 2);
+                var distance = dx * dx + dy * dy;
+                if (distance < best)
+                {
+                    best = distance;
+                    nearest = i;
+                }
+            }
+
+            if (nearest >= 0 && nearest < SourceGrid.Items.Count &&
+                SourceGrid.Items[nearest] is SourceCard target &&
+                target.Id != _sourceDragCard.Id)
+            {
+                MoveSource(_sourceDragCard.Id, target.Id);
+            }
         }
     }
 
@@ -391,6 +417,7 @@ public partial class SourcesPage : Page
         var source = _sourceDragCard;
         _sourceDragging = false;
         _sourceDragCard = null;
+        _cardSlots = null;
         Cursor = Cursors.Arrow;
         RestoreCardVisual(_dragSourceCardVisual);
         RestoreCardVisual(_dragHoverCardVisual);
@@ -403,7 +430,7 @@ public partial class SourcesPage : Page
             return;
         }
 
-        var target = DataContextAt<SourceCard>(SourceGrid, e.GetPosition(SourceGrid));
+        var target = NearestCardAt(e.GetPosition(SourceGrid));
         if (target is null || target.Id == source.Id)
         {
             return;
@@ -413,21 +440,88 @@ public partial class SourcesPage : Page
         e.Handled = true;
     }
 
-    /// <summary>鼠标位置下面的数据项（沿视觉树往上找 DataContext）。</summary>
-    private static T? DataContextAt<T>(UIElement root, Point point) where T : class
+    /// <summary>记录拖动开始时每张卡片的位置，作为固定的落点槽位。</summary>
+    private List<Rect> CaptureCardSlots()
     {
-        var hit = root.InputHitTest(point) as DependencyObject;
-        while (hit is not null)
+        var slots = new List<Rect>();
+        for (var i = 0; i < SourceGrid.Items.Count; i++)
         {
-            if (hit is FrameworkElement { DataContext: T value })
+            if (SourceGrid.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement element)
             {
-                return value;
+                continue;
             }
 
-            hit = VisualTreeHelper.GetParent(hit);
+            var topLeft = element.TranslatePoint(new Point(0, 0), SourceGrid);
+            slots.Add(new Rect(topLeft, new Size(element.ActualWidth, element.ActualHeight)));
         }
 
-        return null;
+        return slots;
+    }
+
+    /// <summary>离这个点最近的槽位现在是哪张卡。</summary>
+    private SourceCard? NearestCardAt(Point point)
+    {
+        if (_cardSlots is not { Count: > 0 } slots)
+        {
+            return null;
+        }
+
+        var nearest = -1;
+        var best = double.MaxValue;
+        for (var i = 0; i < slots.Count; i++)
+        {
+            var bounds = slots[i];
+            var dx = point.X - (bounds.Left + bounds.Width / 2);
+            var dy = point.Y - (bounds.Top + bounds.Height / 2);
+            var distance = dx * dx + dy * dy;
+            if (distance < best)
+            {
+                best = distance;
+                nearest = i;
+            }
+        }
+
+        return nearest >= 0 && nearest < SourceGrid.Items.Count
+            ? SourceGrid.Items[nearest] as SourceCard
+            : null;
+    }
+
+    /// <summary>
+    /// 自检：指针停在第三张卡片不动，换过去后应该认出「就是自己」，不会来回跳。
+    /// </summary>
+    public void RunDragStabilityTest()
+    {
+        SourceGrid.UpdateLayout();
+        if (SourceGrid.Items.Count < 3 || SourceGrid.Items[0] is not SourceCard drag)
+        {
+            Services.Trace.Write("drag test card skipped");
+            return;
+        }
+
+        var before = string.Join(" | ", AppServices.Instance.Settings.Sources.Select(x => x.Name));
+        _cardSlots = CaptureCardSlots();
+        if (_cardSlots.Count < 3)
+        {
+            Services.Trace.Write("drag test card no slots");
+            _cardSlots = null;
+            return;
+        }
+
+        var bounds = _cardSlots[2];
+        var point = new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
+        var first = NearestCardAt(point);
+        if (first is not null)
+        {
+            MoveSource(drag.Id, first.Id);
+        }
+
+        SourceGrid.UpdateLayout();
+        var second = NearestCardAt(point);
+        var after = string.Join(" | ", AppServices.Instance.Settings.Sources.Select(x => x.Name));
+        Services.Trace.Write($"drag test card before={before} first={first?.Id} " +
+                             $"second={second?.Id} drag={drag.Id} order={after} " +
+                             $"stable={second?.Id == drag.Id}");
+        _cardSlots = null;
     }
 
     /// <summary>把 id 挪到 targetId 的位置，顺序写回设置并刷新两侧列表。</summary>
@@ -446,10 +540,24 @@ public partial class SourcesPage : Page
         sources.RemoveAt(from);
         sources.Insert(to, item);
         AppServices.Instance.Settings.Save();
+        Services.Trace.Write("source order " + string.Join(" | ", sources.Select(x => x.Name)));
 
         RefreshSources();
         (Window.GetWindow(this) as MainWindow)?.RefreshSourceStatus();
-        Dispatcher.BeginInvoke(() => AnimateReorder(before), DispatcherPriority.Loaded);
+        Dispatcher.BeginInvoke(() =>
+        {
+            AnimateReorder(before);
+
+            // 刷新会重建卡片容器，拖动中的那张要重新压暗。
+            if (_sourceDragging && _sourceDragCard is { } dragged)
+            {
+                _dragSourceCardVisual = CardContainer(dragged.Id);
+                if (_dragSourceCardVisual is not null)
+                {
+                    _dragSourceCardVisual.Opacity = 0.35;
+                }
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     /// <summary>左侧列表拖动排序后，这里跟着换顺序。</summary>

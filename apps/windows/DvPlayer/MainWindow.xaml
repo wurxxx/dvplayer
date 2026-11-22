@@ -95,10 +95,11 @@
                    PreviewMouseLeftButtonDown="OnSourceNavPreviewMouseDown"
                    PreviewMouseMove="OnSourceNavPreviewMouseMove"
                    PreviewMouseLeftButtonUp="OnSourceNavPreviewMouseUp"
+                   LostMouseCapture="OnSourceNavLostMouseCapture"
                    SelectionChanged="OnSourceSelectionChanged">
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Grid Tag="{Binding Id}" MouseLeftButtonUp="OnSourceItemClick" Cursor="Hand">
+                <Grid Tag="{Binding Id}" Cursor="Hand">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />

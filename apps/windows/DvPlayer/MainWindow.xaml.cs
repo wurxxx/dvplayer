@@ -124,6 +124,39 @@ public partial class MainWindow : FluentWindow
             RefreshSourceStatus();
         }
 
+        // --subtitle-test <itemId>：验证详情页/播放器共用的字幕自动选择结果。
+        if (ArgumentAfter("--subtitle-test") is { Length: > 0 } subtitleItem &&
+            AppServices.Instance.Core is { } subtitleCore)
+        {
+            var info = subtitleCore.MediaInfo(subtitleItem);
+            if (info.Ok && info.Data is { } data)
+            {
+                var index = TrackPrefs.ResolveSubtitle(subtitleItem, data.Subtitles);
+                var name = index >= 0 && index < data.Subtitles.Count
+                    ? TrackPrefs.SubtitleName(data.Subtitles[index])
+                    : "关闭";
+                Trace.Write($"subtitle test item={subtitleItem} subs={data.Subtitles.Count} " +
+                            $"index={index} name={name}");
+            }
+            else
+            {
+                Trace.Write($"subtitle test item={subtitleItem} failed={info.Error}");
+            }
+
+            Close();
+            return;
+        }
+
+        // --drag-test：模拟「指针停在同一格」两次，验证不会 A/B 来回换。
+        if (Environment.GetCommandLineArgs().Contains("--drag-test"))
+        {
+            SourceNav.UpdateLayout();
+            RunDragStabilityTest();
+            (ContentFrame.Content as SourcesPage)?.RunDragStabilityTest();
+            Close();
+            return;
+        }
+
         // --reorder-test：直接调用拖动排序的落位逻辑，验证设置顺序真的写回。
         if (Environment.GetCommandLineArgs().Contains("--reorder-test"))
         {
@@ -1363,38 +1396,70 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        OpenSource(item.Id);
-    }
-
-    // 点的是已经选中的源时 SelectionChanged 不触发，所以点击也单独接一下。
-    private void OnSourceItemClick(object sender, MouseButtonEventArgs e)
-    {
-        // 刚拖完松手也会走到这里，别顺手把源打开。
-        if (_sourceDraggedNow)
+        // 按下鼠标时 ListBox 会立刻选中：这时候还不能进源，
+        // 不然一按下去拖动就开始加载页面，拖拽和点击也会打架。
+        // 记下来，等松开时确认不是拖动再打开。
+        if (_navPointerDown)
         {
+            _navPendingOpenId = item.Id;
             return;
         }
 
-        if (sender is FrameworkElement { Tag: string id })
-        {
-            OpenSource(id);
-        }
+        OpenSource(item.Id);
     }
 
-    /// <summary>左侧服务器列表拖动排序：按下某项、移动超过阈值、松手时换位置。</summary>
+    /// <summary>左侧服务器列表拖动排序：拖动经过就实时让位，松手不再等待。</summary>
     private Point _sourceNavDragStart;
     private SourceNavItem? _sourceNavDragItem;
     private bool _sourceNavDragging;
-    private bool _sourceDraggedNow;
     private FrameworkElement? _navDragVisual;
-    private FrameworkElement? _navHoverVisual;
+    /// <summary>鼠标按下但还没松开：这段时间不打开源。</summary>
+    private bool _navPointerDown;
+    /// <summary>按下时指针下的源，松开且没拖动就打开它。</summary>
+    private string? _navPendingOpenId;
+    /// <summary>
+    /// 拖动开始时各槽位的纵向范围（按列表位置记录，不随动画变化）。
+    /// 用槽位算落点，就不会因为列表正在滑动而命中旧位置、来回跳。
+    /// </summary>
+    private List<(double Top, double Bottom)>? _navSlots;
 
     private void OnSourceNavPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         _sourceNavDragStart = e.GetPosition(SourceNav);
         _sourceNavDragItem = (e.OriginalSource as FrameworkElement)?.DataContext as SourceNavItem;
         _sourceNavDragging = false;
-        Trace.Write("navdrag down " + (_sourceNavDragItem?.Id ?? "null"));
+        _navPointerDown = _sourceNavDragItem is not null;
+        _navPendingOpenId = _sourceNavDragItem?.Id;
+
+        if (_sourceNavDragItem is null)
+        {
+            return;
+        }
+
+        _navSlots = CaptureNavSlots();
+
+        // ListBox 在按下时就会选中并触发 SelectionChanged（进而想打开源）。
+        // 拖动本来就不该改选中项，这里直接吃掉按下事件，松手时再判断是点还是拖。
+        SourceNav.CaptureMouse();
+        e.Handled = true;
+        Trace.Write("navdrag down " + _sourceNavDragItem.Id);
+    }
+
+    private List<(double Top, double Bottom)> CaptureNavSlots()
+    {
+        var slots = new List<(double Top, double Bottom)>();
+        for (var i = 0; i < SourceNav.Items.Count; i++)
+        {
+            if (SourceNav.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement element)
+            {
+                continue;
+            }
+
+            var top = element.TranslatePoint(new Point(0, 0), SourceNav).Y;
+            slots.Add((top, top + element.ActualHeight));
+        }
+
+        return slots;
     }
 
     private void OnSourceNavPreviewMouseMove(object sender, MouseEventArgs e)
@@ -1412,7 +1477,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        // 进入拖动状态：松手时再落位，免得每移动一格就重建一次列表。
+        // 一进入拖动就压暗原项，明确「在拖这一项」。
         if (!_sourceNavDragging)
         {
             _sourceNavDragging = true;
@@ -1424,23 +1489,78 @@ public partial class MainWindow : FluentWindow
             }
         }
 
-        // 鼠标下的目标项稍微放大，给一个落点提示。
-        var hover = DataContextAt<SourceNavItem>(SourceNav, position);
-        if (hover is null || hover.Id == _sourceNavDragItem?.Id)
+        // 落点按「固定槽位」算：鼠标在哪一格就换到那一格。换位后
+        // 鼠标仍在同一格，命中的正好是拖着的这一项，自然不会再换回来。
+        if (_navSlots is not { Count: > 0 } slots)
         {
-            RestoreNavVisual(_navHoverVisual);
-            _navHoverVisual = null;
+            return;
         }
-        else if (!ReferenceEquals(_navHoverVisual, NavContainer(hover.Id)))
+
+        if (NavTargetAt(position.Y) is { } targetId && targetId != _sourceNavDragItem.Id)
         {
-            RestoreNavVisual(_navHoverVisual);
-            _navHoverVisual = NavContainer(hover.Id);
-            if (_navHoverVisual is not null)
+            MoveSourceOrder(_sourceNavDragItem.Id, targetId);
+        }
+    }
+
+    /// <summary>这个纵坐标落在哪一格，那一格现在是哪个源。</summary>
+    private string? NavTargetAt(double y)
+    {
+        if (_navSlots is not { Count: > 0 } slots)
+        {
+            return null;
+        }
+
+        var nearest = -1;
+        var best = double.MaxValue;
+        for (var i = 0; i < slots.Count; i++)
+        {
+            var center = (slots[i].Top + slots[i].Bottom) / 2;
+            var distance = Math.Abs(y - center);
+            if (distance < best)
             {
-                _navHoverVisual.RenderTransformOrigin = new Point(0, 0.5);
-                _navHoverVisual.RenderTransform = new ScaleTransform(1.02, 1.02);
+                best = distance;
+                nearest = i;
             }
         }
+
+        var sources = AppServices.Instance.Settings.Sources;
+        return nearest >= 0 && nearest < sources.Count ? sources[nearest].Id : null;
+    }
+
+    /// <summary>自检：指针停在第三格不动，换过去之后应该认出「就是自己」，不会来回跳。</summary>
+    private void RunDragStabilityTest()
+    {
+        if (SourceNav.Items.Count < 3)
+        {
+            Trace.Write("drag test nav skipped");
+            return;
+        }
+
+        var before = string.Join(" | ", AppServices.Instance.Settings.Sources.Select(s => s.Name));
+        _sourceNavDragItem = SourceNav.Items[0] as SourceNavItem;
+        _navSlots = CaptureNavSlots();
+        if (_navSlots.Count < 3 || _sourceNavDragItem is null)
+        {
+            Trace.Write("drag test nav no slots");
+            _navSlots = null;
+            return;
+        }
+
+        var y = (_navSlots[2].Top + _navSlots[2].Bottom) / 2;
+        var first = NavTargetAt(y);
+        if (first is not null)
+        {
+            MoveSourceOrder(_sourceNavDragItem.Id, first);
+        }
+
+        SourceNav.UpdateLayout();
+        var second = NavTargetAt(y);
+        var after = string.Join(" | ", AppServices.Instance.Settings.Sources.Select(s => s.Name));
+        Trace.Write($"drag test nav before={before} first={first} second={second} " +
+                    $"drag={_sourceNavDragItem.Id} order={after} " +
+                    $"stable={second == _sourceNavDragItem.Id}");
+        _navSlots = null;
+        _sourceNavDragItem = null;
     }
 
     private static void RestoreNavVisual(FrameworkElement? element)
@@ -1486,6 +1606,7 @@ public partial class MainWindow : FluentWindow
     private void AnimateNavReorder(Dictionary<string, Point> before)
     {
         SourceNav.UpdateLayout();
+        var moved = 0;
         for (var i = 0; i < SourceNav.Items.Count; i++)
         {
             if (SourceNav.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement element ||
@@ -1509,6 +1630,12 @@ public partial class MainWindow : FluentWindow
                 {
                     EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
                 });
+            moved++;
+        }
+
+        if (moved > 0)
+        {
+            Trace.Write($"nav flip items={moved}");
         }
     }
 
@@ -1516,32 +1643,60 @@ public partial class MainWindow : FluentWindow
     {
         var dragging = _sourceNavDragging;
         var source = _sourceNavDragItem;
+        var pendingOpen = _navPendingOpenId;
         _sourceNavDragging = false;
         _sourceNavDragItem = null;
+        _navPointerDown = false;
+        _navPendingOpenId = null;
+        _navSlots = null;
         Cursor = Cursors.Arrow;
         RestoreNavVisual(_navDragVisual);
-        RestoreNavVisual(_navHoverVisual);
         _navDragVisual = null;
-        _navHoverVisual = null;
 
-        if (!dragging || source is null)
+        if (SourceNav.IsMouseCaptured)
         {
+            SourceNav.ReleaseMouseCapture();
+        }
+
+        // 点一下（没拖动）：打开这个源。
+        if (!dragging)
+        {
+            if (pendingOpen is not null)
+            {
+                OpenSource(pendingOpen);
+            }
+
             return;
         }
 
-        // 这次 MouseUp 来自拖拽，不要再当成「点开源」。
-        _sourceDraggedNow = true;
-        Dispatcher.BeginInvoke(() => _sourceDraggedNow = false);
-
-        var target = DataContextAt<SourceNavItem>(SourceNav, e.GetPosition(SourceNav));
-        Trace.Write($"navdrag up dragging={dragging} from={source.Id} to={target?.Id ?? "null"}");
-        if (target is null || target.Id == source.Id)
-        {
-            return;
-        }
-
-        MoveSourceOrder(source.Id, target.Id);
         e.Handled = true;
+        Trace.Write($"navdrag up from={source?.Id ?? "null"}");
+    }
+
+    /// <summary>鼠标捕获丢了（拖出窗口松手）：收拾一下视觉状态，别一直卡在半透明。</summary>
+    private void OnSourceNavLostMouseCapture(object sender, MouseEventArgs e)
+    {
+        // 列表换位会重建项容器，偶尔把鼠标捕获弄丢：还按着就继续抓着。
+        if (_navPointerDown && Mouse.LeftButton == MouseButtonState.Pressed)
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (_navPointerDown && !SourceNav.IsMouseCaptured)
+                {
+                    SourceNav.CaptureMouse();
+                }
+            });
+            return;
+        }
+
+        _sourceNavDragging = false;
+        _sourceNavDragItem = null;
+        _navPointerDown = false;
+        _navPendingOpenId = null;
+        _navSlots = null;
+        Cursor = Cursors.Arrow;
+        RestoreNavVisual(_navDragVisual);
+        _navDragVisual = null;
     }
 
     /// <summary>把 dragId 挪到 targetId 的位置，顺序写回设置，两边列表一起刷新。</summary>
@@ -1560,27 +1715,24 @@ public partial class MainWindow : FluentWindow
         sources.RemoveAt(from);
         sources.Insert(to, item);
         AppServices.Instance.Settings.Save();
+        Trace.Write("nav order " + string.Join(" | ", sources.Select(x => x.Name)));
 
         RefreshSourceStatus();
         (ContentFrame.Content as SourcesPage)?.ReloadOrder();
-        Dispatcher.BeginInvoke(() => AnimateNavReorder(before), DispatcherPriority.Loaded);
-    }
-
-    /// <summary>鼠标位置下面的数据项（沿视觉树往上找 DataContext）。</summary>
-    private static T? DataContextAt<T>(UIElement root, Point point) where T : class
-    {
-        var hit = root.InputHitTest(point) as DependencyObject;
-        while (hit is not null)
+        Dispatcher.BeginInvoke(() =>
         {
-            if (hit is FrameworkElement { DataContext: T value })
+            AnimateNavReorder(before);
+
+            // 刷新会重建列表项，拖动中的那一项要重新压暗。
+            if (_sourceNavDragging && _sourceNavDragItem is { } dragged)
             {
-                return value;
+                _navDragVisual = NavContainer(dragged.Id);
+                if (_navDragVisual is not null)
+                {
+                    _navDragVisual.Opacity = 0.5;
+                }
             }
-
-            hit = VisualTreeHelper.GetParent(hit);
-        }
-
-        return null;
+        }, DispatcherPriority.Loaded);
     }
 
     /// <summary>给设置页用：加完本地源直接跳到它的首页。</summary>
@@ -1599,6 +1751,7 @@ public partial class MainWindow : FluentWindow
 
         settings.LastSourceId = id;
         settings.Save();
+        Trace.Write("open source id=" + id);
 
         // 源首页不是导航项：清掉菜单高亮，侧栏只留这个源点亮。
         // 先换页面再刷新侧栏：RefreshSourceNav 靠当前页是不是源首页来决定高亮。
