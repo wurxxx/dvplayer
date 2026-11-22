@@ -199,12 +199,9 @@ final class AppState: ObservableObject {
         coreError = nil
         settings.save()
 
-        // 先把页面切到源首页：库列表 / 记录 / 收藏在后台补，
-        // 别让整个启动卡在「服务器」页等这几条请求（慢源可能十几秒）。
-        if case .sources = page, let first = result.first(where: \.ok) {
-            page = .home(first.id)
-        }
-
+        // 连接已经完成，别再显示「正在连接…」：下面刷新库列表 / 记录可能还要几秒。
+        // 启动后停在「服务器」页，菜单选中哪一项，右边就是哪一页。
+        connecting = false
         await refresh()
     }
 

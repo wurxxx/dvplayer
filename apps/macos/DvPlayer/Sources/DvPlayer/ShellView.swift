@@ -156,7 +156,7 @@ private struct SidebarView: View {
     private var nav: some View {
         VStack(spacing: 2) {
             SidebarItem(icon: "server.rack", title: "服务器",
-                        selected: state.page == .sources || isHomePage) {
+                        selected: state.page == .sources) {
                 state.page = .sources
             }
 
@@ -177,20 +177,13 @@ private struct SidebarView: View {
         }
     }
 
-    /// 当前页是不是某个源的首屏。源首页属于「服务器」这一块。
-    private var isHomePage: Bool {
-        if case .home = state.page { return true }
-        return false
-    }
-
     private var serverNav: some View {
         VStack(spacing: 2) {
             ForEach(state.connections) { connection in
                 SidebarItem(
                     icon: "rectangle.stack",
                     title: connection.name,
-                    // 列表只作入口，不当「当前页」指示：源首页由上面的「服务器」菜单点亮。
-                    selected: false,
+                    selected: state.page == .home(connection.id),
                     dot: connection.ok ? Theme.success : Theme.danger,
                     sourceKind: connection.kind,
                     size: 13.5

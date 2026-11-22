@@ -86,7 +86,7 @@
                 <ComboBox x:Name="StartPageBox" Grid.Column="1" Width="140" Height="34"
                           Style="{StaticResource Select}" VerticalAlignment="Center"
                           SelectionChanged="OnSettingChanged">
-                  <ComboBoxItem Content="服务器首页" Tag="libraries" />
+                  <ComboBoxItem Content="服务器" Tag="sources" />
                   <ComboBoxItem Content="记录" Tag="records" />
                   <ComboBoxItem Content="搜索" Tag="search" />
                 </ComboBox>

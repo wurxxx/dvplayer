@@ -108,25 +108,10 @@ public partial class MainWindow : FluentWindow
         // 先定当前源，服务器首页才知道该拉哪个源；顺便把左下角版本显示出来。
         RefreshSourceStatus();
 
-        // 没有源时直接去「服务器」页添加，服务器首页没什么可看的。
-        if (start == "libraries" && AppServices.Instance.Settings.Sources.Count == 0)
-        {
-            start = "sources";
-        }
-
         Trace.Write($"startup page tag={start} setting={AppServices.Instance.Settings.StartPage}");
 
-        // 服务器首页不是菜单项：页面直接开，同时把侧栏「服务器」菜单点亮。
-        // 源列表里的源不再显示选中态，用户看到的是「服务器」这一项。
-        if (start == "libraries")
-        {
-            SelectNavSilently("sources");
-            Navigate("libraries");
-        }
-        else
-        {
-            SelectNav(start);
-        }
+        // 启动页都是真实菜单项：选中哪一项，右边就是哪一页。
+        SelectNav(start);
 
         // 截图巡检时不受「启动时自动连接」开关影响，否则回归会拍到空页面。
         if (AppServices.Instance.Settings.AutoConnect || shotDir is not null)
@@ -820,15 +805,12 @@ public partial class MainWindow : FluentWindow
     private static string StartTag()
     {
         var page = AppServices.Instance.Settings.StartPage;
-        return page is "sources" or "records" or "search" or "settings"
-            ? page
-            : "libraries";
+        // 老配置里的 "libraries"（服务器首页）现在统一落到「服务器」页：
+        // 菜单选中哪一项，右边就该是哪一页，不能选中「服务器」却显示某个源的首页。
+        return page is "records" or "search" or "settings" ? page : "sources";
     }
 
     private bool _syncingSources;
-
-    /// <summary>静默选中侧栏项：只改高亮，不触发页面导航。</summary>
-    private bool _suppressNav;
 
     private static string? ScreenshotDir() => ArgumentAfter("--screenshot");
 
@@ -1215,27 +1197,6 @@ public partial class MainWindow : FluentWindow
     /// <summary>从页面里跳到侧栏的某一项，并同步高亮。</summary>
     public void NavigateTo(string tag) => SelectNav(tag);
 
-    /// <summary>只改侧栏高亮，不切页面。启动和打开源首页时用。</summary>
-    private void SelectNavSilently(string tag)
-    {
-        var item = Nav.Items.OfType<ListBoxItem>()
-            .FirstOrDefault(i => (i.Tag as string) == tag);
-        if (item is null)
-        {
-            return;
-        }
-
-        _suppressNav = true;
-        try
-        {
-            Nav.SelectedItem = item;
-        }
-        finally
-        {
-            _suppressNav = false;
-        }
-    }
-
     /// <summary>
     /// 点的是已经高亮的菜单项时 SelectionChanged 不触发，单独补一次导航。
     /// 启动后「服务器」是亮的但页面在源首页，点它应该回到服务器列表。
@@ -1351,9 +1312,12 @@ public partial class MainWindow : FluentWindow
 
         _syncingSources = true;
         SourceNav.ItemsSource = items;
-        // 源列表只作入口，不当「当前页」指示器：源首页由侧栏「服务器」菜单点亮。
-        // 这里也别按 LastSourceId 选中，否则启动后高亮的是列表里的某个源。
-        SourceNav.SelectedItem = null;
+        // 停在源首页时点亮这个源；在服务器 / 记录 / 搜索页时这里不会有选中态
+        // （清掉选中由 OnNavSelectionChanged / OpenSource 负责）。
+        var onSourceHome = ContentFrame?.Content is LibrariesPage;
+        SourceNav.SelectedItem = onSourceHome
+            ? items.FirstOrDefault(i => i.Id == selected)
+            : null;
         _syncingSources = false;
     }
 
@@ -1406,10 +1370,11 @@ public partial class MainWindow : FluentWindow
         settings.LastSourceId = id;
         settings.Save();
 
-        // 源首页不是导航项：页面直接开，菜单留在「服务器」上（源属于服务器）。
-        SelectNavSilently("sources");
-        ClearSourceSelection();
+        // 源首页不是导航项：清掉菜单高亮，侧栏只留这个源点亮。
+        // 先换页面再刷新侧栏：RefreshSourceNav 靠当前页是不是源首页来决定高亮。
+        Nav.SelectedItem = null;
         ContentFrame.Navigate(new LibrariesPage());
+        RefreshSourceNav();
     }
 
     private sealed class SourceNavItem
@@ -1436,11 +1401,6 @@ public partial class MainWindow : FluentWindow
     {
         // XAML 里第一个项 IsSelected="True"，会在 ContentFrame 构造之前触发一次。
         if (ContentFrame is null)
-        {
-            return;
-        }
-
-        if (_suppressNav)
         {
             return;
         }
