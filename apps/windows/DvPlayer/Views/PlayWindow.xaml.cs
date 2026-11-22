@@ -67,6 +67,9 @@ public partial class PlayWindow : Window
     /// <summary>蓝光原盘：进度存本地、不查媒体信息、不拼选集，mpv 要带 --bluray-device。</summary>
     private readonly bool _isLocalDisc;
     private readonly string? _discIsoPath;
+    /// <summary>原盘的标题表：右侧「选集」面板里逐个标题切换。</summary>
+    private readonly IReadOnlyList<BluRayTitle> _discTitles;
+    private readonly string? _discDisplayName;
 
     /// <summary>从媒体库点开的本地原盘：条目在核心里，进度要回写核心。</summary>
     private readonly string? _coreItemId;
@@ -219,7 +222,9 @@ public partial class PlayWindow : Window
         string? seriesTitle = null,
         bool localDisc = false,
         string? discIsoPath = null,
-        string? coreItemId = null)
+        string? coreItemId = null,
+        IReadOnlyList<BluRayTitle>? discTitles = null,
+        string? discDisplayName = null)
     {
         _current = source;
         _startSeconds = startSeconds;
@@ -229,6 +234,8 @@ public partial class PlayWindow : Window
         _isLocalDisc = localDisc;
         _discIsoPath = discIsoPath;
         _coreItemId = coreItemId;
+        _discTitles = discTitles ?? Array.Empty<BluRayTitle>();
+        _discDisplayName = discDisplayName;
 
         var settings = AppServices.Instance.Settings;
         _aspect = PlayerAspectExtensions.Parse(settings.VideoAspect);
@@ -445,20 +452,90 @@ public partial class PlayWindow : Window
             return null;
         }
 
-        BluRayTitle? title = titleNumber is { } wanted
-            ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted) ?? probe.Titles[0]
+        var title = titleNumber is { } wanted
+            ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted)
             : null;
 
-        // 只有一条标题就别多一步：直接播。多标题（正片 + 花絮）才让用户选。
-        title ??= probe.Titles.Count == 1
-            ? probe.Titles[0]
-            : DiscTitlesDialog.Pick(owner, isoPath, probe);
+        // 直接播默认标题（最长的正片），不再弹选择框；
+        // 其它标题在播放器右侧的「标题」面板里切，和选集是同一套交互。
+        title ??= DefaultDiscTitle(probe);
         if (title is null)
         {
+            if (!silent)
+            {
+                ConfirmDialog.Alert(owner, "无法打开原盘", "这张盘没有可播放的标题。");
+            }
+
             return null;
         }
 
-        return OpenIso(owner, isoPath, title, probe.DiscName, startOverride, coreItemId);
+        Trace.Write($"disc default title={title.TitleNumber} mpls={title.Mpls} " +
+                    $"dur={title.DurationSeconds:0} of {probe.Titles.Count}");
+        return OpenIso(owner, isoPath, title, probe, startOverride, coreItemId);
+    }
+
+    /// <summary>没指定标题时播哪个：最长的正片；没有正片就最长的标题。</summary>
+    private static BluRayTitle? DefaultDiscTitle(BluRayProbe probe)
+    {
+        var features = probe.Titles.Where(probe.IsFeature).ToList();
+        return (features.Count > 0 ? features : probe.Titles.ToList())
+            .OrderByDescending(item => item.DurationSeconds)
+            .ThenBy(item => item.TitleNumber)
+            .FirstOrDefault();
+    }
+
+    /// <summary>原盘标题的条目 id：每个标题各存一份本地进度。</summary>
+    public static string DiscItemId(string isoPath, BluRayTitle title) =>
+        $"iso:{Path.GetFileNameWithoutExtension(isoPath)}:mpls{title.Mpls}";
+
+    /// <summary>拼一个原盘标题的播放源（URL 是 `bd://mpls/&lt;n&gt;`）。</summary>
+    public static PlaySourceDto DiscSource(string isoPath, BluRayTitle title, string display,
+        double start = 0) => new(
+        DiscItemId(isoPath, title),
+        $"{display} · 标题 {title.TitleNumber}",
+        $"bd://mpls/{title.Mpls}",
+        new List<HttpHeaderDto>(),
+        true,
+        false,
+        string.Empty,
+        null,
+        null,
+        null,
+        (long)Math.Max(0, start),
+        (long)Math.Max(0, title.DurationSeconds),
+        null,
+        null,
+        null,
+        null,
+        false,
+        null,
+        null,
+        new List<AudioTrackDto>(),
+        new List<SubtitleTrackDto>());
+
+    /// <summary>右侧「选集」面板里的原盘标题：正片在前（长的先），花絮按标题号。</summary>
+    public static List<PlayEpisode> DiscPlaylist(string isoPath, BluRayProbe probe)
+    {
+        var features = probe.Titles
+            .Where(probe.IsFeature)
+            .OrderByDescending(item => item.DurationSeconds)
+            .ToList();
+        var extras = probe.Titles
+            .Where(item => !probe.IsFeature(item))
+            .OrderBy(item => item.TitleNumber)
+            .ToList();
+        var display = string.IsNullOrWhiteSpace(probe.DiscName)
+            ? Path.GetFileNameWithoutExtension(isoPath)
+            : probe.DiscName!;
+
+        return features.Concat(extras)
+            .Select(item => new PlayEpisode(
+                DiscItemId(isoPath, item),
+                $"标题 {item.TitleNumber}",
+                $"{(probe.IsFeature(item) ? "正片" : "花絮")} · {item.DurationLabel}",
+                null,
+                $"{display} · 标题 {item.TitleNumber}"))
+            .ToList();
     }
 
     /// <summary>
@@ -469,43 +546,24 @@ public partial class PlayWindow : Window
         Window? owner,
         string isoPath,
         BluRayTitle title,
-        string? discName = null,
+        BluRayProbe? probe = null,
         double? startOverride = null,
         string? coreItemId = null)
     {
         var name = Path.GetFileNameWithoutExtension(isoPath);
-        var display = string.IsNullOrWhiteSpace(discName) ? name : discName!;
-        var itemId = coreItemId ?? $"iso:{name}:mpls{title.Mpls}";
-        var start = startOverride ?? (coreItemId is null ? LocalProgress.Get(itemId) : 0);
-
-        var source = new PlaySourceDto(
-            itemId,
-            $"{display} · 标题 {title.TitleNumber}",
-            $"bd://mpls/{title.Mpls}",
-            new List<HttpHeaderDto>(),
-            true,
-            false,
-            string.Empty,
-            null,
-            null,
-            null,
-            (long)Math.Max(0, start),
-            (long)Math.Max(0, title.DurationSeconds),
-            null,
-            null,
-            null,
-            null,
-            false,
-            null,
-            null,
-            new List<AudioTrackDto>(),
-            new List<SubtitleTrackDto>());
+        var display = string.IsNullOrWhiteSpace(probe?.DiscName) ? name : probe!.DiscName!;
+        var start = startOverride ??
+            (coreItemId is null ? LocalProgress.Get(DiscItemId(isoPath, title)) : 0);
+        var source = DiscSource(isoPath, title, display, start);
+        var playlist = probe is { Titles.Count: > 1 } ? DiscPlaylist(isoPath, probe) : null;
 
         Trace.Write($"disc open iso={Path.GetFileName(isoPath)} title={title.TitleNumber} " +
-                    $"mpls={title.Mpls} dur={title.DurationSeconds:0} resume={start:0}");
+                    $"mpls={title.Mpls} dur={title.DurationSeconds:0} resume={start:0} " +
+                    $"titles={playlist?.Count ?? 1}");
 
-        var window = new PlayWindow(source, start > 0 ? start : 0, null, null,
-            localDisc: true, discIsoPath: isoPath, coreItemId: coreItemId);
+        var window = new PlayWindow(source, start > 0 ? start : 0, playlist, null,
+            localDisc: true, discIsoPath: isoPath, coreItemId: coreItemId,
+            discTitles: probe?.Titles, discDisplayName: display);
         // 先用占位状态挡住 Show() 触发的 OnLoaded，BeginPlayback 再正式起 mpv。
         window._started = true;
         window.AttachSurface(owner);
@@ -1681,6 +1739,15 @@ public partial class PlayWindow : Window
     /// </summary>
     private void AdvanceOrClose()
     {
+        // 原盘的标题是正片 / 花絮，不是剧集：播完这一段就收工，
+        // 不自动跳到下一个标题。想换标题在右侧面板里点。
+        if (_isLocalDisc)
+        {
+            Trace.Write($"eof disc {_itemId} -> close (titles={_playlist.Count})");
+            Close();
+            return;
+        }
+
         var index = _playlist.FindIndex(episode => episode.Id == _itemId);
         if (index >= 0 && index + 1 < _playlist.Count)
         {
@@ -2290,7 +2357,7 @@ public partial class PlayWindow : Window
     {
         if (_playlist.Count == 0)
         {
-            ShowToast("这条没有选集");
+            ShowToast(_isLocalDisc ? "这条没有标题" : "这条没有选集");
             return;
         }
 
@@ -2303,13 +2370,13 @@ public partial class PlayWindow : Window
         var target = index + delta;
         if (target < 0)
         {
-            ShowToast("已经是第一集");
+            ShowToast(_isLocalDisc ? "已经是第一个标题" : "已经是第一集");
             return;
         }
 
         if (target >= _playlist.Count)
         {
-            ShowToast("已经是最后一集");
+            ShowToast(_isLocalDisc ? "已经是最后一个标题" : "已经是最后一集");
             return;
         }
 
@@ -2765,7 +2832,8 @@ public partial class PlayWindow : Window
         if (index >= 0 && index + 1 < _playlist.Count)
         {
             var next = _playlist[index + 1];
-            choices.Add(($"下一集：{next.Badge}", false, () => _ = SwitchToAsync(next.Id)));
+            var nextLabel = _isLocalDisc ? "下一个标题" : "下一集";
+            choices.Add(($"{nextLabel}：{next.Badge}", false, () => _ = SwitchToAsync(next.Id)));
         }
 
         choices.Add(("-", false, NoOp));
@@ -3668,8 +3736,11 @@ public partial class PlayWindow : Window
             return;
         }
 
-        EpisodePanelTitle.Text = "选集";
-        EpisodePanelMeta.Text = $"{_playlist.Count} 集";
+        EpisodePanelTitle.Text = _isLocalDisc ? "标题" : "选集";
+        EpisodePanelMeta.Text = _isLocalDisc
+            ? $"{_playlist.Count} 个标题"
+            : $"{_playlist.Count} 集";
+        EpisodesButton.ToolTip = _isLocalDisc ? "标题" : "选集";
 
         var rows = _playlist.Select(episode =>
         {
@@ -3757,7 +3828,28 @@ public partial class PlayWindow : Window
     /// <summary>切集：重新取播放源，在同一个窗口里重启 mpv，UI 状态跟着重置。</summary>
     private async Task SwitchToAsync(string itemId)
     {
-        var (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
+        PlaySourceDto? source;
+        string? error = null;
+
+        if (_isLocalDisc && _discIsoPath is { Length: > 0 } isoPath)
+        {
+            // 原盘标题不查核心：换一条 bd://mpls 地址，mpv 继续读同一张盘。
+            var discTitle = _discTitles.FirstOrDefault(item => DiscItemId(isoPath, item) == itemId);
+            if (discTitle is null)
+            {
+                ShowToast("找不到这个标题");
+                return;
+            }
+
+            // 切走之前把当前标题的进度记下，下次切回来还能续。
+            ReportProgress(_position, EffectiveDuration);
+            source = DiscSource(isoPath, discTitle, _discDisplayName ?? "", 0);
+        }
+        else
+        {
+            (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
+        }
+
         if (source is null)
         {
             ShowToast(error ?? "这一集打不开");
@@ -4520,6 +4612,12 @@ public partial class PlayWindow : Window
 
     /// <summary>截图巡检用：打开右侧选集面板。</summary>
     public void ShowEpisodesForShot() => OnEpisodesClick(this, new RoutedEventArgs());
+
+    /// <summary>截图巡检用：右侧面板里有多少条（原盘标题 / 剧集集数）。</summary>
+    public int EpisodeCount => _playlist.Count;
+
+    /// <summary>截图巡检用：当前播放源的标题。</summary>
+    public string CurrentTitle => _current.Title;
 
     /// <summary>截图巡检用：选集面板的可见性和尺寸。</summary>
     public string DescribeEpisodesPanel() =>

@@ -518,7 +518,7 @@ public partial class MainWindow : FluentWindow
         double? startOverride = null, bool silent = false)
         => PlayWindow.OpenDiscAsync(this, isoPath, titleNumber, startOverride, null, silent);
 
-    /// <summary>自检：把标题选择框单独截一张。</summary>
+    /// <summary>自检：读标题列表，打开播放器右侧的「标题」面板截一张。</summary>
     private async Task CaptureDiscListAsync(string isoPath, string dir)
     {
         Directory.CreateDirectory(dir);
@@ -528,16 +528,26 @@ public partial class MainWindow : FluentWindow
                     $"titles={probe?.Titles.Count ?? 0} err={error ?? "-"}");
         if (probe is null)
         {
+            Application.Current.Shutdown();
             return;
         }
 
-        var dialog = new DiscTitlesDialog();
-        dialog.Configure(isoPath, probe);
-        dialog.Owner = this;
-        dialog.Show();
-        await Task.Delay(900);
-        UiCapture.Save(dialog, Path.Combine(dir, "disc-titles.png"));
-        dialog.Close();
+        Trace.Write("disc list titles " + string.Join("; ", probe.Titles.Select(title =>
+            $"{(probe.IsFeature(title) ? "feature" : "extra")}:{title.TitleNumber}" +
+            $"/{title.Mpls}/{title.DurationLabel}")));
+
+        var player = await OpenDiscAsync(isoPath, null, null, silent: true);
+        if (player is not null)
+        {
+            await Task.Delay(12000);
+            player.ShowChromeForShot();
+            player.ShowEpisodesForShot();
+            await Task.Delay(900);
+            Trace.Write("disc list panel " + player.DescribeEpisodesPanel());
+            UiCapture.Save(player, Path.Combine(dir, "disc-titles.png"));
+            player.Close();
+        }
+
         Application.Current.Shutdown();
     }
 
@@ -566,6 +576,23 @@ public partial class MainWindow : FluentWindow
         await Task.Delay(500);
         UiCapture.Save(player, Path.Combine(dir, "disc-overlay.png"));
         player.SetShotBackground(false);
+
+        // 右侧「标题」面板：和选集是同一套面板，正片 / 花絮都在里面。
+        player.ShowEpisodesForShot();
+        await Task.Delay(800);
+        Trace.Write($"disc panel {player.DescribeEpisodesPanel()} title={player.CurrentTitle}");
+        UiCapture.Save(player, Path.Combine(dir, "disc-titles.png"));
+
+        // 切到第二个标题，确认原盘内部换标题不查核心、直接换 bd:// 地址。
+        if (player.EpisodeCount > 1)
+        {
+            player.PickEpisodeForShot(1);
+            await Task.Delay(12000);
+            Trace.Write($"disc switched {player.DescribeFeatureState()} " +
+                        $"title={player.CurrentTitle}");
+            UiCapture.SaveScreen(player, Path.Combine(dir, "disc-title-2.png"));
+        }
+
         player.Close();
     }
 
