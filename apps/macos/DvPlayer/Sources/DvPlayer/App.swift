@@ -100,6 +100,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // 自检：`DVPLAYER_FIND=<关键词>` 连上后搜一下，打印结果 id。
+        // 远程验证播放 / 字幕时用它拿真实 itemId，不用手动翻页面。
+        if let query = ProcessInfo.processInfo.environment["DVPLAYER_FIND"], !query.isEmpty {
+            Task { @MainActor in
+                await Self.waitForCore()
+                do {
+                    if let core = AppState.shared.core {
+                        // `@fav` 扫收藏、`@scan` 扫各媒体库前 100 条（远程找带字幕的样片），
+                        // 其它是普通搜索。
+                        var items: [MediaItem]
+                        if query == "@fav" {
+                            items = try await core.favorites(pageSize: 100).items
+                        } else if query == "@scan" {
+                            items = []
+                            for library in try await core.libraries() {
+                                let page = try await core.items(library.id, pageSize: 100)
+                                NSLog("[FindTest] library=\(library.title) "
+                                      + "cat=\(library.category) n=\(page.items.count)")
+                                items += page.items
+                            }
+                        } else {
+                            items = try await core.search(query).items
+                        }
+                        for item in items {
+                            NSLog("[FindTest] \(item.id) | \(item.title) | \(item.kind)")
+                        }
+                        NSLog("[FindTest] total=\(items.count) query=\(query)")
+
+                        // 电影 / 单个视频顺手读一下媒体信息，标出带字幕的样片；
+                        // 找到 5 条（或扫过 300 条）就停，别把整个库都请求一遍。
+                        var scanned = 0
+                        var found = 0
+                        for item in items where (item.kind == "movie" || item.kind == "video")
+                            && scanned < 300 && found < 5 {
+                            scanned += 1
+                            guard let info = try? await core.mediaInfo(item.id),
+                                  !info.subtitles.isEmpty else { continue }
+                            found += 1
+                            NSLog("[FindTest] subs=\(info.subtitles.count) "
+                                  + "audios=\(info.audios.count) | \(item.title) | \(item.id)")
+                        }
+                        NSLog("[FindTest] scanned=\(scanned) withSubs=\(found)")
+                    }
+                } catch {
+                    NSLog("[FindTest] failed: \(error.localizedDescription)")
+                }
+
+                if ProcessInfo.processInfo.environment["DVPLAYER_EXIT"] == "1" {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+
         // 自检：`DVPLAYER_PLAY=<itemId>` 等核心连上后直接开播放窗。
         // 远程验证用：`DVPLAYER_PLAY_SHOT=<png>` 截播放窗，`DVPLAYER_PLAY_UI=` 拨浮层 / 切轨，
         // `DVPLAYER_PLAY_SECONDS=` 后打印位置，`DVPLAYER_EXIT=1` 收工退出。

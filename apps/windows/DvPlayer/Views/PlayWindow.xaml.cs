@@ -1820,7 +1820,7 @@ public partial class PlayWindow : Window
         // 没手动选时，自动选择要读服务器的字幕表；媒体信息还在路上就先等，
         // 否则会把「已套用」标记掉，等表到了也不再选。
         var server = _mediaInfo?.Subtitles;
-        if (saved is null && server is null && !_mediaInfoLoaded)
+        if (saved is null && server is null && !_mediaInfoLoaded && !_isLocalDisc)
         {
             return;
         }

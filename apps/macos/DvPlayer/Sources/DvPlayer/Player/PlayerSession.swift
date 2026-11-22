@@ -233,7 +233,11 @@ final class PlayerSession: ObservableObject {
     private let localSource: LocalPlayback?
     private var initialStart: Double?
     private var loadToken = 0
-    private var tracksApplied = false
+    /// 音轨 / 字幕各自套用一次：字幕轨常比音轨晚到，不能共用标记。
+    private var audioPrefsApplied = false
+    private var subtitlePrefsApplied = false
+    /// 媒体信息请求已结束（成功与否），字幕自动选择不用再等它。
+    private var mediaInfoLoaded = false
     private var isStopped = false
     private var launchStart: Double = 0
     private var launchAt = Date()
@@ -393,7 +397,9 @@ final class PlayerSession: ObservableObject {
         eof = false
         position = 0
         seekPosition = 0
-        tracksApplied = false
+        audioPrefsApplied = false
+        subtitlePrefsApplied = false
+        mediaInfoLoaded = false
         audioTracks = []
         subtitleTracks = []
         selectedAudioId = 0
@@ -452,7 +458,9 @@ final class PlayerSession: ObservableObject {
         eof = false
         position = 0
         seekPosition = 0
-        tracksApplied = false
+        audioPrefsApplied = false
+        subtitlePrefsApplied = false
+        mediaInfoLoaded = false
         audioTracks = []
         subtitleTracks = []
         selectedAudioId = 0
@@ -747,27 +755,53 @@ final class PlayerSession: ObservableObject {
         }
     }
 
-    /// 只在第一次拿到轨道时套用详情页的选择；之后用户自己改。
+    /// 音轨 / 字幕各自只套用一次；每次轨道或媒体信息更新都试一下。
     /// 详情页没读媒体信息就起播（续播、切集）时，退到 mpv 轨上的中文判断。
     private func applyTrackPrefsIfNeeded() {
-        guard !tracksApplied, !(audioTracks.isEmpty && subtitleTracks.isEmpty) else { return }
-        tracksApplied = true
-
-        if let index = TrackPrefs.audio(itemId), audioTracks.indices.contains(index) {
-            selectAudio(audioTracks[index].id, remember: false)
+        if !audioPrefsApplied, !audioTracks.isEmpty {
+            audioPrefsApplied = true
+            if let index = TrackPrefs.audio(itemId), audioTracks.indices.contains(index) {
+                selectAudio(audioTracks[index].id, remember: false)
+            }
         }
 
-        if let pref = TrackPrefs.subtitle(itemId) {
-            if pref == TrackPrefs.subtitleOff {
-                selectSubtitle(0, remember: false)
-            } else if subtitleTracks.indices.contains(pref) {
+        if subtitlePrefsApplied {
+            return
+        }
+
+        // 明确选了「关闭」：不依赖字幕轨，直接关。
+        let saved = TrackPrefs.subtitle(itemId)
+        if saved == TrackPrefs.subtitleOff {
+            subtitlePrefsApplied = true
+            selectSubtitle(0, remember: false)
+            return
+        }
+
+        // 字幕轨还没出现（外挂字幕 / 原盘字幕索引慢）：等下一次轨道清单。
+        guard !subtitleTracks.isEmpty else { return }
+
+        // 没手动选时，自动选择要读服务器的字幕表；媒体信息还在路上就先等，
+        // 否则会把「已套用」标记掉，等表到了也不再选。
+        // 本地文件没有服务器媒体信息，别一直等它。
+        if saved == nil, mediaInfo == nil, !mediaInfoLoaded, localSource == nil {
+            return
+        }
+
+        subtitlePrefsApplied = true
+
+        if let pref = saved {
+            if subtitleTracks.indices.contains(pref) {
                 selectSubtitle(subtitleTracks[pref].id, remember: false)
             }
             return
         }
 
+        // 原盘 remux 的 mpv 轨常常没有语言 / 标题（只有 HDMV PGS_SUBTITLE），
+        // 按 mpv 的 lang 猜不到中文，必须借服务器字幕表（和详情页同一套规则）。
         if let info = mediaInfo, !info.subtitles.isEmpty {
             let index = TrackPrefs.resolveSubtitle(itemId, info.subtitles)
+            NSLog("[Play] subtitle resolve index=\(index) server=\(info.subtitles.count) "
+                  + "mpv=\(subtitleTracks.count)")
             if index == TrackPrefs.subtitleOff {
                 selectSubtitle(0, remember: false)
             } else if subtitleTracks.indices.contains(index) {
@@ -1426,12 +1460,17 @@ final class PlayerSession: ObservableObject {
             let info = try await core.mediaInfo(itemId)
             guard itemId == self.itemId, !isStopped else { return }
             mediaInfo = info
+            mediaInfoLoaded = true
             NSLog("[Play] media info video=\(info.video != nil) audios=\(info.audios.count) " +
                   "subs=\(info.subtitles.count)")
             refreshSubtitleLabels()
             applyTrackPrefsIfNeeded()
         } catch {
+            guard itemId == self.itemId, !isStopped else { return }
+            // 媒体信息读不到也要放行字幕选择，别一直等它。
+            mediaInfoLoaded = true
             NSLog("[Play] media info failed \(itemId): \(error.localizedDescription)")
+            applyTrackPrefsIfNeeded()
         }
     }
 
