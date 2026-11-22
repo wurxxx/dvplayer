@@ -26,9 +26,9 @@ struct SourcesPage: View {
     /// 本地文件夹源：地址是一个目录（或单个视频 / ISO），没有账号密码。
     private var isFolder: Bool { kind == "local" }
 
-    /// 需要「用户名 / 密码」的类型。
+    /// 需要「用户名 / 密码」的类型（飞牛影视也要，别只把文件协议算进来）。
     private var needsCredentials: Bool {
-        ["emby", "jellyfin", "smb", "cifs", "webdav"].contains(kind)
+        ["fnos", "feiniu", "emby", "jellyfin", "smb", "cifs", "webdav"].contains(kind)
     }
 
     /// 走 HTTP 的服务器才有代理；本地目录、SMB / NFS / WebDAV 是系统挂载。
@@ -82,7 +82,7 @@ struct SourcesPage: View {
         case "webdav":
             return "WebDAV 会挂载成一个目录；Windows 需要 WebClient 服务（默认关闭）。"
         default:
-            return "Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。"
+            return "飞牛影视 / Emby / Jellyfin 用账号密码登录；Emby 也可以只填 API Key（用户名留空）。"
         }
     }
 

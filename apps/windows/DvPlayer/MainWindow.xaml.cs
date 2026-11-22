@@ -114,6 +114,8 @@ public partial class MainWindow : FluentWindow
             start = "sources";
         }
 
+        Trace.Write($"startup page tag={start} setting={AppServices.Instance.Settings.StartPage}");
+
         // 服务器首页不是菜单项，直接开页面。
         if (start == "libraries")
         {
@@ -1400,6 +1402,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        Trace.Write("nav " + tag);
         Page page = tag switch
         {
             "libraries" => new LibrariesPage(),

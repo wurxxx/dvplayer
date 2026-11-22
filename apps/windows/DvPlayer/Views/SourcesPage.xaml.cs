@@ -123,9 +123,12 @@ public partial class SourcesPage : Page
 
         var kind = SelectedKind();
         var local = kind == "local";
-        var needsCredentials = kind is "emby" or "jellyfin" or "smb" or "cifs" or "webdav";
+        // 飞牛影视也要账号密码（原来漏了，加文件协议源时把凭据面板一起藏掉了）。
+        var needsCredentials =
+            kind is "fnos" or "feiniu" or "emby" or "jellyfin" or "smb" or "cifs" or "webdav";
 
         CredentialPanel.Visibility = needsCredentials ? Visibility.Visible : Visibility.Collapsed;
+        Services.Trace.Write($"source form kind={kind} credentials={CredentialPanel.Visibility}");
         // 只有走 HTTP 的服务器才有代理：本地目录、SMB / NFS / WebDAV 是系统挂载。
         ProxyPanel.Visibility = kind is "fnos" or "feiniu" or "emby" or "jellyfin"
             ? Visibility.Visible
@@ -146,7 +149,7 @@ public partial class SourcesPage : Page
             "smb" or "cifs" => "写到共享名，例如 smb://192.168.1.10/影视；系统挂载后直接读本地路径，ISO 原盘也能播。",
             "nfs" => "Windows 需要先启用「NFS 客户端」功能；不需要账号密码就留空。",
             "webdav" => "Windows 需要启用「WebClient」服务（默认关闭），服务器要支持 WebDAV。",
-            _ => "Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。",
+            _ => "飞牛影视 / Emby / Jellyfin 用账号密码登录；Emby 也可以只填 API Key（用户名留空）。",
         };
 
         UserLabel.Text = kind is "emby" or "jellyfin"
