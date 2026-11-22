@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -23,7 +24,14 @@ public partial class MainWindow : FluentWindow
     {
         InitializeComponent();
         Loaded += OnLoaded;
+
+        // 每个源连完都会发一次：侧栏的红绿灯跟着立刻变，不等最慢的源。
+        AppServices.Instance.ConnectionChanged += OnConnectionsChanged;
+        Closed += (_, _) => AppServices.Instance.ConnectionChanged -= OnConnectionsChanged;
     }
+
+    private void OnConnectionsChanged(object? sender, EventArgs e) =>
+        Dispatcher.BeginInvoke(UpdateSourceNavStatus);
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -1376,6 +1384,38 @@ public partial class MainWindow : FluentWindow
         _syncingSources = false;
     }
 
+    /// <summary>
+    /// 逐源刷状态点：只改现有项的 Ok / Pending，不重建列表，
+    /// 拖动排序时也不会被打断。源增删导致结构变了才整表重建。
+    /// </summary>
+    private void UpdateSourceNavStatus()
+    {
+        if (SourceNav?.ItemsSource is not List<SourceNavItem> items)
+        {
+            RefreshSourceNav();
+            return;
+        }
+
+        var sources = AppServices.Instance.Settings.Sources;
+        if (items.Count != sources.Count ||
+            items.Where((item, i) => item.Id != sources[i].Id).Any())
+        {
+            RefreshSourceNav();
+            return;
+        }
+
+        var connections = AppServices.Instance.Connections;
+        foreach (var item in items)
+        {
+            var connection = connections.FirstOrDefault(c => c.Id == item.Id);
+            item.Ok = connection?.Ok == true;
+            item.Pending = connection?.Connecting == true;
+        }
+
+        Trace.Write("nav status " + string.Join("; ", items.Select(i =>
+            i.Name + "=" + (i.Pending ? "connecting" : i.Ok ? "ok" : "fail"))));
+    }
+
     /// <summary>清掉服务器列表的选中，不触发切换源。</summary>
     private void ClearSourceSelection()
     {
@@ -1760,14 +1800,17 @@ public partial class MainWindow : FluentWindow
         RefreshSourceNav();
     }
 
-    private sealed class SourceNavItem
+    private sealed class SourceNavItem : INotifyPropertyChanged
     {
+        private bool _ok;
+        private bool _pending;
+
         public SourceNavItem(string id, string name, bool ok, bool pending, string iconPath)
         {
             Id = id;
             Name = name;
-            Ok = ok;
-            Pending = pending;
+            _ok = ok;
+            _pending = pending;
             IconPath = iconPath;
         }
 
@@ -1775,13 +1818,42 @@ public partial class MainWindow : FluentWindow
 
         public string Name { get; }
 
-        public bool Ok { get; }
+        /// <summary>连上了：状态点点亮。逐源回报时只改这一项，不重建列表。</summary>
+        public bool Ok
+        {
+            get => _ok;
+            set
+            {
+                if (_ok == value)
+                {
+                    return;
+                }
+
+                _ok = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Ok)));
+            }
+        }
 
         /// <summary>还在建连：状态点用灰色。</summary>
-        public bool Pending { get; }
+        public bool Pending
+        {
+            get => _pending;
+            set
+            {
+                if (_pending == value)
+                {
+                    return;
+                }
+
+                _pending = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Pending)));
+            }
+        }
 
         /// <summary>侧栏名字左边的服务器图标（pack URI）。</summary>
         public string IconPath { get; }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)

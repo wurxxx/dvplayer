@@ -127,6 +127,10 @@ public sealed class AppServices
 
         Connections = results.ToArray();
 
+        // 先让侧栏 / 服务器页把所有源标成「正在连接」（灰点），
+        // 之后谁先连完谁先变绿，不用一开始全显示成失败的红点。
+        Publish();
+
         // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
         // 挂载也是网络等待，同样每个源一个 Task 并行做，失败的这个源立刻标出来。
         var effective = new SourceConfig?[configs.Count];
