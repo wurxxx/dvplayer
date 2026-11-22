@@ -431,14 +431,16 @@ impl MediaHub {
 
         let mut rows: Vec<(usize, ItemSource)> = Vec::new();
 
-        // 先放各源搜到的那一条（带真实进度），搜不到再退回详情本身。
+        // 先放各源搜到的那一条（带真实进度）。一个源只留一条：搜索里已经把
+        // 同源的剧 / 季合并了，这里再按 source_id 兜一层，资源列表不会出现
+        // 同一个服务器两次。
         if let Ok(found) = self.search(&detail.title) {
             for item in found.items {
                 if !key.matches(&GroupKey::of(&item)) {
                     continue;
                 }
                 for source in item.sources {
-                    if rows.iter().any(|(_, row)| row.item_id == source.item_id) {
+                    if rows.iter().any(|(_, row)| row.source_id == source.source_id) {
                         continue;
                     }
                     let priority = self
@@ -451,24 +453,31 @@ impl MediaHub {
             }
         }
 
+        // 当前详情所在的源用详情自己的 id：同一部剧的季 / 另一条重复条目
+        // 不能顶掉用户正在看的这一条。
         let own_id = qualify(&entry.id, &detail.id);
-        if !rows.iter().any(|(_, row)| row.item_id == own_id) {
-            let priority = self
-                .entries
-                .iter()
-                .position(|e| e.id == entry.id)
-                .unwrap_or(0);
-            rows.push((
-                priority,
-                ItemSource {
-                    item_id: own_id,
-                    source_id: entry.id.clone(),
-                    source_name: entry.source.name().to_string(),
-                    resolution: detail.resolution.clone(),
-                    progress: 0.0,
-                },
-            ));
-        }
+        let own_progress = rows
+            .iter()
+            .find(|(_, row)| row.item_id == own_id)
+            .map(|(_, row)| row.progress)
+            .unwrap_or(0.0);
+        rows.retain(|(_, row)| row.source_id != entry.id);
+
+        let priority = self
+            .entries
+            .iter()
+            .position(|e| e.id == entry.id)
+            .unwrap_or(0);
+        rows.push((
+            priority,
+            ItemSource {
+                item_id: own_id,
+                source_id: entry.id.clone(),
+                source_name: entry.source.name().to_string(),
+                resolution: detail.resolution.clone(),
+                progress: own_progress,
+            },
+        ));
 
         rows.sort_by(|a, b| {
             let a_watched = a.1.progress > 0.0;
@@ -756,6 +765,34 @@ fn promote_episode(item: &mut MediaItem) {
     item.parent_id = None;
 }
 
+/// 同一个源给了多条时留哪条：有进度 > 条目层级更靠上（剧 > 季 > 集）>
+/// 分辨率更高。都打平就保留先到的那条（服务器返回的顺序）。
+fn preferred(candidate: &Candidate, existing: &Candidate) -> bool {
+    let candidate_watched = candidate.item.progress > 0.0;
+    let existing_watched = existing.item.progress > 0.0;
+    if candidate_watched != existing_watched {
+        return candidate_watched;
+    }
+
+    let candidate_kind = kind_rank(candidate.item.kind);
+    let existing_kind = kind_rank(existing.item.kind);
+    if candidate_kind != existing_kind {
+        return candidate_kind > existing_kind;
+    }
+
+    resolution_rank(&candidate.item.resolution) > resolution_rank(&existing.item.resolution)
+}
+
+/// 条目层级：剧 / 电影 > 季 > 集 / 视频。同一个源同时给剧和它的季时留剧。
+fn kind_rank(kind: MediaKind) -> u8 {
+    match kind {
+        MediaKind::Series | MediaKind::Movie => 3,
+        MediaKind::Season => 2,
+        MediaKind::Episode | MediaKind::Video => 1,
+        _ => 0,
+    }
+}
+
 /// 分辨率粗排：4K > 1440p > 1080p > 720p。
 fn resolution_rank(resolution: &Option<String>) -> u8 {
     let Some(text) = resolution else {
@@ -792,14 +829,20 @@ impl Group {
     }
 
     fn push(&mut self, candidate: Candidate) {
-        // 同一个源可能把同一条结果给了两次。
-        if self
+        // 同一个源可能把同一部片给了多次：飞牛的搜索会同时返回剧和它的季
+        // （两条 id 不同，标题 / 年份 / 集数都一样）。一个源只能算一个来源，
+        // 否则界面会显示「2 源」，资源列表里同一个服务器出现两次。
+        if let Some(existing) = self
             .candidates
-            .iter()
-            .any(|existing| existing.item.id == candidate.item.id)
+            .iter_mut()
+            .find(|existing| existing.source_id == candidate.source_id)
         {
+            if preferred(&candidate, existing) {
+                *existing = candidate;
+            }
             return;
         }
+
         self.candidates.push(candidate);
     }
 
@@ -1196,6 +1239,69 @@ mod tests {
         assert_eq!(result.items[0].id, "a:show-1");
         assert_eq!(result.items[0].kind, crate::models::MediaKind::Series);
         assert_eq!(result.items[0].sources.len(), 2);
+    }
+
+    #[test]
+    fn search_counts_one_source_once_when_it_returns_series_and_its_season() {
+        // 飞牛搜索「赘婿无双」会同时给剧和它的季：两条 id 不同、标题和集数一样。
+        let mut series = hit(
+            "a",
+            "s1",
+            "赘婿无双",
+            crate::models::MediaKind::Series,
+            Some(2023),
+            0.0,
+        );
+        series.local_episode_count = Some(69);
+        let mut season = hit(
+            "a",
+            "s2",
+            "赘婿无双",
+            crate::models::MediaKind::Season,
+            None,
+            0.0,
+        );
+        season.local_episode_count = Some(69);
+
+        // 季先到也一样：同一个源只能留一条，而且留剧而不是季。
+        let hub = hub_with(vec![season, series], vec![]);
+        let result = hub.search("赘婿无双").unwrap();
+
+        assert_eq!(result.items.len(), 1);
+        let item = &result.items[0];
+        assert_eq!(item.kind, crate::models::MediaKind::Series);
+        assert_eq!(item.sources.len(), 1);
+        assert_eq!(item.sources[0].item_id, "a:s1");
+        assert_eq!(item.sources[0].source_name, "a");
+    }
+
+    #[test]
+    fn item_sources_has_one_row_per_source() {
+        let mut series = hit(
+            "a",
+            "s1",
+            "赘婿无双",
+            crate::models::MediaKind::Series,
+            Some(2023),
+            0.0,
+        );
+        series.local_episode_count = Some(69);
+        let mut season = hit(
+            "a",
+            "s2",
+            "赘婿无双",
+            crate::models::MediaKind::Season,
+            None,
+            0.0,
+        );
+        season.local_episode_count = Some(69);
+
+        let hub = hub_with(vec![series, season], vec![]);
+        let rows = hub.item_sources("a:s1").unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].item_id, "a:s1");
+        assert_eq!(rows[0].source_id, "a");
     }
 
     #[test]

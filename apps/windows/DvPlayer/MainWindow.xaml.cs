@@ -155,6 +155,40 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // --search-test <关键词>：打印聚合搜索的条目 / 来源，以及详情页「资源」
+        // 列表的行数。同一部片在同一个源里有多条（剧 + 季）时应该只算一个来源。
+        if (ArgumentAfter("--search-test") is { Length: > 0 } searchQuery &&
+            AppServices.Instance.Core is { } searchCore)
+        {
+            var result = await Task.Run(() => searchCore.Search(searchQuery));
+            var found = result.Data?.Items ?? new List<MediaItemDto>();
+            Trace.Write($"search test query={searchQuery} ok={result.Ok} " +
+                        $"n={found.Count} err={result.Error}");
+            for (var index = 0; index < found.Count; index++)
+            {
+                var item = found[index];
+                var sources = item.Sources ?? new List<ItemSourceDto>();
+                Trace.Write($"search item {item.Id} | {item.Title} | {item.Kind} | " +
+                            $"sources={sources.Count} [" +
+                            string.Join(" | ", sources.Select(source =>
+                                $"{source.SourceName}#{source.SourceId}:{source.ItemId}")) +
+                            "]");
+
+                // 「资源」列表每次都要重新搜一遍，只查前几条，别把 80 条都跑一遍。
+                if (index < 5)
+                {
+                    var rows = searchCore.ItemSources(item.Id);
+                    var rowText = string.Join(" | ", (rows.Data ?? new List<ItemSourceDto>())
+                        .Select(source => $"{source.SourceName}#{source.SourceId}:{source.ItemId}"));
+                    Trace.Write($"search rows {item.Id} ok={rows.Ok} " +
+                                $"n={rows.Data?.Count ?? 0} [{rowText}]");
+                }
+            }
+
+            Close();
+            return;
+        }
+
         // --drag-test：模拟「指针停在同一格」两次，验证不会 A/B 来回换。
         if (Environment.GetCommandLineArgs().Contains("--drag-test"))
         {

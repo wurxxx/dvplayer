@@ -124,7 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             items = try await core.search(query).items
                         }
                         for item in items {
-                            NSLog("[FindTest] \(item.id) | \(item.title) | \(item.kind)")
+                            let sources = item.sources.map { source in
+                                "\(source.sourceName)#\(source.sourceId):\(source.itemId)"
+                            }.joined(separator: " | ")
+                            NSLog("[FindTest] \(item.id) | \(item.title) | \(item.kind) "
+                                  + "| sources=\(item.sources.count) [\(sources)]")
                         }
                         NSLog("[FindTest] total=\(items.count) query=\(query)")
 
