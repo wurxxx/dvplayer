@@ -60,7 +60,14 @@ public sealed class MpvHost : HwndHost
     /// <summary>找到 mpv 建出来的子窗口，并让它永远不抢键盘焦点。</summary>
     private void EnsureMpvChild()
     {
-        if (_mpvChild != IntPtr.Zero || _hwnd == IntPtr.Zero)
+        if (_hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // 换集/换片会重启 mpv，子窗口是新建的：旧句柄已经失效，必须重新抓，
+        // 否则后续 WM_SIZE 的 MoveWindow 会打到已销毁的窗口上（新视频不跟随尺寸）。
+        if (_mpvChild != IntPtr.Zero && IsWindow(_mpvChild))
         {
             return;
         }
@@ -237,6 +244,9 @@ public sealed class MpvHost : HwndHost
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);

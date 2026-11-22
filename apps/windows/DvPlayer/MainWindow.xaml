@@ -42,6 +42,8 @@
                    FontSize="11.5" Foreground="{StaticResource FaintBrush}"
                    Margin="20,0,18,18" TextTrimming="CharacterEllipsis" />
 
+        <!-- 源多了侧栏要能滚：之前是固定 StackPanel，超出窗口就点不到下面的源 -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
           <ListBox x:Name="Nav"
                    Background="Transparent"
@@ -138,6 +140,7 @@
             </ListBox.ItemTemplate>
           </ListBox>
         </StackPanel>
+        </ScrollViewer>
       </DockPanel>
     </Border>
 

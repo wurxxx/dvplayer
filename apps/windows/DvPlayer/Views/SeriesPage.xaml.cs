@@ -81,6 +81,9 @@ public partial class SeriesPage : Page
 
     private bool _mediaInfoLoading;
 
+    /// <summary>取媒体信息期间又换了目标：结束后用这个 id 补跑一次。</summary>
+    private string? _mediaInfoPending;
+
     /// <summary>本地实际有几季（服务器可能只刮到第一季）。</summary>
     private int _localSeasonCount;
 
@@ -137,10 +140,22 @@ public partial class SeriesPage : Page
         }
     }
 
+    /// <summary>这次集列表是加载失败，还是真的没有子项（失败时容器 id 不可播）。</summary>
+    private string? _episodesError;
+
     /// <summary>截图巡检用：滚到底，看「链接 / 媒体信息」两块。</summary>
     public void ScrollToMediaInfoForShot() => PageScroll.ScrollToEnd();
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        await LoadDetailPageAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 拉详情、季、集。播放回来会再走一遍（缓存已失效），
+    /// <paramref name="preferredSeasonId"/> 用来保留用户正在看的那一季。
+    /// </summary>
+    private async Task LoadDetailPageAsync(string? preferredSeasonId = null)
     {
         var core = AppServices.Instance.Core;
         if (core is null)
@@ -179,6 +194,7 @@ public partial class SeriesPage : Page
         var kids = children.Ok
             ? children.Data?.Items ?? new List<MediaItemDto>()
             : new List<MediaItemDto>();
+        _episodesError = children.Ok ? null : children.Error ?? "未知错误";
         var childTotal = children.Ok ? children.Data?.Total ?? kids.Count : kids.Count;
 
         Trace.Write($"detail id={_itemId} ok={detail.Ok} title={_detail?.Title} " +
@@ -198,8 +214,13 @@ public partial class SeriesPage : Page
 
         if (seasons.Count > 0)
         {
-            // 剧集：先季，再集。
-            var start = Math.Min(_initialSeason, seasons.Count - 1);
+            // 剧集：先季，再集。刷新时回到用户正在看的那一季。
+            var preferred = preferredSeasonId is not null
+                ? seasons.FindIndex(s => s.Id == preferredSeasonId)
+                : -1;
+            var start = preferred >= 0
+                ? preferred
+                : Math.Min(_initialSeason, seasons.Count - 1);
             _seasonItems = seasons;
 
             _seasons = seasons
@@ -216,6 +237,9 @@ public partial class SeriesPage : Page
 
         // 电影 / 未刮削目录 / 单集：子项直接就是可播的条目。
         _episodesAreFlat = true;
+        // 这一分支也要记归属：点「1-30 / 31-60」靠它判断，漏了就会高亮变了但不滚；
+        // 后台补页的循环条件也用它。缓存恢复那条路径一直是设的，所以以前只在这条路径上坏。
+        _episodesParentId = _itemId;
         await RenderEpisodesAsync(kids, childTotal).ConfigureAwait(true);
 
         if (kids.Count < childTotal)
@@ -227,6 +251,7 @@ public partial class SeriesPage : Page
     /// <summary>缓存命中：把上次的详情、演职、季、集直接铺回去。</summary>
     private async Task ApplySnapshotAsync(DetailSnapshot snapshot)
     {
+        _episodesError = null;
         _detail = snapshot.Detail;
         _localSeasonCount = snapshot.LocalSeasonCount;
         _localEpisodeCount = snapshot.LocalEpisodeCount;
@@ -289,9 +314,17 @@ public partial class SeriesPage : Page
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var result = await Task.Run(() => core.Children(parentId, 1, EpisodePageSize))
             .ConfigureAwait(true);
+
+        // 等待期间切了季：这一页是旧季的，晚到不能再覆盖新季（也不能写进详情缓存）。
+        if (_episodesParentId != parentId)
+        {
+            return;
+        }
+
         var items = result.Ok
             ? result.Data?.Items ?? new List<MediaItemDto>()
             : new List<MediaItemDto>();
+        _episodesError = result.Ok ? null : result.Error ?? "未知错误";
         var total = result.Ok ? result.Data?.Total ?? items.Count : items.Count;
 
         Trace.Write($"episodes first parent={parentId} ok={result.Ok} n={items.Count}/{total} " +
@@ -431,10 +464,21 @@ public partial class SeriesPage : Page
             // 没有子项：电影或单集，直接播自己。
             SeasonPickerText.Text = "全部剧集";
             SeasonPicker.IsEnabled = false;
-            _playTargetId = _itemId;
             _resumeEpisode = 0;
             EpisodeSection.Visibility = Visibility.Collapsed;
-            StatusText.Text = string.Empty;
+
+            if (_episodesError is not null)
+            {
+                // 加载失败不能画成「没有内容」：容器 id 不能播，按钮禁用并说清原因。
+                _playTargetId = null;
+                StatusText.Text = "读取剧集失败：" + _episodesError + "（点刷新重试）";
+            }
+            else
+            {
+                _playTargetId = _itemId;
+                StatusText.Text = string.Empty;
+            }
+
             UpdatePlayButton();
         }
 
@@ -442,7 +486,13 @@ public partial class SeriesPage : Page
 
         await Task.WhenAll(fresh.Select(t => t.ApplyPosterAsync(t.PosterPath)));
         _ = LoadMediaInfoAsync();
-        SaveCache();
+
+        // 集列表这次没读出来就别写缓存：缓存里只有空列表、没有错误标记，
+        // 下次命中会把「加载失败」当成「没有子项」，播放按钮又会指向容器 id。
+        if (_episodesError is null)
+        {
+            SaveCache();
+        }
     }
 
     /// <summary>按集号插到正确位置；服务器漏集号时用没被占用的最小号码补。</summary>
@@ -626,6 +676,9 @@ public partial class SeriesPage : Page
             offset = EpisodeScroller.HorizontalOffset + point.X;
         }
 
+        Trace.Write($"range scroll n={number} idx={index} tiles={_episodeTiles.Count} " +
+                    $"offset={offset:0} cur={EpisodeScroller.HorizontalOffset:0} " +
+                    $"scrollable={EpisodeScroller.ScrollableWidth:0}");
         EpisodeScroller.ScrollToHorizontalOffset(Math.Max(0, offset));
     }
 
@@ -885,31 +938,52 @@ public partial class SeriesPage : Page
             return;
         }
 
-        await PlayWindow.OpenAsync(
-            Window.GetWindow(this), _playTargetId, 0, BuildPlaylist(), MediaText.Clean(_detail?.Title));
+        await PlayAndWaitAsync(_playTargetId, 0).ConfigureAwait(true);
     }
 
-    private void OnWatchedClick(object sender, RoutedEventArgs e)
+    private async void OnWatchedClick(object sender, RoutedEventArgs e)
     {
-        _watched = !_watched;
+        var next = !_watched;
+        var id = _itemId;
+        _watched = next;
         UpdateStateButtons();
-        DetailCache.Drop(_itemId);
+        DetailCache.Drop(id);
 
-        if (AppServices.Instance.Core is { } core)
+        if (AppServices.Instance.Core is not { } core)
         {
-            _ = Task.Run(() => core.SetWatched(_itemId, _watched));
+            return;
+        }
+
+        // 先改 UI 是为了点下去立刻有反馈；失败要改回来，
+        // 不能让按钮显示一个服务端并不存在的状态。
+        var result = await Task.Run(() => core.SetWatched(id, next)).ConfigureAwait(true);
+        if (!result.Ok && _itemId == id)
+        {
+            _watched = !next;
+            UpdateStateButtons();
+            StatusText.Text = "标记失败：" + (result.Error ?? "未知错误");
         }
     }
 
-    private void OnFavoriteClick(object sender, RoutedEventArgs e)
+    private async void OnFavoriteClick(object sender, RoutedEventArgs e)
     {
-        _favorite = !_favorite;
+        var next = !_favorite;
+        var id = _itemId;
+        _favorite = next;
         UpdateStateButtons();
-        DetailCache.Drop(_itemId);
+        DetailCache.Drop(id);
 
-        if (AppServices.Instance.Core is { } core)
+        if (AppServices.Instance.Core is not { } core)
         {
-            _ = Task.Run(() => core.SetFavorite(_itemId, _favorite));
+            return;
+        }
+
+        var result = await Task.Run(() => core.SetFavorite(id, next)).ConfigureAwait(true);
+        if (!result.Ok && _itemId == id)
+        {
+            _favorite = !next;
+            UpdateStateButtons();
+            StatusText.Text = "收藏失败：" + (result.Error ?? "未知错误");
         }
     }
 
@@ -1050,8 +1124,7 @@ public partial class SeriesPage : Page
             return;
         }
 
-        await PlayWindow.OpenAsync(
-            Window.GetWindow(this), _playTargetId, null, BuildPlaylist(), MediaText.Clean(_detail?.Title));
+        await PlayAndWaitAsync(_playTargetId, null).ConfigureAwait(true);
     }
 
     private async void OnEpisodeClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -1061,8 +1134,42 @@ public partial class SeriesPage : Page
             return;
         }
 
-        await PlayWindow.OpenAsync(
-            Window.GetWindow(this), id, null, BuildPlaylist(), MediaText.Clean(_detail?.Title));
+        await PlayAndWaitAsync(id, null).ConfigureAwait(true);
+    }
+
+    /// <summary>打开播放窗口，等它真的关掉再刷新：起播那一刻服务端还没收到新进度。</summary>
+    private async Task PlayAndWaitAsync(string itemId, double? startSeconds)
+    {
+        Trace.Write($"series play open item={itemId}");
+
+        var player = await PlayWindow.OpenAsync(
+            Window.GetWindow(this), itemId, startSeconds, BuildPlaylist(),
+            MediaText.Clean(_detail?.Title)).ConfigureAwait(true);
+
+        if (player is not null)
+        {
+            await player.WaitForCloseAsync().ConfigureAwait(true);
+            Trace.Write($"series play closed item={itemId}");
+        }
+
+        await RefreshAfterPlaybackAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 播放窗口关闭后刷新本页：服务端已经改了续播点 / 已观看状态，
+    /// 不清缓存的话「继续观看」还指向播放前那一集。
+    /// </summary>
+    private async Task RefreshAfterPlaybackAsync()
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        DetailCache.Drop(_itemId);
+        _mediaInfoCache.Clear();
+        _resumeCache.Clear();
+        await LoadDetailPageAsync(_currentSeasonId).ConfigureAwait(true);
     }
 
     // —— 季选择 ——
@@ -1340,9 +1447,16 @@ public partial class SeriesPage : Page
     private async Task LoadMediaInfoAsync()
     {
         var id = _playTargetId;
-        if (string.IsNullOrEmpty(id) || AppServices.Instance.Core is not { } core ||
-            _mediaInfoLoading)
+        if (string.IsNullOrEmpty(id) || AppServices.Instance.Core is not { } core)
         {
+            return;
+        }
+
+        // 上一次还在取：记下最新目标，等它结束后补跑。
+        // 直接丢弃会让切季后的新季媒体信息 / 续播时间永远停在上一季。
+        if (_mediaInfoLoading)
+        {
+            _mediaInfoPending = id;
             return;
         }
 
@@ -1383,6 +1497,14 @@ public partial class SeriesPage : Page
             UpdateTrackButtons(info);
             RenderMediaInfo(info);
             UpdateLocation(info);
+        }
+
+        // 等待期间又换了目标：用最新目标补跑一次（只补一次，pending 随即清空）。
+        var pending = _mediaInfoPending;
+        _mediaInfoPending = null;
+        if (pending is not null && pending != id)
+        {
+            await LoadMediaInfoAsync().ConfigureAwait(true);
         }
     }
 

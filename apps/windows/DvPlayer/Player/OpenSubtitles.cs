@@ -72,6 +72,8 @@ public sealed class OpenSubtitlesService
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
     private string? _token;
     private DateTime _tokenAt = DateTime.MinValue;
+    /// <summary>同时下多份字幕时只登一次，也避免并发把 token 写乱。</summary>
+    private readonly SemaphoreSlim _loginGate = new(1, 1);
 
     private static string BaseUrl =>
         Environment.GetEnvironmentVariable("DVPLAYER_OPENSUBTITLES_BASE")
@@ -114,11 +116,21 @@ public sealed class OpenSubtitlesService
         }
     }
 
+    /// <summary>
+    /// 需要 token 的接口先登录。下载（required）失败要明确报错；
+    /// 搜索只是顺带登录，失败仍可只用 API Key 搜。
+    /// </summary>
     private async Task LoginIfNeededAsync(string apiKey, string? username, string? password,
-        CancellationToken token)
+        CancellationToken token, bool required)
     {
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
         {
+            if (required)
+            {
+                throw new SubtitleException(
+                    "OpenSubtitles 下载需要登录：先填用户名和密码");
+            }
+
             return;
         }
 
@@ -127,32 +139,76 @@ public sealed class OpenSubtitlesService
             return;
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + "/login");
-        Apply(request, Headers(apiKey, withToken: false));
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(new { username, password }),
-            Encoding.UTF8, "application/json");
-
+        await _loginGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
-            using var response = await _http.SendAsync(request, token).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            // 排队期间别人可能已经登好了。
+            if (_token is not null && DateTime.UtcNow - _tokenAt < TimeSpan.FromHours(20))
             {
                 return;
             }
 
-            using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("token", out var tokenElement) &&
-                tokenElement.GetString() is { Length: > 0 } value)
+            string? error = null;
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + "/login");
+            Apply(request, Headers(apiKey, withToken: false));
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(new { username, password }),
+                Encoding.UTF8, "application/json");
+
+            try
             {
-                _token = value;
-                _tokenAt = DateTime.UtcNow;
+                using var response = await _http.SendAsync(request, token).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    error = Message(body) ?? $"HTTP {(int)response.StatusCode}";
+                }
+                else
+                {
+                    using var doc = JsonDocument.Parse(body);
+                    if (doc.RootElement.TryGetProperty("token", out var tokenElement) &&
+                        tokenElement.GetString() is { Length: > 0 } value)
+                    {
+                        _token = value;
+                        _tokenAt = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        error = "登录响应里没有 token";
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                error = ex.Message;
+            }
+
+            if (error is not null)
+            {
+                // 旧 token 已经超过 20 小时，留着只会让后面的请求 401。
+                _token = null;
+                if (required)
+                {
+                    throw new SubtitleException("OpenSubtitles 登录失败：" + error);
+                }
             }
         }
-        catch (Exception)
+        finally
         {
-            // 登录失败时下载接口会给明确的错误，这里不额外处理。
+            _loginGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 401 时把本地 token 清掉：否则要等 20 小时的本地过期时间，
+    /// 期间每次下载都拿同一个已失效的 token。
+    /// </summary>
+    private void InvalidateTokenIfUnauthorized(HttpResponseMessage response)
+    {
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            _token = null;
         }
     }
 
@@ -192,6 +248,7 @@ public sealed class OpenSubtitlesService
         var body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
+            InvalidateTokenIfUnauthorized(response);
             throw new SubtitleException(Message(body) ?? $"OpenSubtitles 返回 HTTP {(int)response.StatusCode}");
         }
 
@@ -242,15 +299,20 @@ public sealed class OpenSubtitlesService
             throw new SubtitleException("没搜到字幕");
         }
 
-        await LoginIfNeededAsync(apiKey, username, password, token).ConfigureAwait(false);
+        // 搜索只顺带登录：没账号也能用 API Key 搜。
+        await LoginIfNeededAsync(apiKey, username, password, token, required: false)
+            .ConfigureAwait(false);
         return results;
     }
 
     /// <summary>取临时下载链接，再把字幕文件存到缓存目录。</summary>
     public async Task<string> DownloadAsync(SubtitleResult result,
-        string apiKey, string? username, string? password, CancellationToken token)
+        string apiKey, string? username, string? password, CancellationToken token,
+        bool authRetried = false)
     {
-        await LoginIfNeededAsync(apiKey, username, password, token).ConfigureAwait(false);
+        // 下载接口要登录 token，失败必须在下载前说清楚。
+        await LoginIfNeededAsync(apiKey, username, password, token, required: true)
+            .ConfigureAwait(false);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + "/downloads");
         Apply(request, Headers(apiKey, withToken: true));
@@ -260,6 +322,21 @@ public sealed class OpenSubtitlesService
 
         using var response = await _http.SendAsync(request, token).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            // token 被服务端提前作废（改密码 / 会话失效）：本地 20 小时的过期时间
+            // 拦不住这种情况，重新登录再试一次。
+            _token = null;
+            if (!authRetried)
+            {
+                await LoginIfNeededAsync(apiKey, username, password, token, required: true)
+                    .ConfigureAwait(false);
+                return await DownloadAsync(result, apiKey, username, password, token,
+                    authRetried: true).ConfigureAwait(false);
+            }
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             throw new SubtitleException(Message(body) ?? $"OpenSubtitles 返回 HTTP {(int)response.StatusCode}");
@@ -283,7 +360,21 @@ public sealed class OpenSubtitlesService
 
         var payload = await _http.GetByteArrayAsync(link, token).ConfigureAwait(false);
         var path = Path.Combine(CacheFolder, Sanitize(fileName));
-        await File.WriteAllBytesAsync(path, payload, token).ConfigureAwait(false);
+
+        // 直接写目标文件：下载中断/取消会留下半份字幕，mpv 可能把它当坏文件。
+        // 先写 .part 再原子替换。
+        var temp = path + ".part";
+        try
+        {
+            await File.WriteAllBytesAsync(temp, payload, token).ConfigureAwait(false);
+            File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(temp); } catch (IOException) { }
+            throw;
+        }
+
         return path;
     }
 

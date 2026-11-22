@@ -21,6 +21,9 @@ public partial class LibrariesPage : Page
     private const int PreviewPerLibrary = 12;
     private const double ScrollStep = 262;
 
+    /// <summary>库网格最多挂多少张卡：Grid 用的是 WrapPanel，没有虚拟化。</summary>
+    private const int MaxBrowseCards = 1500;
+
 
 
     private static int PageSize => Math.Max(10, AppServices.Instance.Settings.PageSize);
@@ -92,6 +95,8 @@ public partial class LibrariesPage : Page
     private bool _loadingPage;
     private bool _hasMore;
     private DateTime _retryAfter = DateTime.MinValue;
+    /// <summary>首屏失败后的自动重试次数（见 ScheduleRetry）。</summary>
+    private int _pageRetries;
 
     /// <summary>类别 / 排序 / 风格一变就换一个版本号，丢掉过期的分页结果。</summary>
     private int _browseVersion;
@@ -118,6 +123,7 @@ public partial class LibrariesPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _heroTimer.Stop();
+        _inlineSearchDebounce?.Cancel();
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
     }
 
@@ -125,12 +131,17 @@ public partial class LibrariesPage : Page
         // 登录在后台线程完成，重新拉数据必须回到 UI 线程。
         Dispatcher.BeginInvoke(() =>
         {
+            var signature = ConnectionSignature();
+
             // 页面已经被别的页替换，或者连接状态没变，就别再拉一遍。
-            if (!IsVisible || (_loaded && ConnectionSignature() == _loadedSignature))
+            if (!IsVisible || (_loaded && signature == _loadedSignature))
             {
+                Services.Trace.Write(
+                    $"home conn skip visible={IsVisible} loaded={_loaded} sig={signature} was={_loadedSignature}");
                 return;
             }
 
+            Services.Trace.Write($"home conn reload sig={signature} was={_loadedSignature}");
             OnLoaded(this, new RoutedEventArgs());
         });
 
@@ -142,12 +153,17 @@ public partial class LibrariesPage : Page
 
         Trace("OnLoaded");
 
+        var signature = ConnectionSignature();
+
         // Loaded 会跟着导航重复触发，已经按同样的连接状态拉过就不再拉。
-        if (_loaded && ConnectionSignature() == _loadedSignature)
+        if (_loaded && signature == _loadedSignature)
         {
+            Services.Trace.Write($"home onload skip sig={signature}");
             return;
         }
 
+        Services.Trace.Write(
+            $"home onload start sig={signature} connected={AppServices.Instance.IsConnected} visible={IsVisible}");
         _overviewTask = LoadOverviewAsync();
         await _overviewTask.ConfigureAwait(true);
     }
@@ -155,9 +171,15 @@ public partial class LibrariesPage : Page
     private bool _loaded;
     private string _loadedSignature = "";
 
-    /// <summary>连接状态的指纹：源和连没连上，变了才需要重新拉。</summary>
-    private static string ConnectionSignature() => string.Join("|",
-        AppServices.Instance.Connections.Select(c => $"{c.Id}:{c.Ok}"));
+    /// <summary>
+    /// 连接状态的指纹：源和连没连上，变了才需要重新拉。
+    /// 必须带上「核心就绪」：所有源回报 ok 与 Core 赋值之间有一瞬，
+    /// 这时只比源状态会把「还不能读」误记成「已经按这个状态拉过」，
+    /// 随后 Core 就绪的那次事件指纹相同就被跳过，首页永远停在「正在读取…」。
+    /// </summary>
+    private static string ConnectionSignature() =>
+        (AppServices.Instance.IsConnected ? "core" : "nocore") + "|" +
+        string.Join("|", AppServices.Instance.Connections.Select(c => $"{c.Id}:{c.Ok}"));
 
     /// <summary>截图巡检用：等首页数据就绪后直接进第一个库的网格。</summary>
     public async Task ShowFirstLibraryAsync()
@@ -177,6 +199,8 @@ public partial class LibrariesPage : Page
 
     private bool _loading;
     private int _loadVersion;
+    /// <summary>加载期间又有连接变化：这一轮结束后补跑一次。</summary>
+    private bool _reloadPending;
 
     /// <summary>上次首页的数据。启动先把它画出来，实时数据回来再替换。</summary>
     private HomeSnapshot? _snapshot;
@@ -190,18 +214,65 @@ public partial class LibrariesPage : Page
         // Loaded 和 ConnectionChanged 会连着触发好几次，重复加载会让首页更慢。
         if (_loading)
         {
+            // 加载中才连上的源：这一轮拿到的数据已经过时，结束后得再补一次。
+            // 直接丢掉的话，最后那一次连接变化没有后续事件，首页就永远缺那个源。
+            _reloadPending = true;
+            Services.Trace.Write("home load busy, queued");
             return;
         }
 
         _loading = true;
         var version = ++_loadVersion;
+        // 指纹必须在发请求之前采样：数据反映的是「此刻的已连接源」。
+        // 结束后再采样，会把加载期间才连上的源也算进去，它的库永远补不进来。
+        var signature = ConnectionSignature();
+        Services.Trace.Write(
+            $"home load begin v={version} sig={signature} connected={AppServices.Instance.IsConnected}");
         try
         {
             await LoadOverviewCoreAsync(version).ConfigureAwait(true);
         }
+        catch (ObjectDisposedException)
+        {
+            // 加载途中用户点了「重新连接」：旧核心已释放，这一轮作废。
+            Services.Trace.Write($"home load aborted v={version} (core disposed)");
+        }
         finally
         {
             _loading = false;
+
+            if (version == _loadVersion)
+            {
+                _loadedSignature = signature;
+                _loaded = true;
+            }
+
+            // 加载期间收到过连接变化：状态还没反映到这一轮数据里，补一次。
+            if (_reloadPending)
+            {
+                _reloadPending = false;
+                if (!_loaded || ConnectionSignature() != _loadedSignature)
+                {
+                    // 补跑不在任何 await 链上：异常必须自己记下来，否则会变成
+                    // 未观察任务，而 _loaded 已经写死，页面不会再重试。
+                    _overviewTask = ReloadPendingAsync();
+                }
+            }
+
+            Services.Trace.Write(
+                $"home load end v={version} cur={_loadVersion} sig={signature} loadedSig={_loadedSignature}");
+        }
+    }
+
+    private async Task ReloadPendingAsync()
+    {
+        try
+        {
+            await LoadOverviewAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            Services.Trace.Write("home pending reload failed: " + ex);
         }
     }
 
@@ -210,8 +281,52 @@ public partial class LibrariesPage : Page
         var services = AppServices.Instance;
         if (!services.IsConnected || !IsVisible)
         {
+            Services.Trace.Write(
+                $"home core skip v={version} connected={services.IsConnected} visible={IsVisible}");
             SourceTitle.Text = "媒体库";
-            StatusText.Text = "未连接媒体源，先去「媒体源」添加。";
+
+            // Hero 的 XAML 默认文案是「正在读取…」。连不上时如果不动它，
+            // 整页看起来像一直在读（冷启动还没连完、自动连接关掉时尤其明显）。
+            var connections = services.Connections;
+            var noSources = services.Settings.Sources.Count == 0;
+            var connecting = connections.Any(c => c.Connecting);
+            var allFailed = !noSources && !connecting && connections.Count > 0 &&
+                            connections.All(c => !c.Ok);
+
+            StatusText.Text = noSources
+                ? "还没有配置媒体源，先去「服务器」添加一个。"
+                : connecting
+                    ? "正在连接媒体源…"
+                    : allFailed
+                        ? "媒体源没有连上，去「服务器」检查地址或账号。"
+                        : "未连接媒体源，点右上角的重新连接。";
+
+            if (IsVisible)
+            {
+                HeroTitle.Text = noSources
+                    ? "还没有媒体源"
+                    : connecting
+                        ? "正在连接媒体源…"
+                        : allFailed
+                            ? "媒体源没有连上"
+                            : "未连接媒体源";
+                HeroMeta.Text = noSources
+                    ? "去「服务器」添加一个源"
+                    : connecting
+                        ? "连上后会显示库和海报"
+                        : allFailed
+                            ? "去「服务器」检查地址或账号"
+                            : "点右上角重新连接";
+                HeroOverview.Text = string.Empty;
+                HeroChips.ItemsSource = null;
+                HeroChips.Visibility = Visibility.Collapsed;
+                HeroDots.ItemsSource = null;
+                HeroDots.Visibility = Visibility.Collapsed;
+                HeroPrev.Visibility = Visibility.Collapsed;
+                HeroNext.Visibility = Visibility.Collapsed;
+                _heroTimer.Stop();
+            }
+
             return;
         }
 
@@ -230,6 +345,20 @@ public partial class LibrariesPage : Page
         if (sourceName is not null && !sourceOk)
         {
             StatusText.Text = "这个服务器没有连上，去「服务器」检查地址或账号。";
+            // Hero 的 XAML 默认文案是「正在读取…」。源没连上时必须换成明确状态，
+            // 否则整页看起来像一直卡在加载（冒烟截图里就是这样）。
+            _heroTimer.Stop();
+            _heroPool.Clear();
+            HeroTitle.Text = sourceName + " 没有连上";
+            HeroMeta.Text = "去「服务器」检查地址或账号";
+            HeroOverview.Text = string.Empty;
+            HeroChips.ItemsSource = null;
+            HeroChips.Visibility = Visibility.Collapsed;
+            HeroDots.ItemsSource = null;
+            HeroDots.Visibility = Visibility.Collapsed;
+            HeroPrev.Visibility = Visibility.Collapsed;
+            HeroNext.Visibility = Visibility.Collapsed;
+            Services.Trace.Write($"home core offline v={version} source={sourceName}");
             return;
         }
 
@@ -248,17 +377,21 @@ public partial class LibrariesPage : Page
         Trace($"libraries: {librariesResult.Data?.Count ?? 0} 个");
         if (!librariesResult.Ok || librariesResult.Data is null)
         {
+            Services.Trace.Write(
+                $"home core libraries failed v={version} err={librariesResult.Error}");
+
             if (_snapshot is null)
             {
                 StatusText.Text = "读取媒体库失败：" + (librariesResult.Error ?? "未知错误");
+                HeroTitle.Text = "读取媒体库失败";
+                HeroMeta.Text = librariesResult.Error ?? "稍后点「重新连接」再试";
+                HeroOverview.Text = string.Empty;
             }
 
             return;
         }
 
         _libraries = librariesResult.Data;
-        _loaded = true;
-        _loadedSignature = ConnectionSignature();
         if (sourceOk)
         {
             var mine = _libraries.Where(l => l.SourceId == sourceId).ToList();
@@ -284,6 +417,8 @@ public partial class LibrariesPage : Page
 
         if (version != _loadVersion || !IsVisible)
         {
+            Services.Trace.Write(
+                $"home core stale v={version} cur={_loadVersion} visible={IsVisible}");
             return;
         }
 
@@ -303,6 +438,9 @@ public partial class LibrariesPage : Page
 
         var sections = BuildSections(snapshots);
 
+        // 库首页下载失败时以前完全静默，界面看起来像「这个库是空的」。
+        var failed = pages.Where(p => !p.Page.Ok).ToList();
+
         // 缓存里已经有详情版的 Hero 就先留着，别退回列表海报再闪一下。
         if (_heroPool.Count == 0)
         {
@@ -311,8 +449,15 @@ public partial class LibrariesPage : Page
 
         LibraryCards.ItemsSource = _libraryCards;
         Sections.ItemsSource = sections;
-        StatusText.Text = "";
+        StatusText.Text = failed.Count switch
+        {
+            0 => "",
+            _ when failed.Count == pages.Length =>
+                "读取库内容失败：" + (failed[0].Page.Error ?? "未知错误"),
+            _ => "部分库读取失败：" + string.Join("、", failed.Select(p => p.Library.Title)),
+        };
         Trace("sections 画完");
+        Services.Trace.Write($"home core done v={version} libs={_libraries.Count} failed={failed.Count}");
 
         if (_heroPool.Count > 0)
         {
@@ -335,6 +480,11 @@ public partial class LibrariesPage : Page
         {
             ApplyRecords(recordsResult.Data, sourceId, sourceOk);
             Trace("records 画完");
+        }
+        else if (recordsResult.Data is null && StatusText.Text.Length == 0)
+        {
+            // 继续观看失败不影响库内容，但别让「没有记录」和「读不到记录」长得一样。
+            StatusText.Text = "读取观看记录失败：" + (recordsResult.Error ?? "未知错误");
         }
 
         // 库卡片与分组里的海报最后补，先把结构画出来。
@@ -894,7 +1044,11 @@ public partial class LibrariesPage : Page
     }
 
     /// <summary>截图巡检用：切到「收藏」分段。</summary>
-    public void ShowFavoritesForShot() => FavoriteSegment.IsChecked = true;
+    public async Task ShowFavoritesForShotAsync()
+    {
+        FavoriteSegment.IsChecked = true;
+        await LoadFavoritesAsync().ConfigureAwait(true);
+    }
 
     /// <summary>截图巡检用：把 Hero 左右箭头显示出来，确认位置和样式。</summary>
     public void PreviewHeroArrows() => FadeArrows(1);
@@ -1090,10 +1244,29 @@ public partial class LibrariesPage : Page
 
     private int _inlineSearchVersion;
 
-    private void OnInlineSearchTextChanged(object sender, TextChangedEventArgs e)
+    /// <summary>输入防抖：连续敲字只发最后一次搜索（以前每个字符都请求全部源）。</summary>
+    private CancellationTokenSource? _inlineSearchDebounce;
+
+    private async void OnInlineSearchTextChanged(object sender, TextChangedEventArgs e)
     {
         UpdateInlineSearchPlaceholder();
-        _ = RunInlineSearchAsync(InlineSearchBox.Text);
+
+        var text = InlineSearchBox.Text;
+        _inlineSearchDebounce?.Cancel();
+        _inlineSearchDebounce?.Dispose();
+        var cts = new CancellationTokenSource();
+        _inlineSearchDebounce = cts;
+
+        try
+        {
+            await Task.Delay(300, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await RunInlineSearchAsync(text);
     }
 
     private void UpdateInlineSearchPlaceholder() =>
@@ -1193,7 +1366,7 @@ public partial class LibrariesPage : Page
     {
         // XAML 解析时 MediaSegment 的 IsChecked 先触发，后面的控件字段还没赋值。
         if (SearchSegment is null || FavoriteSegment is null || BrowseRoot is null ||
-            SearchPanel is null)
+            SearchPanel is null || FavoriteRoot is null)
         {
             return;
         }
@@ -1202,7 +1375,7 @@ public partial class LibrariesPage : Page
         if (SearchSegment.IsChecked == true)
         {
             OverviewPanel.Visibility = Visibility.Collapsed;
-            FavoriteEmpty.Visibility = Visibility.Collapsed;
+            FavoriteRoot.Visibility = Visibility.Collapsed;
             BrowseRoot.Visibility = Visibility.Collapsed;
             SearchPanel.Visibility = Visibility.Visible;
             _heroTimer.Stop();
@@ -1216,13 +1389,14 @@ public partial class LibrariesPage : Page
 
         var favorites = FavoriteSegment.IsChecked == true;
         OverviewPanel.Visibility = favorites ? Visibility.Collapsed : Visibility.Visible;
-        FavoriteEmpty.Visibility = favorites ? Visibility.Visible : Visibility.Collapsed;
+        FavoriteRoot.Visibility = favorites ? Visibility.Visible : Visibility.Collapsed;
         BrowseRoot.Visibility = Visibility.Collapsed;
         UpdateTopBar();
 
         if (favorites)
         {
             _heroTimer.Stop();
+            _ = LoadFavoritesAsync();
         }
         else if (_heroPool.Count > 1)
         {
@@ -1230,10 +1404,65 @@ public partial class LibrariesPage : Page
         }
     }
 
+    private int _favoritesVersion;
+
+    /// <summary>收藏分段的列表：每次切进来都重拉（播放、取消收藏后内容会变）。</summary>
+    private async Task LoadFavoritesAsync()
+    {
+        if (AppServices.Instance.Core is not { } core)
+        {
+            FavoriteEmpty.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var version = ++_favoritesVersion;
+        // 拉取要几秒：先给明确状态，别让整页空白看起来像坏了。
+        FavoriteResults.ItemsSource = null;
+        FavoriteEmptyTitle.Text = "正在读取…";
+        FavoriteEmptyHint.Text = "收藏列表加载中";
+        FavoriteEmpty.Visibility = Visibility.Visible;
+
+        var result = await Task.Run(() => core.Favorites(1, 200)).ConfigureAwait(true);
+
+        // 期间又切了分段 / 页面已经走了：旧结果不能再铺上来。
+        if (version != _favoritesVersion || !IsVisible)
+        {
+            return;
+        }
+
+        if (!result.Ok || result.Data is null)
+        {
+            FavoriteResults.ItemsSource = null;
+            FavoriteCountText.Text = "收藏";
+            FavoriteEmptyTitle.Text = "读取收藏失败";
+            FavoriteEmptyHint.Text = result.Error ?? "未知错误";
+            FavoriteEmpty.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var cards = (result.Data.Items ?? new List<MediaItemDto>()).Select(ToCard).ToList();
+        FavoriteCountText.Text = result.Data.Total > cards.Count
+            ? $"收藏 · {cards.Count}/{result.Data.Total}"
+            : $"收藏 · {result.Data.Total}";
+
+        if (cards.Count == 0)
+        {
+            FavoriteEmptyTitle.Text = "还没有收藏";
+            FavoriteEmptyHint.Text = "收藏的影片会集中在这里";
+        }
+
+        FavoriteResults.ItemsSource = cards;
+        FavoriteEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        await Task.WhenAll(cards.Select(c => c.ApplyPosterAsync(c.PosterPath)))
+            .ConfigureAwait(true);
+    }
+
     private async void OnRefreshClick(object sender, RoutedEventArgs e)
     {
         BrowseRoot.Visibility = Visibility.Collapsed;
         OverviewPanel.Visibility = Visibility.Visible;
+        FavoriteRoot.Visibility = Visibility.Collapsed;
         FavoriteEmpty.Visibility = Visibility.Collapsed;
         SearchPanel.Visibility = Visibility.Collapsed;
         MediaSegment.IsChecked = true;
@@ -1262,6 +1491,7 @@ public partial class LibrariesPage : Page
     {
         BrowseRoot.Visibility = Visibility.Collapsed;
         OverviewPanel.Visibility = Visibility.Visible;
+        FavoriteRoot.Visibility = Visibility.Collapsed;
         SearchPanel.Visibility = Visibility.Collapsed;
         UpdateTopBar();
 
@@ -1559,6 +1789,7 @@ public partial class LibrariesPage : Page
         _hasMore = true;
         _loadingPage = false;
         _retryAfter = DateTime.MinValue;
+        _pageRetries = 0;
         _allCards = new List<ItemCard>();
         _visible.Clear();
         _total = 0;
@@ -1607,20 +1838,35 @@ public partial class LibrariesPage : Page
             if (!result.Ok || result.Data is null)
             {
                 _retryAfter = DateTime.UtcNow.AddSeconds(3);
-                BrowseFooter.Text = "加载失败：" + (result.Error ?? "未知错误");
+                BrowseFooter.Text = "加载失败：" + (result.Error ?? "未知错误") + "（稍后自动重试）";
+                BrowseStatus.Text = "加载失败";
+                // 空列表时没有滚动，滚到底的自动续页触发不了：
+                // 这里主动重试几次，别让用户卡在「0 条」上。
+                ScheduleRetry(version);
                 return;
             }
+
+            _pageRetries = 0;
 
             var cards = result.Data.Items.Select(ToCard).ToList();
             Trace($"page {page} ok n={cards.Count} total={result.Data.Total}");
             _page = page + 1;
             _total = result.Data.Total;
             _allCards.AddRange(cards);
-            _hasMore = cards.Count > 0 && _allCards.Count < _total;
+
+            // 卡片不虚拟化（WrapPanel）：上千个按钮和图片全留在可视化树里，
+            // 翻几十页后滚动会越来越慢。到上限就停，剩下的让用户用页内搜索找。
+            _hasMore = cards.Count > 0 &&
+                       _allCards.Count < _total &&
+                       _allCards.Count < MaxBrowseCards;
 
             AppendVisible(cards);
             UpdateBrowseStatus();
-            BrowseFooter.Text = _hasMore ? "" : (_total > 0 ? "已全部加载" : "");
+            BrowseFooter.Text = _hasMore
+                ? ""
+                : _total > MaxBrowseCards && _allCards.Count >= MaxBrowseCards
+                    ? $"已显示前 {MaxBrowseCards} 条，用页内搜索定位其余内容"
+                    : _total > 0 ? "已全部加载" : "";
 
             await FillMissingPostersAsync(cards).ConfigureAwait(true);
         }
@@ -1647,6 +1893,35 @@ public partial class LibrariesPage : Page
         }
     }
 
+    /// <summary>空列表时没有滚动可等：失败后延迟自动重试（最多 3 次）。</summary>
+    private void ScheduleRetry(int version)
+    {
+        if (_pageRetries >= 3)
+        {
+            return;
+        }
+
+        _pageRetries++;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(3000).ConfigureAwait(false);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (version == _browseVersion && BrowseRoot.Visibility == Visibility.Visible)
+                {
+                    _ = LoadPageAsync(version);
+                }
+            });
+        });
+    }
+
+    /// <summary>目录列表里「查过详情但没有封面」的条目也会被反复翻到，记下来别再打服务端。</summary>
+    private static readonly Dictionary<string, string?> DetailPosterCache = new();
+    private const int DetailPosterCacheMax = 2000;
+
+    /// <summary>缓存属于哪个 core：重连后是另一个实例，旧结果不能再用。</summary>
+    private static MediaCore? DetailPosterCacheCore;
+
     /// <summary>
     /// 未刮削的目录（Directory）列表项不带封面，需要单独取一次详情拿第一张图。
     /// 并发限制在 8 个，避免一页 60 个请求把服务端打满。
@@ -1659,7 +1934,37 @@ public partial class LibrariesPage : Page
             return;
         }
 
-        var pending = cards.Where(c => c.PosterPath is null && !c.IsPlayable).ToList();
+        lock (DetailPosterCache)
+        {
+            if (!ReferenceEquals(core, DetailPosterCacheCore))
+            {
+                DetailPosterCache.Clear();
+                DetailPosterCacheCore = core;
+            }
+        }
+
+        var pending = new List<ItemCard>();
+        foreach (var card in cards.Where(c => c.PosterPath is null && !c.IsPlayable))
+        {
+            string? cached;
+            bool known;
+            lock (DetailPosterCache)
+            {
+                known = DetailPosterCache.TryGetValue(card.Id, out cached);
+            }
+
+            if (!known)
+            {
+                pending.Add(card);
+                continue;
+            }
+
+            // 查过确实没有封面：留在原样（显示占位图），不再请求。
+            if (!string.IsNullOrWhiteSpace(cached))
+            {
+                await card.ApplyPosterAsync(cached).ConfigureAwait(true);
+            }
+        }
 
         using var gate = new SemaphoreSlim(8);
 
@@ -1669,9 +1974,26 @@ public partial class LibrariesPage : Page
             try
             {
                 var detail = await Task.Run(() => core.ItemDetail(card.Id)).ConfigureAwait(true);
-                if (detail.Ok && !string.IsNullOrWhiteSpace(detail.Data?.PosterPath))
+                if (!detail.Ok)
                 {
-                    await card.ApplyPosterAsync(detail.Data.PosterPath).ConfigureAwait(true);
+                    // 失败不写缓存：下次翻到还能重试。
+                    return;
+                }
+
+                var poster = detail.Data?.PosterPath;
+                lock (DetailPosterCache)
+                {
+                    if (DetailPosterCache.Count >= DetailPosterCacheMax)
+                    {
+                        DetailPosterCache.Clear();
+                    }
+
+                    DetailPosterCache[card.Id] = poster;
+                }
+
+                if (!string.IsNullOrWhiteSpace(poster))
+                {
+                    await card.ApplyPosterAsync(poster).ConfigureAwait(true);
                 }
             }
             catch (Exception)

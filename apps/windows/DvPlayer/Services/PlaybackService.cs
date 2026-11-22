@@ -105,8 +105,17 @@ internal static class Trace
         {
             lock (Gate)
             {
-                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-                System.IO.File.AppendAllText(Path, $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}");
+                var log = Path;
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(log)!);
+
+                // 超过 4MB 轮转一份：播放链路每集都写，长时间用下来会无限长。
+                var info = new System.IO.FileInfo(log);
+                if (info.Exists && info.Length > 4 * 1024 * 1024)
+                {
+                    System.IO.File.Move(log, log + ".1", overwrite: true);
+                }
+
+                System.IO.File.AppendAllText(log, $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}");
             }
         }
         catch (Exception)

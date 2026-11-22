@@ -264,6 +264,10 @@ public partial class SourcesPage : Page
         {
             _sourceDragging = true;
             Cursor = Cursors.SizeAll;
+
+            // 捕获鼠标：拖到卡片网格外松手也要收到 MouseUp，
+            // 否则 ghost、半透明卡片和 SizeAll 光标都会留在界面上。
+            SourceGrid.CaptureMouse();
             _cardSlots = CaptureCardSlots();
             _dragSourceCardVisual = CardContainer(_sourceDragCard.Id);
             if (_dragSourceCardVisual is not null)
@@ -419,6 +423,12 @@ public partial class SourcesPage : Page
         _sourceDragCard = null;
         _cardSlots = null;
         Cursor = Cursors.Arrow;
+
+        if (SourceGrid.IsMouseCaptured)
+        {
+            SourceGrid.ReleaseMouseCapture();
+        }
+
         RestoreCardVisual(_dragSourceCardVisual);
         RestoreCardVisual(_dragHoverCardVisual);
         _dragSourceCardVisual = null;
@@ -438,6 +448,25 @@ public partial class SourcesPage : Page
 
         MoveSource(source.Id, target.Id);
         e.Handled = true;
+    }
+
+    /// <summary>捕获被系统抢走（Alt+Tab、弹窗）时按取消处理，别留下 ghost。</summary>
+    private void OnSourceGridLostCapture(object sender, MouseEventArgs e)
+    {
+        if (!_sourceDragging)
+        {
+            return;
+        }
+
+        _sourceDragging = false;
+        _sourceDragCard = null;
+        _cardSlots = null;
+        Cursor = Cursors.Arrow;
+        RestoreCardVisual(_dragSourceCardVisual);
+        RestoreCardVisual(_dragHoverCardVisual);
+        _dragSourceCardVisual = null;
+        _dragHoverCardVisual = null;
+        HideDragGhost();
     }
 
     /// <summary>记录拖动开始时每张卡片的位置，作为固定的落点槽位。</summary>
@@ -741,6 +770,12 @@ public partial class SourcesPage : Page
 
         NetMount.Release(id);
         settings.Sources.RemoveAll(s => s.Id == id);
+        if (_editingId == id)
+        {
+            // 编辑的就是这条：不收表单的话，之后点保存会用同一个 id 把它写回来。
+            CloseAddPanel();
+        }
+
         if (settings.LastSourceId == id)
         {
             settings.LastSourceId = null;
@@ -803,6 +838,11 @@ public partial class SourcesPage : Page
             }
             else
             {
+                // 和服务器分支一样锁成「编辑这一条」：路径写错了再点保存是改它，
+                // 不会又生成一条新的僵尸源。
+                _editingId = localConfig.Id;
+                AddTitle.Text = "编辑服务器";
+                AddSubmitButton.Content = "保存并连接";
                 AddStatus.Text = "添加失败：" + (localError ?? "读不到这个目录");
             }
 
@@ -879,8 +919,16 @@ public partial class SourcesPage : Page
         }
 
         // 同一地址同一账号不重复加，按最新提交的为准（编辑自己不算重复）。
-        settings.Sources.RemoveAll(s =>
-            s.Id != config.Id && s.Base == baseUri && s.Username == user);
+        // 被顶掉的可能是挂载过的源：不 Release 会留下盘符/会话。
+        var deduped = settings.Sources
+            .Where(s => s.Id != config.Id && s.Base == baseUri && s.Username == user)
+            .ToList();
+        foreach (var old in deduped)
+        {
+            NetMount.Release(old.Id);
+            settings.Sources.Remove(old);
+        }
+
         settings.Sources.RemoveAll(s => s.Id == config.Id);
         settings.Sources.Add(config);
         settings.LastSourceId = config.Id;
@@ -889,7 +937,9 @@ public partial class SourcesPage : Page
         AddStatus.Text = "正在连接…";
         var (ok, error) = await ReconnectAsync(null);
 
-        if (ok)
+        // 「有一个源连上」不代表刚加的这一个连上了：按这个源自己的状态提示。
+        var connection = AppServices.Instance.Connections.FirstOrDefault(c => c.Id == config.Id);
+        if (ok && (connection?.Ok ?? false))
         {
             var wasEditing = _editingId is not null;
             PassBox.Password = string.Empty;
@@ -900,7 +950,14 @@ public partial class SourcesPage : Page
         }
         else
         {
-            AddStatus.Text = "连接失败：" + (error ?? "未知错误");
+            // 源已经落盘（可能只是暂时离线）。把它锁成「正在编辑这一条」：
+            // 用户改完直接点保存就是编辑，不会又生成一条僵尸源。
+            _editingId = config.Id;
+            AddTitle.Text = "编辑服务器";
+            AddSubmitButton.Content = "保存并连接";
+            var why = connection?.Error ?? error ?? "未知错误";
+            AddStatus.Text = "已保存，但连接失败：" + why + "。改好后可直接重试。";
+            (Window.GetWindow(this) as MainWindow)?.RefreshSourceStatus();
         }
     }
 

@@ -17,6 +17,8 @@ public sealed class MpvIpc : IDisposable
     private StreamWriter? _writer;
     private Thread? _reader;
     private CancellationTokenSource? _cts;
+    /// <summary>Dispose 时取消所有在途连接；否则关窗后轮询还会再跑 10 秒。</summary>
+    private readonly CancellationTokenSource _lifetime = new();
     private int _nextId = 1;
     private readonly object _writeLock = new();
 
@@ -37,24 +39,50 @@ public sealed class MpvIpc : IDisposable
     public async Task<bool> ConnectAsync(TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
+        var token = _lifetime.Token;
 
-        while (DateTime.UtcNow < deadline)
+        while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
         {
             var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             try
             {
-                await pipe.ConnectAsync(500).ConfigureAwait(false);
-                _pipe = pipe;
-                _writer = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true };
-                _cts = new CancellationTokenSource();
+                await pipe.ConnectAsync(500, token).ConfigureAwait(false);
+
+                // 连上的瞬间窗口可能已经关了：这条管道不能再挂到一个已释放的对象上。
+                if (token.IsCancellationRequested)
+                {
+                    pipe.Dispose();
+                    return false;
+                }
+
+                lock (_writeLock)
+                {
+                    _pipe = pipe;
+                    _writer = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true };
+                }
+
+                _cts = CancellationTokenSource.CreateLinkedTokenSource(token);
                 _reader = new Thread(() => ReadLoop(_cts.Token)) { IsBackground = true, Name = "mpv-ipc" };
                 _reader.Start();
                 return true;
             }
+            catch (OperationCanceledException)
+            {
+                pipe.Dispose();
+                return false;
+            }
             catch (Exception)
             {
                 pipe.Dispose();
-                await Task.Delay(150).ConfigureAwait(false);
+
+                try
+                {
+                    await Task.Delay(150, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return false;
+                }
             }
         }
 
@@ -76,6 +104,15 @@ public sealed class MpvIpc : IDisposable
 
     public void Dispose()
     {
+        // 先取消：还在轮询的 ConnectAsync 会马上返回 false，不再碰已释放的管道。
+        try
+        {
+            _lifetime.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
         try
         {
             _cts?.Cancel();
@@ -100,8 +137,12 @@ public sealed class MpvIpc : IDisposable
         {
         }
 
-        _pipe = null;
-        _writer = null;
+        lock (_writeLock)
+        {
+            _pipe = null;
+            _writer = null;
+        }
+
         _cts?.Dispose();
         _cts = null;
     }

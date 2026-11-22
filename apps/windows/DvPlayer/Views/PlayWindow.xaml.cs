@@ -56,6 +56,11 @@ public partial class PlayWindow : Window
     private IntPtr _hwnd;
     private bool _started;
     private bool _closed;
+    /// <summary>关窗信号：详情页等它完成再刷新，否则刷新发生在起播那一刻。</summary>
+    private readonly TaskCompletionSource _closedSignal =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>切集的代次：后点的那一次赢，先发出的慢请求回来时直接丢弃。</summary>
+    private int _switchSeq;
     /// <summary>错误面板点「重试」正在跑：别连点重复解析 / 重复起 mpv。</summary>
     private bool _retrying;
     private MpvIpc? _ipc;
@@ -254,12 +259,21 @@ public partial class PlayWindow : Window
         _surface.Host.HostReady += OnHostReady;
         Loaded += OnLoaded;
         Closing += OnClosing;
+        // 详情页要等播放窗口真的关掉再刷新（见 SeriesPage.RefreshAfterPlaybackAsync）。
+        Closed += (_, _) => _closedSignal.TrySetResult();
 
         // 进度条 / 音量条的点按只能挂在根节点上：点在滑块的模板 Border 上时，
         // 挂在 Slider 自己身上的预览事件收不到（MouseLeftButtonDown 是按元素重抛的）。
         Root.PreviewMouseDown += OnSliderPreviewMouseDown;
         Root.PreviewMouseMove += OnSliderPreviewMouseMove;
         Root.PreviewMouseUp += OnSliderPreviewMouseUp;
+        // 鼠标捕获被系统抢走（Alt+Tab / 弹窗）时收不到 MouseUp：
+        // 按「松手」收尾，否则 _seeking / _volumeDragging 一直为 true，
+        // 控制条永远不自动隐藏、进度条也不再跟播放走。
+        Root.AddHandler(
+            Mouse.LostMouseCaptureEvent,
+            new MouseEventHandler(OnSliderLostCapture),
+            handledEventsToo: true);
 
         _ticker.Tick += OnTick;
         _hideTimer.Tick += OnHideTick;
@@ -623,11 +637,14 @@ public partial class PlayWindow : Window
     /// <summary>窗口还开着吗：后台补选集时先看一眼，别往已关的窗口里塞控件。</summary>
     public bool IsAlive => !_closed;
 
+    /// <summary>窗口关闭后完成：调用方用它等播放结束，再刷详情 / 拉新进度。</summary>
+    public Task WaitForCloseAsync() => _closedSignal.Task;
+
     /// <summary>当前条目 id（原盘是 `iso:...`），自检写标记 / 日志用。</summary>
     public string ItemId => _itemId;
 
     /// <summary>选集晚一点才拼好时补进来（续播入口不再为了列集而卡住开窗）。</summary>
-    public void SetPlaylist(List<PlayEpisode> playlist, string? seriesTitle)
+    public void SetPlaylist(List<PlayEpisode> playlist, string? seriesTitle, bool partial = false)
     {
         if (_closed)
         {
@@ -643,6 +660,13 @@ public partial class PlayWindow : Window
         UpdateChips();
         UpdatePlaylistSelection();
         ApplySourceToUi(_current);
+
+        // 选集只取到一部分（服务端中途失败 / 触顶）：明说，
+        // 否则用户会以为后面的集不存在。
+        if (partial)
+        {
+            ShowToast("选集没取全：服务器只返回了一部分");
+        }
     }
 
     private void ApplySourceToUi(PlaySourceDto source)
@@ -1394,8 +1418,31 @@ public partial class PlayWindow : Window
         Launch(_current, _startSeconds);
     }
 
+    /// <summary>
+    /// 日志里不能出现凭据：Emby 的直链带 `api_key=`，URL 里也可能有 userinfo。
+    /// 只保留 scheme://host/path。
+    /// </summary>
+    private static string RedactUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return url;
+        }
+
+        // GetComponents(SchemeAndServer|Path) 只要 scheme/host/port/path，
+        // 天然不带 userinfo 和 query。
+        return uri.GetComponents(
+            UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
+    }
+
     private void Launch(PlaySourceDto source, double? startSeconds)
     {
+        // 关闭流程已经开始：任何重试/延迟调用都不该再拉 mpv 起来。
+        if (_closed)
+        {
+            return;
+        }
         var launch = Playback.ToLaunch(source, startSeconds);
         if (_isLocalDisc)
         {
@@ -1440,7 +1487,7 @@ public partial class PlayWindow : Window
             }
         }
 
-        Trace.Write($"mpv start url={launch.Url} headers={launch.Headers?.Count ?? 0} " +
+        Trace.Write($"mpv start url={RedactUrl(launch.Url)} headers={launch.Headers?.Count ?? 0} " +
                     $"start={launch.StartSeconds} resume={source.PositionSeconds} " +
                     $"aspect={_aspect.Key()} introSkip={_pendingIntroSkip?.ToString("0") ?? "-"} " +
                     $"buffer={MpvProcess.BufferSizeMb}MiB");
@@ -1460,6 +1507,9 @@ public partial class PlayWindow : Window
         catch (Exception ex)
         {
             Trace.Write("mpv start failed: " + ex.Message);
+            // MpvProcess.Start 在 Stop 之前就做存在性检查并抛异常（文件被删/挂载掉线），
+            // 这时上一集的 mpv 还活着，而 _ipc 已置 null：不停掉的话声音继续放且壳控制不了。
+            _mpv.Stop();
             ShowError(ex.Message);
             return;
         }
@@ -1621,16 +1671,9 @@ public partial class PlayWindow : Window
 
                 case "current-tracks/video" when value.ValueKind == JsonValueKind.Object:
                     // mpv 只在轨道对象里给 DV profile，没有 FEL/MEL（那要侧路解析 RPU）。
-                    _dvProfile =
-                        value.TryGetProperty("dolby-vision-profile", out var profile) &&
-                        profile.ValueKind == JsonValueKind.Number
-                            ? profile.GetInt32()
-                            : 0;
-                    _videoCodec =
-                        value.TryGetProperty("codec", out var codec) &&
-                        codec.ValueKind == JsonValueKind.String
-                            ? codec.GetString() ?? ""
-                            : "";
+                    // 8.1 这类带小数的值按四舍五入取整，裸 GetInt32 会抛。
+                    _dvProfile = Int(value, "dolby-vision-profile") ?? 0;
+                    _videoCodec = Str(value, "codec") ?? "";
                     UpdateChips();
                     ProbeDolbyVisionIfNeeded();
                     break;
@@ -1710,13 +1753,20 @@ public partial class PlayWindow : Window
                     break;
 
                 case "width" when value.ValueKind == JsonValueKind.Number:
-                    _videoWidth = value.GetInt32();
-                    UpdateVideoAspect();
+                    // 这个分支的 value 本身就是数字，不能按「对象属性」去取。
+                    if (value.TryGetInt32(out var width))
+                    {
+                        _videoWidth = width;
+                        UpdateVideoAspect();
+                    }
                     break;
 
                 case "height" when value.ValueKind == JsonValueKind.Number:
-                    _videoHeight = value.GetInt32();
-                    UpdateVideoAspect();
+                    if (value.TryGetInt32(out var height))
+                    {
+                        _videoHeight = height;
+                        UpdateVideoAspect();
+                    }
                     break;
 
                 case "video-params/aspect" when value.ValueKind == JsonValueKind.Number:
@@ -1798,6 +1848,22 @@ public partial class PlayWindow : Window
     }
 
     /// <summary>mpv 的轨道清单：音轨 / 字幕菜单和「按详情页的选择播放」都读它。</summary>
+    /// <summary>安全读取字符串属性：mpv 在某些情况下给 null / 别的类型，裸 GetString 会抛。</summary>
+    private static string? Str(JsonElement obj, string name) =>
+        obj.ValueKind == JsonValueKind.Object &&
+        obj.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
+
+    /// <summary>安全读取整数属性；8.1 这种带小数的数字按四舍五入取整。</summary>
+    private static int? Int(JsonElement obj, string name) =>
+        obj.ValueKind == JsonValueKind.Object &&
+        obj.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.Number
+            ? element.TryGetInt32(out var exact)
+                ? exact
+                : element.TryGetDouble(out var approx) ? (int)Math.Round(approx) : null
+            : null;
+
     private void ParseTracks(JsonElement value)
     {
         if (value.ValueKind != JsonValueKind.Array)
@@ -1812,23 +1878,22 @@ public partial class PlayWindow : Window
 
         foreach (var track in value.EnumerateArray())
         {
-            var type = track.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
+            var type = Str(track, "type");
             if (type is not ("audio" or "sub"))
             {
                 continue;
             }
 
             var item = new MpvTrack(
-                track.TryGetProperty("id", out var idElement) ? idElement.GetInt32() : 0,
+                Int(track, "id") ?? 0,
                 type,
-                track.TryGetProperty("lang", out var lang) ? lang.GetString() : null,
-                track.TryGetProperty("title", out var title) ? title.GetString() : null,
-                track.TryGetProperty("codec", out var codec) ? codec.GetString() : null,
-                track.TryGetProperty("demux-channel-count", out var channels) && channels.ValueKind == JsonValueKind.Number
-                    ? channels.GetInt32()
-                    : null,
-                track.TryGetProperty("selected", out var selected) && selected.ValueKind == JsonValueKind.True,
-                track.TryGetProperty("external-filename", out var filename) ? filename.GetString() : null);
+                Str(track, "lang"),
+                Str(track, "title"),
+                Str(track, "codec"),
+                Int(track, "demux-channel-count"),
+                track.TryGetProperty("selected", out var selected) &&
+                selected.ValueKind == JsonValueKind.True,
+                Str(track, "external-filename"));
 
             if (type == "audio")
             {
@@ -2040,14 +2105,15 @@ public partial class PlayWindow : Window
         if (!string.IsNullOrEmpty(_coreItemId))
         {
             var task = Playback.Report(_coreItemId!, position, duration, stopped);
-            if (wait) task.Wait(2500);
+            // 关窗最多等 0.8s：等太久窗口看起来像卡死，丢一次上报还能靠播放中的周期上报补。
+            if (wait) task.Wait(800);
             return;
         }
 
         if (!_isLocalDisc)
         {
             var task = Playback.Report(_itemId, position, duration, stopped);
-            if (wait) task.Wait(2500);
+            if (wait) task.Wait(800);
             return;
         }
 
@@ -2084,19 +2150,43 @@ public partial class PlayWindow : Window
             return;
         }
 
-        var result = await Task.Run(() => core.MediaInfo(itemId)).ConfigureAwait(true);
-        if (itemId != _itemId)
+        try
         {
-            return;
+            var result = await Task.Run(() => core.MediaInfo(itemId)).ConfigureAwait(true);
+            if (itemId != _itemId)
+            {
+                return;
+            }
+
+            _mediaInfo = result.Ok ? result.Data : null;
+        }
+        catch (Exception ex)
+        {
+            // 核心在重连时被释放、或媒体信息解析失败：这一集当作没有规格信息，
+            // 但不能把「已加载」标志卡死（否则字幕自动选择永远不生效）。
+            Trace.Write("media info failed: " + ex.Message);
+            if (itemId != _itemId)
+            {
+                return;
+            }
+
+            _mediaInfo = null;
         }
 
-        _mediaInfo = result.Ok ? result.Data : null;
         _mediaInfoLoaded = true;
-        UpdateChips();
-        UpdateMediaInfoText();
 
-        // 字幕的自动选择要读服务器的语言表，媒体信息晚到就再套一次。
-        ApplyTrackPrefs();
+        try
+        {
+            UpdateChips();
+            UpdateMediaInfoText();
+
+            // 字幕的自动选择要读服务器的语言表，媒体信息晚到就再套一次。
+            ApplyTrackPrefs();
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("media info apply failed: " + ex.Message);
+        }
     }
 
     /// <summary>
@@ -2505,9 +2595,36 @@ public partial class PlayWindow : Window
             return;
         }
 
+        FinishSlider();
+        e.Handled = true;
+    }
+
+    /// <summary>鼠标捕获丢失：当成松手处理，别把拖动状态留在那儿。</summary>
+    private void OnSliderLostCapture(object sender, MouseEventArgs e)
+    {
+        if (_clickSlider is null)
+        {
+            return;
+        }
+
+        FinishSlider();
+    }
+
+    /// <summary>结束一次「点轨道拖动」：seek 或音量都在这收尾。</summary>
+    private void FinishSlider()
+    {
         var slider = _clickSlider;
         _clickSlider = null;
-        slider.ReleaseMouseCapture();
+
+        if (slider is null)
+        {
+            return;
+        }
+
+        if (slider.IsMouseCaptured)
+        {
+            slider.ReleaseMouseCapture();
+        }
 
         if (ReferenceEquals(slider, Seek))
         {
@@ -2521,8 +2638,6 @@ public partial class PlayWindow : Window
                 _ipc.Command("set_property", "volume", (int)Math.Round(Volume.Value));
             }
         }
-
-        e.Handled = true;
     }
 
     /// <summary>把点击位置换算成滑块值；进度条拖动时只动 UI，松手才 seek。</summary>
@@ -2606,6 +2721,18 @@ public partial class PlayWindow : Window
     private void OnVolumeDragStarted(object sender, RoutedEventArgs e)
     {
         _volumeDragging = true;
+    }
+
+    private void OnVolumeDragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        // 只有 DragStarted 时：松手后这个标志一直为 true，控制条永远不会自动隐藏。
+        _volumeDragging = false;
+
+        // 拖动中最后一个事件可能没发出去，松手时补一次最终值。
+        if (_ipc is not null)
+        {
+            _ipc.Command("set_property", "volume", (int)Math.Round(Volume.Value));
+        }
     }
 
     private void OnVolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -3869,6 +3996,9 @@ public partial class PlayWindow : Window
     {
         PlaySourceDto? source;
         string? error = null;
+        // 这一集从哪里起播：网络集一律 0；侧栏直开的原盘切标题用它自己的本地进度。
+        var startSeconds = 0d;
+        var seq = ++_switchSeq;
 
         if (_isLocalDisc && _discIsoPath is { Length: > 0 } isoPath)
         {
@@ -3887,10 +4017,17 @@ public partial class PlayWindow : Window
             // 媒体库条目（进度在核心）只有一个续播点，切标题从头开始。
             var resume = _coreItemId is null ? LocalProgress.Get(itemId) : 0;
             source = DiscSource(isoPath, discTitle, _discDisplayName ?? "", resume);
+            startSeconds = resume;
         }
         else
         {
             (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
+        }
+
+        // await 期间可能已经关窗，或用户又点了别的集：这一轮已经过期，丢弃结果。
+        if (_closed || seq != _switchSeq)
+        {
+            return;
         }
 
         if (source is null)
@@ -3936,7 +4073,9 @@ public partial class PlayWindow : Window
 
         // 切集一律从头开始：服务器给的续播点是「上次看到哪」，
         // 已经看完的集会带着片尾位置回来，起播就立刻 EOF 跳到下一集。
-        Launch(source, 0);
+        // 原盘切标题是例外：起播点来自上面算好的本地进度。
+        _startSeconds = startSeconds;
+        Launch(source, startSeconds);
         await Task.CompletedTask;
     }
 
@@ -3956,7 +4095,15 @@ public partial class PlayWindow : Window
         {
             // 关窗是「停止播放」：Emby 靠 Stopped 才写 UserData。
             // 窗口关完进程就退，这里等一下这次上报，别让它被一起带走。
-            ReportProgress(_position, EffectiveDuration, stopped: true, wait: true);
+            try
+            {
+                ReportProgress(_position, EffectiveDuration, stopped: true, wait: true);
+            }
+            catch (Exception ex)
+            {
+                // 上报失败/超时不能挡住后面的 Dispose，否则 mpv 和 IPC 会漏。
+                Trace.Write("close report failed: " + ex.Message);
+            }
         }
 
         _danmakuCts?.Cancel();
@@ -4382,6 +4529,8 @@ public partial class PlayWindow : Window
 
         _retrying = true;
         ErrorPanel.Visibility = Visibility.Collapsed;
+        var retryItem = _itemId;
+        var retrySeq = _switchSeq;
         Trace.Write($"play retry item={_itemId} hasUrl={!string.IsNullOrEmpty(_current.Url)}");
 
         try
@@ -4399,7 +4548,9 @@ public partial class PlayWindow : Window
             }
 
             var (source, error) = await Playback.ResolveAsync(_itemId).ConfigureAwait(true);
-            if (_closed)
+
+            // 重试期间关窗 / 切了别的集：这次结果已经过期，别把旧集拉回来。
+            if (_closed || retrySeq != _switchSeq || _itemId != retryItem)
             {
                 return;
             }

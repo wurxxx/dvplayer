@@ -104,8 +104,7 @@ public sealed class DanmakuService
             {
                 var title = item.TryGetProperty("episodeTitle", out var t) ? t.GetString() : null;
                 if (title is not null &&
-                    (title.Contains($"第{episode}", StringComparison.Ordinal) ||
-                     title.Contains($"第 {episode}", StringComparison.Ordinal)) &&
+                    MatchesEpisode(title, episode) &&
                     item.TryGetProperty("episodeId", out var id))
                 {
                     return id.GetInt32();
@@ -125,6 +124,33 @@ public sealed class DanmakuService
         }
 
         throw new DanmakuException("弹弹play 没匹配到这一集");
+    }
+
+    /// <summary>
+    /// 标题里是不是这一集。「第1」不能命中「第10」：数字后面还是数字就不算。
+    /// 也兼容「第 1 集」这种中间带空格的写法。
+    /// </summary>
+    private static bool MatchesEpisode(string title, int episode)
+    {
+        var number = episode.ToString(CultureInfo.InvariantCulture);
+        foreach (var prefix in new[] { "第", "第 " })
+        {
+            var needle = prefix + number;
+            var index = 0;
+
+            while ((index = title.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+            {
+                var after = index + needle.Length;
+                if (after >= title.Length || !char.IsDigit(title[after]))
+                {
+                    return true;
+                }
+
+                index = after;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>取一集的弹幕 XML 并解析。</summary>

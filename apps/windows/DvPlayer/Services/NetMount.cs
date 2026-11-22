@@ -17,6 +17,10 @@ internal static class NetMount
 {
     /// <summary>挂载根（SMB 是 <c>\\host\share</c>，NFS / WebDAV 是盘符），按源 id 记。</summary>
     private static readonly Dictionary<string, string> Mounted = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>已选中但还没挂上的盘符：两个源并发时不能挑到同一个。</summary>
+    private static readonly Dictionary<string, string> Reserved = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>正在后台卸载的源：同一 id 立刻重挂时要先等它卸完。</summary>
+    private static readonly Dictionary<string, Task> Releasing = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object Gate = new();
 
     /// <summary>挂载类型；<c>local</c> 不在这里。</summary>
@@ -32,21 +36,65 @@ internal static class NetMount
             return config;
         }
 
-        var (root, path) = kind switch
+        // 这个源刚被删/改地址：后台卸载还没完时先等，否则会复用到旧挂载。
+        Task? releasing;
+        lock (Gate)
         {
-            "smb" or "cifs" => MountSmb(config),
-            "nfs" => MountNfs(config),
-            _ => MountWebDav(config),
-        };
+            Releasing.TryGetValue(config.Id, out releasing);
+        }
+
+        if (releasing is not null)
+        {
+            try
+            {
+                releasing.Wait(TimeSpan.FromSeconds(25));
+            }
+            catch (Exception)
+            {
+                // 卸载失败也继续，挂载命令会把真实错误报出来。
+            }
+        }
+
+        string root;
+        string path;
+
+        try
+        {
+            (root, path) = kind switch
+            {
+                "smb" or "cifs" => MountSmb(config),
+                "nfs" => MountNfs(config),
+                _ => MountWebDav(config),
+            };
+        }
+        catch
+        {
+            // 挂载失败：把预约的盘符还回去，否则下次会白白跳过它。
+            lock (Gate)
+            {
+                Reserved.Remove(config.Id);
+            }
+
+            throw;
+        }
 
         if (!Directory.Exists(path))
         {
+            // 挂载命令成功但目录读不到（权限/服务没起）：把刚挂上的东西卸掉，
+            // 否则盘符被占着又不在 Mounted 里，永远没人释放。
+            lock (Gate)
+            {
+                Reserved.Remove(config.Id);
+            }
+
+            Unmount(root);
             throw new NetMountException($"已挂载 {root}，但读不到目录：{path}");
         }
 
         lock (Gate)
         {
             Mounted[config.Id] = root;
+            Reserved.Remove(config.Id);
         }
 
         return config with
@@ -61,17 +109,42 @@ internal static class NetMount
     /// <summary>删源 / 换地址时卸载。没挂过就什么也不做。</summary>
     public static void Release(string id)
     {
-        string? root;
+        string root;
         lock (Gate)
         {
-            if (!Mounted.TryGetValue(id, out root))
+            Reserved.Remove(id);
+            if (!Mounted.TryGetValue(id, out var found))
             {
                 return;
             }
 
             Mounted.Remove(id);
+            root = found;
         }
 
+        // 卸载命令最坏等 20 秒；删源/改地址发生在 UI 线程，不能同步等。
+        var task = Task.Run(() => Unmount(root));
+
+        lock (Gate)
+        {
+            Releasing[id] = task;
+        }
+
+        _ = task.ContinueWith(_ =>
+        {
+            lock (Gate)
+            {
+                // 只清自己那一笔：同一 id 可能已经被更新的一轮覆盖。
+                if (Releasing.TryGetValue(id, out var current) && current == task)
+                {
+                    Releasing.Remove(id);
+                }
+            }
+        }, TaskScheduler.Default);
+    }
+
+    private static void Unmount(string root)
+    {
         try
         {
             if (root.StartsWith(@"\\", StringComparison.Ordinal))
@@ -233,21 +306,25 @@ internal static class NetMount
         var drive = ReuseOrPickDrive(config.Id);
         if (!Directory.Exists(drive + "\\"))
         {
-            var arguments = $"use {drive} \"{url}\" /persistent:no";
-            if (!string.IsNullOrEmpty(config.Username))
+            // 密码交给 Win32 调用：以前拼进 `net use` 命令行，
+            // 进程列表里任何本机用户都能看到，密码里的引号还能注入开关。
+            var resource = new NetResource
             {
-                arguments += $" /user:\"{config.Username}\"";
-                if (!string.IsNullOrEmpty(config.Password))
-                {
-                    arguments += $" \"{config.Password}\"";
-                }
-            }
+                Type = ResourceTypeDisk,
+                LocalName = drive,
+                RemoteName = url,
+            };
 
-            var (ok, output) = Run("net", arguments);
-            if (!ok)
+            var code = WNetAddConnection2(
+                ref resource,
+                string.IsNullOrEmpty(config.Password) ? null : config.Password,
+                string.IsNullOrEmpty(config.Username) ? null : config.Username,
+                0);
+
+            if (code is not (0 or ErrorAlreadyAssigned or ErrorSessionCredentialConflict))
             {
                 throw new NetMountException(
-                    $"WebDAV 挂载失败：{output}\n" +
+                    $"WebDAV 挂载失败（{code}）：{new Win32Exception(code).Message}\n" +
                     "Windows 需要启用「WebClient」服务（默认关闭），服务器要支持 WebDAV。");
             }
         }
@@ -267,14 +344,25 @@ internal static class NetMount
                 return existing;
             }
 
+            // 同一次挂载重试：继续用已经预约的盘符。
+            if (Reserved.TryGetValue(id, out var reserved))
+            {
+                return reserved;
+            }
+
             var used = new HashSet<string>(
                 DriveInfo.GetDrives().Select(d => d.Name.TrimEnd('\\')),
                 StringComparer.OrdinalIgnoreCase);
+
+            // 预约但还没挂上的盘符，DriveInfo 看不到，必须自己算进去。
+            used.UnionWith(Reserved.Values);
+
             foreach (var letter in "ZYXWVUTSRQPONMLK")
             {
                 var name = letter + ":";
                 if (!used.Contains(name))
                 {
+                    Reserved[id] = name;
                     return name;
                 }
             }

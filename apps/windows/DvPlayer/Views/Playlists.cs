@@ -21,7 +21,7 @@ internal static class Playlists
     /// <summary>从剧集 / 季 / 单集的 id 读出可播放的集列表。</summary>
     /// <param name="id">剧集 id（会再下一层挑一季）、季 id 或目录 id。</param>
     /// <param name="seasonNumber">剧集有多季时挑哪一季；0 / null = 第一季。</param>
-    public static async Task<(List<PlayEpisode> Items, string? Title)> LoadAsync(
+    public static async Task<(List<PlayEpisode> Items, string? Title, bool Complete)> LoadAsync(
         MediaCore core,
         string id,
         string? title = null,
@@ -34,7 +34,7 @@ internal static class Playlists
             ? Task.Run(() => core.ItemDetail(id))
             : null;
 
-        var items = await FetchAllChildrenAsync(core, id).ConfigureAwait(true);
+        var (items, complete) = await FetchAllChildrenAsync(core, id).ConfigureAwait(true);
         var childrenMs = clock.ElapsedMilliseconds;
 
         // 传进来的是剧集本身：直接子项是「季」，要再下一层才是集。
@@ -45,7 +45,7 @@ internal static class Playlists
                          ?? items.FirstOrDefault(item => item.SeasonNumber is > 0)
                          ?? items[0];
 
-            items = await FetchAllChildrenAsync(core, season.Id).ConfigureAwait(true);
+            (items, complete) = await FetchAllChildrenAsync(core, season.Id).ConfigureAwait(true);
         }
 
         items = items
@@ -65,7 +65,7 @@ internal static class Playlists
         Trace.Write($"playlist id={id} n={items.Count} childrenMs={childrenMs} " +
                     $"totalMs={clock.ElapsedMilliseconds}");
 
-        return (ToEpisodes(items), title);
+        return (ToEpisodes(items), title, complete);
     }
 
     /// <summary>一页一百条地取全：一次要 500 条时服务端要扫更久，分页反而快。</summary>
@@ -74,9 +74,11 @@ internal static class Playlists
     /// <summary>防止服务端 Total 异常时无限翻页。</summary>
     private const int ChildrenMaxPages = 30;
 
-    private static async Task<List<MediaItemDto>> FetchAllChildrenAsync(MediaCore core, string id)
+    private static async Task<(List<MediaItemDto> Items, bool Complete)> FetchAllChildrenAsync(
+        MediaCore core, string id)
     {
         var all = new List<MediaItemDto>();
+        var complete = true;
 
         for (var page = 1; page <= ChildrenMaxPages; page++)
         {
@@ -88,11 +90,9 @@ internal static class Playlists
                         $"ms={pageClock.ElapsedMilliseconds}");
             if (!result.Ok)
             {
-                if (page == 1)
-                {
-                    Trace.Write($"playlist children failed id={id} err={result.Error}");
-                }
-
+                // 中途失败：已拿到的几页照用，但要标出来，别让界面以为这就是全部。
+                complete = false;
+                Trace.Write($"playlist children failed id={id} page={page} err={result.Error}");
                 break;
             }
 
@@ -109,9 +109,16 @@ internal static class Playlists
             {
                 break;
             }
+
+            if (page == ChildrenMaxPages)
+            {
+                // 服务端 Total 异常时别无限翻页，但要让调用方知道没取全。
+                complete = false;
+                Trace.Write($"playlist page cap id={id} pages={ChildrenMaxPages} loaded={all.Count}/{total}");
+            }
         }
 
-        return all;
+        return (all, complete);
     }
 
     /// <summary>
@@ -145,7 +152,7 @@ internal static class Playlists
     }
 
     /// <summary>认出记录所在容器里的集列表；哪条线索都不通就返回 null（照旧单集播放）。</summary>
-    private static async Task<(List<PlayEpisode> Items, string? Title)?> ResolvePlaylistAsync(
+    private static async Task<(List<PlayEpisode> Items, string? Title, bool Complete)?> ResolvePlaylistAsync(
         MediaCore core,
         PlayRecordDto record)
     {
@@ -160,7 +167,7 @@ internal static class Playlists
 
             // 2) 飞牛的 parent_guid 不是可浏览的目录，按剧名把剧集找回来。
             if (!string.IsNullOrWhiteSpace(record.SeriesTitle) &&
-                await FindSeriesAsync(core, record.SeriesTitle!) is { } seriesId &&
+                await FindSeriesAsync(core, record.SeriesTitle!, record.SourceId) is { } seriesId &&
                 await TryLoadAsync(core, seriesId, record, record.SeriesTitle) is { } bySeries)
             {
                 return bySeries;
@@ -179,7 +186,7 @@ internal static class Playlists
     private static async Task AttachPlaylistAsync(
         PlayWindow window,
         PlayRecordDto record,
-        Task<(List<PlayEpisode> Items, string? Title)?> playlistTask)
+        Task<(List<PlayEpisode> Items, string? Title, bool Complete)?> playlistTask)
     {
         var playlist = await playlistTask.ConfigureAwait(true);
         if (playlist is not { } found || !window.IsAlive)
@@ -187,9 +194,9 @@ internal static class Playlists
             return;
         }
 
-        window.SetPlaylist(found.Items, found.Title);
+        window.SetPlaylist(found.Items, found.Title, partial: !found.Complete);
         Trace.Write($"playlist attached record={record.ItemId} n={found.Items.Count} " +
-                    $"title={found.Title}");
+                    $"title={found.Title} complete={found.Complete}");
 
         if (found.Items.All(item => item.Id != record.ItemId))
         {
@@ -217,13 +224,14 @@ internal static class Playlists
     /// 记录的 item id 有时是「播放用」的 guid，和列表里的条目 id 对不上，
     /// 所以还要按标题兜一层。
     /// </summary>
-    private static async Task<(List<PlayEpisode> Items, string? Title)?> TryLoadAsync(
+    private static async Task<(List<PlayEpisode> Items, string? Title, bool Complete)?> TryLoadAsync(
         MediaCore core,
         string containerId,
         PlayRecordDto record,
         string? title)
     {
-        var (items, seriesTitle) = await LoadAsync(core, containerId, title, record.SeasonNumber);
+        var (items, seriesTitle, complete) =
+            await LoadAsync(core, containerId, title, record.SeasonNumber);
         if (items.Count < 2)
         {
             return null;
@@ -240,8 +248,8 @@ internal static class Playlists
         }
 
         Trace.Write($"record playlist {record.ItemId} -> {target.Id} " +
-                    $"container={containerId} episodes={items.Count}");
-        return (items, seriesTitle);
+                    $"container={containerId} episodes={items.Count} complete={complete}");
+        return (items, seriesTitle, complete);
     }
 
     /// <summary>按标题认集：记录的标题多半就是文件名，去掉扩展名后和列表对得上。</summary>
@@ -286,7 +294,7 @@ internal static class Playlists
         !string.IsNullOrWhiteSpace(record.SeriesTitle);
 
     /// <summary>按剧名找回剧集 id：只认标题对得上的 series / tv，宁可不找也不错找。</summary>
-    private static async Task<string?> FindSeriesAsync(MediaCore core, string title)
+    private static async Task<string?> FindSeriesAsync(MediaCore core, string title, string? sourceId)
     {
         var result = await Task.Run(() => core.Search(title)).ConfigureAwait(true);
         var wanted = title.Trim();
@@ -295,9 +303,19 @@ internal static class Playlists
             .Where(item => item.Kind is "series" or "Series" or "tv" or "TV")
             .ToList();
 
-        return series.FirstOrDefault(item =>
+        // 搜索是跨源的：先只在本源里找。以前不看的 SourceId，
+        // A 源播的记录可能接到 B 源的剧上（选集、下一集全错源）。
+        var mine = series
+            .Where(item => string.IsNullOrEmpty(sourceId) ||
+                           item.SourceId == sourceId ||
+                           item.Id.StartsWith(sourceId + ":", StringComparison.Ordinal))
+            .ToList();
+
+        var pool = mine.Count > 0 ? mine : series;
+
+        return pool.FirstOrDefault(item =>
                    string.Equals(item.Title?.Trim(), wanted, StringComparison.OrdinalIgnoreCase))?.Id
-               ?? series.FirstOrDefault()?.Id;
+               ?? pool.FirstOrDefault()?.Id;
     }
 
     /// <summary>

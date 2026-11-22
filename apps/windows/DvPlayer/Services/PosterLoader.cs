@@ -53,8 +53,30 @@ public static class PosterLoader
     }
 
     private static readonly Dictionary<string, BitmapSource> Memory = new();
+    private static readonly LinkedList<string> MemoryOrder = new();
     private static readonly Dictionary<string, Task<BitmapSource?>> Pending = new();
     private static readonly object Gate = new();
+
+    /// <summary>内存里最多留多少张：翻几十页也不会一直涨。</summary>
+    private const int MemoryLimit = 240;
+
+    /// <summary>放进内存缓存并按 LRU 淘汰最旧的。</summary>
+    private static void Remember(string key, BitmapSource bitmap)
+    {
+        lock (Gate)
+        {
+            Memory[key] = bitmap;
+            MemoryOrder.Remove(key);
+            MemoryOrder.AddLast(key);
+
+            while (MemoryOrder.Count > MemoryLimit)
+            {
+                var oldest = MemoryOrder.First!.Value;
+                MemoryOrder.RemoveFirst();
+                Memory.Remove(oldest);
+            }
+        }
+    }
 
     private static string CacheDir
     {
@@ -140,16 +162,23 @@ public static class PosterLoader
                 }
 
                 bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                await File.WriteAllBytesAsync(file, bytes).ConfigureAwait(false);
+
+                // 原子写：半截文件会被下一次 File.Exists 当成有效图，
+                // 解码失败后这张海报就永久空白。
+                var temp = file + ".part";
+                await File.WriteAllBytesAsync(temp, bytes).ConfigureAwait(false);
+                File.Move(temp, file, overwrite: true);
             }
 
             var bitmap = Decode(bytes, width);
-            if (bitmap is not null)
+            if (bitmap is null)
             {
-                lock (Gate)
-                {
-                    Memory[key] = bitmap;
-                }
+                // 坏缓存（半截 / 不支持的格式）删掉，下次重新下载。
+                try { File.Delete(file); } catch (IOException) { }
+            }
+            else
+            {
+                Remember(key, bitmap);
             }
 
             return bitmap;

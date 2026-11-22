@@ -437,14 +437,31 @@
       </Grid>
     </Grid>
 
-    <!-- 收藏（空态） -->
-    <StackPanel x:Name="FavoriteEmpty" HorizontalAlignment="Center"
-                VerticalAlignment="Center" Margin="0,0,0,80" Visibility="Collapsed">
-      <TextBlock Text="&#xE734;" Style="{StaticResource EmptyIcon}" />
-      <TextBlock Text="还没有收藏" Style="{StaticResource EmptyText}" FontSize="14" />
-      <TextBlock Text="收藏的影片会集中在这里" Style="{StaticResource EmptyText}"
-                 FontSize="12.5" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
-    </StackPanel>
+    <!-- 收藏 -->
+    <Grid x:Name="FavoriteRoot" Margin="32,88,32,0" Visibility="Collapsed">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <TextBlock x:Name="FavoriteCountText" Text="收藏" Style="{StaticResource PageTitle}"
+                 FontSize="21" VerticalAlignment="Center" />
+
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,18,0,0">
+        <controls:PosterGrid x:Name="FavoriteResults"
+                             ItemTemplate="{StaticResource PosterTemplate}" />
+      </ScrollViewer>
+
+      <StackPanel x:Name="FavoriteEmpty" Grid.Row="1" HorizontalAlignment="Center"
+                  VerticalAlignment="Center" Margin="0,0,0,80" Visibility="Collapsed">
+        <TextBlock Text="&#xE734;" Style="{StaticResource EmptyIcon}" />
+        <TextBlock x:Name="FavoriteEmptyTitle" Text="还没有收藏"
+                   Style="{StaticResource EmptyText}" FontSize="14" />
+        <TextBlock x:Name="FavoriteEmptyHint" Text="收藏的影片会集中在这里"
+                   Style="{StaticResource EmptyText}" FontSize="12.5" Margin="0,6,0,0"
+                   Foreground="{StaticResource FaintBrush}" />
+      </StackPanel>
+    </Grid>
 
     <!-- 媒体库内容（原网格视图） -->
     <Grid x:Name="BrowseRoot" Margin="32,40,32,0" Visibility="Collapsed">

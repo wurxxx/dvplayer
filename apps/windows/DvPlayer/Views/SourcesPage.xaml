@@ -32,7 +32,8 @@
         <ItemsControl x:Name="SourceGrid"
                       PreviewMouseLeftButtonDown="OnSourceGridPreviewMouseDown"
                       PreviewMouseMove="OnSourceGridPreviewMouseMove"
-                      PreviewMouseLeftButtonUp="OnSourceGridPreviewMouseUp">
+                      PreviewMouseLeftButtonUp="OnSourceGridPreviewMouseUp"
+                      LostMouseCapture="OnSourceGridLostCapture">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <WrapPanel />

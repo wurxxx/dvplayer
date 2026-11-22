@@ -219,18 +219,13 @@ public static partial class BluRayDisc
             return File.Exists(console) ? console : (File.Exists(exe) ? exe : null);
         }
 
-        var fromEnv = Environment.GetEnvironmentVariable("DVPLAYER_MPV");
-        if (!string.IsNullOrWhiteSpace(fromEnv) && ConsoleFor(fromEnv) is { } envMpv)
+        // 环境变量 / exe 旁 / 开发树上游，统一由 MpvLocator 找。
+        if (MpvLocator.FindDirectory() is { } dir &&
+            ConsoleFor(Path.Combine(dir, "mpv.exe")) is { } found)
         {
-            return envMpv;
+            return found;
         }
 
-        var beside = Path.Combine(AppContext.BaseDirectory, "mpv", "mpv.exe");
-        if (ConsoleFor(beside) is { } besideMpv)
-        {
-            return besideMpv;
-        }
-
-        return ConsoleFor(@"D:\dvplayer\mpv\mpv.exe");
+        return null;
     }
 }

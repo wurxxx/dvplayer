@@ -5,6 +5,12 @@
 # Both use the same self-contained win-x64 publish payload, including
 # dvplayer_media.dll and the bundled mpv.
 #
+# 版本号同时写在三个地方，发布时一起改：
+#   apps\windows\DvPlayer\DvPlayer.csproj  <Version>   （Windows 关于 / 侧栏显示）
+#   core\Cargo.toml [workspace.package] version        （共享核心，macOS 侧栏也用它）
+#   apps\macos\DvPlayer\Info.plist CFBundleShortVersionString
+# 这里传的 -Version 决定产物文件名，并覆盖程序集版本；核心版本要去改 Cargo.toml 再编。
+#
 # Usage (PowerShell):
 #   powershell -ExecutionPolicy Bypass -File apps\windows\packaging\build-release.ps1
 #   ... -Version 0.1.1
@@ -48,14 +54,14 @@ if (-not $SkipPublish) {
     if (Test-Path $payload) { Remove-WithRetry $payload }
     New-Item -ItemType Directory -Force $payload | Out-Null
     dotnet publish $proj -c $Configuration -r win-x64 --self-contained true `
-        -p:DebugType=none -o $payload
+        -p:Version=$Version -p:DebugType=none -o $payload
     if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
 }
 if (-not (Test-Path (Join-Path $payload 'DvPlayer.exe'))) {
     throw "payload missing DvPlayer.exe: $payload"
 }
 
-# Shared Rust core (same copy rule as the MSIX script).
+# Shared Rust core (dvplayer_media.dll, built by scripts/windows/build-core.ps1).
 $core = Join-Path $repo 'core\target\x86_64-pc-windows-gnu\release\dvplayer_media.dll'
 if (Test-Path $core) {
     Copy-Item $core $payload -Force

@@ -12,10 +12,19 @@ namespace DvPlayer.Views;
 public partial class SettingsPage : Page
 {
     private bool _ready;
+    private readonly System.Windows.Threading.DispatcherTimer _saveTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(500),
+    };
 
     public SettingsPage()
     {
         InitializeComponent();
+        _saveTimer.Tick += (_, _) =>
+        {
+            _saveTimer.Stop();
+            SaveExtras();
+        };
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -28,13 +37,20 @@ public partial class SettingsPage : Page
         LoadValues();
         RefreshSourceSummary();
 
-        AppVersionText.Text = "0.1.0（" + typeof(SettingsPage).Assembly.GetName().Version + "）";
+        AppVersionText.Text = AppServices.AppVersion;
         CoreVersionText.Text = AppServices.Instance.CoreVersion ?? "未加载";
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+
+        // 还有没来得及写盘的输入：离开页面前补一次。
+        if (_saveTimer.IsEnabled)
+        {
+            _saveTimer.Stop();
+            SaveExtras();
+        }
     }
 
     private void OnConnectionChanged(object? sender, EventArgs e) =>
@@ -178,9 +194,24 @@ public partial class SettingsPage : Page
     }
 
     /// <summary>弹幕 / 字幕的文本框：边输入边写回 settings.json，不依赖配色或分段切换。</summary>
-    private void OnSettingTextChanged(object sender, TextChangedEventArgs e) => SaveExtras();
+    private void OnSettingTextChanged(object sender, TextChangedEventArgs e) => ScheduleExtraSave();
 
-    private void OnSettingPasswordChanged(object sender, RoutedEventArgs e) => SaveExtras();
+    private void OnSettingPasswordChanged(object sender, RoutedEventArgs e) => ScheduleExtraSave();
+
+    /// <summary>
+    /// 输入时每个字符都写盘太频繁（而且写的是明文密码）：
+    /// 停 500ms 再存一次，离开页面时补存。
+    /// </summary>
+    private void ScheduleExtraSave()
+    {
+        if (!_ready)
+        {
+            return;
+        }
+
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
 
     private void SaveExtras()
     {

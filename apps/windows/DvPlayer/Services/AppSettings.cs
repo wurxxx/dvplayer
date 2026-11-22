@@ -1,4 +1,6 @@
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 
 namespace DvPlayer.Services;
@@ -12,6 +14,15 @@ public sealed class AppSettings
         PropertyNameCaseInsensitive = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
+
+    /// <summary>UI 线程和线程池都会 Save，写盘必须串行。</summary>
+    private static readonly object SaveLock = new();
+
+    /// <summary>凭据在文件里的前缀。旧配置没有前缀，按明文读，存的时候自动转成密文。</summary>
+    private const string SealedPrefix = "dpapi:v1:";
+
+    /// <summary>不弹任何 UI（后台保存时不能弹授权框）。</summary>
+    private const int CryptProtectUiForbidden = 0x1;
 
     public List<SourceConfig> Sources { get; set; } = new();
 
@@ -75,17 +86,33 @@ public sealed class AppSettings
 
     public static AppSettings Load()
     {
+        var path = FilePath;
+
         try
         {
-            if (File.Exists(FilePath))
+            if (File.Exists(path))
             {
-                var text = File.ReadAllText(FilePath);
-                return JsonSerializer.Deserialize<AppSettings>(text, Json) ?? new AppSettings();
+                var text = File.ReadAllText(path);
+                var settings =
+                    JsonSerializer.Deserialize<AppSettings>(text, Json) ?? new AppSettings();
+                settings.Unseal();
+                return settings;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 配置损坏就当空的，不让启动失败。
+            // 配置损坏就当空的，不让启动失败；但先备份坏文件：
+            // 否则下一次 Save() 会把空对象写回去，源和凭据全没了。
+            try
+            {
+                var backup = path + ".broken-" + DateTime.Now.ToString("yyyyMMddHHmmss");
+                File.Move(path, backup, overwrite: true);
+                Trace.Write($"settings load failed, moved to {backup}: {ex.Message}");
+            }
+            catch (Exception)
+            {
+                // 备份都失败就维持原状，至少别让启动崩掉。
+            }
         }
 
         return new AppSettings();
@@ -93,13 +120,174 @@ public sealed class AppSettings
 
     public void Save()
     {
+        lock (SaveLock)
+        {
+            var path = FilePath;
+            var temp = path + ".tmp";
+
+            try
+            {
+                // 先写临时文件再原子替换：写到一半崩溃/断电不会留下半截 JSON。
+                // 凭据用当前用户的 DPAPI 密钥加密：配置文件被拷走 / 被别的账户读到也解不开。
+                File.WriteAllText(temp, JsonSerializer.Serialize(SealedForStorage(), Json));
+                File.Move(temp, path, overwrite: true);
+            }
+            catch (Exception)
+            {
+                // 写失败不影响播放。
+                try { File.Delete(temp); } catch (Exception) { }
+            }
+        }
+    }
+
+    // —— 凭据保护（DPAPI，按当前 Windows 用户） ——
+
+    /// <summary>存盘用的副本：内存里的对象不变，只把要落盘的凭据换成密文。</summary>
+    private AppSettings SealedForStorage()
+    {
+        var copy = (AppSettings)MemberwiseClone();
+        copy.Sources = (Sources ?? new List<SourceConfig>())
+            .Select(source => source with { Password = Seal(source.Password) })
+            .ToList();
+        copy.DanmakuAppSecret = Seal(DanmakuAppSecret);
+        copy.OpenSubtitlesPassword = Seal(OpenSubtitlesPassword);
+        copy.OpenSubtitlesApiKey = Seal(OpenSubtitlesApiKey);
+        return copy;
+    }
+
+    /// <summary>读到内存的副本：旧版明文原样保留，下次保存时自动转成密文。</summary>
+    private void Unseal()
+    {
+        Sources = (Sources ?? new List<SourceConfig>())
+            .Select(source => source with { Password = Unseal(source.Password) })
+            .ToList();
+        DanmakuAppSecret = Unseal(DanmakuAppSecret);
+        OpenSubtitlesPassword = Unseal(OpenSubtitlesPassword);
+        OpenSubtitlesApiKey = Unseal(OpenSubtitlesApiKey);
+    }
+
+    private static string Seal(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        if (value.StartsWith(SealedPrefix, StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
         try
         {
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            var input = new DataBlob { Size = bytes.Length, Data = handle.AddrOfPinnedObject() };
+            if (!CryptProtectData(ref input, "dvplayer", IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                    CryptProtectUiForbidden, out var output))
+            {
+                // 极少数失败（服务被禁用）：宁可明文存，也别丢凭据。
+                return value;
+            }
+
+            try
+            {
+                var sealedBytes = new byte[output.Size];
+                Marshal.Copy(output.Data, sealedBytes, 0, output.Size);
+                return SealedPrefix + Convert.ToBase64String(sealedBytes);
+            }
+            finally
+            {
+                LocalFree(output.Data);
+            }
         }
         catch (Exception)
         {
-            // 写失败不影响播放。
+            return value;
+        }
+        finally
+        {
+            handle.Free();
         }
     }
+
+    private static string Unseal(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        // 没有前缀 = 旧版明文配置。
+        if (!value.StartsWith(SealedPrefix, StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        byte[] sealedBytes;
+        try
+        {
+            sealedBytes = Convert.FromBase64String(value[SealedPrefix.Length..]);
+        }
+        catch (FormatException)
+        {
+            return string.Empty;
+        }
+
+        var handle = GCHandle.Alloc(sealedBytes, GCHandleType.Pinned);
+        try
+        {
+            var input = new DataBlob
+            {
+                Size = sealedBytes.Length,
+                Data = handle.AddrOfPinnedObject(),
+            };
+            if (!CryptUnprotectData(ref input, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                    CryptProtectUiForbidden, out var output))
+            {
+                // 配置文件被拷到别的用户 / 别的机器：解不开就当没填密码，
+                // 别让整份配置读不出来（源列表、其它设置都还在）。
+                return string.Empty;
+            }
+
+            try
+            {
+                var plain = new byte[output.Size];
+                Marshal.Copy(output.Data, plain, 0, output.Size);
+                return Encoding.UTF8.GetString(plain);
+            }
+            finally
+            {
+                LocalFree(output.Data);
+            }
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DataBlob
+    {
+        public int Size;
+        public IntPtr Data;
+    }
+
+    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CryptProtectData(
+        ref DataBlob dataIn, string? description, IntPtr optionalEntropy,
+        IntPtr reserved, IntPtr prompt, int flags, out DataBlob dataOut);
+
+    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CryptUnprotectData(
+        ref DataBlob dataIn, IntPtr description, IntPtr optionalEntropy,
+        IntPtr reserved, IntPtr prompt, int flags, out DataBlob dataOut);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr memory);
 }

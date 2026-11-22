@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace DvPlayer.Services;
 
 /// <summary>一个源的连接结果，设置页与顶栏用它显示状态。</summary>
@@ -19,12 +21,21 @@ public sealed class AppServices
 {
     public static AppServices Instance { get; } = new();
 
+    /// <summary>
+    /// 应用版本：打包脚本用 <c>-p:Version</c> 写进程序集，本地未打包的构建是 1.0.0。
+    /// 以前关于页和侧栏都写死 0.1.0，出了 0.1.4 的包界面还显示 0.1.0。
+    /// </summary>
+    public static string AppVersion { get; } = ReadAppVersion();
+
     private AppServices()
     {
         Settings = AppSettings.Load();
     }
 
     public AppSettings Settings { get; }
+
+    /// <summary>连接串行化：自动连接与手点「连接」可能同时进来。</summary>
+    private readonly SemaphoreSlim _connectGate = new(1, 1);
 
     /// <summary>聚合句柄：内部持有所有已连上的源。</summary>
     public MediaCore? Core { get; private set; }
@@ -33,12 +44,20 @@ public sealed class AppServices
     public IReadOnlyList<SourceConnection> Connections { get; private set; } = Array.Empty<SourceConnection>();
 
     /// <summary>顶栏那一行：一个源显示名字，多个源显示数量。</summary>
-    public string SourceSummary => Connections.Count(c => c.Ok) switch
+    public string SourceSummary
     {
-        0 => "未连接",
-        1 => Connections.First(c => c.Ok).Name,
-        var n => $"{n} 个源",
-    };
+        get
+        {
+            // Connections 会被核心回调线程整体替换：先取快照，避免两次读取拿到不同数组。
+            var snapshot = Connections;
+            return snapshot.Count(c => c.Ok) switch
+            {
+                0 => "未连接",
+                1 => snapshot.First(c => c.Ok).Name,
+                var n => $"{n} 个源",
+            };
+        }
+    }
 
     /// <summary>共享核心版本号；DLL 缺失时返回 null。</summary>
     public string? CoreVersion
@@ -56,6 +75,22 @@ public sealed class AppServices
         }
     }
 
+    private static string ReadAppVersion()
+    {
+        var assembly = typeof(AppServices).Assembly;
+        var info = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(info))
+        {
+            // 带 SourceLink 时会追加 +<commit>，界面上只留版本号。
+            var plus = info.IndexOf('+');
+            return plus > 0 ? info[..plus] : info;
+        }
+
+        return assembly.GetName().Version?.ToString(3) ?? "未知";
+    }
+
     public bool IsConnected => Core is { IsValid: true };
 
     /// <summary>
@@ -69,6 +104,20 @@ public sealed class AppServices
     /// 只要有一个连上就算成功，失败的会在设置页标出来。
     /// </summary>
     public async Task<(bool Ok, string? Error)> ConnectAllAsync()
+    {
+        // 两轮并发连接会各建一个 hub，后完成的覆盖 Core，先完成的永远不释放。
+        await _connectGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return await ConnectAllCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _connectGate.Release();
+        }
+    }
+
+    private async Task<(bool Ok, string? Error)> ConnectAllCoreAsync()
     {
         Core?.Dispose();
         Core = null;
@@ -149,9 +198,12 @@ public sealed class AppServices
         })).ConfigureAwait(false);
 
         // 挂好的一次性交给核心：核心内部每个源一个线程建连，谁先连完谁先回调。
+        // 注意：Where 里的 i 是原序列下标，Select 再取 i 会是过滤后的下标。
+        // 之前一版因此把 null 塞进 toConnect（挂载失败源不在末尾时），随后 config.Id 空引用崩溃。
         var toConnect = configs
-            .Where((_, i) => mountErrors[i] is null && effective[i] is not null)
-            .Select((_, i) => effective[i]!)
+            .Select((config, i) => (Config: config, Index: i))
+            .Where(x => mountErrors[x.Index] is null && effective[x.Index] is not null)
+            .Select(x => effective[x.Index]!)
             .ToList();
         ApiResult<List<SourceConnectDto>> batch;
         var watch = System.Diagnostics.Stopwatch.StartNew();

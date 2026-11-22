@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 
 namespace DvPlayer.Dialogs;
 
@@ -87,6 +89,14 @@ public partial class ConfirmDialog : Window
             return;
         }
 
+        // 这是 Preview 事件：点「删除」「取消」时也会先到这里。
+        // 在按钮（或输入框）上不能 DragMove，否则拖动把点击吞掉，按钮点不动。
+        if (e.OriginalSource is DependencyObject source &&
+            (InsideButton(source) || InsideInput(source)))
+        {
+            return;
+        }
+
         try
         {
             DragMove();
@@ -95,5 +105,36 @@ public partial class ConfirmDialog : Window
         {
             // 快速点击时鼠标已经抬起，忽略。
         }
+    }
+
+    private static bool InsideButton(DependencyObject? node)
+    {
+        while (node is not null)
+        {
+            if (node is ButtonBase)
+            {
+                return true;
+            }
+
+            node = VisualTreeHelper.GetParent(node);
+        }
+
+        return false;
+    }
+
+    /// <summary>可输入的控件（以后加「不再提示」勾选框时用）。</summary>
+    private static bool InsideInput(DependencyObject? node)
+    {
+        while (node is not null)
+        {
+            if (node is TextBoxBase or ToggleButton)
+            {
+                return true;
+            }
+
+            node = VisualTreeHelper.GetParent(node);
+        }
+
+        return false;
     }
 }

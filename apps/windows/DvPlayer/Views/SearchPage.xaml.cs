@@ -17,6 +17,9 @@ public partial class SearchPage : Page
 
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(280) };
 
+    /// <summary>多个源同时连上时，每次都重搜一遍会把同一个查询打 4 次；合并成一次。</summary>
+    private readonly DispatcherTimer _reconnectDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
+
     private List<PlayRecordDto>? _recordIndex;
 
     /// <summary>连点输入时只认最后一次查询的结果。</summary>
@@ -29,6 +32,7 @@ public partial class SearchPage : Page
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         _debounce.Tick += OnDebounceTick;
+        _reconnectDebounce.Tick += OnReconnectDebounceTick;
 
         // 上次的查询词：切页 / 重启后回来还在，OnLoaded 会接着搜一次。
         var saved = AppServices.Instance.Settings.SearchKeyword;
@@ -64,6 +68,7 @@ public partial class SearchPage : Page
     {
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
         _debounce.Stop();
+        _reconnectDebounce.Stop();
 
         // 还没等到防抖就切页：把输入框里现在的词也留下。
         SaveKeyword(SearchBox.Text.Trim());
@@ -73,12 +78,20 @@ public partial class SearchPage : Page
     private void OnConnectionChanged(object? sender, EventArgs e) =>
         Dispatcher.BeginInvoke(() =>
         {
-            _recordIndex = null;
-            if (!string.IsNullOrWhiteSpace(SearchBox.Text))
-            {
-                _ = RunSearchAsync(SearchBox.Text);
-            }
+            // 启动时每个源连上都会触发一次；合并成一轮，只重搜最后一次。
+            _reconnectDebounce.Stop();
+            _reconnectDebounce.Start();
         });
+
+    private void OnReconnectDebounceTick(object? sender, EventArgs e)
+    {
+        _reconnectDebounce.Stop();
+        _recordIndex = null;
+        if (!string.IsNullOrWhiteSpace(SearchBox.Text))
+        {
+            _ = RunSearchAsync(SearchBox.Text);
+        }
+    }
 
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
     {
@@ -153,6 +166,7 @@ public partial class SearchPage : Page
         {
             List<SearchCard> cards;
             List<SourceFailureDto> failed;
+            string? searchError = null;
 
             if (RecordSegment.IsChecked == true)
             {
@@ -165,10 +179,20 @@ public partial class SearchPage : Page
                 var outcome = await SearchMediaAsync(query);
                 cards = outcome.Cards;
                 failed = outcome.Failed;
+                searchError = outcome.Error;
             }
 
             if (version != _version)
             {
+                return;
+            }
+
+            if (searchError is not null)
+            {
+                // 整次搜索失败：直接把原因说清楚（源全挂 / 核心没返回）。
+                ShowEmpty("搜索失败", searchError);
+                StatusText.Text = "搜索失败：" + searchError;
+                StatusText.ToolTip = null;
                 return;
             }
 
@@ -223,18 +247,21 @@ public partial class SearchPage : Page
     }
 
     /// <summary>跨源搜索，交给核心（去重、选主源、失败源都已在核心里做完）。</summary>
-    private async Task<(List<SearchCard> Cards, List<SourceFailureDto> Failed)> SearchMediaAsync(string query)
+    private async Task<(List<SearchCard> Cards, List<SourceFailureDto> Failed, string? Error)>
+        SearchMediaAsync(string query)
     {
         var core = AppServices.Instance.Core;
         if (core is null)
         {
-            return (new List<SearchCard>(), new List<SourceFailureDto>());
+            return (new List<SearchCard>(), new List<SourceFailureDto>(), "还没有连接媒体源");
         }
 
         var result = await Task.Run(() => core.Search(query)).ConfigureAwait(true);
         if (!result.Ok || result.Data is null)
         {
-            return (new List<SearchCard>(), new List<SourceFailureDto>());
+            // 整次搜索失败（不是单个源挂了）：错误要显示出来，不能装作「0 个结果」。
+            return (new List<SearchCard>(), new List<SourceFailureDto>(),
+                result.Error ?? "共享核心没有返回结果");
         }
 
         var showResolution = AppServices.Instance.Settings.ShowResolution;
@@ -268,7 +295,7 @@ public partial class SearchPage : Page
             .Take(120)
             .ToList();
 
-        return (cards, failed);
+        return (cards, failed, null);
     }
 
     private async Task<List<SearchCard>> SearchRecordsAsync(string query)

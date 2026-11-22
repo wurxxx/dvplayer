@@ -35,6 +35,21 @@ public partial class MainWindow : FluentWindow
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        try
+        {
+            await OnLoadedCoreAsync();
+        }
+        catch (Exception ex)
+        {
+            // async void 里没人 await：异常直接结束进程，脚本只能看到「没反应」。
+            // 写清楚原因再退出，至少日志里能查到。
+            Trace.Write("startup failed: " + ex);
+            Application.Current.Shutdown(1);
+        }
+    }
+
+    private async Task OnLoadedCoreAsync()
+    {
         // --window-test：没人能手动点按钮，自检一遍最小化 / 最大化 / 关闭，
         // 结果写到 %TEMP%\dvplayer\window-test.log，供远程核对。
         if (Environment.GetCommandLineArgs().Contains("--window-test"))
@@ -922,7 +937,7 @@ public partial class MainWindow : FluentWindow
         player.Close();
     }
 
-    private static async Task<(List<PlayEpisode> Items, string? Title)?> BuildShotPlaylistAsync()
+    private static async Task<(List<PlayEpisode> Items, string? Title, bool Complete)?> BuildShotPlaylistAsync()
     {
         var seriesId = ArgumentAfter("--play-series");
         if (seriesId is null || AppServices.Instance.Core is not { } core)
@@ -951,7 +966,15 @@ public partial class MainWindow : FluentWindow
     {
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, flag);
-        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        if (index < 0 || index + 1 >= args.Length)
+        {
+            return null;
+        }
+
+        // 下一个参数是另一个开关（如 `--screenshot --window 1600x900`）时，
+        // 不能把它当成取值，否则截图会写到名字叫 `--window` 的目录里。
+        var value = args[index + 1];
+        return value.StartsWith("--", StringComparison.Ordinal) ? null : value;
     }
 
     /// <summary>--screenshot 之后可再跟页面名，只巡检指定的页。</summary>
@@ -1168,7 +1191,8 @@ public partial class MainWindow : FluentWindow
             {
                 if (ContentFrame.Content is LibrariesPage favPage)
                 {
-                    favPage.ShowFavoritesForShot();
+                    // 等真正的收藏请求回来再截：以前只等 600ms，慢源会截到空白。
+                    await favPage.ShowFavoritesForShotAsync().ConfigureAwait(true);
                     await Task.Delay(600);
                 }
                 else if (ContentFrame.Content is RecordsPage recordsPage)
@@ -1404,16 +1428,22 @@ public partial class MainWindow : FluentWindow
     public void RefreshSourceStatus()
     {
         var services = AppServices.Instance;
-        VersionText.Text = "版本 " + (services.CoreVersion ?? "未加载");
+        VersionText.Text = "版本 " + AppServices.AppVersion;
         VersionText.ToolTip = services.Connections.Count > 0 && !services.IsConnected
             ? "所有服务器都没有连上"
-            : null;
+            // 侧栏只放应用版本；核心版本放悬停提示，装错旧 dll 时能对出来。
+            : "共享核心 " + (services.CoreVersion ?? "未加载");
 
         RefreshSourceNav();
     }
 
-    /// <summary>侧栏的源列表：配置过的都列出来，连上的点亮一点。</summary>
-    private void RefreshSourceNav()
+    /// <summary>
+    /// 侧栏的源列表：配置过的都列出来，连上的点亮一点。
+    /// <paramref name="selectId"/> 用于「用户刚点了这个源」：这时导航可能还没落地，
+    /// 不能用 ContentFrame.Content 判断，否则会把刚选中的源清掉
+    /// （只留下鼠标悬停色，鼠标一移开就像没选中）。
+    /// </summary>
+    private void RefreshSourceNav(string? selectId = null)
     {
         if (SourceNav is null)
         {
@@ -1436,7 +1466,7 @@ public partial class MainWindow : FluentWindow
             })
             .ToList();
 
-        var selected = settings.LastSourceId;
+        var selected = selectId ?? settings.LastSourceId;
         if (items.All(i => i.Id != selected))
         {
             // 记的源被删了或从没选过：退到第一个连上的。
@@ -1452,7 +1482,7 @@ public partial class MainWindow : FluentWindow
         SourceNav.ItemsSource = items;
         // 停在源首页时点亮这个源；在服务器 / 记录 / 搜索页时这里不会有选中态
         // （清掉选中由 OnNavSelectionChanged / OpenSource 负责）。
-        var onSourceHome = ContentFrame?.Content is LibrariesPage;
+        var onSourceHome = selectId is not null || ContentFrame?.Content is LibrariesPage;
         SourceNav.SelectedItem = onSourceHome
             ? items.FirstOrDefault(i => i.Id == selected)
             : null;
@@ -1785,7 +1815,11 @@ public partial class MainWindow : FluentWindow
         }
 
         e.Handled = true;
-        Trace.Write($"navdrag up from={source?.Id ?? "null"}");
+
+        // 拖动过程中每跨一格只改内存顺序，松手时再落盘一次：
+        // 以前每跨一格都同步 Save（现在是 DPAPI 加密 + 写盘），拖一下写十几次。
+        AppServices.Instance.Settings.Save();
+        Trace.Write("navdrag up from=" + (source?.Id ?? "null"));
     }
 
     /// <summary>鼠标捕获丢了（拖出窗口松手）：收拾一下视觉状态，别一直卡在半透明。</summary>
@@ -1802,6 +1836,14 @@ public partial class MainWindow : FluentWindow
                 }
             });
             return;
+        }
+
+        // 拖动中被系统抢走捕获（Alt+Tab / 弹窗）：顺序只在内存里改过，
+        // 这里也落盘一次，别让这次拖动白做。
+        if (_sourceNavDragging)
+        {
+            AppServices.Instance.Settings.Save();
+            Trace.Write("navdrag lost capture, saved");
         }
 
         _sourceNavDragging = false;
@@ -1829,7 +1871,6 @@ public partial class MainWindow : FluentWindow
         var item = sources[from];
         sources.RemoveAt(from);
         sources.Insert(to, item);
-        AppServices.Instance.Settings.Save();
         Trace.Write("nav order " + string.Join(" | ", sources.Select(x => x.Name)));
 
         RefreshSourceStatus();
@@ -1861,6 +1902,8 @@ public partial class MainWindow : FluentWindow
         if (settings.LastSourceId == id && ContentFrame.Content is LibrariesPage page)
         {
             page.SelectMediaTab();
+            // 点了已经打开的源：选中态也要补上，别只在鼠标悬停时好看。
+            RefreshSourceNav(id);
             return;
         }
 
@@ -1872,7 +1915,8 @@ public partial class MainWindow : FluentWindow
         // 先换页面再刷新侧栏：RefreshSourceNav 靠当前页是不是源首页来决定高亮。
         Nav.SelectedItem = null;
         ContentFrame.Navigate(new LibrariesPage());
-        RefreshSourceNav();
+        // 导航是异步落地的：这里直接点名要高亮哪个源，别等 Content 更新。
+        RefreshSourceNav(id);
     }
 
     private sealed class SourceNavItem : INotifyPropertyChanged

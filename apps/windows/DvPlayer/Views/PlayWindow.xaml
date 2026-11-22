@@ -315,7 +315,8 @@
                     Minimum="0" Maximum="100" Value="100" VerticalAlignment="Center"
                     IsMoveToPointEnabled="True"
                     ValueChanged="OnVolumeChanged"
-                    Thumb.DragStarted="OnVolumeDragStarted" />
+                    Thumb.DragStarted="OnVolumeDragStarted"
+                    Thumb.DragCompleted="OnVolumeDragCompleted" />
 
             <Button x:Name="AudioButton" Grid.Column="8" Style="{StaticResource PlayerButton}"
                     Click="OnAudioClick" ToolTip="音轨" VerticalAlignment="Center">

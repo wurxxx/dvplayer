@@ -12,7 +12,10 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             Services.Trace.Write("unhandled ui exception: " + args.Exception);
-            args.Handled = false;
+
+            // 重连换核心时，页面上还在飞的旧调用会撞上已释放的 SafeHandle。
+            // 这不是程序错误：记一行就够，别把整个窗口退掉。其它异常照旧退出。
+            args.Handled = args.Exception is ObjectDisposedException;
         };
 
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>

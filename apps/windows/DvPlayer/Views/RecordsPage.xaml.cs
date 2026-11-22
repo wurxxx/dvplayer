@@ -585,8 +585,9 @@ public partial class RecordsPage : Page
             return;
         }
 
-        // 收藏的是影片 / 剧集本身，进详情；观看记录才是续播。
-        if (_favorites.Any(f => f.Id == id))
+        // 收藏分段：收藏的是影片 / 剧集本身，进详情。
+        // 观看分段：有记录就续播——收藏过的电影点「继续观看」不该跳详情。
+        if (FavoriteSegment.IsChecked == true)
         {
             NavigationService?.Navigate(new SeriesPage(id));
             return;

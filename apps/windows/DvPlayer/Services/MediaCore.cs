@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Win32.SafeHandles;
 
 namespace DvPlayer.Services;
 
@@ -19,11 +20,16 @@ public sealed class MediaCore : IDisposable
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private IntPtr _handle;
+    /// <summary>
+    /// Hub 句柄。用 SafeHandle 而不是裸 IntPtr：P/Invoke 期间运行时会加引用，
+    /// Dispose 会等在途调用返回后才 dv_hub_free，避免「重连时释放、页面还在调」的释放后使用。
+    /// 已释放后再调用会抛 ObjectDisposedException，而不是把野指针交给原生侧。
+    /// </summary>
+    private readonly HubHandle _handle;
 
-    private MediaCore(IntPtr handle) => _handle = handle;
+    private MediaCore(HubHandle handle) => _handle = handle;
 
-    public bool IsValid => _handle != IntPtr.Zero;
+    public bool IsValid => !_handle.IsInvalid && !_handle.IsClosed;
 
     public static string Version()
     {
@@ -57,7 +63,7 @@ public sealed class MediaCore : IDisposable
         try
         {
             var handle = dv_hub_new();
-            return handle == IntPtr.Zero ? null : new MediaCore(handle);
+            return handle == IntPtr.Zero ? null : new MediaCore(new HubHandle(handle));
         }
         catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
         {
@@ -399,12 +405,20 @@ public sealed class MediaCore : IDisposable
         }
     }
 
-    public void Dispose()
+    public void Dispose() => _handle.Dispose();
+
+    /// <summary>
+    /// dv_hub_free 只在没有在途 P/Invoke 时执行（SafeHandle 的引用计数负责）。
+    /// 重复 Dispose 是安全的。
+    /// </summary>
+    private sealed class HubHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
-        if (_handle != IntPtr.Zero)
+        public HubHandle(IntPtr handle) : base(ownsHandle: true) => SetHandle(handle);
+
+        protected override bool ReleaseHandle()
         {
-            dv_hub_free(_handle);
-            _handle = IntPtr.Zero;
+            dv_hub_free(handle);
+            return true;
         }
     }
 
@@ -418,12 +432,12 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_hub_add", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_add(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string configJson);
 
     [DllImport(Lib, EntryPoint = "dv_hub_add_many", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_add_many(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string configsJson);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -431,13 +445,13 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_hub_add_many_stream", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_add_many_stream(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string configsJson,
         ConnectCallback callback,
         IntPtr userData);
 
     [DllImport(Lib, EntryPoint = "dv_hub_sources", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_hub_sources(IntPtr handle);
+    private static extern IntPtr dv_hub_sources(HubHandle handle);
 
     [DllImport(Lib, EntryPoint = "dv_source_kinds", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_source_kinds();
@@ -446,11 +460,11 @@ public sealed class MediaCore : IDisposable
     private static extern void dv_string_free(IntPtr text);
 
     [DllImport(Lib, EntryPoint = "dv_hub_libraries", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_hub_libraries(IntPtr handle);
+    private static extern IntPtr dv_hub_libraries(HubHandle handle);
 
     [DllImport(Lib, EntryPoint = "dv_hub_items", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_items(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string libraryId,
         int page,
         int pageSize,
@@ -458,7 +472,7 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_hub_children", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_children(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string parentId,
         int page,
         int pageSize,
@@ -466,15 +480,15 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_hub_genres", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_genres(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string scopeId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_records", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr dv_hub_records(IntPtr handle);
+    private static extern IntPtr dv_hub_records(HubHandle handle);
 
     [DllImport(Lib, EntryPoint = "dv_hub_favorites", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_favorites(
-        IntPtr handle,
+        HubHandle handle,
         int page,
         int pageSize);
 
@@ -486,33 +500,33 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_hub_report_stopped", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_report_stopped(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
         long position,
         long duration);
 
     [DllImport(Lib, EntryPoint = "dv_hub_report_progress", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_report_progress(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
         long position,
         long duration);
 
     [DllImport(Lib, EntryPoint = "dv_hub_set_favorite", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_set_favorite(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
         int favorite);
 
     [DllImport(Lib, EntryPoint = "dv_hub_set_watched", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_set_watched(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId,
         int watched);
 
     [DllImport(Lib, EntryPoint = "dv_hub_remove_record", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_remove_record(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
     [DllImport(Lib, EntryPoint = "dv_version", CallingConvention = CallingConvention.Cdecl)]
@@ -520,42 +534,42 @@ public sealed class MediaCore : IDisposable
 
     [DllImport(Lib, EntryPoint = "dv_hub_search", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_search(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string query);
 
     [DllImport(Lib, EntryPoint = "dv_hub_detail", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_detail(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_person_works", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_person_works(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string personId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_people", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_people(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_item_sources", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_item_sources(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_media_info", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_media_info(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_play_source", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_play_source(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string itemId);
 
     [DllImport(Lib, EntryPoint = "dv_hub_image_source", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_image_source(
-        IntPtr handle,
+        HubHandle handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string posterPath);
 }
 

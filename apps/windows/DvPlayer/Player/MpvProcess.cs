@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 
 namespace DvPlayer.Player;
@@ -57,6 +58,10 @@ public sealed class MpvProcess : IDisposable
     private MpvIpc? _ipc;
     private int _session;
     private readonly object _gate = new();
+    /// <summary>日志流同时被 stdout/stderr 两个回调线程写，必须串行。</summary>
+    private readonly object _logGate = new();
+    /// <summary>当前日志属于哪一次 Start；旧播放的收尾不能关掉新日志。</summary>
+    private int _logSession;
 
     public bool IsRunning
     {
@@ -111,20 +116,30 @@ public sealed class MpvProcess : IDisposable
             psi.ArgumentList.Add(arg);
         }
 
-        OpenLog();
-        WriteLog("args: " + string.Join(" ", psi.ArgumentList));
+        OpenLog(_session);
+        WriteLog("args: " + string.Join(" ", psi.ArgumentList.Select(RedactArg)));
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => WriteLog(e.Data);
         process.ErrorDataReceived += (_, e) => WriteLog(e.Data);
         process.Exited += (_, _) => Exited?.Invoke(this, EventArgs.Empty);
 
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        try
+        {
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
 
-        // 兜底：DvPlayer 被强杀/崩溃时，mpv 也一起结束，不留后台进程。
-        ChildProcessJob.Assign(process);
+            // 兜底：DvPlayer 被强杀/崩溃时，mpv 也一起结束，不留后台进程。
+            ChildProcessJob.Assign(process);
+        }
+        catch
+        {
+            // 启动失败（mpv 被删、无权限）：把刚打开的日志流关掉，别留下句柄。
+            CloseLog(_session);
+            process.Dispose();
+            throw;
+        }
 
         lock (_gate)
         {
@@ -166,17 +181,41 @@ public sealed class MpvProcess : IDisposable
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
-                process.WaitForExit(3000);
+
+                // 关窗发生在 UI 线程：Kill 之后不能再同步等（WaitForExit(3000)
+                // 最坏卡 3 秒，窗口看起来像没响应）。后台收尾，等输出回调结束再关日志。
+                var stopping = _session;
+                _ = Task.Run(() => Finish(process, stopping));
+                return;
             }
         }
-        catch (InvalidOperationException)
+        catch (Exception ex)
         {
-            // 已经退出，忽略。
+            // 已退出 / 无权限 / 进程被系统回收：关窗不能因此失败。
+            Debug.WriteLine("[mpv] stop failed: " + ex.Message);
+        }
+
+        Finish(process, _session);
+    }
+
+    /// <summary>
+    /// 等 mpv 真正退出后释放进程和日志流。必须在后台线程调用。
+    /// <paramref name="session"/> 用来避免关掉下一次 Start 刚打开的新日志。
+    /// </summary>
+    private void Finish(Process process, int session)
+    {
+        try
+        {
+            process.WaitForExit(3000);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("[mpv] wait exit failed: " + ex.Message);
         }
         finally
         {
             process.Dispose();
-            CloseLog();
+            CloseLog(session);
         }
     }
 
@@ -188,6 +227,32 @@ public sealed class MpvProcess : IDisposable
     public static string LogPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "dvplayer", "mpv.log");
+
+    /// <summary>
+    /// 日志脱敏：鉴权头只留头名，URL 去掉 query 和 userinfo。
+    /// mpv 的参数里既有 `--http-header-fields-add=Authorization: ...`，
+    /// 也有带 `api_key=` 的直链，原样落盘等于把 token 写进 mpv.log。
+    /// </summary>
+    private static string RedactArg(string arg)
+    {
+        if (arg.StartsWith("--http-header-fields", StringComparison.Ordinal))
+        {
+            var colon = arg.IndexOf(':');
+            return colon > 0 ? arg[..(colon + 1)] + " ***" : arg + "=***";
+        }
+
+        // GetComponents(SchemeAndServer|Path) 只要 scheme/host/port/path，
+        // 天然不带 userinfo 和 query，比 UriBuilder 逐个清字段更稳。
+        if (arg.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
+            Uri.TryCreate(arg, UriKind.Absolute, out var uri) &&
+            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            return uri.GetComponents(
+                UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
+        }
+
+        return arg;
+    }
 
     private static IEnumerable<string> BuildArgs(IntPtr wid, MpvLaunch launch, string pipeName)
     {
@@ -266,7 +331,8 @@ public sealed class MpvProcess : IDisposable
 
         if (launch.StartSeconds > 1)
         {
-            yield return $"--start={launch.StartSeconds:0.###}";
+            // 小数点必须是 "."：某些区域设置会输出 ","，mpv 会把 --start=12,5 解析错。
+            yield return "--start=" + launch.StartSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         }
 
         // 原盘：`--bluray-device=<iso>`，URL 是 `bd://mpls/<n>`。
@@ -287,41 +353,33 @@ public sealed class MpvProcess : IDisposable
 
     private static string FindMpv()
     {
-        var fromEnv = Environment.GetEnvironmentVariable("DVPLAYER_MPV");
-        if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv))
-        {
-            return fromEnv;
-        }
-
-        var beside = Path.Combine(AppContext.BaseDirectory, "mpv", "mpv.exe");
-        if (File.Exists(beside))
-        {
-            return beside;
-        }
-
-        const string fallback = @"D:\dvplayer\mpv\mpv.exe";
-        if (File.Exists(fallback))
-        {
-            return fallback;
-        }
-
-        throw new FileNotFoundException(
-            "找不到 mpv.exe。设 DVPLAYER_MPV，或把它放在 exe 旁边的 mpv\\mpv.exe。");
+        return MpvLocator.Find()
+            ?? throw new FileNotFoundException(
+                "找不到 mpv.exe。设 DVPLAYER_MPV，或把它放在 exe 旁边的 mpv\\mpv.exe。");
     }
 
-    private void OpenLog()
+    private void OpenLog(int session)
     {
+        var dir = Path.GetDirectoryName(LogPath)!;
+
         try
         {
-            var dir = Path.GetDirectoryName(LogPath)!;
             Directory.CreateDirectory(dir);
-            _logStream = new FileStream(LogPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-            _log = new StreamWriter(_logStream) { AutoFlush = true };
+            var stream = new FileStream(LogPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+            var writer = new StreamWriter(stream) { AutoFlush = true };
+
+            lock (_logGate)
+            {
+                // 上一次 Start 失败可能留下没关的流，先收掉再挂新的。
+                try { _log?.Dispose(); } catch (IOException) { }
+                _logStream = stream;
+                _log = writer;
+                _logSession = session;
+            }
         }
         catch (IOException)
         {
             // 日志写不了不影响播放。
-            _log = null;
         }
     }
 
@@ -334,20 +392,45 @@ public sealed class MpvProcess : IDisposable
 
         try
         {
-            _log?.WriteLine(line);
+            // stdout 和 stderr 各一个回调线程，StreamWriter 不是线程安全的。
+            lock (_logGate)
+            {
+                _log?.WriteLine(line);
+            }
         }
         catch (ObjectDisposedException)
         {
             // 进程在关闭，忽略。
         }
+        catch (IOException)
+        {
+            // 磁盘满 / 日志被占用：写日志失败不能打断播放。
+        }
 
         Debug.WriteLine($"[mpv] {line}");
     }
 
-    private void CloseLog()
+    private void CloseLog(int session)
     {
-        _log?.Dispose();
-        _log = null;
-        _logStream = null;
+        lock (_logGate)
+        {
+            // 会话已经换了：这是旧播放的收尾，别关掉新一代的日志流。
+            if (_logSession != session)
+            {
+                return;
+            }
+
+            try
+            {
+                _log?.Dispose();
+            }
+            catch (IOException)
+            {
+                // 刷盘失败也不能卡住关窗。
+            }
+
+            _log = null;
+            _logStream = null;
+        }
     }
 }
