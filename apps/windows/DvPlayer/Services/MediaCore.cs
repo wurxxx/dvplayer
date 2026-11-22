@@ -73,6 +73,17 @@ public sealed class MediaCore : IDisposable
         return Read(ptr, root => root.Deserialize<SourceInfoDto>(Json)!);
     }
 
+    /// <summary>
+    /// 并行建连多个源：核心给每个源开一个线程去登录，全部完成后按入参顺序返回。
+    /// 单次调用顶掉以前的逐个 Add，3 个服务器不用再等 3 份时间。
+    /// </summary>
+    public ApiResult<List<SourceConnectDto>> AddMany(IReadOnlyList<SourceConfig> configs)
+    {
+        var json = JsonSerializer.Serialize(configs, Json);
+        var ptr = dv_hub_add_many(_handle, json);
+        return Read(ptr, root => root.Deserialize<List<SourceConnectDto>>(Json) ?? new());
+    }
+
     /// <summary>已连上的源（设置页显示状态用）。</summary>
     public ApiResult<List<SourceInfoDto>> Sources()
     {
@@ -361,6 +372,11 @@ public sealed class MediaCore : IDisposable
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string configJson);
 
+    [DllImport(Lib, EntryPoint = "dv_hub_add_many", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_add_many(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string configsJson);
+
     [DllImport(Lib, EntryPoint = "dv_hub_sources", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_sources(IntPtr handle);
 
@@ -497,6 +513,16 @@ public sealed record SourceConfig(
     string Proxy = "");
 
 public sealed record SourceInfoDto(string Id, string Name, string Kind);
+
+/// <summary>并行建连的单个结果：连没连上、耗时多久、网络往返延迟多少毫秒。</summary>
+public sealed record SourceConnectDto(
+    string Id,
+    string Name,
+    string Kind,
+    bool Ok,
+    string? Error,
+    long Ms,
+    long? LatencyMs);
 
 public sealed record MediaLibraryDto(
     string Id,

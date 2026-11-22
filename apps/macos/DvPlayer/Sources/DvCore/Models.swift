@@ -44,19 +44,23 @@ public struct SourceInfo: Codable, Identifiable, Hashable, Sendable {
 }
 
 /// 一个源连没连上。设置页和侧栏都用它。
-public struct SourceConnection: Identifiable, Hashable, Sendable {
+public struct SourceConnection: Identifiable, Codable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let kind: String
     public let ok: Bool
     public let error: String?
+    /// 网络往返延迟（毫秒）；本地源或探测失败为 nil。
+    public let latencyMs: Int?
 
-    public init(id: String, name: String, kind: String, ok: Bool, error: String?) {
+    public init(id: String, name: String, kind: String, ok: Bool, error: String?,
+                latencyMs: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.ok = ok
         self.error = error
+        self.latencyMs = latencyMs
     }
 }
 

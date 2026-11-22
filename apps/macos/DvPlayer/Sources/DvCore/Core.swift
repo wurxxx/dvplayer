@@ -59,6 +59,14 @@ public final class Core: @unchecked Sendable {
         }
     }
 
+    /// 并行建连多个源：核心给每个源开一个线程登录，全部完成后按入参顺序返回。
+    public func addMany(_ configs: [SourceConfig]) async throws -> [SourceConnection] {
+        let json = String(data: try JSONEncoder().encode(configs), encoding: .utf8) ?? "[]"
+        return try await perform { hub in
+            json.withCString { dv_hub_add_many(hub, $0) }
+        }
+    }
+
     public func sources() async throws -> [SourceInfo] {
         try await perform { hub in dv_hub_sources(hub) }
     }

@@ -357,6 +357,38 @@ pub extern "C" fn dv_hub_add(handle: *mut HubHandle, config: *const c_char) -> *
     })
 }
 
+/// 并行添加并登录多个源。config 是 `SourceConfig` 的 JSON 数组。
+///
+/// 每个源一个线程建连，全部结束后按数组顺序返回结果（`ok` / `error` / `ms`）。
+/// 单个源失败不影响其它源。
+#[no_mangle]
+pub extern "C" fn dv_hub_add_many(handle: *mut HubHandle, configs: *const c_char) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_mut() }) else {
+            return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
+                "null handle".into(),
+            )));
+        };
+
+        let Some(json) = read_cstr(configs) else {
+            return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
+                "null configs".into(),
+            )));
+        };
+
+        let parsed: Vec<SourceConfig> = match serde_json::from_str(&json) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
+                    format!("configs 解析失败：{err}"),
+                )));
+            }
+        };
+
+        reply(Ok(h.inner.add_many(&parsed)))
+    })
+}
+
 /// 已连接的源，用于设置页显示状态。
 #[no_mangle]
 pub extern "C" fn dv_hub_sources(handle: *const HubHandle) -> *mut c_char {

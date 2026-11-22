@@ -233,11 +233,11 @@ public partial class SourcesPage : Page
                 var connection = connections.FirstOrDefault(c => c.Id == s.Id);
                 var kind = MediaText.SourceKindLabel(s.Kind);
 
-                // 连接结果三分：没试过 / 连上 / 失败。
+                // 连接结果三分：没试过 / 连上 / 失败。连上时显示连接时刻和往返延迟。
                 var (status, brush) = connection is null
                     ? ("尚未连接", "FaintBrush")
                     : connection.Ok
-                        ? ("已连接 · " + DateTime.Now.ToString("HH:mm"), "SuccessBrush")
+                        ? (ConnectedStatus(connection), "SuccessBrush")
                         : ("连接失败：" + (connection.Error ?? "未知错误"), "DangerBrush");
 
                 return new SourceCard
@@ -262,6 +262,23 @@ public partial class SourcesPage : Page
             : ok == sources.Count
                 ? $"{sources.Count} 个服务器 · 全部已连接"
                 : $"{sources.Count} 个服务器 · {ok} 个已连接";
+    }
+
+    /// <summary>「已连接 · 09:00 · 延迟 12 ms」。没有时刻 / 延迟就只显示有的那部分。</summary>
+    private static string ConnectedStatus(SourceConnection connection)
+    {
+        var parts = new List<string> { "已连接" };
+        if (connection.ConnectedAt is { } at)
+        {
+            parts.Add(at.ToString("HH:mm"));
+        }
+
+        if (connection.LatencyMs is { } latency)
+        {
+            parts.Add(latency < 1 ? "延迟 <1 ms" : $"延迟 {latency} ms");
+        }
+
+        return string.Join(" · ", parts);
     }
 
     private void OnAddToggleClick(object sender, RoutedEventArgs e)

@@ -1,7 +1,16 @@
 namespace DvPlayer.Services;
 
 /// <summary>一个源的连接结果，设置页与顶栏用它显示状态。</summary>
-public sealed record SourceConnection(string Id, string Name, string Kind, bool Ok, string? Error);
+/// <param name="LatencyMs">网络往返延迟（毫秒）；本地源或探测失败为 null。</param>
+/// <param name="ConnectedAt">这次连上的时刻，卡片上显示 HH:mm。</param>
+public sealed record SourceConnection(
+    string Id,
+    string Name,
+    string Kind,
+    bool Ok,
+    string? Error,
+    long? LatencyMs = null,
+    DateTime? ConnectedAt = null);
 
 /// <summary>进程级服务容器。正式项目会用依赖注入，这里先保持简单。</summary>
 public sealed class AppServices
@@ -84,40 +93,75 @@ public sealed class AppServices
             return (false, "无法加载共享核心 dvplayer_media（检查 DLL 是否在输出目录）");
         }
 
-        var results = new List<SourceConnection>();
-        foreach (var config in configs)
+        // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
+        // 挂载也是网络等待，同样每个源一个 Task 并行做。
+        var prepared = await Task.WhenAll(configs.Select(async config =>
         {
-            // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
-            SourceConfig effective;
             try
             {
-                effective = await Task.Run(() => NetMount.Prepare(config)).ConfigureAwait(false);
+                return (Config: config,
+                        Effective: await Task.Run(() => NetMount.Prepare(config)).ConfigureAwait(false),
+                        Error: (string?)null);
             }
             catch (Exception ex)
             {
-                results.Add(new SourceConnection(
-                    config.Id, config.Name, config.Kind, false, ex.Message));
-                continue;
+                return (Config: config, Effective: config, Error: ex.Message);
             }
+        })).ConfigureAwait(false);
 
-            ApiResult<SourceInfoDto> added;
-            try
-            {
-                // 核心拿到的是 kind=local + 挂载后的路径。
-                added = await Task.Run(() => core.Add(effective)).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                added = ApiResult<SourceInfoDto>.Fail("调用共享核心失败：" + ex.Message);
-            }
-
-            results.Add(new SourceConnection(
-                config.Id,
-                config.Name,
-                config.Kind,
-                added.Ok,
-                added.Ok ? null : added.Error ?? "连接失败"));
+        // 挂好的一次性交给核心：核心内部每个源一个线程建连，3 个服务器并行登录。
+        var toConnect = prepared.Where(p => p.Error is null).Select(p => p.Effective).ToList();
+        ApiResult<List<SourceConnectDto>> batch;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            batch = toConnect.Count == 0
+                ? ApiResult<List<SourceConnectDto>>.Success(new List<SourceConnectDto>())
+                : await Task.Run(() => core.AddMany(toConnect)).ConfigureAwait(false);
         }
+        catch (Exception ex)
+        {
+            batch = ApiResult<List<SourceConnectDto>>.Fail("调用共享核心失败：" + ex.Message);
+        }
+        watch.Stop();
+
+        // 并行连接的总耗时应接近最慢的那个源，而不是各源相加；日志留着对比。
+        Trace.Write(batch.Ok
+            ? $"connect {toConnect.Count} source(s) in {watch.ElapsedMilliseconds} ms: " +
+              string.Join("; ", batch.Data!.Select(c =>
+                  $"{c.Name} ok={c.Ok} ms={c.Ms} latency={c.LatencyMs?.ToString() ?? "-"}"))
+            : "connect failed: " + batch.Error);
+
+        var byId = batch.Ok && batch.Data is not null
+            ? batch.Data.ToDictionary(c => c.Id)
+            : new Dictionary<string, SourceConnectDto>();
+
+        var connectedAt = DateTime.Now;
+        var results = prepared.Select(p =>
+        {
+            if (p.Error is not null)
+            {
+                return new SourceConnection(p.Config.Id, p.Config.Name, p.Config.Kind, false, p.Error);
+            }
+
+            if (!batch.Ok)
+            {
+                return new SourceConnection(
+                    p.Config.Id, p.Config.Name, p.Config.Kind, false, batch.Error ?? "连接失败");
+            }
+
+            return byId.TryGetValue(p.Config.Id, out var connect)
+                ? new SourceConnection(
+                    p.Config.Id,
+                    p.Config.Name,
+                    p.Config.Kind,
+                    connect.Ok,
+                    connect.Ok ? null : connect.Error ?? "连接失败",
+                    connect.LatencyMs,
+                    connect.Ok ? connectedAt : null)
+                : new SourceConnection(
+                    p.Config.Id, p.Config.Name, p.Config.Kind, false, "核心未返回该源的连接结果");
+        }).ToList();
 
         Connections = results;
 

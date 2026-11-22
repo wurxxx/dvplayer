@@ -133,18 +133,56 @@ final class AppState: ObservableObject {
         }
 
         // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
-        var result: [SourceConnection] = []
-        for config in settings.sources {
-            do {
-                let effective = try await MountSources.prepare(config)
-                _ = try await hub.add(effective)
-                result.append(SourceConnection(id: config.id, name: config.name,
-                                               kind: config.kind, ok: true, error: nil))
-            } catch {
-                result.append(SourceConnection(id: config.id, name: config.name,
-                                               kind: config.kind, ok: false,
-                                               error: error.localizedDescription))
+        // 挂载和登录都是网络等待：每源一个任务并行做，3 个服务器不用等 3 份时间。
+        let configs = settings.sources
+        var prepared: [(config: SourceConfig, effective: SourceConfig?, error: String?)] = []
+        await withTaskGroup(of: (SourceConfig, SourceConfig?, String?).self) { group in
+            for config in configs {
+                group.addTask {
+                    do {
+                        return (config, try await MountSources.prepare(config), nil)
+                    } catch {
+                        return (config, nil, error.localizedDescription)
+                    }
+                }
             }
+            for await item in group {
+                prepared.append((config: item.0, effective: item.1, error: item.2))
+            }
+        }
+
+        // 并行返回的顺序不定，按用户配置的顺序排回来。
+        let order = Dictionary(uniqueKeysWithValues: configs.enumerated().map { ($1.id, $0) })
+        prepared.sort { (order[$0.config.id] ?? 0) < (order[$1.config.id] ?? 0) }
+
+        var connects: [String: SourceConnection] = [:]
+        var batchError: String?
+        let toConnect = prepared.compactMap { $0.effective }
+        if !toConnect.isEmpty {
+            do {
+                for connect in try await hub.addMany(toConnect) {
+                    connects[connect.id] = connect
+                }
+            } catch {
+                batchError = error.localizedDescription
+            }
+        }
+
+        let result: [SourceConnection] = prepared.map { item in
+            if let error = item.error {
+                return SourceConnection(id: item.config.id, name: item.config.name,
+                                        kind: item.config.kind, ok: false, error: error)
+            }
+            if let error = batchError {
+                return SourceConnection(id: item.config.id, name: item.config.name,
+                                        kind: item.config.kind, ok: false, error: error)
+            }
+            if let connect = connects[item.config.id] {
+                return connect
+            }
+            return SourceConnection(id: item.config.id, name: item.config.name,
+                                    kind: item.config.kind, ok: false,
+                                    error: "核心未返回该源的连接结果")
         }
 
         // 已删掉的源留下的挂载点顺手卸掉。
@@ -160,11 +198,14 @@ final class AppState: ObservableObject {
         core = hub
         coreError = nil
         settings.save()
-        await refresh()
 
+        // 先把页面切到源首页：库列表 / 记录 / 收藏在后台补，
+        // 别让整个启动卡在「服务器」页等这几条请求（慢源可能十几秒）。
         if case .sources = page, let first = result.first(where: \.ok) {
             page = .home(first.id)
         }
+
+        await refresh()
     }
 
     /// 库里列表 + 观看记录 + 收藏（收藏页要用）。

@@ -8,6 +8,9 @@
 //! 进出聚合层时统一加/去前缀，界面拿到的 id 始终可以跨源唯一定位。
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
 
 use crate::error::{MediaError, Result};
 use crate::models::{
@@ -30,11 +33,58 @@ struct Entry {
     source: Box<dyn MediaSource>,
 }
 
+/// 并行建连的一个结果。界面用它显示每个源连没连上、花了多久。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceConnect {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// 建连（含登录）耗时，毫秒。
+    pub ms: u64,
+    /// 网络往返延迟（毫秒）。本地目录没有，探测失败也没有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+}
+
 /// 合并前先记下是哪个源给的库，重名时要用源名区分。
 struct QualifiedLibrary {
     entry_id: String,
     source_name: String,
     library: MediaLibrary,
+}
+
+/// 测一次已登录源的网络延迟：先预热建立连接，再计时一次请求。
+///
+/// 只测走 HTTP 的源（本地目录没有「延迟」）；3 秒超时、拿不到响应就返回 None。
+/// 用与适配器相同的客户端构造，所以源的代理设置同样生效。
+fn probe_latency(config: &SourceConfig) -> Option<u64> {
+    if !matches!(
+        config.kind.as_str(),
+        "fnos" | "feiniu" | "emby" | "jellyfin" | "webdav"
+    ) {
+        return None;
+    }
+
+    let url = config.base.trim().trim_end_matches('/');
+    if url.is_empty() {
+        return None;
+    }
+
+    let client = crate::sources::http_client(&config.proxy);
+    let timeout = Duration::from_secs(3);
+
+    // 第一次可能要走 DNS + TCP + TLS，结果不计时。
+    let _ = client.get(url).timeout(timeout).send();
+
+    let started = Instant::now();
+    match client.get(url).timeout(timeout).send() {
+        Ok(_) => Some(started.elapsed().as_millis() as u64),
+        Err(_) => None,
+    }
 }
 
 impl Default for MediaHub {
@@ -68,6 +118,88 @@ impl MediaHub {
         )))?;
 
         self.add_source(&config.id, source)
+    }
+
+    /// 并行建连多个源：每个源一个线程去创建 + 登录，全部结束后再按配置顺序
+    /// 挂进聚合层。登录是网络等待，串行时 3 个服务器就要等 3 份时间。
+    ///
+    /// 线程里只碰自己的适配器，`entries` 始终由当前线程写入，所以不用加锁。
+    /// 失败的源带 `error` 返回，不影响其它源；`ms` 是建连（含登录）耗时。
+    pub fn add_many(&mut self, configs: &[SourceConfig]) -> Vec<SourceConnect> {
+        let attempts: Vec<(
+            SourceConfig,
+            std::result::Result<Box<dyn MediaSource>, String>,
+            u64,
+            Option<u64>,
+        )> =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = configs
+                    .iter()
+                    .cloned()
+                    .map(|config| {
+                        scope.spawn(move || {
+                            let started = Instant::now();
+                            let result = match create(&config) {
+                                Some(mut source) => source
+                                    .login()
+                                    .map(|()| source)
+                                    .map_err(|err| err.to_string()),
+                                None => Err(format!("不支持的源类型：{}", config.kind)),
+                            };
+                            // 登录成功后再测一次往返：连接池已热，量到的是真正的延迟，
+                            // 而不是 DNS / TLS 握手的开销。
+                            let latency = if result.is_ok() {
+                                probe_latency(&config)
+                            } else {
+                                None
+                            };
+                            (config, result, started.elapsed().as_millis() as u64, latency)
+                        })
+                    })
+                    .collect();
+
+                handles
+                    .into_iter()
+                    .zip(configs.iter().cloned())
+                    .map(|(handle, config)| match handle.join() {
+                        Ok(done) => done,
+                        Err(_) => (config, Err("建连线程异常退出".to_string()), 0, None),
+                    })
+                    .collect()
+            });
+
+        let mut out = Vec::with_capacity(attempts.len());
+        for (config, result, ms, latency) in attempts {
+            match result {
+                Ok(source) => {
+                    let info = SourceConnect {
+                        id: config.id.clone(),
+                        name: config.name.clone(),
+                        kind: config.kind.clone(),
+                        ok: true,
+                        error: None,
+                        ms,
+                        latency_ms: latency,
+                    };
+                    self.entries.push(Entry {
+                        id: config.id,
+                        source,
+                    });
+                    out.push(info);
+                }
+                Err(error) => out.push(SourceConnect {
+                    id: config.id,
+                    name: config.name,
+                    kind: config.kind,
+                    ok: false,
+                    error: Some(error),
+                    ms,
+                    latency_ms: None,
+                }),
+            }
+        }
+
+        out
     }
 
     /// 已连接的源（id, 名称, 类型），设置页用它显示健康状态。

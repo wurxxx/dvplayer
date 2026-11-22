@@ -14,6 +14,8 @@ DVHub dv_hub_new(void);
 void dv_hub_free(DVHub handle);
 
 char *dv_hub_add(DVHub handle, const char *config);
+/// 并行添加并登录多个源，configs 是 SourceConfig 的 JSON 数组。
+char *dv_hub_add_many(DVHub handle, const char *configs);
 char *dv_hub_sources(const DVHub handle);
 char *dv_hub_libraries(const DVHub handle);
 

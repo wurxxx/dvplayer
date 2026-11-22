@@ -266,8 +266,15 @@ struct SourcesPage: View {
             return state.connecting ? "正在连接…" : "未连接"
         }
         if connection.ok {
+            var parts = ["已连接"]
             let libraries = state.libraryCount(of: config.id)
-            return libraries > 0 ? "已连接 · \(libraries) 个媒体库" : "已连接"
+            if libraries > 0 {
+                parts.append("\(libraries) 个媒体库")
+            }
+            if let latency = connection.latencyMs {
+                parts.append(latency < 1 ? "延迟 <1 ms" : "延迟 \(latency) ms")
+            }
+            return parts.joined(separator: " · ")
         }
         return connection.error ?? "连接失败"
     }

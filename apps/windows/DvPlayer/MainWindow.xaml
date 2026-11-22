@@ -48,6 +48,7 @@
                    BorderThickness="0"
                    Margin="0,2,0,0"
                    ItemContainerStyle="{StaticResource NavItem}"
+                   PreviewMouseLeftButtonDown="OnNavPreviewMouseDown"
                    SelectionChanged="OnNavSelectionChanged">
 
             <ListBoxItem Tag="sources">
