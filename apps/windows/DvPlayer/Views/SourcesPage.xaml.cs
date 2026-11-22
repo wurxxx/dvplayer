@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DvPlayer.Dialogs;
 using DvPlayer.Services;
@@ -230,6 +231,7 @@ public partial class SourcesPage : Page
     private bool _sourceDragging;
     private FrameworkElement? _dragSourceCardVisual;
     private FrameworkElement? _dragHoverCardVisual;
+    private Point _dragGhostOffset;
 
     private void OnSourceGridPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -260,33 +262,54 @@ public partial class SourcesPage : Page
             _dragSourceCardVisual = CardContainer(_sourceDragCard.Id);
             if (_dragSourceCardVisual is not null)
             {
-                _dragSourceCardVisual.Opacity = 0.5;
+                _dragSourceCardVisual.Opacity = 0.35;
+                _dragGhostOffset = e.GetPosition(_dragSourceCardVisual);
+                ShowDragGhost(_dragSourceCardVisual);
             }
         }
 
-        UpdateHoverVisual(DataContextAt<SourceCard>(SourceGrid, position));
+        // 快照跟着鼠标走。
+        var layerPoint = e.GetPosition(DragLayer);
+        Canvas.SetLeft(DragGhost, layerPoint.X - _dragGhostOffset.X);
+        Canvas.SetTop(DragGhost, layerPoint.Y - _dragGhostOffset.Y);
+
+        // 经过别的源就实时让位：它先换过去，后面的卡片用位移动画补上。
+        var hover = DataContextAt<SourceCard>(SourceGrid, position);
+        if (hover is not null && hover.Id != _sourceDragCard.Id)
+        {
+            MoveSource(_sourceDragCard.Id, hover.Id);
+        }
     }
 
-    /// <summary>拖动时把鼠标下的目标卡片略微放大，给一个明确的落点。</summary>
-    private void UpdateHoverVisual(SourceCard? hover)
+    /// <summary>把卡片截成一张图，作为拖动时跟随鼠标的「快照」。</summary>
+    private void ShowDragGhost(FrameworkElement source)
     {
-        if (hover is null || hover.Id == _sourceDragCard?.Id)
-        {
-            RestoreCardVisual(_dragHoverCardVisual);
-            _dragHoverCardVisual = null;
-            return;
-        }
-
-        var container = CardContainer(hover.Id);
-        if (ReferenceEquals(container, _dragHoverCardVisual) || container is null)
+        var width = source.ActualWidth;
+        var height = source.ActualHeight;
+        if (width < 1 || height < 1)
         {
             return;
         }
 
-        RestoreCardVisual(_dragHoverCardVisual);
-        container.RenderTransformOrigin = new Point(0.5, 0.5);
-        container.RenderTransform = new ScaleTransform(1.025, 1.025);
-        _dragHoverCardVisual = container;
+        var dpi = VisualTreeHelper.GetDpi(source);
+        var bitmap = new RenderTargetBitmap(
+            (int)Math.Ceiling(width * dpi.DpiScaleX),
+            (int)Math.Ceiling(height * dpi.DpiScaleY),
+            96 * dpi.DpiScaleX,
+            96 * dpi.DpiScaleY,
+            PixelFormats.Pbgra32);
+        bitmap.Render(source);
+
+        DragGhost.Width = width;
+        DragGhost.Height = height;
+        DragGhost.Background = new ImageBrush(bitmap) { Stretch = Stretch.Fill };
+        DragGhost.Visibility = Visibility.Visible;
+    }
+
+    private void HideDragGhost()
+    {
+        DragGhost.Visibility = Visibility.Collapsed;
+        DragGhost.Background = null;
     }
 
     private static void RestoreCardVisual(FrameworkElement? element)
@@ -373,6 +396,7 @@ public partial class SourcesPage : Page
         RestoreCardVisual(_dragHoverCardVisual);
         _dragSourceCardVisual = null;
         _dragHoverCardVisual = null;
+        HideDragGhost();
 
         if (!dragging || source is null)
         {

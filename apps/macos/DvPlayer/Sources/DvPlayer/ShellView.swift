@@ -87,6 +87,8 @@ private struct SidebarView: View {
     @EnvironmentObject private var state: AppState
     /// 拖动时鼠标下的服务器，用来画落点高亮。
     @State private var dropTargetId: String?
+    /// 正在拖的服务器；经过别的项时实时让位。
+    @State private var draggingId: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -196,27 +198,19 @@ private struct SidebarView: View {
                     state.openSource(connection.id)
                 }
                 .animation(.easeOut(duration: 0.12), value: dropTargetId)
-                .onDrag { NSItemProvider(object: connection.id as NSString) }
+                .onDrag {
+                    draggingId = connection.id
+                    return NSItemProvider(object: connection.id as NSString)
+                }
                 .onDrop(
                     of: [.text],
-                    isTargeted: Binding(
-                        get: { dropTargetId == connection.id },
-                        set: { targeted in
-                            if targeted {
-                                dropTargetId = connection.id
-                            } else if dropTargetId == connection.id {
-                                dropTargetId = nil
-                            }
-                        }
+                    delegate: SourceDropDelegate(
+                        targetId: connection.id,
+                        draggingId: $draggingId,
+                        dropTargetId: $dropTargetId,
+                        move: { id, target in state.moveSource(id, to: target) }
                     )
-                ) { providers in
-                    guard let provider = providers.first else { return false }
-                    _ = provider.loadObject(ofClass: NSString.self) { object, _ in
-                        guard let id = object as? String else { return }
-                        Task { @MainActor in state.moveSource(id, to: connection.id) }
-                    }
-                    return true
-                }
+                )
             }
         }
     }

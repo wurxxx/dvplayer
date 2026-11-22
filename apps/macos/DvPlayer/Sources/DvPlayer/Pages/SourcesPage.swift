@@ -17,6 +17,8 @@ struct SourcesPage: View {
 
     /// 拖动时鼠标下的目标源，用来画落点高亮。
     @State private var dropTargetId: String?
+    /// 正在拖的源。经过别的卡片时就让它让位（不是松手才换）。
+    @State private var draggingId: String?
 
     private var isEditing: Bool { editing != nil }
 
@@ -114,22 +116,19 @@ struct SourcesPage: View {
                                 RoundedRectangle(cornerRadius: Theme.radiusCard)
                                     .stroke(Theme.accent, lineWidth: isTarget ? 1.5 : 0)
                             }
-                            .onDrag { NSItemProvider(object: config.id as NSString) }
+                            .onDrag {
+                                draggingId = config.id
+                                return NSItemProvider(object: config.id as NSString)
+                            }
                             .onDrop(
                                 of: [.text],
-                                isTargeted: Binding(
-                                    get: { dropTargetId == config.id },
-                                    set: { targeted in
-                                        if targeted {
-                                            dropTargetId = config.id
-                                        } else if dropTargetId == config.id {
-                                            dropTargetId = nil
-                                        }
-                                    }
+                                delegate: SourceDropDelegate(
+                                    targetId: config.id,
+                                    draggingId: $draggingId,
+                                    dropTargetId: $dropTargetId,
+                                    move: { id, target in state.moveSource(id, to: target) }
                                 )
-                            ) { providers in
-                                dropSource(providers, onto: config.id)
-                            }
+                            )
                     }
                 }
 
@@ -292,16 +291,6 @@ struct SourcesPage: View {
         if state.pendingConnections.contains(config.id) { return Theme.faint }
         guard let connection else { return Theme.faint }
         return connection.ok ? Theme.success : Theme.danger
-    }
-
-    /// 拖拽落位：把拖过来的源挪到 targetId 的位置。
-    private func dropSource(_ providers: [NSItemProvider], onto targetId: String) -> Bool {
-        guard let provider = providers.first else { return false }
-        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
-            guard let id = object as? String else { return }
-            Task { @MainActor in state.moveSource(id, to: targetId) }
-        }
-        return true
     }
 
     private func statusText(_ config: SourceConfig, _ connection: SourceConnection?) -> String {
@@ -488,5 +477,35 @@ struct SourcesPage: View {
                 state.showToast("已保存并连接")
             }
         }
+    }
+}
+
+/// 拖动经过某个源时就让它让位，带动画；松手后高亮消失。
+struct SourceDropDelegate: DropDelegate {
+    let targetId: String
+    @Binding var draggingId: String?
+    @Binding var dropTargetId: String?
+    let move: (String, String) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging = draggingId, dragging != targetId else { return }
+        dropTargetId = targetId
+        move(dragging, targetId)
+    }
+
+    func dropExited(info: DropInfo) {
+        if dropTargetId == targetId {
+            dropTargetId = nil
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingId = nil
+        dropTargetId = nil
+        return true
     }
 }

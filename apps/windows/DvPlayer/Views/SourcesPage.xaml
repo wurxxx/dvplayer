@@ -27,8 +27,9 @@
       <StackPanel Margin="0,0,0,28">
         <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
 
-        <!-- 卡片可以拖动排序：按住拖到另一个源上松手，就占它的位置，顺序写回设置。 -->
-        <ItemsControl x:Name="SourceGrid" Margin="0,14,0,0"
+        <!-- 卡片可以拖动排序：拖动时有半透明快照跟随，经过哪个源就让位。 -->
+        <Grid x:Name="SourceGridHost" Margin="0,14,0,0">
+        <ItemsControl x:Name="SourceGrid"
                       PreviewMouseLeftButtonDown="OnSourceGridPreviewMouseDown"
                       PreviewMouseMove="OnSourceGridPreviewMouseMove"
                       PreviewMouseLeftButtonUp="OnSourceGridPreviewMouseUp">
@@ -94,6 +95,13 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+
+          <!-- 拖动时跟着鼠标走的卡片快照（不吃鼠标事件） -->
+          <Canvas x:Name="DragLayer" IsHitTestVisible="False" ClipToBounds="False">
+            <Border x:Name="DragGhost" Visibility="Collapsed" CornerRadius="12"
+                    Opacity="0.92" />
+          </Canvas>
+        </Grid>
 
         <!-- 空态：没有源时给一个明确的入口 -->
         <StackPanel x:Name="EmptyState" Margin="0,60,0,0" Visibility="Collapsed">
