@@ -12,6 +12,8 @@ struct SearchPage: View {
     @State private var errorText: String?
     @State private var searching = false
     @State private var searched = false
+    /// 输入防抖：每次敲字取消上一条待执行的搜索。
+    @State private var searchTask: Task<Void, Never>?
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16, alignment: .top)]
@@ -74,20 +76,34 @@ struct SearchPage: View {
             }
         }
         .onAppear {
-            // 截图巡检：`DVPLAYER_SEARCH=<关键词>` 直接带一个查询进来。
+            // 截图巡检：`DVPLAYER_SEARCH=<关键词>` 优先；
+            // 否则接着上次的查询词，切页 / 重启回来还在。
             let env = ProcessInfo.processInfo.environment
-            if keyword.isEmpty, let wanted = env["DVPLAYER_SEARCH"], !wanted.isEmpty {
+            if let wanted = env["DVPLAYER_SEARCH"], !wanted.isEmpty {
                 keyword = wanted
+            } else if keyword.isEmpty,
+                      let saved = state.settings.searchKeyword,
+                      !saved.trimmingCharacters(in: .whitespaces).isEmpty {
+                keyword = saved
             }
         }
-        .onSubmit(of: .text) { Task { await search() } }
+        .onSubmit(of: .text) {
+            searchTask?.cancel()
+            Task { await search() }
+        }
         .onChange(of: keyword) { _ in
-            Task {
-                // 打完再搜：300ms 内又敲字就作废。
+            searchTask?.cancel()
+            searchTask = Task {
+                // 打完再搜：300ms 内又敲字就作废（取消上一次）。
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 guard !Task.isCancelled else { return }
                 await search()
             }
+        }
+        .onDisappear {
+            searchTask?.cancel()
+            // 还没等到防抖就切页：把输入框里现在的词也留下。
+            saveKeyword(keyword.trimmingCharacters(in: .whitespaces))
         }
     }
 
@@ -109,9 +125,16 @@ struct SearchPage: View {
         Set(results.flatMap { $0.sources.map(\.sourceId) }).count
     }
 
+    private func saveKeyword(_ text: String) {
+        guard state.settings.searchKeyword != text else { return }
+        state.settings.searchKeyword = text
+        state.settings.save()
+    }
+
     private func search() async {
-        guard let core = state.core else { return }
         let text = keyword.trimmingCharacters(in: .whitespaces)
+        saveKeyword(text)
+        guard let core = state.core else { return }
         guard !text.isEmpty else {
             results = []
             failures = []

@@ -30,12 +30,21 @@ public partial class SearchPage : Page
         Unloaded += OnUnloaded;
         _debounce.Tick += OnDebounceTick;
 
+        // 上次的查询词：切页 / 重启后回来还在，OnLoaded 会接着搜一次。
+        var saved = AppServices.Instance.Settings.SearchKeyword;
+        if (!string.IsNullOrWhiteSpace(saved))
+        {
+            SearchBox.Text = saved;
+            _debounce.Stop();
+        }
+
         // 截图回归：--search-text <关键词> 直接带一个查询进来。
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, "--search-text");
         if (index >= 0 && index + 1 < args.Length)
         {
             SearchBox.Text = args[index + 1];
+            _debounce.Stop();
         }
     }
 
@@ -55,6 +64,9 @@ public partial class SearchPage : Page
     {
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
         _debounce.Stop();
+
+        // 还没等到防抖就切页：把输入框里现在的词也留下。
+        SaveKeyword(SearchBox.Text.Trim());
     }
 
     /// <summary>源重连后索引整个作废，下一次搜索重新拉。</summary>
@@ -100,10 +112,25 @@ public partial class SearchPage : Page
             ? Visibility.Visible
             : Visibility.Collapsed;
 
+    /// <summary>查询词落盘：切页 / 重启后搜索框和结果都能接着上次。</summary>
+    private static void SaveKeyword(string query)
+    {
+        var settings = AppServices.Instance.Settings;
+        if ((settings.SearchKeyword ?? "") == query)
+        {
+            return;
+        }
+
+        settings.SearchKeyword = query;
+        settings.Save();
+    }
+
     private async Task RunSearchAsync(string raw)
     {
         var query = raw.Trim();
         var version = ++_version;
+
+        SaveKeyword(query);
 
         if (query.Length == 0)
         {

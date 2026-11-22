@@ -23,6 +23,9 @@ public sealed class AppSettings
     /// <summary>启动后先打开哪一页：sources / records / search / settings。</summary>
     public string StartPage { get; set; } = "sources";
 
+    /// <summary>搜索页上次的查询词：切到别的页再回来、重启应用都还在。</summary>
+    public string? SearchKeyword { get; set; }
+
     /// <summary>列表每页条数（媒体库与搜索共用）。</summary>
     public int PageSize { get; set; } = 60;
 

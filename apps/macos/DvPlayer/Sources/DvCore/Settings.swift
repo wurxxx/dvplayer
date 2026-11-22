@@ -7,6 +7,8 @@ public struct AppSettings: Codable, Sendable {
     public var lastSourceId: String?
     public var autoConnect: Bool = true
     public var startPage: String = "libraries"
+    /// 搜索页上次的查询词：切到别的页再回来、重启应用都还在。
+    public var searchKeyword: String?
     public var pageSize: Int = 60
     public var showResolution: Bool = true
     public var resumePlayback: Bool = true

@@ -58,7 +58,9 @@
   盘不卸载；关播放窗时卸载 ISO。进度回写核心（本地源）。
   自检：`DVPLAYER_DISC=<iso>` + `DVPLAYER_DISC_TITLE=N`（不建源直接开 ISO）、
   `DVPLAYER_PLAY_UI=episodes,next` 切到下一个标题。
-- 搜索页：跨源搜索；结果卡片直接进详情（全局 `AppState.detailItemId` 路由，切侧栏自动收起）
+- 搜索页：跨源搜索；结果卡片直接进详情（全局 `AppState.detailItemId` 路由，切侧栏自动收起）。
+  输入框保留上次关键词（`settings.searchKeyword`），切页 / 重启回来自动再搜一次；
+  输入防抖会取消上一条待执行的搜索，不会每敲一个字并发一次请求。
 - 记录页：「观看」的播放按钮直接 `PlayerLauncher.play(record:)`，收藏卡片进详情
 - 设置页：续播、分辨率角标、自动连接、播放缓冲、核心版本与配置路径
 - Emby 源播放实测（2026-11-21）：Monta HD（Emby 4.9.3、https + openresty 反代、
