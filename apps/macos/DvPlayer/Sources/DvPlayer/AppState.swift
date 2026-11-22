@@ -123,8 +123,31 @@ final class AppState: ObservableObject {
 
     // MARK: - 连接
 
+    /// 连接代号：连点重连 / 启动并发两轮时，只有最后一轮能写状态。
+    private var connectGeneration = 0
+
+    /// 给页面用：连接代号变了（重连 / 切源）说明缓存的数据可能过期。
+    var connectionSerial: Int { connectGeneration }
+
+    /// 连接任务串行化：并发两轮会各建一个 hub，先建好的那份没人释放。
+    private var connectTask: Task<Void, Never>?
+
     /// 把所有配置好的源接进核心。单个源失败不影响其它源。
     func connectAll() async {
+        let previous = connectTask
+        let task = Task { [weak self] in
+            _ = await previous?.value
+            guard let self else { return }
+            await self.connectAllCore()
+        }
+        connectTask = task
+        await task.value
+    }
+
+    private func connectAllCore() async {
+        connectGeneration += 1
+        let generation = connectGeneration
+
         guard !settings.sources.isEmpty else {
             connections = []
             core = nil
@@ -134,7 +157,12 @@ final class AppState: ObservableObject {
         }
 
         connecting = true
-        defer { connecting = false }
+        defer {
+            // 旧的一轮结束不能把新的一轮标成「已连完」。
+            if generation == connectGeneration {
+                connecting = false
+            }
+        }
 
         core = nil
         guard let hub = Core() else {
@@ -180,8 +208,14 @@ final class AppState: ObservableObject {
         }
 
         // 并行返回的顺序不定，按用户配置的顺序排回来。
-        let order = Dictionary(uniqueKeysWithValues: configs.enumerated().map { ($1.id, $0) })
+        // 重复 id 时取先出现的那一条（uniqueKeysWithValues 会直接 trap）。
+        let order = Dictionary(
+            configs.enumerated().map { ($1.id, $0) },
+            uniquingKeysWith: { first, _ in first })
         prepared.sort { (order[$0.config.id] ?? 0) < (order[$1.config.id] ?? 0) }
+
+        // 挂载期间又点了一次重连：这一轮的结果已经过期，别再往下写。
+        guard generation == connectGeneration else { return }
 
         var connects: [String: SourceConnection] = [:]
         var batchError: String?
@@ -190,7 +224,10 @@ final class AppState: ObservableObject {
             do {
                 // 每连完一个源就回调一次，卡片和侧栏立即更新。
                 let streamed = try await hub.addManyStream(toConnect) { [weak self] connection in
-                    Task { @MainActor in self?.applyConnection(connection) }
+                    Task { @MainActor in
+                        guard let self, generation == self.connectGeneration else { return }
+                        self.applyConnection(connection)
+                    }
                 }
                 for connect in streamed {
                     connects[connect.id] = connect
@@ -199,6 +236,8 @@ final class AppState: ObservableObject {
                 batchError = error.localizedDescription
             }
         }
+
+        guard generation == connectGeneration else { return }
 
         let result: [SourceConnection] = prepared.map { item in
             if let error = item.error {
@@ -217,13 +256,26 @@ final class AppState: ObservableObject {
                                     error: "核心未返回该源的连接结果")
         }
 
-        // 已删掉的源留下的挂载点顺手卸掉。
-        cleanupStaleMounts(keep: Set(settings.sources.map(\.id)))
+        // 连接期间用户可能删了源：只保留还配置着的。
+        // 旧一轮回来时这里也能挡住「已删源又被写回」。
+        let live = Set(settings.sources.map(\.id))
+        let current = result.filter { live.contains($0.id) }
 
-        connections = result
+        // 已删掉的源留下的挂载点顺手卸掉（后台执行，别卡住连接流程）。
+        await cleanupStaleMounts(keep: live)
+
+        connections = current
         pendingConnections.removeAll()
-        guard result.contains(where: \.ok) else {
-            coreError = result.map { "\($0.name)：\($0.error ?? "连接失败")" }
+
+        guard !current.isEmpty else {
+            core = nil
+            coreError = nil
+            page = .sources
+            return
+        }
+
+        guard current.contains(where: \.ok) else {
+            coreError = current.map { "\($0.name)：\($0.error ?? "连接失败")" }
                 .joined(separator: "；")
             return
         }
@@ -262,8 +314,9 @@ final class AppState: ObservableObject {
             settings.sources.insert(item, at: to)
 
             // 侧栏直接读 connections，顺序也跟着换，不用等重连。
-            let order = Dictionary(uniqueKeysWithValues:
-                settings.sources.enumerated().map { ($1.id, $0) })
+            let order = Dictionary(
+                settings.sources.enumerated().map { ($1.id, $0) },
+                uniquingKeysWith: { first, _ in first })
             connections.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
         }
         settings.save()
@@ -275,6 +328,9 @@ final class AppState: ObservableObject {
 
         do {
             libraries = try await core.libraries()
+            // 上一次读库失败留下的错误不能带到这次成功的刷新里：
+            // 首页会直接展示 coreError（见 LibrariesPage.emptyHint）。
+            coreError = nil
         } catch {
             coreError = "读取媒体库失败：\(error.localizedDescription)"
         }
@@ -292,6 +348,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// 只刷新收藏（详情页点了收藏之后调，别的页面下一次进来就是新状态）。
+    func refreshFavorites() async {
+        guard let core else { return }
+        favorites = (try? await core.favorites().items) ?? []
+    }
+
+    /// 只刷新观看记录（详情页标记看过 / 看完之后调）。
+    func refreshRecords() async {
+        guard let core else { return }
+        records = (try? await core.records()) ?? []
+    }
+
     // MARK: - 源管理
 
     func saveSource(_ incoming: SourceConfig) async {
@@ -305,7 +373,7 @@ final class AppState: ObservableObject {
         // 地址或协议改了：旧挂载点先卸，connectAll 会按新地址重挂。
         if let old = settings.sources.first(where: { $0.id == config.id }),
            old.kind != config.kind || old.base != config.base {
-            releaseMount(config.id)
+            await releaseMount(config.id)
         }
 
         if let index = settings.sources.firstIndex(where: { $0.id == config.id }) {
@@ -320,7 +388,7 @@ final class AppState: ObservableObject {
     }
 
     func removeSource(_ id: String) async {
-        releaseMount(id)
+        await releaseMount(id)
         settings.sources.removeAll { $0.id == id }
         if settings.lastSourceId == id {
             settings.lastSourceId = settings.sources.first?.id

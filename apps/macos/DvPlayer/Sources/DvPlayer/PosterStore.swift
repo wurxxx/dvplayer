@@ -20,6 +20,39 @@ actor PosterStore {
         directory = base.appendingPathComponent("DvPlayer/posters", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         memory.countLimit = 400
+
+        // 磁盘缓存没有上限会一直涨：启动时按最旧清一次。
+        Task.detached(priority: .utility) { [directory] in
+            Self.trimDirectory(directory, limitBytes: 512 * 1024 * 1024)
+        }
+    }
+
+    /// 目录超过上限就按修改时间从旧到新删，直到回到上限以内。
+    private static func trimDirectory(_ directory: URL, limitBytes: Int64) {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: keys) else {
+            return
+        }
+
+        var total: Int64 = 0
+        var entries: [(url: URL, size: Int64, date: Date)] = []
+        for file in files {
+            guard let values = try? file.resourceValues(forKeys: Set(keys)),
+                  let size = values.fileSize,
+                  let date = values.contentModificationDate else {
+                continue
+            }
+            total += Int64(size)
+            entries.append((file, Int64(size), date))
+        }
+
+        guard total > limitBytes else { return }
+        for entry in entries.sorted(by: { $0.date < $1.date }) {
+            if total <= limitBytes { break }
+            try? FileManager.default.removeItem(at: entry.url)
+            total -= entry.size
+        }
     }
 
     func image(path: String?, core: Core?) async -> NSImage? {
@@ -52,7 +85,9 @@ actor PosterStore {
                       let image = NSImage(data: data) else {
                     return nil
                 }
-                try? data.write(to: directory.appendingPathComponent(Self.fileName(path)))
+                // 先写临时文件再改名：下载中断不会留下半张坏图（一直空白）。
+                try? data.write(to: directory.appendingPathComponent(Self.fileName(path)),
+                                options: .atomic)
                 return image
             } catch {
                 NSLog("[DvPlayer] 海报加载失败 \(path)：\(error.localizedDescription)")

@@ -242,6 +242,9 @@ final class PlayerSession: ObservableObject {
 
     // —— 浮层 ——
     @Published var chromeVisible = true
+
+    /// 上一次重置「控制条 3 秒后隐藏」的时间，见 showChrome()。
+    private var lastChromePoke = Date.distantPast
     @Published var panel: Panel = .none
     @Published var toast: String?
     @Published var isFullscreen = false
@@ -317,10 +320,16 @@ final class PlayerSession: ObservableObject {
     /// 按条目缓存 FEL / MEL：切回来不再重复读码流。
     private static var doviCache: [String: String] = [:]
     private var lastReportAt = Date.distantPast
+    /// 上一次上报的秒数：暂停时周期上报跳过没变的位置。
+    private var lastReportedPosition: Double = -1
     private var hideTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
     private var reportTimer: Timer?
     private var aboutToClose = false
+    /// 加载超时计时（见 startLoadTimeout）。
+    private var loadTimeoutTask: Task<Void, Never>?
+    /// 这次加载是不是被 30 秒超时判过：首帧晚到时要把那条错误收掉。
+    private var loadTimedOut = false
 
     private static let resumeThreshold = 5.0
     private static let reportEvery: TimeInterval = 10
@@ -455,10 +464,14 @@ final class PlayerSession: ObservableObject {
 
     /// 本地播放：不取核心播放源、不拉媒体信息，续播点读本地文件。
     private func beginLocal(_ local: LocalPlayback) async {
+        // 点开本地文件后、真正开始前窗口可能已经关了。
+        guard !isStopped else { return }
         loadToken += 1
+        let token = loadToken
         loading = true
         buffering = false
         error = nil
+        loadTimedOut = false
         eof = false
         position = 0
         seekPosition = 0
@@ -467,6 +480,10 @@ final class PlayerSession: ObservableObject {
         mediaInfoLoaded = false
         audioTracks = []
         subtitleTracks = []
+        // 上一集的在线字幕搜索结果不能带到这一集。
+        subtitleResults = []
+        subtitleError = nil
+        subtitleSearching = false
         selectedAudioId = 0
         selectedSubtitleId = 0
         mediaInfo = nil
@@ -498,11 +515,13 @@ final class PlayerSession: ObservableObject {
         launchAt = Date()
         loadingFloor = start
         lastReportAt = Date()
+        lastReportedPosition = -1
 
         NSLog("[Play] local load \(local.itemId) from=\(String(format: "%.1f", start)) " +
               "dur=\(Int(local.duration))")
         mpv.loadURL(local.url, headers: [:], start: start)
         startReporting()
+        startLoadTimeout(token: token)
     }
 
     private func begin(itemId: String, startSeconds: Double?) async {
@@ -518,9 +537,11 @@ final class PlayerSession: ObservableObject {
 
         loadToken += 1
         let token = loadToken
-        loading = true
+        // 先不要置 loading：旧文件的 position 回调还在来（切集复用同一个 mpv），
+        // 那些回调会走 finishLoading 把黑底收掉，新文件还没开始加载就露出旧画面。
         buffering = false
         error = nil
+        loadTimedOut = false
         eof = false
         position = 0
         seekPosition = 0
@@ -529,6 +550,10 @@ final class PlayerSession: ObservableObject {
         mediaInfoLoaded = false
         audioTracks = []
         subtitleTracks = []
+        // 上一集的在线字幕搜索结果不能带到这一集。
+        subtitleResults = []
+        subtitleError = nil
+        subtitleSearching = false
         selectedAudioId = 0
         selectedSubtitleId = 0
         mediaInfo = nil
@@ -572,18 +597,24 @@ final class PlayerSession: ObservableObject {
             // 从起播开始计时：否则第一个位置回调用「很久没报过」立刻上报一次，
             // 这时 duration 还没下来，会把记录写成 0。
             lastReportAt = Date()
+        lastReportedPosition = -1
 
             let headers: [String: String] = Dictionary(
                 source.headers.map { ($0.name, $0.value) },
                 uniquingKeysWith: { _, last in last })
             NSLog("[Play] load \(itemId) from=\(String(format: "%.1f", start)) dur=\(source.durationSeconds)")
+            // 拿到地址、真正要 loadfile 了才盖上黑底。
+            loading = true
             mpv.loadURL(source.url, headers: headers, start: start, proxy: source.proxy)
             startReporting()
+            startLoadTimeout(token: token)
 
             Task { await loadMediaInfo(itemId: itemId) }
         } catch {
             guard token == loadToken, !isStopped else { return }
             loading = false
+            loadTimeoutTask?.cancel()
+            loadTimeoutTask = nil
             self.error = error.localizedDescription
             NSLog("[Play] source failed \(itemId): \(error.localizedDescription)")
         }
@@ -599,6 +630,12 @@ final class PlayerSession: ObservableObject {
 
     func switchTo(itemId: String) {
         guard itemId != self.itemId || error != nil else { return }
+
+        // 媒体库源：切走前把当前集的进度记下并发 stopped，
+        // 否则这一集的「看到哪」停在切集前最后一次周期上报的位置。
+        if discSource == nil, !eof, position > 0 {
+            report(position, stopped: true)
+        }
 
         // 原盘：同一个窗口换标题，重新生成 EDL 再重启 mpv，不查核心。
         if let discSource {
@@ -637,9 +674,10 @@ final class PlayerSession: ObservableObject {
 
         error = nil
 
-        // mpv 子进程已经退出（或启动失败）：IPC 已经没用了，换个新实例再试。
-        if !mpv.isAlive {
-            mpv.shutdown()
+        // mpv 子进程已经退出，或 IPC 已经断了：这个实例不能再复用，换个新实例再试。
+        if !mpv.isAlive || !mpv.isReady {
+            let dead = mpv
+            Task { await dead?.shutdown() }
             guard let engine = MpvEngine(frame: engineFrame, startSeconds: nil) else {
                 loading = false
                 error = "播放器启动失败"
@@ -681,6 +719,13 @@ final class PlayerSession: ObservableObject {
         if duration > 1 {
             self.duration = duration
         }
+
+        // 播完以后用户又把进度拖回片尾之前：这一集重新算「正在看」。
+        // 不重置的话，关窗时 eof 分支会按片长上报，把刚拖回去的进度改成「已看完」。
+        if eof, duration > 1, position < duration - 2 {
+            eof = false
+        }
+
         guard !isScrubbing else { return }
         self.position = position
         seekPosition = position
@@ -691,7 +736,8 @@ final class PlayerSession: ObservableObject {
             finishLoading("position")
         }
 
-        if Date().timeIntervalSince(lastReportAt) >= Self.reportEvery, position > 0 {
+        if Date().timeIntervalSince(lastReportAt) >= Self.reportEvery, position > 0,
+           abs(position - lastReportedPosition) >= 1 {
             lastReportAt = Date()
             report(position)
         }
@@ -707,12 +753,37 @@ final class PlayerSession: ObservableObject {
 
     /// 首帧到了：收掉不透明黑底。`video-frame-info` 先到就用它，位置兜底。
     private func finishLoading(_ reason: String) {
+        // 超时之后首帧才到（慢 NAS / 大文件）：视频已经在放了，别让界面停在错误面板。
+        if loadTimedOut {
+            loadTimedOut = false
+            if error != nil {
+                error = nil
+            }
+        }
+
         guard loading else { return }
         loading = false
+        loadTimeoutTask?.cancel()
+        loadTimeoutTask = nil
         NSLog("[Play] loading finish reason=\(reason) pos=\(String(format: "%.1f", position)) " +
               "floor=\(String(format: "%.1f", loadingFloor))")
         if Self.bufferingHold {
             buffering = true
+        }
+    }
+
+    /// 加载超时：网络慢或文件读不出来时，别让黑底一直转。
+    /// 以前 `file_error` 文案为空时没有任何兜底，界面就永远停在加载中。
+    private func startLoadTimeout(token: Int, seconds: UInt64 = 30) {
+        loadTimeoutTask?.cancel()
+        loadTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard token == self.loadToken, self.loading, !self.isStopped else { return }
+            self.loading = false
+            self.loadTimedOut = true
+            self.error = "加载超时：媒体源没有响应，或这个文件读不出来。"
+            NSLog("[Play] load timeout item=\(self.itemId)")
         }
     }
 
@@ -1020,6 +1091,12 @@ final class PlayerSession: ObservableObject {
         let target = min(max(0, seconds), duration > 0 ? duration : seconds)
         position = target
         seekPosition = target
+
+        // 播完之后拖回片尾之前：重新算「正在看」（暂停时拖回不一定有时长事件）。
+        if eof, duration <= 0 || target < duration - 2 {
+            eof = false
+        }
+
         // 跳过去以后原来那段缓存没用了，等 demuxer 重新填。
         bufferedPosition = target
         mpv.seek(to: target)
@@ -1090,7 +1167,19 @@ final class PlayerSession: ObservableObject {
     // MARK: - 浮层 / 面板
 
     func showChrome() {
-        chromeVisible = true
+        // @Published 不判等：鼠标每动一下就赋值会让整个播放页 body 重算。
+        if !chromeVisible {
+            chromeVisible = true
+        }
+
+        // 连续移动每秒几十次：每次都 cancel + 新建 3 秒计时太浪费，
+        // 半秒内只重置一次，语义仍是「最后一次移动后 3 秒隐藏」。
+        let now = Date()
+        if hideTask != nil, now.timeIntervalSince(lastChromePoke) < 0.5 {
+            return
+        }
+        lastChromePoke = now
+
         hideTask?.cancel()
         guard panel == .none, !isScrubbing else { return }
         hideTask = Task { [weak self] in
@@ -1308,6 +1397,9 @@ final class PlayerSession: ObservableObject {
         let languages = settings.subtitleLanguages ?? "zh-cn,zh-tw,en"
         NSLog("[Subtitles] search \(query) S\(season ?? 0)E\(episode ?? 0)")
 
+        // 搜索要几秒：切了集之后回来的是上一集的字幕，不能挂到新集上。
+        let item = itemId
+
         Task { [weak self] in
             do {
                 let results = try await OpenSubtitlesService.shared.search(
@@ -1319,11 +1411,16 @@ final class PlayerSession: ObservableObject {
                     password: settings.openSubtitlesPassword,
                     languages: languages)
                 guard let self else { return }
+                guard !self.isStopped, self.itemId == item else {
+                    NSLog("[Subtitles] stale results for \(item), dropped")
+                    return
+                }
                 self.subtitleResults = results
                 self.subtitleSearching = false
                 NSLog("[Subtitles] results=\(results.count)")
             } catch {
                 guard let self else { return }
+                guard !self.isStopped, self.itemId == item else { return }
                 self.subtitleError = error.localizedDescription
                 self.subtitleSearching = false
                 NSLog("[Subtitles] search failed: \(error.localizedDescription)")
@@ -1339,6 +1436,8 @@ final class PlayerSession: ObservableObject {
         }
 
         toast("正在下载字幕…")
+        let item = itemId
+
         Task { [weak self] in
             do {
                 let url = try await OpenSubtitlesService.shared.download(
@@ -1346,12 +1445,14 @@ final class PlayerSession: ObservableObject {
                     apiKey: apiKey,
                     username: settings.openSubtitlesUsername,
                     password: settings.openSubtitlesPassword)
-                guard let self, !self.isStopped else { return }
+
+                // 下载要几秒：切了集就装到新集上了，必须以发请求时的条目为准。
+                guard let self, !self.isStopped, self.itemId == item else { return }
                 self.mpv.addPrimarySubtitle(url.path)
                 self.toast("字幕已加载：\(result.languageLabel)")
                 NSLog("[Subtitles] applied \(result.languageLabel) \(url.lastPathComponent)")
             } catch {
-                guard let self else { return }
+                guard let self, self.itemId == item else { return }
                 self.subtitleError = error.localizedDescription
                 NSLog("[Subtitles] download failed: \(error.localizedDescription)")
             }
@@ -1445,23 +1546,41 @@ final class PlayerSession: ObservableObject {
     func requestClose() {
         guard !aboutToClose else { return }
         aboutToClose = true
-        // 播到结尾时 mpv 会把 time-pos 复位，别拿这个值覆盖刚写好的「已看完」。
-        if !eof {
-            report(position, stopped: true, wait: true)
+
+        // 播到结尾时 mpv 会把 time-pos 复位：用片长上报，别拿复位后的 0
+        // 覆盖刚写好的「已看完」。eof 时也要补一次 stopped，
+        // 否则 Emby 那边只收到进度、没收到停止，UserData 不落盘。
+        if eof {
+            report(duration, stopped: true)
+        } else {
+            // 关窗不等网络：主线程同步等会让窗口看起来像卡住。
+            // Cmd+Q 那条路才需要 flush（见 stop(flush:)）。
+            report(position, stopped: true)
         }
+
         onClose?()
     }
 
-    func stop() {
+    /// <param name="flush">
+    /// 退出 App 时同步等最后一次上报；普通关窗不用等，免得界面卡住。
+    /// </param>
+    func stop(flush: Bool = false) {
         guard !isStopped else { return }
         isStopped = true
+        danmakuTask?.cancel()
+        danmakuTask = nil
         hideTask?.cancel()
         toastTask?.cancel()
+        loadTimeoutTask?.cancel()
+        loadTimeoutTask = nil
         reportTimer?.invalidate()
         reportTimer = nil
 
-        if !eof {
-            report(max(position, 0), stopped: true, wait: true)
+        if eof {
+            // 播完关窗：位置按片长算，并补 stopped（见 requestClose 的说明）。
+            report(duration, stopped: true, wait: flush)
+        } else {
+            report(max(position, 0), stopped: true, wait: flush)
         }
 
         mpv.onPosition = nil
@@ -1472,7 +1591,17 @@ final class PlayerSession: ObservableObject {
         mpv.onSpeed = nil
         mpv.onVolume = nil
         mpv.onError = nil
-        mpv.shutdown()
+
+        // 关闭 mpv 要等它退出（最多 2 秒）；放进 Task，别卡住关窗主线程。
+        // 但退出 App（Cmd+Q / 注销）时没有 run loop 再跑这个 Task：必须同步收尾，
+        // 否则 applicationWillTerminate 一返回，mpv 就成了继续播放的孤儿进程。
+        if let engine = mpv {
+            if flush {
+                engine.shutdownNow()
+            } else {
+                Task { await engine.shutdown() }
+            }
+        }
     }
 
     private func startReporting() {
@@ -1489,10 +1618,14 @@ final class PlayerSession: ObservableObject {
         // 定时关闭和位置无关：暂停着也要到点关。
         checkSleep()
         guard position > 0 else { return }
-        if Date().timeIntervalSince(lastReportAt) >= Self.reportEvery {
-            lastReportAt = Date()
-            report(position)
-        }
+        guard Date().timeIntervalSince(lastReportAt) >= Self.reportEvery else { return }
+
+        // 暂停时位置不动：别每 10 秒把同一个点重复上报一遍。
+        // 拖动 / 恢复播放后位置变了，下一次 tick 会补上。
+        guard abs(position - lastReportedPosition) >= 1 else { return }
+
+        lastReportAt = Date()
+        report(position)
     }
 
     /// <param name="wait">关窗 / 退出时同步等这次上报，异步 Task 会被进程退出带走。</param>
@@ -1505,6 +1638,7 @@ final class PlayerSession: ObservableObject {
         // 时长还没解析出来时不写记录：服务器会把它当成 0 秒的片子。
         guard total > 0 else { return }
         let value = Int(seconds)
+        lastReportedPosition = seconds
 
         // 从媒体库点开的本地原盘：条目在核心里，进度回写核心。
         if let coreItemId = localSource?.coreItemId {

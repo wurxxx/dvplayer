@@ -21,6 +21,8 @@ struct BrowseView: View {
     @State private var genres: [Genre] = []
     @State private var genre: String?
     @State private var filter = ""
+    /// 列表请求的世代号：切排序 / 分类后，旧请求晚到的结果不能落到界面上。
+    @State private var loadVersion = 0
 
     private let pageSize = 60
 
@@ -196,28 +198,44 @@ struct BrowseView: View {
     private func load(reset: Bool) async {
         guard let core = state.core else { return }
 
+        // 切排序 / 切分类时 .task(id:) 会重跑，但旧请求还不能取消；
+        // 用世代号保证只有最后一次的结果能落到界面上。
+        loadVersion &+= 1
+        let version = loadVersion
+
         if reset {
             page = 1
             items = []
         }
 
+        let pageToLoad = page
         loading = true
-        defer { loading = false }
+        defer {
+            if version == loadVersion {
+                loading = false
+            }
+        }
 
         if category == "风格" && genres.isEmpty {
-            genres = (try? await core.genres(scopeId)) ?? []
+            let loaded = (try? await core.genres(scopeId)) ?? []
+            guard version == loadVersion else { return }
+            genres = loaded
         }
 
         let query = ListQuery(kinds: kinds, genre: genre, sort: sort, descending: descending)
         do {
             let result = isLibrary
-                ? try await core.items(scopeId, page: page, pageSize: pageSize, query: query)
-                : try await core.children(scopeId, page: page, pageSize: pageSize, query: query)
+                ? try await core.items(scopeId, page: pageToLoad, pageSize: pageSize, query: query)
+                : try await core.children(scopeId, page: pageToLoad, pageSize: pageSize, query: query)
+
+            // 等待期间换了排序 / 分类：这一页属于旧条件，直接丢掉。
+            guard version == loadVersion else { return }
 
             items = reset ? result.items : items + result.items
             total = result.total
-            page += 1
+            page = pageToLoad + 1
         } catch {
+            guard version == loadVersion else { return }
             if reset { items = [] }
             state.showToast("读取失败：\(error.localizedDescription)")
         }

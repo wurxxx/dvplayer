@@ -24,6 +24,15 @@ final class MpvIPC: @unchecked Sendable {
     private var nextObserveId = 1
     private var buffer = Data()
 
+    /// 保护 fd / reading / readerDone / closed。
+    ///
+    /// 读线程和 close() 必须互斥：close() 先 shutdown 叫醒阻塞的 read，
+    /// 再等读线程退出才 close(fd)——否则 fd 号会被下一次 connect 复用，
+    /// 读线程可能读到另一条连接的数据。
+    private let ioLock = NSCondition()
+    private var readerDone = true
+    private var closed = false
+
     private let gate = NSLock()
     private var pending: [Int: (Reply) -> Void] = [:]
 
@@ -32,6 +41,11 @@ final class MpvIPC: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
+            ioLock.lock()
+            let stopped = closed
+            ioLock.unlock()
+            if stopped { return false }
+
             let handle = socket(AF_UNIX, SOCK_STREAM, 0)
             if handle < 0 { return false }
 
@@ -54,8 +68,18 @@ final class MpvIPC: @unchecked Sendable {
             }
 
             if result == 0 {
+                ioLock.lock()
+                if closed {
+                    ioLock.unlock()
+                    Darwin.close(handle)
+                    return false
+                }
+
                 fd = handle
                 reading = true
+                readerDone = false
+                ioLock.unlock()
+
                 let thread = Thread { [weak self] in self?.readLoop() }
                 thread.name = "mpv-ipc"
                 thread.start()
@@ -97,12 +121,32 @@ final class MpvIPC: @unchecked Sendable {
     }
 
     func close() {
+        ioLock.lock()
+        closed = true
+        let handle = fd
+        let wasReading = reading
+        fd = -1
         reading = false
-        if fd >= 0 {
-            shutdown(fd, SHUT_RDWR)
-            Darwin.close(fd)
-            fd = -1
+        ioLock.unlock()
+
+        guard handle >= 0 else { return }
+
+        // 先 shutdown 让阻塞的 read() 立刻返回，读线程会自己跳出循环。
+        shutdown(handle, SHUT_RDWR)
+
+        if wasReading {
+            ioLock.lock()
+            let deadline = Date().addingTimeInterval(0.3)
+            while !readerDone {
+                if !ioLock.wait(until: deadline) {
+                    NSLog("[IPC] reader 没在 0.3s 内退出，强行关闭 fd=%d", handle)
+                    break
+                }
+            }
+            ioLock.unlock()
         }
+
+        Darwin.close(handle)
     }
 
     // MARK: - 内部
@@ -112,28 +156,58 @@ final class MpvIPC: @unchecked Sendable {
         var line = data
         line.append(0x0A)
 
-        gate.lock()
+        // 持 ioLock 写完：close() 就不会在写到一半时把 fd 关掉。
+        // IPC 一行命令只有几十字节，不会被这两把锁拖慢。
+        ioLock.lock()
         let handle = fd
-        gate.unlock()
-        guard handle >= 0 else { return }
+        guard handle >= 0, reading else {
+            ioLock.unlock()
+            return
+        }
 
+        var broken = false
         line.withUnsafeBytes { raw in
             var offset = 0
             while offset < raw.count {
+                // mpv 卡住不读 socket 时 write 会一直阻塞在这把锁里，把主线程和 close()
+                // 一起拖死。先 poll 到可写（最多 100ms）。
+                var event = pollfd(fd: handle, events: Int16(POLLOUT), revents: 0)
+                if Darwin.poll(&event, 1, 100) <= 0 {
+                    broken = true
+                    break
+                }
+
                 let written = Darwin.write(handle, raw.baseAddress!.advanced(by: offset),
                                            raw.count - offset)
-                if written <= 0 { return }
+                if written <= 0 {
+                    broken = true
+                    break
+                }
                 offset += written
             }
+        }
+        ioLock.unlock()
+
+        if broken {
+            // 写了一半就断：socket 里会留半行 JSON，后面每条命令都跟它拼成坏行。
+            // 直接把连接判死——读线程退出时走 onDisconnect，上层按「播放器已退出」处理。
+            NSLog("[IPC] write failed, closing connection")
+            close()
         }
     }
 
     private func readLoop() {
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
 
-        while reading {
+        while true {
+            ioLock.lock()
+            let socketFD = fd
+            let active = reading
+            ioLock.unlock()
+            guard active, socketFD >= 0 else { break }
+
             let count = chunk.withUnsafeMutableBytes { raw in
-                Darwin.read(fd, raw.baseAddress, raw.count)
+                Darwin.read(socketFD, raw.baseAddress, raw.count)
             }
 
             if count <= 0 {
@@ -150,7 +224,11 @@ final class MpvIPC: @unchecked Sendable {
             }
         }
 
+        ioLock.lock()
         reading = false
+        readerDone = true
+        ioLock.broadcast()
+        ioLock.unlock()
 
         gate.lock()
         let waiting = pending

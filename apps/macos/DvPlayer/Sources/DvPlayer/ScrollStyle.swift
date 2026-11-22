@@ -182,23 +182,32 @@ private struct PageScroller: View {
                 let travel = max(height - thumb, 1)
                 let y = travel * metrics.fraction
 
-                Capsule()
-                    .fill(Color.white.opacity(dragging ? 0.46 : (hovering ? 0.34 : 0.22)))
-                    .frame(width: 6, height: thumb)
-                    .offset(y: y)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 1)
-                    .contentShape(Rectangle())
-                    .onHover { hovering = $0 }
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                dragging = true
-                                let fraction = (value.location.y - thumb / 2) / travel
-                                metrics.scroll(toFraction: fraction)
-                            }
-                            .onEnded { _ in dragging = false }
-                    )
+                ZStack(alignment: .top) {
+                    // 整条滚动槽都是命中区域：点空白处也直接跳过去。
+                    // 以前手势挂在滑块上，`location.y` 只有 0..thumb，
+                    // 点/拖滑块会被算成「顶部」，页面直接跳回开头。
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    dragging = true
+                                    // 槽内坐标减去半个滑块：让滑块中心跟手。
+                                    let fraction = (value.location.y - thumb / 2) / travel
+                                    metrics.scroll(toFraction: fraction)
+                                }
+                                .onEnded { _ in dragging = false }
+                        )
+
+                    Capsule()
+                        .fill(Color.white.opacity(dragging ? 0.46 : (hovering ? 0.34 : 0.22)))
+                        .frame(width: 6, height: thumb)
+                        .offset(y: y)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.trailing, 1)
+                        .allowsHitTesting(false)
+                }
+                .onHover { hovering = $0 }
             }
             .frame(width: 10)
             .animation(.easeOut(duration: 0.12), value: metrics.offset)

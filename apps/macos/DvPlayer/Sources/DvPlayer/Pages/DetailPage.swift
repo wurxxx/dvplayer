@@ -457,9 +457,9 @@ struct DetailPage: View {
         }
     }
 
-    /// 跳段时把目标段拉出来；后台补页先跑完再接手。
+    /// 跳段：等后台补页让开，缺的从当前页往后拉到至少 need 集。
     private func ensureEpisodes(through need: Int) async {
-        guard let core = state.core, let season = seasonId else { return }
+        guard state.core != nil, let season = seasonId else { return }
 
         var waited = 0
         while filling && waited < 150 {
@@ -467,21 +467,13 @@ struct DetailPage: View {
             waited += 1
         }
 
-        var next = max(2, episodes.count / episodePageSize + 1)
-        while seasonId == season, episodes.count < need {
-            guard let paged = try? await core.children(season, page: next,
-                                                      pageSize: episodePageSize),
-                  !paged.items.isEmpty else { return }
-
-            let rows = makeRows(paged.items, used: Set(episodes.map(\.number)))
-            episodes.append(contentsOf: rows)
-            episodes.sort { $0.number < $1.number }
-            episodeTotal = max(episodeTotal, paged.total)
-            saveCache()
-
-            if paged.items.count < episodePageSize { return }
-            next += 1
+        if episodes.count >= need || filling {
+            return
         }
+
+        filling = true
+        await fetchEpisodes(season: season, through: need, from: nil)
+        filling = false
     }
 
     // MARK: - 资源（同一部片的多个来源）
@@ -658,7 +650,20 @@ struct DetailPage: View {
     // MARK: - 派生文案
 
     private var playTargetId: String? {
-        detail?.playItemId ?? episodes.first?.id ?? (detail != nil ? itemId : nil)
+        // 详情里的 playItemId 是「整部剧下一条要看的」；本地源跨季时会指到别的季。
+        // 已经选中某一季（episodes 是当前季的行）就以这季为准：
+        // 先找看到一半的集，再退回第一集。
+        if let resumable = episodes.first(where: {
+            $0.item.progress > 0.01 && $0.item.progress < 0.995
+        }) {
+            return resumable.id
+        }
+
+        if let first = episodes.first {
+            return first.id
+        }
+
+        return detail?.playItemId ?? (detail != nil ? itemId : nil)
     }
 
     /// 当前季的季号：选集面板里补成 `S01E03` 这种。
@@ -854,6 +859,7 @@ struct DetailPage: View {
                 try await core.setFavorite(itemId, favorite: target)
                 self.detail = try? await core.detail(itemId)
                 DetailCache.shared.drop(itemId)
+                await state.refreshFavorites()
                 state.showToast(target ? "已加入收藏" : "已取消收藏")
             } catch {
                 state.showToast("操作失败：\(error.localizedDescription)")
@@ -871,6 +877,7 @@ struct DetailPage: View {
                 try await core.setWatched(itemId, watched: target)
                 self.detail = try? await core.detail(itemId)
                 DetailCache.shared.drop(itemId)
+                await state.refreshRecords()
                 state.showToast(target ? "已标记为看过" : "已标记为未看")
             } catch {
                 state.showToast("操作失败：\(error.localizedDescription)")
@@ -909,6 +916,9 @@ struct DetailPage: View {
 
     /// 后台补页正在跑：跳段时先等它，别两边各拉一遍同一页。
     @State private var filling = false
+
+    /// 补页期间又来了新的请求（切季 / 跳段）：等这一趟结束再跑。
+    @State private var fillPending: (season: String, page: Int)?
 
     /// 截图巡检：DVPLAYER_RANGE=31 就自动点一次这一段。
     @State private var rangeShotDone = false
@@ -965,7 +975,8 @@ struct DetailPage: View {
             return
         }
 
-        let children = (try? await core.children(itemId, pageSize: 100))?.items ?? []
+        let flat = try? await core.children(itemId, pageSize: episodePageSize)
+        let children = flat?.items ?? []
         if children.first?.isSeason == true {
             seasons = children.sorted { ($0.seasonNumber ?? 0) < ($1.seasonNumber ?? 0) }
             let first = seasons.first
@@ -975,7 +986,14 @@ struct DetailPage: View {
             }
         } else {
             episodes = makeRows(children)
-            episodeTotal = episodes.count
+            episodeTotal = max(flat?.total ?? 0, episodes.count)
+
+            // 无季的长剧（目录里直接几百集）：第一页之后继续后台补，
+            // 以前只显示前 100 集，total 再大也翻不到。
+            if episodes.count < episodeTotal {
+                seasonId = itemId
+                Task { await fillEpisodes(itemId, from: 2) }
+            }
         }
 
         await loadMediaInfo()
@@ -997,13 +1015,36 @@ struct DetailPage: View {
     }
 
     /// 后台按页把剩下的集补进来；中途切了季就停。
+    /// 同时只跑一趟：又有新请求时先记下，等这趟结束再跑。
     private func fillEpisodes(_ season: String, from page: Int) async {
-        guard let core = state.core, !filling else { return }
-        filling = true
-        defer { filling = false }
+        guard state.core != nil else { return }
 
-        var next = page
+        if filling {
+            fillPending = (season, page)
+            return
+        }
+
+        filling = true
+        await fetchEpisodes(season: season, through: nil, from: page)
+        filling = false
+
+        if let pending = fillPending {
+            fillPending = nil
+            await fillEpisodes(pending.season, from: pending.page)
+        }
+    }
+
+    /// 拉页的公共实现。`through == nil` 表示把剩下的全补完，
+    /// 否则补到至少 need 集。`from` 给定时从这一页开始。
+    private func fetchEpisodes(season: String, through need: Int?, from start: Int?) async {
+        guard let core = state.core else { return }
+
+        var next = start ?? max(2, episodes.count / episodePageSize + 1)
         while seasonId == season {
+            if let need, episodes.count >= need {
+                return
+            }
+
             guard let paged = try? await core.children(season, page: next,
                                                       pageSize: episodePageSize),
                   !paged.items.isEmpty else { return }
@@ -1012,12 +1053,21 @@ struct DetailPage: View {
             let rows = makeRows(paged.items, used: Set(episodes.map(\.number)))
             episodes.append(contentsOf: rows)
             episodes.sort { $0.number < $1.number }
-
             episodeTotal = max(episodeTotal, paged.total)
             saveCache()
-            if paged.items.count < episodePageSize || episodes.count >= episodeTotal {
+
+            if paged.items.count < episodePageSize {
                 return
             }
+
+            if let need {
+                if episodes.count >= need {
+                    return
+                }
+            } else if episodes.count >= episodeTotal {
+                return
+            }
+
             next += 1
         }
     }
@@ -1025,6 +1075,8 @@ struct DetailPage: View {
     private func loadEpisodes(_ season: String) async {
         seasonId = season
         selectedRangeStart = 0
+        // 上一季还没跑完的补页请求作废（旧 fill 自己会因为 seasonId 变了退出）。
+        fillPending = nil
         await loadFirstEpisodes(season)
         await loadMediaInfo()
         saveCache()

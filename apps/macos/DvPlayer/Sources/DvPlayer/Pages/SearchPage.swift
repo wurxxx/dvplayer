@@ -14,6 +14,8 @@ struct SearchPage: View {
     @State private var searched = false
     /// 输入防抖：每次敲字取消上一条待执行的搜索。
     @State private var searchTask: Task<Void, Never>?
+    /// 搜索世代号：已经发出去的旧搜索晚到，不能覆盖新词的结果。
+    @State private var searchVersion = 0
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16, alignment: .top)]
@@ -102,6 +104,8 @@ struct SearchPage: View {
         }
         .onDisappear {
             searchTask?.cancel()
+            // 在途搜索也作废：页面已经不显示了，别让结果晚到再改状态。
+            searchVersion &+= 1
             // 还没等到防抖就切页：把输入框里现在的词也留下。
             saveKeyword(keyword.trimmingCharacters(in: .whitespaces))
         }
@@ -134,6 +138,11 @@ struct SearchPage: View {
     private func search() async {
         let text = keyword.trimmingCharacters(in: .whitespaces)
         saveKeyword(text)
+
+        // 防抖只能取消还没发出去的搜索；已经在核心里跑的那一轮要靠版本号拦。
+        searchVersion &+= 1
+        let version = searchVersion
+
         guard let core = state.core else { return }
         guard !text.isEmpty else {
             results = []
@@ -144,19 +153,27 @@ struct SearchPage: View {
         }
 
         searching = true
-        defer { searching = false }
+        defer {
+            if version == searchVersion {
+                searching = false
+            }
+        }
 
         do {
             let result = try await core.search(text)
+            guard version == searchVersion else { return }
             results = result.items
             failures = result.failed
             errorText = nil
         } catch {
+            guard version == searchVersion else { return }
             // 全失败才抛到这里；单个源失败在 result.failed 里。
             results = []
             failures = []
             errorText = error.localizedDescription
         }
+
+        guard version == searchVersion else { return }
         searched = true
     }
 }
@@ -297,7 +314,7 @@ struct SettingsPage: View {
                             SectionTitle(text: "关于")
 
                             KeyValueRow(key: "共享核心", value: state.coreVersion)
-                            KeyValueRow(key: "应用", value: "DV Player for macOS 0.1")
+                            KeyValueRow(key: "应用", value: "DV Player for macOS \(appVersion)")
                             KeyValueRow(key: "配置",
                                         value: AppSettings.fileURL.path)
                             KeyValueRow(key: "已连接", value: state.isConnected ? "是" : "否")
@@ -319,6 +336,13 @@ struct SettingsPage: View {
     }
 
     // MARK: - 弹幕 / 字幕凭据
+
+    /// .app 里读 Info.plist（发布时和安装包版本一起改）；
+    /// 直接 `swift build` 跑的二进制没有 bundle，退回共享核心版本。
+    private var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+            ?? state.coreVersion
+    }
 
     private var danmakuHint: String {
         let settings = state.settings

@@ -56,13 +56,20 @@ struct ShellView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let detail = state.detailItemId {
-            // 详情页里切源会换 itemId：`.id` 让它整页重建，
-            // 免得上一部的选集 / 演职人员残留在新片下面。
-            DetailPage(itemId: detail, onBack: { state.detailItemId = nil })
-                .id(detail)
-        } else {
+        // 详情页盖在页面上，而不是替换它：以前 `if detail { … } else { pageContent }`
+        // 会让底下的搜索 / 记录 / 库首页整页销毁，返回时再全量重拉一次。
+        ZStack {
             pageContent
+                .allowsHitTesting(state.detailItemId == nil)
+
+            if let detail = state.detailItemId {
+                // 详情页里切源会换 itemId：`.id` 让它整页重建，
+                // 免得上一部的选集 / 演职人员残留在新片下面。
+                DetailPage(itemId: detail, onBack: { state.detailItemId = nil })
+                    .id(detail)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            }
         }
     }
 

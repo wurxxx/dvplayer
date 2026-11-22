@@ -75,6 +75,8 @@ final class MpvEngine {
 
     /// mpv 子进程还活着吗：错误面板「重试」用它决定要不要换个新进程。
     var isAlive: Bool { !shuttingDown && process.isRunning }
+    /// IPC 也还连着：`isAlive` 为真但控制通道已断的间隙里不能复用这个实例。
+    var isReady: Bool { ready && !shuttingDown }
 
     private let process = Process()
     private let ipc = MpvIPC()
@@ -135,8 +137,8 @@ final class MpvEngine {
         socketPath = NSTemporaryDirectory() + "dvplayer-\(getpid())-\(Int.random(in: 1000...9999)).sock"
         try? FileManager.default.removeItem(atPath: socketPath)
 
-        // mpv 的 geometry 用左上原点（主屏）。
-        let geometry = Self.geometryString(for: frame)
+        // mpv 的 geometry 用左上原点；屏幕索引单独给，副屏负坐标才不会错位。
+        let geometry = Self.geometry(for: frame)
 
         var args = [
             "--no-config",
@@ -146,13 +148,14 @@ final class MpvEngine {
             "--gpu-context=macvk",
             "--hwdec=auto-safe",
             "--no-border",
+            "--screen=\(geometry.screen)",
             "--no-input-default-bindings",
             "--input-vo-keyboard=no",
             "--keep-open=yes",
             "--no-terminal",
             "--focus-on=never",     // 窗口焦点归浮层，mpv 不抢
             "--title=DV Player",
-            "--geometry=\(geometry)",
+            "--geometry=\(geometry.value)",
             "--input-ipc-server=\(socketPath)",
             "--msg-level=all=info,vo/gpu-next=warn",
             // 出问题看这个文件：mpv 是子进程，stderr 在 .app 里看不到。
@@ -206,10 +209,33 @@ final class MpvEngine {
 
         NSLog("[Play] mpv pid=\(process.processIdentifier) geometry=\(geometry) args=\(args.joined(separator: " "))")
 
-        guard ipc.connect(path: socketPath) else {
+        videoFrame = frame
+
+        // IPC 连接放后台：mpv 建 socket 要时间，最坏重试 6 秒。
+        // 在主线程同步等，打开播放窗会先卡住这么久。
+        let ipc = self.ipc
+        let path = self.socketPath
+        Task.detached {
+            let connected = ipc.connect(path: path)
+            await MainActor.run { [weak self] in
+                self?.finishConnect(connected: connected)
+            }
+        }
+    }
+
+    /// IPC 连上（或失败）之后的收尾。后台连接完成时回到主线程执行。
+    private func finishConnect(connected: Bool) {
+        guard !shuttingDown else {
+            // 连接期间窗已经关了：socket 收掉，别再挂回调。
+            ipc.close()
+            return
+        }
+
+        guard connected else {
             NSLog("[Play] mpv IPC 连不上")
             process.terminate()
-            return nil
+            onError?("播放器启动失败：控制通道没连上")
+            return
         }
 
         ipc.onEvent = { [weak self] name, data in
@@ -217,6 +243,8 @@ final class MpvEngine {
         }
         ipc.onDisconnect = { [weak self] in
             guard let self, !self.shuttingDown else { return }
+            // 控制通道断了但进程可能还没退出：这个实例不能再复用（写命令会落在死 fd 上）。
+            self.ready = false
             NSLog("[Play] mpv 退出 code=\(self.process.terminationStatus)")
             self.onError?("播放器已退出")
         }
@@ -226,7 +254,6 @@ final class MpvEngine {
         }
         ipc.command(["set_property", "secondary-sub-visibility", "yes"])
         ready = true
-        videoFrame = frame
 
         if let pendingLoad {
             self.pendingLoad = nil
@@ -286,7 +313,7 @@ final class MpvEngine {
         ipc.command(["set_property", "start", startValue])
         ipc.command(["set_property", "pause", Self.pauseUntilFirstFrame ? "yes" : "no"])
 
-        NSLog("[Play] mpv load \(url.prefix(72))… start=\(startValue)")
+        NSLog("[Play] mpv load \(Self.redacted(url).prefix(72))… start=\(startValue)")
         ipc.command(["loadfile", url, "replace"])
         if Self.pauseUntilFirstFrame {
             waitFirstFrame()
@@ -499,24 +526,54 @@ final class MpvEngine {
         guard ready, !shuttingDown else { return }
         guard frame.width > 1, frame.height > 1 else { return }
         videoFrame = frame
-        ipc.command(["set_property", "geometry", Self.geometryString(for: frame)])
+
+        // 先选屏幕再给相对坐标：副屏在主屏左侧时，绝对坐标是负数，
+        // mpv 的 geometry 会把负号当成「从右边算」，窗口就跑错屏了。
+        let geometry = Self.geometry(for: frame)
+        ipc.command(["set_property", "screen", geometry.screen])
+        ipc.command(["set_property", "geometry", geometry.value])
     }
 
     func toggleMuteIPC() {
         ipc.command(["set_property", "mute", muted ? "no" : "yes"])
     }
 
-    func shutdown() {
+    /// 关闭 mpv：发 quit，最多等 2 秒，不退就杀。
+    ///
+    /// 用 `await` 等而不是主线程 `usleep` 轮询：关窗 / Cmd+Q 都是在主线程调的，
+    /// 同步轮询会把界面卡住最多 2 秒。
+    func shutdown() async {
         guard !shuttingDown else { return }
         shuttingDown = true
         cancelFirstFrameWait()
         ipc.command(["quit"])
         ipc.close()
 
-        // 给它一点时间自己退；不退就杀掉。
         let deadline = Date().addingTimeInterval(2)
         while process.isRunning, Date() < deadline {
-            usleep(50_000)
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if process.isRunning {
+            process.terminate()
+        }
+        try? FileManager.default.removeItem(atPath: socketPath)
+    }
+
+    /// 退出 App 时的同步收尾。
+    ///
+    /// `applicationWillTerminate` 返回后进程就没了，MainActor 上排队的 `shutdown()`
+    /// 不会再执行 —— 原来 Cmd+Q 会把 mpv 留成孤儿进程继续播放。
+    /// 这里最多等 400ms，宁可在退出时多站一会儿，也别留下后台 mpv。
+    func shutdownNow() {
+        guard !shuttingDown else { return }
+        shuttingDown = true
+        cancelFirstFrameWait()
+        ipc.command(["quit"])
+        ipc.close()
+
+        let deadline = Date().addingTimeInterval(0.4)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
         }
         if process.isRunning {
             process.terminate()
@@ -624,6 +681,9 @@ final class MpvEngine {
                 if value, !eofSent {
                     eofSent = true
                     onEOF?()
+                } else if !value {
+                    // 拖回片尾之前：再播完一次要重新触发 onEOF（以前只会触发一次）。
+                    eofSent = false
                 }
             case "speed":
                 guard let value = data as? Double else { return }
@@ -772,14 +832,31 @@ final class MpvEngine {
         return env
     }
 
+    /// 日志里不能出现签名 / token：去掉 query 和 userinfo。
+    private static func redacted(_ url: String) -> String {
+        guard var components = URLComponents(string: url) else { return url }
+        components.query = nil
+        components.user = nil
+        components.password = nil
+        return components.string ?? url
+    }
+
     /// AppKit 的窗口 frame（左下原点）→ mpv 的 geometry（左上原点，主屏坐标）。
-    private static func geometryString(for frame: NSRect) -> String {
-        let screen = NSScreen.screens.first { $0.frame.intersects(frame) } ?? NSScreen.main
-        let screenFrame = screen?.frame ?? .zero
-        let x = Int(frame.origin.x.rounded())
-        let y = Int((screenFrame.maxY - frame.maxY).rounded())
+    /// 把浮层的屏幕坐标换成 mpv 的 `--screen` + `--geometry`。
+    /// mpv 的 geometry 只接受正偏移（负号是「从右边算」），
+    /// 所以先选屏幕，再算相对这块屏幕的坐标；副屏在主屏左边时不会被夹到主屏。
+    private static func geometry(for frame: NSRect) -> (screen: Int, value: String) {
+        let screens = NSScreen.screens
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        let index = screens.firstIndex { $0.frame.contains(center) } ?? 0
+        let screenFrame = screens.indices.contains(index)
+            ? screens[index].frame
+            : (NSScreen.main?.frame ?? .zero)
+
+        let x = max(0, Int((frame.origin.x - screenFrame.minX).rounded()))
+        let y = max(0, Int((screenFrame.maxY - frame.maxY).rounded()))
         let width = Int(frame.width.rounded())
         let height = Int(frame.height.rounded())
-        return "\(width)x\(height)+\(max(0, x))+\(max(0, y))"
+        return (index, "\(width)x\(height)+\(x)+\(y)")
     }
 }

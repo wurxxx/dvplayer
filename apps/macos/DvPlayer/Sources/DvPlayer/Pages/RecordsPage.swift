@@ -54,8 +54,13 @@ struct RecordsPage: View {
         for (position, connection) in connections.enumerated() {
             index[connection.id] = position
         }
-        let names = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0.name) })
-        let ok = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0.ok) })
+        // 同 id 的源出现两次时 uniqueKeysWithValues 会 trap；用循环后者覆盖前者。
+        var names: [String: String] = [:]
+        var okStates: [String: Bool] = [:]
+        for connection in connections {
+            names[connection.id] = connection.name
+            okStates[connection.id] = connection.ok
+        }
 
         return order
             .sorted { (index[$0] ?? Int.max) < (index[$1] ?? Int.max) }
@@ -63,7 +68,7 @@ struct RecordsPage: View {
                 SourceGroup(
                     id: key,
                     title: names[key] ?? (key.isEmpty ? "其它" : key),
-                    ok: ok[key] ?? false,
+                    ok: okStates[key] ?? false,
                     records: buckets[key] ?? []
                 )
             }

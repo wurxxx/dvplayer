@@ -473,8 +473,18 @@ struct SourcesPage: View {
             await state.saveSource(config)
             saving = false
             editing = nil
-            if state.isConnected {
-                state.showToast("已保存并连接")
+
+            // 按这个源自己的状态提示：别的源连着不代表新源也连上了。
+            if let connection = state.connections.first(where: { $0.id == config.id }) {
+                if connection.ok {
+                    state.showToast("已保存并连接")
+                } else if let error = connection.error, !error.isEmpty {
+                    state.showToast("已保存，但连接失败：\(error)")
+                } else {
+                    state.showToast("已保存，正在连接…")
+                }
+            } else {
+                state.showToast("已保存")
             }
         }
     }

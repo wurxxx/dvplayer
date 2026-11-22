@@ -80,9 +80,18 @@ private struct Target {
         switch scheme {
         case "smb": return "smb://\(host)/\(share)"
         case "nfs": return "nfs://\(host):\(share)"
-        case "webdav": return webdavURL
+        // WebDAV 的 URL 可能带 `user:password@`，日志和错误里不能原样输出。
+        case "webdav": return Self.redacted(webdavURL)
         default: return "webdav://\(host)"
         }
+    }
+
+    /// 去掉 URL 里的 userinfo，只留 scheme / host / path / query。
+    static func redacted(_ url: String) -> String {
+        guard var components = URLComponents(string: url) else { return url }
+        components.user = nil
+        components.password = nil
+        return components.string ?? url
     }
 
     init(_ config: SourceConfig) throws {
@@ -148,11 +157,19 @@ private struct Target {
                 host = String(head[..<colon])
                 let export = String(head[head.index(after: colon)...])
                 let rest = pieces.dropFirst()
-                share = export.isEmpty ? (rest.first ?? "/") : export
-                subPath = (export.isEmpty ? Array(rest.dropFirst()) : Array(rest)).joined(separator: "/")
+                if export.isEmpty {
+                    // `nfs://host:/volume1/media`：按 `/` 切开后前导斜杠没了，
+                    // 导出目录要补回 `/volume1`，否则 mount 会去找 `host:volume1`。
+                    share = rest.first.map { "/" + $0 } ?? "/"
+                    subPath = rest.dropFirst().joined(separator: "/")
+                } else {
+                    share = export.hasPrefix("/") ? export : "/" + export
+                    subPath = rest.joined(separator: "/")
+                }
             } else {
                 host = head
-                share = pieces.count > 1 ? pieces[1] : "/"
+                // `nfs://host/volume1/media`：第一段是导出目录，其余是子路径。
+                share = pieces.count > 1 ? "/" + pieces[1] : "/"
                 subPath = pieces.dropFirst(2).joined(separator: "/")
             }
         case "webdav":
@@ -182,7 +199,7 @@ private struct Target {
         webdavURL = davURL
 
         guard !host.isEmpty else {
-            throw MountError("地址里没有主机名：\(raw)")
+            throw MountError("地址里没有主机名：\(Self.redacted(raw))")
         }
         if detected == "smb" && share.isEmpty {
             throw MountError("SMB 地址要写到共享名，例如 smb://192.168.1.10/影视")
@@ -281,7 +298,14 @@ func run(_ path: String, _ arguments: [String]) throws {
 }
 
 /// 卸载并清掉挂载点。删源 / 换地址时调用。
-func releaseMount(_ id: String) {
+/// umount 可能要几秒，放到后台线程，别卡住主线程（删源的按钮会看起来像没响应）。
+func releaseMount(_ id: String) async {
+    await Task.detached(priority: .utility) {
+        releaseMountSync(id)
+    }.value
+}
+
+private func releaseMountSync(_ id: String) {
     let point = MountSources.mountPoint(id)
     guard FileManager.default.fileExists(atPath: point.path) else { return }
 
@@ -292,7 +316,13 @@ func releaseMount(_ id: String) {
 }
 
 /// 启动时清理：已不存在的源留下的挂载点。
-func cleanupStaleMounts(keep ids: Set<String>) {
+func cleanupStaleMounts(keep ids: Set<String>) async {
+    await Task.detached(priority: .utility) {
+        cleanupStaleMountsSync(keep: ids)
+    }.value
+}
+
+private func cleanupStaleMountsSync(keep ids: Set<String>) {
     guard let entries = try? FileManager.default.contentsOfDirectory(
         at: MountSources.root, includingPropertiesForKeys: nil) else {
         return

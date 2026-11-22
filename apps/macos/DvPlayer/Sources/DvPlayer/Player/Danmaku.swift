@@ -92,7 +92,7 @@ final class DanmakuService {
             // 优先标题里带「第 N 话 / 集」的。
             for item in episodes {
                 let title = item["episodeTitle"] as? String ?? ""
-                if title.contains("第\(episode)") || title.contains("第 \(episode)") {
+                if Self.matchesEpisode(title, episode) {
                     if let id = item["episodeId"] as? Int { return id }
                 }
             }
@@ -108,6 +108,24 @@ final class DanmakuService {
         }
 
         throw DanmakuError.notMatched
+    }
+
+    /// 标题里是不是这一集：「第1」不能命中「第10」，数字后面还是数字就不算。
+    /// 也兼容「第 1 集」这种中间带空格的写法。
+    private static func matchesEpisode(_ title: String, _ episode: Int) -> Bool {
+        let number = String(episode)
+        for prefix in ["第", "第 "] {
+            let needle = prefix + number
+            var searchRange = title.startIndex..<title.endIndex
+            while let range = title.range(of: needle, range: searchRange) {
+                if range.upperBound == title.endIndex ||
+                    !title[range.upperBound].isNumber {
+                    return true
+                }
+                searchRange = range.upperBound..<title.endIndex
+            }
+        }
+        return false
     }
 
     /// 取一集的弹幕 XML 并解析。

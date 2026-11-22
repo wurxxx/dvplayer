@@ -111,10 +111,26 @@ enum PlaylistLoader {
 
     private static func findSeries(_ core: Core, title: String) async -> String? {
         guard let result = try? await core.search(title) else { return nil }
-        let wanted = title.trimmingCharacters(in: .whitespaces)
+        let wanted = normalize(title)
+        guard !wanted.isEmpty else { return nil }
+
         let series = result.items.filter { ["series", "tv"].contains($0.kind.lowercased()) }
-        return series.first { $0.title.trimmingCharacters(in: .whitespaces) == wanted }?.id
-            ?? series.first?.id
+
+        // 先精确匹配；再退一步用归一化后的包含关系。
+        // 都没有就返回 nil——以前会退回「搜到的第一部剧」，
+        // 记录标题对不上时会把播放列表接到另一部剧上。
+        if let exact = series.first(where: { normalize($0.title) == wanted }) {
+            return exact.id
+        }
+
+        for item in series {
+            let name = normalize(item.title)
+            if !name.isEmpty && (name.contains(wanted) || wanted.contains(name)) {
+                return item.id
+            }
+        }
+
+        return nil
     }
 }
 
@@ -299,6 +315,14 @@ final class PlayerLauncher {
     }
 
     func close() {
+        controller?.close()
+        controller = nil
+    }
+
+    /// Cmd+Q / 注销的兜底：这两条路不会走 `windowWillClose`，
+    /// 不在这里收尾，mpv 子进程、ISO 挂载、presentationOptions 都会留在系统里。
+    func shutdownForTermination() {
+        controller?.session.stop(flush: true)
         controller?.close()
         controller = nil
     }
@@ -520,7 +544,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
 
         session.isFullscreenSwitching = true
-        defer { session.isFullscreenSwitching = false }
 
         if let saved = savedFrame, session.isFullscreen {
             savedFrame = nil
@@ -538,6 +561,10 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
 
         window.makeKeyAndOrderFront(nil)
+
+        // 先把「正在切全屏」清掉再同步：applyGeometry 会因这个标志直接返回，
+        // 否则进出全屏后 mpv 的子窗口停在旧尺寸上。
+        session.isFullscreenSwitching = false
         syncGeometry(force: true)
     }
 
@@ -555,6 +582,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     private func installWheelMonitor() {
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self, event.window === self.window else { return event }
+            // 面板打开时滚轮归面板（选集 / 字幕列表要能滚），不要拿来调音量。
+            guard self.session.panel == .none else { return event }
             guard abs(event.scrollingDeltaY) > 0.5 else { return nil }
             guard Date().timeIntervalSince(self.lastWheelAt) > 0.08 else { return nil }
             self.lastWheelAt = Date()
@@ -564,9 +593,30 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func handleKey(_ event: NSEvent) -> Bool {
-        // 面板 / 菜单打开时，方向键归系统。
         let key = event.keyCode
-        let shift = event.modifierFlags.contains(.shift)
+
+        // 面板 / 菜单打开时，键盘归面板；Esc 仍用来关面板。
+        if session.panel != .none {
+            if key == 53 {
+                session.panel = .none
+                return true
+            }
+            return false
+        }
+
+        // Cmd / Ctrl / Option 组合是系统菜单、输入法、辅助功能在用，别抢。
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) {
+            return false
+        }
+
+        // 焦点在输入框 / 音量滑块上时，空格和方向键归控件
+        // （以前 Space 一律暂停，滑块调不动，按钮也按不了）。
+        if Self.isTextOrSlider(window?.firstResponder) {
+            return false
+        }
+
+        let shift = flags.contains(.shift)
 
         switch key {
             case 49: // space
@@ -600,9 +650,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
                 session.nextEpisode()
                 return true
             case 53: // esc
-                if session.panel != .none {
-                    session.panel = .none
-                } else if session.isFullscreen {
+                if session.isFullscreen {
                     session.toggleFullscreen()
                 } else {
                     closePlayer()
@@ -611,6 +659,11 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             default:
                 return false
         }
+    }
+
+    /// 焦点是不是在能自己用空格 / 方向键的控件上。
+    private static func isTextOrSlider(_ responder: NSResponder?) -> Bool {
+        responder is NSTextView || responder is NSTextField || responder is NSSlider
     }
 
     // MARK: NSWindowDelegate

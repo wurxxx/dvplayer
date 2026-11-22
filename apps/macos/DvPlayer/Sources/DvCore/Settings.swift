@@ -44,6 +44,32 @@ public struct AppSettings: Codable, Sendable {
 
     public init() {}
 
+    /// 缺字段一律回退默认值：Swift 合成的 Decodable 不会用属性默认值补键，
+    /// 老配置少一个非可选字段就会整份解码失败、随后被 save() 清空。
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sources = try c.decodeIfPresent([SourceConfig].self, forKey: .sources) ?? []
+        lastSourceId = try c.decodeIfPresent(String.self, forKey: .lastSourceId)
+        autoConnect = try c.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? true
+        startPage = try c.decodeIfPresent(String.self, forKey: .startPage) ?? "libraries"
+        searchKeyword = try c.decodeIfPresent(String.self, forKey: .searchKeyword)
+        pageSize = try c.decodeIfPresent(Int.self, forKey: .pageSize) ?? 60
+        showResolution = try c.decodeIfPresent(Bool.self, forKey: .showResolution) ?? true
+        resumePlayback = try c.decodeIfPresent(Bool.self, forKey: .resumePlayback) ?? true
+        bufferSizeMb = try c.decodeIfPresent(Int.self, forKey: .bufferSizeMb)
+        videoAspect = try c.decodeIfPresent(String.self, forKey: .videoAspect)
+        audioDevice = try c.decodeIfPresent(String.self, forKey: .audioDevice)
+        audioPassthrough = try c.decodeIfPresent(Bool.self, forKey: .audioPassthrough)
+        hdrPassthrough = try c.decodeIfPresent(Bool.self, forKey: .hdrPassthrough)
+        danmakuEnabled = try c.decodeIfPresent(Bool.self, forKey: .danmakuEnabled)
+        danmakuAppId = try c.decodeIfPresent(String.self, forKey: .danmakuAppId)
+        danmakuAppSecret = try c.decodeIfPresent(String.self, forKey: .danmakuAppSecret)
+        openSubtitlesApiKey = try c.decodeIfPresent(String.self, forKey: .openSubtitlesApiKey)
+        openSubtitlesUsername = try c.decodeIfPresent(String.self, forKey: .openSubtitlesUsername)
+        openSubtitlesPassword = try c.decodeIfPresent(String.self, forKey: .openSubtitlesPassword)
+        subtitleLanguages = try c.decodeIfPresent(String.self, forKey: .subtitleLanguages)
+    }
+
     public static var directory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
                                            in: .userDomainMask).first
@@ -64,6 +90,12 @@ public struct AppSettings: Codable, Sendable {
         } catch {
             // 配置损坏 / 第一次启动都当空的，不让界面起不来。
             NSLog("[DvPlayer] 读配置失败 \(fileURL.path)：\(error.localizedDescription)")
+            // 但不要把坏文件直接留着等下一次 save() 覆盖：先备份一份，方便找回源和凭据。
+            if FileManager.default.fileExists(atPath: Self.fileURL.path) {
+                let stamp = Int(Date().timeIntervalSince1970)
+                let backup = Self.directory.appendingPathComponent("settings.json.broken-\(stamp)")
+                try? FileManager.default.moveItem(at: Self.fileURL, to: backup)
+            }
             return AppSettings()
         }
     }
@@ -75,6 +107,10 @@ public struct AppSettings: Codable, Sendable {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(self).write(to: Self.fileURL, options: .atomic)
+            // 文件里有服务器密码、弹幕 AppSecret、OpenSubtitles 凭据：
+            // 默认 0644 会让同机其它本地用户读到，收紧到 0600。
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: Self.fileURL.path)
         } catch {
             NSLog("[DvPlayer] 写入配置失败：\(error.localizedDescription)")
         }

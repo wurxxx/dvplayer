@@ -23,13 +23,23 @@ struct DvPlayerApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Cmd+Q / 注销：单窗口应用的普通窗口关闭回调不会走，
+    /// 这里兜底停 mpv、卸 ISO 并清掉全屏时的 presentationOptions。
+    func applicationWillTerminate(_ notification: Notification) {
+        PlayerLauncher.shared.shutdownForTermination()
+        NSApp.presentationOptions = []
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
         // 上次异常退出可能留下挂载中的 ISO 临时目录。
-        BluRayDisc.cleanupStaleMounts()
+        // hdiutil detach 可能要几秒：放后台，别让 App 启动第一帧卡住。
+        DispatchQueue.global(qos: .utility).async {
+            BluRayDisc.cleanupStaleMounts()
+        }
 
         // 起窗就抢焦点，红绿灯才是彩色的（非活动窗口是灰点，深色侧栏上看不清）。
         // 窗口 chrome：没有标题栏，三个按钮浮在侧栏左上角。

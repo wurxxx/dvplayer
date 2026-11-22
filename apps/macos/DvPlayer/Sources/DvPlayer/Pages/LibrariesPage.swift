@@ -8,6 +8,13 @@ struct LibrarySection: Identifiable {
     var id: String { library.id }
 }
 
+/// 库内搜索的一条：展示用聚合条目，点开时用「本源那一条」的 id。
+/// 核心搜索按主源去重，主源可能是别的服务器。
+struct LibrarySearchHit: Identifiable {
+    let item: MediaItem
+    let id: String
+}
+
 /// Hero 轮播的一条。
 struct HeroItem: Identifiable {
     let id: String
@@ -40,10 +47,14 @@ struct LibrariesPage: View {
     @State private var browseTarget: BrowseTarget?
     @State private var detailId: String?
     @State private var searchText = ""
-    @State private var searchResults: [MediaItem] = []
+    @State private var searchResults: [LibrarySearchHit] = []
     @State private var searching = false
     @State private var heroHovering = false
     @State private var tab: SourceTab = .media
+    /// 这份页面状态属于哪个源：切源时要把详情 / 网格 / 页签清掉。
+    @State private var loadedSourceId: String?
+    /// 上次加载时的连接代号：重连后库数据要重新拉。
+    @State private var loadedGeneration = -1
 
     private enum SourceTab: String, CaseIterable {
         case media = "媒体"
@@ -79,7 +90,9 @@ struct LibrariesPage: View {
                     .transition(.opacity)
             }
         }
-        .task(id: sourceId) { await load() }
+        // 库列表是 refresh() 里后到的：核心就绪那一刻它可能还是空的。
+        // 只按 core 是否为空重载，会先画出一个空首页，之后 libraries 到了也不再拉。
+        .task(id: "\(sourceId)|\(state.core == nil)|\(state.libraries.count)") { await load() }
         .task(id: heroes.count) { await rotateHero() }
     }
 
@@ -139,6 +152,44 @@ struct LibrariesPage: View {
         )
     }
 
+    /// 首页还没内容时解释一下：连接中 / 这个源离线 / 读库失败 / 没有源。
+    /// 不能只看 `core == nil`：多个源里只有一个离线时，core 仍然非空，
+    /// 点那个离线源会得到一个「空 Hero + 空块」的页面。
+    private var emptyHint: (text: String, spinner: Bool)? {
+        let connection = state.connections.first { $0.id == sourceId }
+
+        if state.pendingConnections.contains(sourceId) {
+            return ("正在连接媒体源…", true)
+        }
+
+        if state.core == nil {
+            if state.connecting {
+                return ("正在连接媒体源…", true)
+            }
+            if !state.hasSources {
+                return ("还没有媒体源，去「服务器」添加一个。", false)
+            }
+            if let error = state.coreError {
+                return (error, false)
+            }
+            return ("媒体源没有连上，去「服务器」检查一下。", false)
+        }
+
+        if connection == nil {
+            return ("这个源已经不在服务器列表里了。", false)
+        }
+
+        if connection?.ok == false {
+            return ("这个源没有连上，去「服务器」检查地址或账号。", false)
+        }
+
+        if let error = state.coreError {
+            return (error, false)
+        }
+
+        return nil
+    }
+
     private var mediaTab: some View {
         PageScroll {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -160,6 +211,13 @@ struct LibrariesPage: View {
         .overlay(alignment: .center) {
             if loading && sections.isEmpty {
                 ProgressView().controlSize(.large)
+            } else if sections.isEmpty, let hint = emptyHint {
+                VStack(spacing: 10) {
+                    if hint.spinner {
+                        ProgressView().controlSize(.small)
+                    }
+                    Caption(text: hint.text, size: 13)
+                }
             }
         }
     }
@@ -186,8 +244,10 @@ struct LibrariesPage: View {
                 }
 
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 22) {
-                    ForEach(searchResults) { item in
-                        PosterCard(item: item, width: cardWidth) { open(item) }
+                    ForEach(searchResults) { hit in
+                        PosterCard(item: hit.item, width: cardWidth) {
+                            open(hit.item, id: hit.id)
+                        }
                     }
                 }
             }
@@ -377,13 +437,14 @@ struct LibrariesPage: View {
 
     // MARK: - 动作
 
-    private func open(_ item: MediaItem) {
+    private func open(_ item: MediaItem, id: String? = nil) {
+        let target = id ?? item.id
         if item.isSeason || item.isSeries || item.isFolder {
-            browseTarget = BrowseTarget(id: item.id,
+            browseTarget = BrowseTarget(id: target,
                                         title: MediaText.clean(item.title),
                                         isLibrary: false)
         } else {
-            detailId = item.id
+            detailId = target
         }
     }
 
@@ -421,28 +482,74 @@ struct LibrariesPage: View {
         defer { searching = false }
 
         let all = (try? await core.search(keyword)) ?? SearchResult()
-        searchResults = all.items.filter { $0.sourceId == sourceId }
+
+        // 核心按主源去重，主源可能是别的服务器。本服务器也有这部片时，
+        // 要在 `sources` 里找到本服务器那一条，点开才是本源的条目。
+        // 以前直接按 item.sourceId 过滤，主源在别处就把本服务器的片也丢掉了。
+        searchResults = all.items.compactMap { item in
+            if item.sourceId == sourceId {
+                return LibrarySearchHit(item: item, id: item.id)
+            }
+
+            guard let hit = item.sources.first(where: { $0.sourceId == sourceId }) else {
+                return nil
+            }
+
+            return LibrarySearchHit(item: item, id: hit.itemId)
+        }
     }
 
     // MARK: - 加载
 
     private func load() async {
+        let id = sourceId
+        let generation = state.connectionSerial
+
+        // 换了源或重连过：上一条源的详情 / 网格 / 页签键不能留在这一条上。
+        if loadedSourceId != id || loadedGeneration != generation {
+            loadedSourceId = id
+            loadedGeneration = generation
+            detailId = nil
+            browseTarget = nil
+            tab = .media
+            searchText = ""
+            searchResults = []
+            sections = []
+            heroes = []
+            heroIndex = 0
+        } else if !sections.isEmpty, state.core != nil,
+                  sections.count == state.libraries(of: id).count,
+                  state.debugDetail == nil, state.debugLibrary == nil {
+            // 从详情页返回时视图会重建，`.task` 跟着再跑一遍：
+            // 同一个连接、首页已经有数据，直接复用，别整库重拉一遍。
+            loading = false
+            return
+        }
+
         guard let core = state.core else {
             loading = false
             return
         }
 
         loading = true
-        defer { loading = false }
+        defer {
+            // 被取消说明换源 / 换连接了，新 task 会自己接管 loading 状态。
+            if !Task.isCancelled {
+                loading = false
+            }
+        }
 
         var built: [LibrarySection] = []
         // 首页每行默认按「添加时间」倒序，和点进库里的默认排序一致。
         // 不传排序时各家服务器默认值不一样（飞牛入库倒序、Emby 按名称）。
         let addedQuery = ListQuery(sort: "added", descending: true)
-        for library in state.libraries(of: sourceId) {
+        for library in state.libraries(of: id) {
             let page = try? await core.items(library.id, pageSize: 18, query: addedQuery)
+            // 等待期间切了源：这一页是旧源的，不能再铺上来。
+            guard !Task.isCancelled else { return }
             built.append(LibrarySection(library: library, items: page?.items ?? []))
         }
+        guard !Task.isCancelled else { return }
         sections = built
 
         var pool: [HeroItem] = []
