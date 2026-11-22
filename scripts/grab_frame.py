@@ -7,6 +7,7 @@ mpv 没有“在时间 T 截图”的命令行开关，所以这里用 --input-i
 from __future__ import annotations
 
 import argparse
+import atexit
 import glob
 import json
 import os
@@ -95,6 +96,8 @@ def main() -> int:
     outdir = os.path.abspath(args.outdir)
     os.makedirs(outdir, exist_ok=True)
     runtime = tempfile.mkdtemp(prefix="dvplayer-")
+    # socket 和临时目录用完就删：跑截图对比会留下几十个 /tmp/dvplayer-*。
+    atexit.register(shutil.rmtree, runtime, ignore_errors=True)
     sock_path = os.path.join(runtime, "mpv.sock")
     log_path = os.path.join(outdir, f"{args.prefix}.log")
 

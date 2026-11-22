@@ -20,6 +20,13 @@ printf '%s\n' "$NAS_PASS"
 EOF
 chmod 700 "$TMP/askpass"
 
+# ssh 会把后面的所有参数用空格拼成一条命令再交给远端 shell 解析：
+# 带空格 / 引号的文件名会被拆开，甚至被当成命令执行。手动套 POSIX 单引号。
+quote() {
+  local s=${1//\'/\'\\\'\'}
+  printf "'%s'" "$s"
+}
+
 ssh_run() {
   SSH_ASKPASS="$TMP/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 \
     ssh -o StrictHostKeyChecking=no \
@@ -57,8 +64,8 @@ probe() {
   esac
 }
 
-# 1) 显式指定的文件
-for f in "$@"; do
+# 1) 显式指定的文件（远端 set -u：没有额外参数时 "$@" 在旧 bash 下会报 unbound）
+for f in ${1+"$@"}; do
   [ -f "$f" ] || { echo "MISSING  $f"; continue; }
   echo "== 指定文件 =="
   ls -l "$f"
@@ -111,4 +118,8 @@ rm -f /tmp/dvscan.$$
 echo "扫完: 探测了 $n 个文件"
 EOS
 
-ssh_run "bash -s" "$ROOT_DIR" "$MAX_FILES" "${NAS_SCAN_MODE:-dv}" "$@" < "$TMP/scan.sh"
+remote_cmd="bash -s"
+for arg in "$ROOT_DIR" "$MAX_FILES" "${NAS_SCAN_MODE:-dv}" "$@"; do
+  remote_cmd+=" $(quote "$arg")"
+done
+ssh_run "$remote_cmd" < "$TMP/scan.sh"

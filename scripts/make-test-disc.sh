@@ -20,19 +20,30 @@ if [ ! -x "$FFMPEG" ]; then
     exit 1
 fi
 
-rm -rf "$OUT"
-mkdir -p "$OUT/BDMV/PLAYLIST" "$OUT/BDMV/STREAM" "$OUT/BDMV/META/DL"
+# 不要 rm -rf "$OUT"：OUT 是用户给的路径，`make-test-disc.sh .` 或 `~/Movies`
+# 会把整个目录删掉。盘结构放临时目录里，最后只替换 $OUT 下的这一个 ISO。
+mkdir -p "$OUT"
+ISO="$OUT/disc-test.iso"
+
+# 只删这一个产物（不碰用户目录）：hdiutil 对已存在的输出会直接失败，
+# 而这脚本本来就是反复生成测试盘用的。
+rm -f "$ISO"
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/dvplayer-disc.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+
+mkdir -p "$WORK/BDMV/PLAYLIST" "$WORK/BDMV/STREAM" "$WORK/BDMV/META/DL"
 
 # 两段 mpegts 当 m2ts；测试盘只需要 mpv 能解码。
 "$FFMPEG" -hide_banner -loglevel error \
     -f lavfi -i "testsrc2=size=480x270:rate=25" -t 20 \
-    -c:v mpeg2video -b:v 2M -f mpegts "$OUT/BDMV/STREAM/00001.m2ts"
+    -c:v mpeg2video -b:v 2M -f mpegts "$WORK/BDMV/STREAM/00001.m2ts"
 "$FFMPEG" -hide_banner -loglevel error \
     -f lavfi -i "testsrc2=size=480x270:rate=25" -t 8 \
-    -c:v mpeg2video -b:v 2M -f mpegts "$OUT/BDMV/STREAM/00002.m2ts"
+    -c:v mpeg2video -b:v 2M -f mpegts "$WORK/BDMV/STREAM/00002.m2ts"
 
 # 最小可解析的 mpls：PlayList 段一个 PlayItem，IN/OUT 用 45 kHz 刻度。
-python3 - "$OUT" <<'PY'
+python3 - "$WORK" <<'PY'
 import pathlib
 import struct
 import sys
@@ -63,5 +74,5 @@ def mpls(name: str, seconds: float) -> bytes:
 )
 PY
 
-hdiutil makehybrid -quiet -o "$OUT/disc-test.iso" "$OUT" -iso -joliet
-echo "$OUT/disc-test.iso"
+hdiutil makehybrid -quiet -o "$ISO" "$WORK" -iso -joliet
+echo "$ISO"

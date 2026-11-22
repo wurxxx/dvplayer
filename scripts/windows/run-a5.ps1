@@ -1,4 +1,4 @@
-# 在交互会话里跑 A5 并抓屏（由 schtasks /it 调用，不要直接 ssh 跑）
+﻿# 在交互会话里跑 A5 并抓屏（由 schtasks /it 调用，不要直接 ssh 跑）
 $ErrorActionPreference = "Continue"
 $env:DOTNET_ROOT = "D:\dvplayer\dotnet"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"

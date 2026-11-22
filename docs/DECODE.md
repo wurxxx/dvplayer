@@ -157,5 +157,5 @@ sh scripts/windows/wssh.sh 'schtasks /run /tn decode-check'   # B：纯解码
 sh scripts/windows/wssh.sh 'schtasks /run /tn decode-ipc'     # A：壳 + IPC
 sh scripts/windows/wssh.sh 'schtasks /run /tn decode-render'  # C：渲染吞吐
 
-scp -i ~/.ssh/dvplayer_win -r wucl@192.168.0.154:D:/dvplayer/out/decode3 out/
+scp -i ~/.ssh/dvplayer_win -r wucl@192.168.194.3:D:/dvplayer/out/decode3 out/
 ```

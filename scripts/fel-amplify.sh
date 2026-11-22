@@ -24,6 +24,12 @@ BUILD="$LP/_build-vk"
 
 [ -f "$SRC" ] || { echo "找不到 $SRC（先跑 scripts/build-vk-macos.sh）" >&2; exit 1; }
 [ -d "$BUILD" ] || { echo "找不到 $BUILD（先跑 scripts/build-vk-macos.sh）" >&2; exit 1; }
+
+# 上次还原后重编失败会留下这个标记：prefix-vk 里可能还是 100 倍残差放大器。
+if [ -f "$BUILD/.dovi-amplify-dirty" ]; then
+  echo "prefix-vk 里还残留着残差放大器（$BUILD/.dovi-amplify-dirty），先跑 scripts/build-vk-macos.sh 重建" >&2
+  exit 1
+fi
 grep -q 'color.rgb += clamp(res, -\$mx, \$mx);' "$SRC" || {
   echo "colorspace.c 的 NLQ 行不是预期形态；可能上次没还原，先检查 $SRC" >&2
   exit 1
@@ -35,13 +41,20 @@ backup=$(mktemp -t dovi-colorspace.XXXXXX)
 cp "$SRC" "$backup"
 
 cleanup() {
+  local status=$?
+  trap - EXIT INT TERM
   cp "$backup" "$SRC"
   rm -f "$backup"
   if meson compile -C "$BUILD" >/dev/null 2>&1 &&
      meson install -C "$BUILD" >/dev/null 2>&1; then
+    rm -f "$BUILD/.dovi-amplify-dirty"
     echo "[amplify] 已还原 libplacebo 并重编"
   else
-    echo "[amplify] 警告：还原源码后重编失败，请手动跑 scripts/build-vk-macos.sh" >&2
+    # 还原失败不能只打警告：prefix-vk 里还是放大过的 shader，
+    # 之后打的 .app 会全部失真。留标记，让下次运行和打包前直接失败。
+    : > "$BUILD/.dovi-amplify-dirty"
+    echo "[amplify] 错误：还原源码后重编失败，已留下标记 $BUILD/.dovi-amplify-dirty；先跑 scripts/build-vk-macos.sh" >&2
+    [ "$status" -ne 0 ] || exit 1
   fi
 }
 trap cleanup EXIT INT TERM

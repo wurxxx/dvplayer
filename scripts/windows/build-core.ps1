@@ -1,4 +1,4 @@
-# 构建共享媒体库核心 dvplayer_media.dll（Windows）。
+﻿# 构建共享媒体库核心 dvplayer_media.dll（Windows）。
 #
 # 要点：
 #  - 用 rustup 的 stable-x86_64-pc-windows-gnu 工具链，装到 D:\dvplayer\tools；

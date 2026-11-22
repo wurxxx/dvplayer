@@ -1,8 +1,8 @@
 ﻿# Run a command in the active console session (the logged-in desktop), from an
 # elevated SSH / service session.
 #
-# Why: MSIX deployment (Add-AppxPackage) needs the interactive user session;
-# in session 0 it fails with 0x80070005 ("cannot initialize PLM").
+# Why: D3D11 / WPF rendering needs the interactive user session;
+# in session 0 the D3D11 swapchain cannot be created (0x887A0022).
 #
 # Two ways to get the interactive user's token:
 #   - running as SYSTEM (preferred): WTSQueryUserToken(active console session)

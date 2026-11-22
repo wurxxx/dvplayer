@@ -7,7 +7,7 @@
 
 ```bash
 sh scripts/windows/wssh.sh 'Get-Date'     # 远程跑 PowerShell，base64 传参、UTF-8 输出
-scp -i ~/.ssh/dvplayer_win a.zip wucl@192.168.0.154:D:/dvplayer/
+scp -i ~/.ssh/dvplayer_win a.zip wucl@192.168.194.3:D:/dvplayer/
 ```
 
 SSH 会话在 session 0，GUI 起在那里你看不见。要跑带窗口的东西，用计划任务在
@@ -34,34 +34,6 @@ schtasks /run /tn verify-a5
 
 > PowerShell 5.1 按 ANSI 解析无 BOM 的 `.ps1`，中文注释会把引号弄坏。
 > 这些脚本一律写成纯 ASCII。
-
-## 远程代跑（agent，备用）
-
-Windows 家庭版没有 RDP 主机，SSH/WinRM 也没开时，这个反向代理可以顶一下：
-
-Windows 家庭版没有 RDP 主机，SSH/WinRM 也没开，所以用一个**反向代理**把机器交给 Mac 驱动：
-
-| 文件 | 跑在哪 | 作用 |
-| --- | --- | --- |
-| `agent.bat` | Windows | 双击即可（不需要管理员），自动下载并启动 `agent.ps1` |
-| `agent.ps1` | Windows | 轮询任务、在本进程执行、回传结果/文件 |
-| `agent-server.py` | Mac | 静态文件 + `/agent/task`、`/agent/result`、`/agent/upload` |
-| `dvagent.py` | Mac | 下发任务、等结果、看日志 |
-| `bootstrap-windows.py` | Mac | 等代理上线 → 装 SDK → 编译 A5 → 跑起来抓屏 |
-
-Mac 侧：
-
-```bash
-python3 scripts/windows/agent-server.py            # 常驻，端口 8080
-python3 scripts/windows/dvagent.py run 'Get-Date'
-python3 scripts/windows/dvagent.py log
-python3 scripts/windows/bootstrap-windows.py       # 一条龙
-```
-
-任务/结果都在 `build/agent/`（已 ignore）。代理进程里的任务可以直接用
-`Send-File <路径> <名字>` 把截图、日志传回 `build/agent/uploads/`。
-
-注意：通道是**明文 + 固定 token**，只适合可信局域网；用完关窗口就断。
 
 ## 下面的 A4 脚本可以单独跑，不依赖 Mac
 

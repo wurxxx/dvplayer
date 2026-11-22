@@ -18,11 +18,20 @@ cd /d "%~dp0"
 set MSI=OpenSSH-Win64-v10.4.0.0.msi
 
 if not exist "%MSI%" (
-    echo        downloading %MSI% from the Mac ...
-    powershell -NoProfile -Command "$wc = New-Object Net.WebClient; $wc.Proxy = $null; $wc.DownloadFile('http://192.168.0.15:8080/OpenSSH-Win64-v10.4.0.0.msi', '%~dp0%MSI%')"
+    echo        downloading %MSI% from the official release ...
+    powershell -NoProfile -Command "$u='https://github.com/PowerShell/Win32-OpenSSH/releases/download/v10.4.0.0/OpenSSH-Win64-v10.4.0.0.msi'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile($u,'%~dp0%MSI%')"
 )
 if not exist "%MSI%" (
     echo ERROR: %MSI% not found and download failed.
+    pause
+    exit /b 1
+)
+rem 装 MSI 等于给它管理员权限：签名无效或不是 Microsoft 的包一律不装。
+rem （原先是从局域网明文 HTTP 取的，中间人可以换包。）
+powershell -NoProfile -Command "$s=Get-AuthenticodeSignature '%~dp0%MSI%'; if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'Microsoft') { Write-Host ('signature: ' + $s.Status + ' / ' + $s.SignerCertificate.Subject); exit 1 }"
+if errorlevel 1 (
+    echo ERROR: %MSI% signature check failed.
+    del "%MSI%" >nul 2>&1
     pause
     exit /b 1
 )

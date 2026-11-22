@@ -24,7 +24,9 @@ SRC=${SRC:-$ROOT/build/src}
 DL=${DL:-$ROOT/build/dl}
 VK_BUILD=${VK_BUILD:-$ROOT/build/vk}
 JOBS=${JOBS:-$(sysctl -n hw.ncpu)}
-GH_PROXY=${GH_PROXY:-https://v4.gh-proxy.org/}
+# 默认直连 GitHub：GH_PROXY 是第三方代理，拿到的 tar 没有哈希可校验，
+# 等于把编译进去的源码交给中间人。只有明确信任时再 export GH_PROXY=...。
+GH_PROXY=${GH_PROXY:-}
 
 MVK_TAG=v1.4.2
 HEADERS_TAG=vulkan-sdk-1.4.363.0
@@ -64,13 +66,23 @@ mkdir -p "$PREFIX_VK" "$SRC" "$DL" "$VK_BUILD"
 # ---------------------------------------------------------------- 源码
 fetch() { # fetch <repo> <tag> <outfile>
   local repo=$1 tag=$2 out=$3
-  if [ -f "$out" ]; then
+  # 只认「能被 tar 解开」的文件：上次 curl 被中断留下的半截包同样存在，
+  # 按「文件存在就跳过」会让后面解包静默失败。
+  if [ -f "$out" ] && tar -tzf "$out" >/dev/null 2>&1; then
     echo "已下载: $(basename "$out")"
     return
   fi
+  rm -f "$out"
   echo "下载 $repo $tag"
-  curl -sL --max-time 900 -o "$out" \
+  [ -z "$GH_PROXY" ] || echo "经第三方代理 $GH_PROXY 下载（无哈希校验）" >&2
+  curl -fsSL --retry 2 --max-time 900 -o "$out.part" \
     "${GH_PROXY}https://github.com/KhronosGroup/$repo/archive/refs/tags/$tag.tar.gz"
+  tar -tzf "$out.part" >/dev/null 2>&1 || {
+    echo "下载结果不是完整 tar.gz：${out}.part" >&2
+    rm -f "$out.part"
+    exit 1
+  }
+  mv "$out.part" "$out"
 }
 
 step "下载源码"
@@ -78,17 +90,27 @@ fetch Vulkan-Headers "$HEADERS_TAG" "$DL/vulkan-headers.tar.gz"
 fetch Vulkan-Loader  "$LOADER_TAG"  "$DL/vulkan-loader.tar.gz"
 fetch glslang        "$GLSLANG_TAG" "$DL/glslang-$GLSLANG_TAG.tar.gz"
 fetch_release="MoltenVK-macos.tar"
-if [ ! -f "$DL/$fetch_release" ]; then
-  echo "下载 MoltenVK $MVK_TAG"
-  curl -sL --max-time 900 -o "$DL/$fetch_release" \
-    "${GH_PROXY}https://github.com/KhronosGroup/MoltenVK/releases/download/$MVK_TAG/$fetch_release"
+if [ ! -f "$DL/$fetch_release" ] || ! tar -tf "$DL/$fetch_release" >/dev/null 2>&1; then
+  # 半截包同样会让解包失败：先删掉再下，下完用 tar 自检。
+  rm -f "$DL/$fetch_release"
+  repo=${fetch_release%-macos.tar}
+  echo "下载 $fetch_release（$MVK_TAG）"
+  [ -z "$GH_PROXY" ] || echo "经第三方代理 $GH_PROXY 下载（无哈希校验）" >&2
+  curl -fsSL --retry 2 --max-time 900 -o "$DL/$fetch_release.part" \
+    "${GH_PROXY}https://github.com/KhronosGroup/$repo/releases/download/$MVK_TAG/$fetch_release"
+  tar -tf "$DL/$fetch_release.part" >/dev/null 2>&1 || {
+    echo "下载结果不是完整 tar：$DL/$fetch_release.part" >&2
+    rm -f "$DL/$fetch_release.part"
+    exit 1
+  }
+  mv "$DL/$fetch_release.part" "$DL/$fetch_release"
 fi
 
 for t in vulkan-headers.tar.gz vulkan-loader.tar.gz "glslang-$GLSLANG_TAG.tar.gz"; do
-  tar -xzf "$DL/$t" -C "$SRC" 2>/dev/null || true
+  tar -xzf "$DL/$t" -C "$SRC"
 done
 mkdir -p "$VK_BUILD/mvk"
-tar -xf "$DL/$fetch_release" -C "$VK_BUILD/mvk" 2>/dev/null || true
+tar -xf "$DL/$fetch_release" -C "$VK_BUILD/mvk"
 
 # ---------------------------------------------------------------- Vulkan-Headers
 step "Vulkan-Headers"
@@ -143,6 +165,14 @@ json.dump({
 PY
 
 # ---------------------------------------------------------------- libplacebo
+# fel-amplify.sh 还原失败会留下这个标记：prefix-vk 里还是放大过的 shader。
+# 照常「pc 存在就跳过」会让标记永远清不掉，这里强制重装一次。
+if [ -f "$SRC/libplacebo/_build-vk/.dovi-amplify-dirty" ]; then
+  echo "检测到残差放大器残留标记，重建 libplacebo"
+  rm -rf "$SRC/libplacebo/_build-vk"
+  rm -f "$PREFIX_VK/lib/pkgconfig/libplacebo.pc"
+fi
+
 step "libplacebo（Vulkan + glslang）"
 # 上游 7.387 的 glslang 检测有两处没传 dirs，导致 find_library 找不到库。
 # 这里在 build/src 里打本地补丁（不进仓库），只影响构建。

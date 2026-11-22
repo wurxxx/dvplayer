@@ -107,7 +107,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 
 对应主线 2 与 3 的第一版：飞牛 + Emby / Jellyfin + 目录源、跨源合并搜索、
 合并播放记录与续播；播放/暂停/seek/轨道/字幕/音频设备与直通/HDR 开关/全屏/快捷键；
-MSIX 打包与自动更新。Plex 排在最后。
+Windows 绿色版 / Inno Setup 安装版打包；自动更新暂缓。Plex 排在最后。
 
 共享层见 ADR-0008：媒体库逻辑在 `core/media`（Rust），三端只做界面。
 

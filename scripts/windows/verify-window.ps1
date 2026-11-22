@@ -1,4 +1,4 @@
-# 看窗口实际尺寸和控制条是否画出来：PrintWindow 抓窗口自身（不受屏幕位置影响）。
+﻿# 看窗口实际尺寸和控制条是否画出来：PrintWindow 抓窗口自身（不受屏幕位置影响）。
 $ErrorActionPreference = "Continue"
 $env:DOTNET_ROOT = "D:\dvplayer\dotnet"
 Add-Type -AssemblyName System.Drawing

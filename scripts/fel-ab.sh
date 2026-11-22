@@ -52,10 +52,20 @@ if [ "$mode" = "vk" ]; then
 fi
 
 echo "== with EL (FEL active) =="
-a=$("${grab[@]}" "$in" "$t" with-el --outdir "$out" | tail -1)
+a_raw=$("${grab[@]}" "$in" "$t" with-el --outdir "$out") || {
+  echo "抓帧失败（with EL）" >&2
+  exit 1
+}
+a=$(printf '%s\n' "$a_raw" | tail -1)
+[ -f "$a" ] || { echo "抓帧没有产出文件（with EL）：$a" >&2; exit 1; }
 
 echo "== base layer only =="
-b=$("${grab[@]}" "$in" "$t" bl-only --no-el --outdir "$out" | tail -1)
+b_raw=$("${grab[@]}" "$in" "$t" bl-only --no-el --outdir "$out") || {
+  echo "抓帧失败（base layer）" >&2
+  exit 1
+}
+b=$(printf '%s\n' "$b_raw" | tail -1)
+[ -f "$b" ] || { echo "抓帧没有产出文件（base layer）：$b" >&2; exit 1; }
 
 echo
 echo "with EL: $a"
@@ -67,14 +77,22 @@ grep -iE 'Dolby Vision Profile|enhancement|splitter|el_pair' "$out/with-el.log" 
 echo
 
 echo "== psnr =="
-psnr=$(ffmpeg -hide_banner -i "$a" -i "$b" -lavfi psnr -f null - 2>&1 |
-       grep -E 'PSNR' | tail -1 || true)
-echo "${psnr:-（未取得）}"
+psnr_log=$(ffmpeg -hide_banner -i "$a" -i "$b" -lavfi psnr -f null - 2>&1) || {
+  echo "PSNR 计算失败" >&2
+  exit 1
+}
+psnr=$(printf '%s\n' "$psnr_log" | grep -E 'PSNR' | tail -1)
+[ -n "$psnr" ] || { echo "PSNR 没有输出" >&2; exit 1; }
+echo "$psnr"
 
 echo "== ssim =="
-ssim=$(ffmpeg -hide_banner -i "$a" -i "$b" -lavfi ssim -f null - 2>&1 |
-       grep -E 'SSIM' | tail -1 || true)
-echo "${ssim:-（未取得）}"
+ssim_log=$(ffmpeg -hide_banner -i "$a" -i "$b" -lavfi ssim -f null - 2>&1) || {
+  echo "SSIM 计算失败" >&2
+  exit 1
+}
+ssim=$(printf '%s\n' "$ssim_log" | grep -E 'SSIM' | tail -1)
+[ -n "$ssim" ] || { echo "SSIM 没有输出" >&2; exit 1; }
+echo "$ssim"
 
 echo "== 像素差（8bit RGB）=="
 python3 - "$a" "$b" <<'PY'

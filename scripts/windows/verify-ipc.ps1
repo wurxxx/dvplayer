@@ -1,4 +1,4 @@
-# 验证 mpv IPC + 控制条。
+﻿# 验证 mpv IPC + 控制条。
 # 关键：PowerShell 默认不是 DPI-aware，Screen.Bounds/CopyFromScreen 会只截到
 # 物理屏幕的左上角一块。这里先声明 PerMonitorV2 再测量和截图。
 
@@ -42,7 +42,9 @@ $proc = Start-Process -FilePath $exe -PassThru
 Say ("pid=" + $proc.Id)
 Start-Sleep -Seconds 14
 
-$pipe = Get-ChildItem \\.\pipe\ | Where-Object { $_.Name -like "dvplayer-*" } | Select-Object -Last 1
+$pipe = Get-ChildItem \\.\pipe\ |
+    Where-Object { $_.Name -like "dvplayer-$($proc.Id)-*" } |
+    Select-Object -Last 1
 if (-not $pipe) {
     Say "no dvplayer pipe found"
     Shot "a5-ipc-fail.png"

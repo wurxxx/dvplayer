@@ -1,8 +1,19 @@
-# A5 量化验证：DPI、窗口/客户区、mpv 子窗口是否跟随、F11、改尺寸。
+﻿# A5 量化验证：DPI、窗口/客户区、mpv 子窗口是否跟随、F11、改尺寸。
 # 由 schtasks /it 在交互会话里跑。
 
 $ErrorActionPreference = "Continue"
 $env:DOTNET_ROOT = "D:\dvplayer\dotnet"
+
+# PowerShell 默认不 DPI-aware：缩放屏上 Screen.Bounds 是虚拟化后的尺寸，
+# CopyFromScreen 也只截到左上角一块。先声明 PerMonitorV2 再量、再截。
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class DpiCtx {
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
+}
+"@
+[DpiCtx]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing

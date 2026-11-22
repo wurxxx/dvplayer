@@ -8,7 +8,7 @@
 # 输出强制 UTF-8，避免中文乱码。
 set -u
 
-HOST=${DVWIN_HOST:-192.168.0.102}
+HOST=${DVWIN_HOST:-192.168.194.3}
 USER_NAME=${DVWIN_USER:-wucl}
 KEY=${DVWIN_KEY:-$HOME/.ssh/dvplayer_win}
 
