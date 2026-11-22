@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using DvPlayer.Dialogs;
 using DvPlayer.Services;
@@ -221,6 +222,100 @@ public partial class SourcesPage : Page
         }
     }
 
+    /// <summary>拖动排序：按下卡片、移动超过阈值、松手时换位置。</summary>
+    private Point _sourceDragStart;
+    private SourceCard? _sourceDragCard;
+    private bool _sourceDragging;
+
+    private void OnSourceGridPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _sourceDragStart = e.GetPosition(SourceGrid);
+        _sourceDragCard = (e.OriginalSource as FrameworkElement)?.DataContext as SourceCard;
+        _sourceDragging = false;
+    }
+
+    private void OnSourceGridPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _sourceDragCard is null)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(SourceGrid);
+        if (!_sourceDragging &&
+            Math.Abs(position.X - _sourceDragStart.X) < 8 &&
+            Math.Abs(position.Y - _sourceDragStart.Y) < 8)
+        {
+            return;
+        }
+
+        _sourceDragging = true;
+        Cursor = Cursors.SizeAll;
+    }
+
+    private void OnSourceGridPreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        var dragging = _sourceDragging;
+        var source = _sourceDragCard;
+        _sourceDragging = false;
+        _sourceDragCard = null;
+        Cursor = Cursors.Arrow;
+
+        if (!dragging || source is null)
+        {
+            return;
+        }
+
+        var target = DataContextAt<SourceCard>(SourceGrid, e.GetPosition(SourceGrid));
+        if (target is null || target.Id == source.Id)
+        {
+            return;
+        }
+
+        MoveSource(source.Id, target.Id);
+        e.Handled = true;
+    }
+
+    /// <summary>鼠标位置下面的数据项（沿视觉树往上找 DataContext）。</summary>
+    private static T? DataContextAt<T>(UIElement root, Point point) where T : class
+    {
+        var hit = root.InputHitTest(point) as DependencyObject;
+        while (hit is not null)
+        {
+            if (hit is FrameworkElement { DataContext: T value })
+            {
+                return value;
+            }
+
+            hit = VisualTreeHelper.GetParent(hit);
+        }
+
+        return null;
+    }
+
+    /// <summary>把 id 挪到 targetId 的位置，顺序写回设置并刷新两侧列表。</summary>
+    private void MoveSource(string id, string targetId)
+    {
+        var sources = AppServices.Instance.Settings.Sources;
+        var from = sources.FindIndex(s => s.Id == id);
+        var to = sources.FindIndex(s => s.Id == targetId);
+        if (from < 0 || to < 0 || from == to)
+        {
+            return;
+        }
+
+        var item = sources[from];
+        sources.RemoveAt(from);
+        sources.Insert(to, item);
+        AppServices.Instance.Settings.Save();
+
+        RefreshSources();
+        (Window.GetWindow(this) as MainWindow)?.RefreshSourceStatus();
+    }
+
+    /// <summary>左侧列表拖动排序后，这里跟着换顺序。</summary>
+    public void ReloadOrder() => RefreshSources();
+
     private void RefreshSources()
     {
         var services = AppServices.Instance;
@@ -233,12 +328,14 @@ public partial class SourcesPage : Page
                 var connection = connections.FirstOrDefault(c => c.Id == s.Id);
                 var kind = MediaText.SourceKindLabel(s.Kind);
 
-                // 连接结果三分：没试过 / 连上 / 失败。连上时显示连接时刻和往返延迟。
+                // 连接结果四分：没试过 / 正在连 / 连上 / 失败。
                 var (status, brush) = connection is null
                     ? ("尚未连接", "FaintBrush")
-                    : connection.Ok
-                        ? (ConnectedStatus(connection), "SuccessBrush")
-                        : ("连接失败：" + (connection.Error ?? "未知错误"), "DangerBrush");
+                    : connection.Connecting
+                        ? ("正在连接…", "FaintBrush")
+                        : connection.Ok
+                            ? (ConnectedStatus(connection), "SuccessBrush")
+                            : ("连接失败：" + (connection.Error ?? "未知错误"), "DangerBrush");
 
                 return new SourceCard
                 {

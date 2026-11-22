@@ -16,6 +16,13 @@ void dv_hub_free(DVHub handle);
 char *dv_hub_add(DVHub handle, const char *config);
 /// 并行添加并登录多个源，configs 是 SourceConfig 的 JSON 数组。
 char *dv_hub_add_many(DVHub handle, const char *configs);
+
+/// 每个源连完立刻回调一次：json 是 SourceConnect，user_data 原样传回。
+typedef void (*dv_connect_callback)(const char *json, void *user_data);
+
+/// 同 dv_hub_add_many，但每连完一个就回调一次，最后仍返回完整数组。
+char *dv_hub_add_many_stream(DVHub handle, const char *configs,
+                             dv_connect_callback callback, void *user_data);
 char *dv_hub_sources(const DVHub handle);
 char *dv_hub_libraries(const DVHub handle);
 

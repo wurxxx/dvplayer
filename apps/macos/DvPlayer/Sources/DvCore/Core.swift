@@ -18,6 +18,15 @@ private struct EnvelopeNoData: Decodable {
     let error: String?
 }
 
+/// 回调盒：把 Swift 闭包带过 C ABI。调用期间用它保活。
+private final class ConnectCallbackBox: @unchecked Sendable {
+    let onEach: @Sendable (SourceConnection) -> Void
+
+    init(_ onEach: @escaping @Sendable (SourceConnection) -> Void) {
+        self.onEach = onEach
+    }
+}
+
 /// Dolby Vision P7 的增强层类型：`elType` 是 "fel" / "mel"。
 public struct DoviProbe: Decodable, Sendable {
     public let profile: Int
@@ -64,6 +73,36 @@ public final class Core: @unchecked Sendable {
         let json = String(data: try JSONEncoder().encode(configs), encoding: .utf8) ?? "[]"
         return try await perform { hub in
             json.withCString { dv_hub_add_many(hub, $0) }
+        }
+    }
+
+    /// 并行建连，每个源连完立即回调 `onEach`（来自建连线程，界面自己转主线程）。
+    public func addManyStream(
+        _ configs: [SourceConfig],
+        onEach: @escaping @Sendable (SourceConnection) -> Void
+    ) async throws -> [SourceConnection] {
+        let json = String(data: try JSONEncoder().encode(configs), encoding: .utf8) ?? "[]"
+        let box = ConnectCallbackBox(onEach)
+        // C 函数指针不能捕获上下文：盒子通过 user_data 传进来。
+        let callback: @convention(c) (UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void = {
+            pointer, userData in
+            guard let pointer, let userData else { return }
+            let text = String(cString: pointer)
+            guard let data = text.data(using: .utf8),
+                  let connection = try? JSONDecoder().decode(SourceConnection.self, from: data) else {
+                return
+            }
+            Unmanaged<ConnectCallbackBox>.fromOpaque(userData)
+                .takeUnretainedValue()
+                .onEach(connection)
+        }
+
+        // [box] 捕获保证回调期间盒子还活着；核心调用返回时所有回调都已结束。
+        return try await perform { [box] hub in
+            json.withCString {
+                dv_hub_add_many_stream(hub, $0, callback,
+                                       Unmanaged.passUnretained(box).toOpaque())
+            }
         }
     }
 

@@ -34,7 +34,7 @@ struct Entry {
 }
 
 /// 并行建连的一个结果。界面用它显示每个源连没连上、花了多久。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceConnect {
     pub id: String,
@@ -120,17 +120,28 @@ impl MediaHub {
         self.add_source(&config.id, source)
     }
 
+    /// 并行建连多个源，不回报中间状态（一次性拿全部结果）。
+    pub fn add_many(&mut self, configs: &[SourceConfig]) -> Vec<SourceConnect> {
+        self.add_many_stream(configs, |_| {})
+    }
+
     /// 并行建连多个源：每个源一个线程去创建 + 登录，全部结束后再按配置顺序
     /// 挂进聚合层。登录是网络等待，串行时 3 个服务器就要等 3 份时间。
     ///
-    /// 线程里只碰自己的适配器，`entries` 始终由当前线程写入，所以不用加锁。
+    /// `on_done` 在**每个源刚连完时**立即调用（哪个快哪个先到），界面不用等
+    /// 最慢的那个才更新状态。线程里只碰自己的适配器，`entries` 始终由当前
+    /// 线程写入，所以不用加锁。
+    ///
     /// 失败的源带 `error` 返回，不影响其它源；`ms` 是建连（含登录）耗时。
-    pub fn add_many(&mut self, configs: &[SourceConfig]) -> Vec<SourceConnect> {
+    pub fn add_many_stream<F>(&mut self, configs: &[SourceConfig], on_done: F) -> Vec<SourceConnect>
+    where
+        F: Fn(SourceConnect) + Sync,
+    {
+        let on_done = &on_done;
         let attempts: Vec<(
             SourceConfig,
             std::result::Result<Box<dyn MediaSource>, String>,
-            u64,
-            Option<u64>,
+            SourceConnect,
         )> =
             std::thread::scope(|scope| {
                 let handles: Vec<_> = configs
@@ -153,7 +164,32 @@ impl MediaHub {
                             } else {
                                 None
                             };
-                            (config, result, started.elapsed().as_millis() as u64, latency)
+
+                            let info = match &result {
+                                Ok(_) => SourceConnect {
+                                    id: config.id.clone(),
+                                    name: config.name.clone(),
+                                    kind: config.kind.clone(),
+                                    ok: true,
+                                    error: None,
+                                    ms: started.elapsed().as_millis() as u64,
+                                    latency_ms: latency,
+                                },
+                                Err(error) => SourceConnect {
+                                    id: config.id.clone(),
+                                    name: config.name.clone(),
+                                    kind: config.kind.clone(),
+                                    ok: false,
+                                    error: Some(error.clone()),
+                                    ms: started.elapsed().as_millis() as u64,
+                                    latency_ms: None,
+                                },
+                            };
+
+                            // 这个源已经出结果了，立刻告诉界面。
+                            on_done(info.clone());
+
+                            (config, result, info)
                         })
                     })
                     .collect();
@@ -163,40 +199,32 @@ impl MediaHub {
                     .zip(configs.iter().cloned())
                     .map(|(handle, config)| match handle.join() {
                         Ok(done) => done,
-                        Err(_) => (config, Err("建连线程异常退出".to_string()), 0, None),
+                        Err(_) => {
+                            let info = SourceConnect {
+                                id: config.id.clone(),
+                                name: config.name.clone(),
+                                kind: config.kind.clone(),
+                                ok: false,
+                                error: Some("建连线程异常退出".to_string()),
+                                ms: 0,
+                                latency_ms: None,
+                            };
+                            on_done(info.clone());
+                            (config, Err("建连线程异常退出".to_string()), info)
+                        }
                     })
                     .collect()
             });
 
         let mut out = Vec::with_capacity(attempts.len());
-        for (config, result, ms, latency) in attempts {
-            match result {
-                Ok(source) => {
-                    let info = SourceConnect {
-                        id: config.id.clone(),
-                        name: config.name.clone(),
-                        kind: config.kind.clone(),
-                        ok: true,
-                        error: None,
-                        ms,
-                        latency_ms: latency,
-                    };
-                    self.entries.push(Entry {
-                        id: config.id,
-                        source,
-                    });
-                    out.push(info);
-                }
-                Err(error) => out.push(SourceConnect {
+        for (config, result, info) in attempts {
+            if let Ok(source) = result {
+                self.entries.push(Entry {
                     id: config.id,
-                    name: config.name,
-                    kind: config.kind,
-                    ok: false,
-                    error: Some(error),
-                    ms,
-                    latency_ms: None,
-                }),
+                    source,
+                });
             }
+            out.push(info);
         }
 
         out

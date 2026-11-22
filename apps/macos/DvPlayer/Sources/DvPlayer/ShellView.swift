@@ -184,11 +184,22 @@ private struct SidebarView: View {
                     icon: "rectangle.stack",
                     title: connection.name,
                     selected: state.page == .home(connection.id),
-                    dot: connection.ok ? Theme.success : Theme.danger,
+                    dot: state.pendingConnections.contains(connection.id)
+                        ? Theme.faint
+                        : (connection.ok ? Theme.success : Theme.danger),
                     sourceKind: connection.kind,
                     size: 13.5
                 ) {
                     state.openSource(connection.id)
+                }
+                .onDrag { NSItemProvider(object: connection.id as NSString) }
+                .onDrop(of: [.text], isTargeted: nil) { providers in
+                    guard let provider = providers.first else { return false }
+                    _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                        guard let id = object as? String else { return }
+                        Task { @MainActor in state.moveSource(id, to: connection.id) }
+                    }
+                    return true
                 }
             }
         }
@@ -216,50 +227,49 @@ private struct SidebarItem: View {
     @State private var hovering = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                if let sourceKind {
-                    ZStack(alignment: .bottomTrailing) {
-                        SourceIcon(kind: sourceKind, size: 18)
+        // 不用 Button：Button 会独占总标事件，服务器项就没法拖拽排序了。
+        HStack(spacing: 12) {
+            if let sourceKind {
+                ZStack(alignment: .bottomTrailing) {
+                    SourceIcon(kind: sourceKind, size: 18)
 
-                        if let dot {
-                            Circle()
-                                .fill(dot)
-                                .frame(width: 6, height: 6)
-                                .overlay(
-                                    Circle().stroke(Theme.sidebar, lineWidth: 1.4)
-                                )
-                                .offset(x: 1.5, y: 1.5)
-                        }
+                    if let dot {
+                        Circle()
+                            .fill(dot)
+                            .frame(width: 6, height: 6)
+                            .overlay(
+                                Circle().stroke(Theme.sidebar, lineWidth: 1.4)
+                            )
+                            .offset(x: 1.5, y: 1.5)
                     }
-                    .frame(width: 16, alignment: .leading)
-                } else if let dot {
-                    Circle().fill(dot).frame(width: 6, height: 6)
-                        .frame(width: 16)
-                } else {
-                    Image(systemName: icon)
-                        .font(.system(size: 13.5))
-                        .frame(width: 16)
                 }
-
-                Text(title)
-                    .font(.system(size: size))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Spacer(minLength: 0)
+                .frame(width: 16, alignment: .leading)
+            } else if let dot {
+                Circle().fill(dot).frame(width: 6, height: 6)
+                    .frame(width: 16)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 13.5))
+                    .frame(width: 16)
             }
-            .foregroundStyle(selected ? Theme.text : Theme.muted)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radiusControl)
-                    .fill(selected ? Color.white.opacity(0.07)
-                                   : (hovering ? Color.white.opacity(0.04) : .clear))
-            )
-            .contentShape(Rectangle())
+
+            Text(title)
+                .font(.system(size: size))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(selected ? Theme.text : Theme.muted)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radiusControl)
+                .fill(selected ? Color.white.opacity(0.07)
+                               : (hovering ? Color.white.opacity(0.04) : .clear))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { action() }
         .onHover { hovering = $0 }
     }
 }

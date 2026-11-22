@@ -123,6 +123,22 @@ public partial class MainWindow : FluentWindow
             RefreshSourceStatus();
         }
 
+        // --reorder-test：直接调用拖动排序的落位逻辑，验证设置顺序真的写回。
+        if (Environment.GetCommandLineArgs().Contains("--reorder-test"))
+        {
+            var sources = AppServices.Instance.Settings.Sources;
+            var before = string.Join(" | ", sources.Select(s => s.Name));
+            if (sources.Count >= 3)
+            {
+                MoveSourceOrder(sources[0].Id, sources[2].Id);
+                (ContentFrame.Content as SourcesPage)?.ReloadOrder();
+            }
+            var after = string.Join(" | ", sources.Select(s => s.Name));
+            Trace.Write($"reorder test before: {before} / after: {after}");
+            Close();
+            return;
+        }
+
         // --playlist <容器 id>：只量选集加载耗时（不起播放器、不占带宽），
         // 用来对比「边播边拼选集」时服务端响应慢多少。
         if (ArgumentAfter("--playlist") is { Length: > 0 } playlistOnly &&
@@ -1291,11 +1307,16 @@ public partial class MainWindow : FluentWindow
         var settings = services.Settings;
 
         var items = settings.Sources
-            .Select(source => new SourceNavItem(
-                source.Id,
-                source.Name,
-                services.Connections.Any(c => c.Id == source.Id && c.Ok),
-                SourceIcons.Pack(source.Kind)))
+            .Select(source =>
+            {
+                var connection = services.Connections.FirstOrDefault(c => c.Id == source.Id);
+                return new SourceNavItem(
+                    source.Id,
+                    source.Name,
+                    connection?.Ok == true,
+                    connection?.Connecting == true,
+                    SourceIcons.Pack(source.Kind));
+            })
             .ToList();
 
         var selected = settings.LastSourceId;
@@ -1347,10 +1368,120 @@ public partial class MainWindow : FluentWindow
     // 点的是已经选中的源时 SelectionChanged 不触发，所以点击也单独接一下。
     private void OnSourceItemClick(object sender, MouseButtonEventArgs e)
     {
+        // 刚拖完松手也会走到这里，别顺手把源打开。
+        if (_sourceDraggedNow)
+        {
+            return;
+        }
+
         if (sender is FrameworkElement { Tag: string id })
         {
             OpenSource(id);
         }
+    }
+
+    /// <summary>左侧服务器列表拖动排序：按下某项、移动超过阈值、松手时换位置。</summary>
+    private Point _sourceNavDragStart;
+    private SourceNavItem? _sourceNavDragItem;
+    private bool _sourceNavDragging;
+    private bool _sourceDraggedNow;
+
+    private void OnSourceNavPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _sourceNavDragStart = e.GetPosition(SourceNav);
+        _sourceNavDragItem = (e.OriginalSource as FrameworkElement)?.DataContext as SourceNavItem;
+        _sourceNavDragging = false;
+        Trace.Write("navdrag down " + (_sourceNavDragItem?.Id ?? "null"));
+    }
+
+    private void OnSourceNavPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _sourceNavDragItem is null)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(SourceNav);
+        if (!_sourceNavDragging &&
+            Math.Abs(position.X - _sourceNavDragStart.X) < 8 &&
+            Math.Abs(position.Y - _sourceNavDragStart.Y) < 8)
+        {
+            return;
+        }
+
+        // 进入拖动状态：松手时再落位，免得每移动一格就重建一次列表。
+        if (!_sourceNavDragging)
+        {
+            Trace.Write("navdrag start " + _sourceNavDragItem.Id);
+        }
+
+        _sourceNavDragging = true;
+        Cursor = Cursors.SizeAll;
+    }
+
+    private void OnSourceNavPreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        var dragging = _sourceNavDragging;
+        var source = _sourceNavDragItem;
+        _sourceNavDragging = false;
+        _sourceNavDragItem = null;
+        Cursor = Cursors.Arrow;
+
+        if (!dragging || source is null)
+        {
+            return;
+        }
+
+        // 这次 MouseUp 来自拖拽，不要再当成「点开源」。
+        _sourceDraggedNow = true;
+        Dispatcher.BeginInvoke(() => _sourceDraggedNow = false);
+
+        var target = DataContextAt<SourceNavItem>(SourceNav, e.GetPosition(SourceNav));
+        Trace.Write($"navdrag up dragging={dragging} from={source.Id} to={target?.Id ?? "null"}");
+        if (target is null || target.Id == source.Id)
+        {
+            return;
+        }
+
+        MoveSourceOrder(source.Id, target.Id);
+        e.Handled = true;
+    }
+
+    /// <summary>把 dragId 挪到 targetId 的位置，顺序写回设置，两边列表一起刷新。</summary>
+    private void MoveSourceOrder(string dragId, string targetId)
+    {
+        var sources = AppServices.Instance.Settings.Sources;
+        var from = sources.FindIndex(s => s.Id == dragId);
+        var to = sources.FindIndex(s => s.Id == targetId);
+        if (from < 0 || to < 0 || from == to)
+        {
+            return;
+        }
+
+        var item = sources[from];
+        sources.RemoveAt(from);
+        sources.Insert(to, item);
+        AppServices.Instance.Settings.Save();
+
+        RefreshSourceStatus();
+        (ContentFrame.Content as SourcesPage)?.ReloadOrder();
+    }
+
+    /// <summary>鼠标位置下面的数据项（沿视觉树往上找 DataContext）。</summary>
+    private static T? DataContextAt<T>(UIElement root, Point point) where T : class
+    {
+        var hit = root.InputHitTest(point) as DependencyObject;
+        while (hit is not null)
+        {
+            if (hit is FrameworkElement { DataContext: T value })
+            {
+                return value;
+            }
+
+            hit = VisualTreeHelper.GetParent(hit);
+        }
+
+        return null;
     }
 
     /// <summary>给设置页用：加完本地源直接跳到它的首页。</summary>
@@ -1379,11 +1510,12 @@ public partial class MainWindow : FluentWindow
 
     private sealed class SourceNavItem
     {
-        public SourceNavItem(string id, string name, bool ok, string iconPath)
+        public SourceNavItem(string id, string name, bool ok, bool pending, string iconPath)
         {
             Id = id;
             Name = name;
             Ok = ok;
+            Pending = pending;
             IconPath = iconPath;
         }
 
@@ -1392,6 +1524,9 @@ public partial class MainWindow : FluentWindow
         public string Name { get; }
 
         public bool Ok { get; }
+
+        /// <summary>还在建连：状态点用灰色。</summary>
+        public bool Pending { get; }
 
         /// <summary>侧栏名字左边的服务器图标（pack URI）。</summary>
         public string IconPath { get; }

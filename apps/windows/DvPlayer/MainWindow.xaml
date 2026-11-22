@@ -92,6 +92,9 @@
                    BorderThickness="0"
                    Margin="0,0,0,8"
                    ItemContainerStyle="{StaticResource NavItem}"
+                   PreviewMouseLeftButtonDown="OnSourceNavPreviewMouseDown"
+                   PreviewMouseMove="OnSourceNavPreviewMouseMove"
+                   PreviewMouseLeftButtonUp="OnSourceNavPreviewMouseUp"
                    SelectionChanged="OnSourceSelectionChanged">
             <ListBox.ItemTemplate>
               <DataTemplate>
@@ -116,6 +119,10 @@
                           <Style.Triggers>
                             <DataTrigger Binding="{Binding Ok}" Value="True">
                               <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                            </DataTrigger>
+                            <!-- 还在建连：灰点，别让人以为已经失败。 -->
+                            <DataTrigger Binding="{Binding Pending}" Value="True">
+                              <Setter Property="Fill" Value="{StaticResource FaintBrush}" />
                             </DataTrigger>
                           </Style.Triggers>
                         </Style>

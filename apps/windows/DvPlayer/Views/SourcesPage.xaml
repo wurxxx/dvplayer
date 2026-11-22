@@ -27,7 +27,11 @@
       <StackPanel Margin="0,0,0,28">
         <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
 
-        <ItemsControl x:Name="SourceGrid" Margin="0,14,0,0">
+        <!-- 卡片可以拖动排序：按住拖到另一个源上松手，就占它的位置，顺序写回设置。 -->
+        <ItemsControl x:Name="SourceGrid" Margin="0,14,0,0"
+                      PreviewMouseLeftButtonDown="OnSourceGridPreviewMouseDown"
+                      PreviewMouseMove="OnSourceGridPreviewMouseMove"
+                      PreviewMouseLeftButtonUp="OnSourceGridPreviewMouseUp">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <WrapPanel />

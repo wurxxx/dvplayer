@@ -5,7 +5,7 @@
 //! - 所有指针参数可以为空（返回 ok=false 的 JSON，而不是崩溃）；
 //! - 统一响应 `{"ok":true,"data":...}` / `{"ok":false,"error":"..."}`。
 
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
@@ -386,6 +386,63 @@ pub extern "C" fn dv_hub_add_many(handle: *mut HubHandle, configs: *const c_char
         };
 
         reply(Ok(h.inner.add_many(&parsed)))
+    })
+}
+
+/// 单个源连完之后立刻回调一次。参数是 `SourceConnect` 的 JSON 和调用方的 user_data。
+///
+/// 回调可能从多个建连线程同时进来，实现方要自己保证线程安全
+/// （C# 用 GCHandle 固定委托并转 UI 线程，Swift 用 box + Task @MainActor）。
+pub type HubConnectCallback = extern "C" fn(*const c_char, *mut c_void);
+
+/// 并行添加并登录多个源，**每连完一个就回调一次**，最后返回完整结果数组。
+///
+/// 和 `dv_hub_add_many` 相同，只是界面不用等最慢的那个才更新状态。
+#[no_mangle]
+pub extern "C" fn dv_hub_add_many_stream(
+    handle: *mut HubHandle,
+    configs: *const c_char,
+    callback: Option<HubConnectCallback>,
+    user_data: *mut c_void,
+) -> *mut c_char {
+    guard(|| {
+        let Some(h) = (unsafe { handle.as_mut() }) else {
+            return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
+                "null handle".into(),
+            )));
+        };
+
+        let Some(json) = read_cstr(configs) else {
+            return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
+                "null configs".into(),
+            )));
+        };
+
+        let parsed: Vec<SourceConfig> = match serde_json::from_str(&json) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                return reply::<Vec<crate::hub::SourceConnect>>(Err(MediaError::Other(
+                    format!("configs 解析失败：{err}"),
+                )));
+            }
+        };
+
+        // *mut c_void 不是 Send/Sync，转成 usize 才能在多线程闭包里用。
+        let user = user_data as usize;
+        let emit = |info: crate::hub::SourceConnect| {
+            let Some(cb) = callback else {
+                return;
+            };
+            let Ok(text) = serde_json::to_string(&info) else {
+                return;
+            };
+            let Ok(cstr) = CString::new(text) else {
+                return;
+            };
+            cb(cstr.as_ptr(), user as *mut c_void);
+        };
+
+        reply(Ok(h.inner.add_many_stream(&parsed, emit)))
     })
 }
 

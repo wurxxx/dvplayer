@@ -84,6 +84,55 @@ public sealed class MediaCore : IDisposable
         return Read(ptr, root => root.Deserialize<List<SourceConnectDto>>(Json) ?? new());
     }
 
+    /// <summary>
+    /// 并行建连多个源，`onEach` 在每个源刚连完时立即回调（哪个先完成哪个先到，
+    /// 回调来自建连线程）。返回值仍是全部完成后的完整结果。
+    /// </summary>
+    public ApiResult<List<SourceConnectDto>> AddManyStream(
+        IReadOnlyList<SourceConfig> configs, Action<SourceConnectDto> onEach)
+    {
+        var json = JsonSerializer.Serialize(configs, Json);
+        void OnConnect(IntPtr ptr, IntPtr userData)
+        {
+            if (ptr == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var text = Marshal.PtrToStringUTF8(ptr);
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            try
+            {
+                var dto = JsonSerializer.Deserialize<SourceConnectDto>(text, Json);
+                if (dto is not null)
+                {
+                    onEach(dto);
+                }
+            }
+            catch (JsonException)
+            {
+                // 单个源的回报格式不对不该拖垮其它源。
+            }
+        }
+
+        ConnectCallback callback = OnConnect;
+        var pinned = GCHandle.Alloc(callback);
+        try
+        {
+            var ptr = dv_hub_add_many_stream(
+                _handle, json, callback, GCHandle.ToIntPtr(pinned));
+            return Read(ptr, root => root.Deserialize<List<SourceConnectDto>>(Json) ?? new());
+        }
+        finally
+        {
+            pinned.Free();
+        }
+    }
+
     /// <summary>已连上的源（设置页显示状态用）。</summary>
     public ApiResult<List<SourceInfoDto>> Sources()
     {
@@ -376,6 +425,16 @@ public sealed class MediaCore : IDisposable
     private static extern IntPtr dv_hub_add_many(
         IntPtr handle,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string configsJson);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ConnectCallback(IntPtr json, IntPtr userData);
+
+    [DllImport(Lib, EntryPoint = "dv_hub_add_many_stream", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr dv_hub_add_many_stream(
+        IntPtr handle,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string configsJson,
+        ConnectCallback callback,
+        IntPtr userData);
 
     [DllImport(Lib, EntryPoint = "dv_hub_sources", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr dv_hub_sources(IntPtr handle);

@@ -32,6 +32,8 @@ final class AppState: ObservableObject {
         detailItemId = itemId
     }
     @Published var connections: [SourceConnection] = []
+    /// 还在建连的源。卡片 / 侧栏据此显示「正在连接…」和灰点。
+    @Published var pendingConnections: Set<String> = []
     @Published var libraries: [MediaLibrary] = []
     @Published var records: [PlayRecord] = []
     @Published var favorites: [MediaItem] = []
@@ -79,6 +81,18 @@ final class AppState: ObservableObject {
 
         guard hasSources else {
             page = .sources
+            return
+        }
+
+        // 自检：把第一个源拖到最后一个位置，验证排序真的写回设置。
+        if ProcessInfo.processInfo.environment["DVPLAYER_REORDER_TEST"] == "1" {
+            let before = settings.sources.map(\.name).joined(separator: " | ")
+            if settings.sources.count >= 2 {
+                moveSource(settings.sources[0].id, to: settings.sources[settings.sources.count - 1].id)
+            }
+            let after = settings.sources.map(\.name).joined(separator: " | ")
+            NSLog("[ReorderTest] before: %@ / after: %@", before, after)
+            DispatchQueue.main.async { NSApp.terminate(nil) }
             return
         }
 
@@ -132,9 +146,17 @@ final class AppState: ObservableObject {
             return
         }
 
+        // 每个源先以「正在连接」出现在列表里：谁先连完谁先变状态，
+        // 不用等最慢的那个（以前是全部完成才一次性写结果）。
+        let configs = settings.sources
+        pendingConnections = Set(configs.map(\.id))
+        connections = configs.map {
+            SourceConnection(id: $0.id, name: $0.name, kind: $0.kind,
+                             ok: false, error: nil)
+        }
+
         // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
         // 挂载和登录都是网络等待：每源一个任务并行做，3 个服务器不用等 3 份时间。
-        let configs = settings.sources
         var prepared: [(config: SourceConfig, effective: SourceConfig?, error: String?)] = []
         await withTaskGroup(of: (SourceConfig, SourceConfig?, String?).self) { group in
             for config in configs {
@@ -148,6 +170,12 @@ final class AppState: ObservableObject {
             }
             for await item in group {
                 prepared.append((config: item.0, effective: item.1, error: item.2))
+                // 挂载失败也算这个源出结果了，立刻标出来。
+                if let error = item.2 {
+                    applyConnection(SourceConnection(id: item.0.id, name: item.0.name,
+                                                     kind: item.0.kind, ok: false,
+                                                     error: error))
+                }
             }
         }
 
@@ -160,7 +188,11 @@ final class AppState: ObservableObject {
         let toConnect = prepared.compactMap { $0.effective }
         if !toConnect.isEmpty {
             do {
-                for connect in try await hub.addMany(toConnect) {
+                // 每连完一个源就回调一次，卡片和侧栏立即更新。
+                let streamed = try await hub.addManyStream(toConnect) { [weak self] connection in
+                    Task { @MainActor in self?.applyConnection(connection) }
+                }
+                for connect in streamed {
                     connects[connect.id] = connect
                 }
             } catch {
@@ -189,6 +221,7 @@ final class AppState: ObservableObject {
         cleanupStaleMounts(keep: Set(settings.sources.map(\.id)))
 
         connections = result
+        pendingConnections.removeAll()
         guard result.contains(where: \.ok) else {
             coreError = result.map { "\($0.name)：\($0.error ?? "连接失败")" }
                 .joined(separator: "；")
@@ -203,6 +236,34 @@ final class AppState: ObservableObject {
         // 启动后停在「服务器」页，菜单选中哪一项，右边就是哪一页。
         connecting = false
         await refresh()
+    }
+
+    /// 单个源的连接结果到了：按 id 替换，清掉它的「连接中」标记。
+    private func applyConnection(_ connection: SourceConnection) {
+        if let index = connections.firstIndex(where: { $0.id == connection.id }) {
+            connections[index] = connection
+        } else {
+            connections.append(connection)
+        }
+        pendingConnections.remove(connection.id)
+    }
+
+    /// 拖动排序：把 id 挪到 targetId 的位置，顺序写回设置。
+    func moveSource(_ id: String, to targetId: String) {
+        guard id != targetId,
+              let from = settings.sources.firstIndex(where: { $0.id == id }),
+              let to = settings.sources.firstIndex(where: { $0.id == targetId }) else {
+            return
+        }
+
+        let item = settings.sources.remove(at: from)
+        settings.sources.insert(item, at: to)
+        settings.save()
+
+        // 侧栏直接读 connections，顺序也跟着换，不用等重连。
+        let order = Dictionary(uniqueKeysWithValues:
+            settings.sources.enumerated().map { ($1.id, $0) })
+        connections.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
     }
 
     /// 库里列表 + 观看记录 + 收藏（收藏页要用）。

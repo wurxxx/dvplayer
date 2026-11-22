@@ -102,7 +102,12 @@ struct SourcesPage: View {
                     emptyState
                 } else {
                     ForEach(state.settings.sources) { config in
+                        // 拖到另一个源上就占它的位置，顺序写回设置。
                         sourceCard(config)
+                            .onDrag { NSItemProvider(object: config.id as NSString) }
+                            .onDrop(of: [.text], isTargeted: nil) { providers in
+                                dropSource(providers, onto: config.id)
+                            }
                     }
                 }
 
@@ -212,8 +217,7 @@ struct SourcesPage: View {
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(connection?.ok == true ? Theme.success
-                              : (connection == nil ? Theme.faint : Theme.danger))
+                        .fill(dotColor(config, connection))
                         .frame(width: 6, height: 6)
                     Text(statusText(config, connection))
                         .font(.system(size: 12))
@@ -261,9 +265,29 @@ struct SourcesPage: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusCard))
     }
 
+    /// 连上绿点、失败红点、还在连灰点、没试过灰点。
+    private func dotColor(_ config: SourceConfig, _ connection: SourceConnection?) -> Color {
+        if state.pendingConnections.contains(config.id) { return Theme.faint }
+        guard let connection else { return Theme.faint }
+        return connection.ok ? Theme.success : Theme.danger
+    }
+
+    /// 拖拽落位：把拖过来的源挪到 targetId 的位置。
+    private func dropSource(_ providers: [NSItemProvider], onto targetId: String) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let id = object as? String else { return }
+            Task { @MainActor in state.moveSource(id, to: targetId) }
+        }
+        return true
+    }
+
     private func statusText(_ config: SourceConfig, _ connection: SourceConnection?) -> String {
         guard let connection else {
-            return state.connecting ? "正在连接…" : "未连接"
+            return "未连接"
+        }
+        if state.pendingConnections.contains(config.id) {
+            return "正在连接…"
         }
         if connection.ok {
             var parts = ["已连接"]
