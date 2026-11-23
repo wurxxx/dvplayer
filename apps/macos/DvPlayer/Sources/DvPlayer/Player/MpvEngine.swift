@@ -154,6 +154,9 @@ final class MpvEngine {
             "--keep-open=yes",
             "--no-terminal",
             "--focus-on=never",     // 窗口焦点归浮层，mpv 不抢
+            // 播放器是浮层里的画面，不该再占一个 Dock 图标 / Cmd-Tab 条目：
+            // 默认 regular 会多出一个「mpv」，看起来像开了两个 App。
+            "--macos-app-activation-policy=accessory",
             "--title=DV Player",
             "--geometry=\(geometry.value)",
             "--input-ipc-server=\(socketPath)",
@@ -254,6 +257,13 @@ final class MpvEngine {
         }
         ipc.command(["set_property", "secondary-sub-visibility", "yes"])
         ready = true
+
+        // 起进程时窗口还没摆好（PlayerWindow 的 buildContentView 早于 IPC 连上）：
+        // 那一次 syncGeometry 被 `guard ready` 挡掉，这里补一次，否则 mpv 停在
+        // 启动参数里的 geometry 上，和浮层错开几十点。
+        if videoFrame != .zero {
+            syncGeometry(to: videoFrame)
+        }
 
         if let pendingLoad {
             self.pendingLoad = nil
@@ -530,9 +540,21 @@ final class MpvEngine {
         // 先选屏幕再给相对坐标：副屏在主屏左侧时，绝对坐标是负数，
         // mpv 的 geometry 会把负号当成「从右边算」，窗口就跑错屏了。
         let geometry = Self.geometry(for: frame)
+        // `geometry` 只在窗口创建时生效；运行时改必须先把 force-window-position 打开，
+        // 否则命令返回 success 但窗口纹丝不动（实测：拖动浮层后画面停在原地）。
+        ipc.command(["set_property", "force-window-position", "yes"])
         ipc.command(["set_property", "screen", geometry.screen])
         ipc.command(["set_property", "geometry", geometry.value])
+        if geometry.value != lastAppliedGeometry {
+            lastAppliedGeometry = geometry.value
+            NSLog("[Play] sync geometry=\(geometry.value) screen=\(geometry.screen) " +
+                  "frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)) " +
+                  "\(Int(frame.width))x\(Int(frame.height))")
+        }
     }
+
+    /// 上一次真正发给 mpv 的 geometry，只在变化时打日志。
+    private var lastAppliedGeometry = ""
 
     func toggleMuteIPC() {
         ipc.command(["set_property", "mute", muted ? "no" : "yes"])
@@ -841,22 +863,29 @@ final class MpvEngine {
         return components.string ?? url
     }
 
-    /// AppKit 的窗口 frame（左下原点）→ mpv 的 geometry（左上原点，主屏坐标）。
-    /// 把浮层的屏幕坐标换成 mpv 的 `--screen` + `--geometry`。
-    /// mpv 的 geometry 只接受正偏移（负号是「从右边算」），
-    /// 所以先选屏幕，再算相对这块屏幕的坐标；副屏在主屏左边时不会被夹到主屏。
+    /// AppKit 的窗口 frame（左下原点，单位是点）→ mpv 的 `--screen` + `--geometry`。
+    ///
+    /// 两个坑，都是实测出来的（1080p@2x 屏）：
+    /// - **geometry 的单位是像素，不是点**：传 `1280x720` 得到的是 640x360 点的窗口，
+    ///   正好是浮层的一半，画面缩在左上角。要按屏幕的 backingScaleFactor 乘回去。
+    /// - **y 的原点是菜单栏下方**，不是屏幕顶：传 `+200+200` 实际落在 y=130 点，
+    ///   比 AppKit 算出来的低 30 点。这里把菜单栏高度补进去。
+    /// mpv 的 geometry 只接受正偏移（负号是「从右边算」），所以先选屏幕再算相对坐标，
+    /// 副屏在主屏左边时不会被夹到主屏。
     private static func geometry(for frame: NSRect) -> (screen: Int, value: String) {
         let screens = NSScreen.screens
         let center = NSPoint(x: frame.midX, y: frame.midY)
         let index = screens.firstIndex { $0.frame.contains(center) } ?? 0
-        let screenFrame = screens.indices.contains(index)
-            ? screens[index].frame
-            : (NSScreen.main?.frame ?? .zero)
+        let screen = screens.indices.contains(index) ? screens[index] : NSScreen.main
+        let screenFrame = screen?.frame ?? .zero
+        let scale = screen?.backingScaleFactor ?? 1
+        // 菜单栏高度：visibleFrame 顶端与 frame 顶端之差。
+        let menuBar = max(0, screenFrame.maxY - (screen?.visibleFrame.maxY ?? screenFrame.maxY))
 
-        let x = max(0, Int((frame.origin.x - screenFrame.minX).rounded()))
-        let y = max(0, Int((screenFrame.maxY - frame.maxY).rounded()))
-        let width = Int(frame.width.rounded())
-        let height = Int(frame.height.rounded())
+        let x = max(0, Int(((frame.origin.x - screenFrame.minX) * scale).rounded()))
+        let y = max(0, Int(((screenFrame.maxY - frame.maxY - menuBar) * scale).rounded()))
+        let width = Int((frame.width * scale).rounded())
+        let height = Int((frame.height * scale).rounded())
         return (index, "\(width)x\(height)+\(x)+\(y)")
     }
 }
