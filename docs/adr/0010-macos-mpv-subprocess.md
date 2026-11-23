@@ -1,7 +1,13 @@
 # ADR-0010：macOS 改用 mpv 子进程 + 透明浮层窗（支持 Dolby Vision）
 
-- 状态：已接受（取代 ADR-0003 的 macOS 播放实现）
+- 状态：**已废弃**（被 ADR-0011 取代）
 - 日期：2026-11-21
+
+> **2026-11-23 更新**：mpv 在 2026-11-22 合入 `ad9d850`（add a gpu-next render
+> backend）/ `eb565a2`（renderer selection），render API 现在能用 gpu-next，
+> 跑在 OpenGL 上、不需要 Vulkan。本 ADR 的核心前提（「gpu-next 只能用 mpv
+> 自己的窗口」）已经不成立，macOS 播放层已改回单窗口 + render API。
+> 见 ADR-0011 与 `.opencode/drag-notes.md`。
 
 ## 背景
 

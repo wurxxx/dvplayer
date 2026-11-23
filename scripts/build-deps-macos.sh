@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 从源码构建 M0 所需的最小栈：
-#   FFmpeg 9.0.2 + libplacebo 7.387.0 + libass 0.17.4 + mpv 0.42.0
+#   FFmpeg 9.0.2 + libplacebo 7.387.0 + libass 0.17.4 + mpv master（gpu-next render backend）
 #
 # 为什么不用 Homebrew：本机是 Intel + macOS 26，Homebrew 已把该配置列为
 # Tier 3、不再提供 bottle；且 /usr/local 权限异常。这里全部装进项目内的
@@ -100,14 +100,22 @@ else
   make install
 fi
 
-# ------------------------------------------------------------------ mpv 0.42
-if [ -x "$PREFIX/bin/mpv" ]; then
-  step "mpv 已安装，跳过"
+# ------------------------------------------------------------------ mpv
+# 必须是 2026-11-22 之后的 master：render API 从那时起才有 gpu-next 后端
+# （`ad9d850` add gpu-next render backend / `eb565a2` add renderer selection）。
+# 没有它，render API 只能用 legacy `gpu`，Dolby Vision P5 会把 IPT 当 YCbCr 解，
+# 画面发紫（framebuffer 实测 meanDiff 30–54）。
+MPV_COMMIT=${MPV_COMMIT:-1eb941f}
+MPV_STAMP="$PREFIX/lib/libmpv.2.dylib"
+if [ -f "$MPV_STAMP" ] && [ "$(cat "$PREFIX/.mpv-commit" 2>/dev/null)" = "$MPV_COMMIT" ]; then
+  step "mpv 已安装（$MPV_COMMIT），跳过"
 else
-  step "mpv v0.42.0"
+  step "mpv $MPV_COMMIT"
   if [ ! -d "$SRC/mpv" ]; then
-    git clone --depth 1 --branch v0.42.0 https://github.com/mpv-player/mpv.git "$SRC/mpv"
+    git clone https://github.com/mpv-player/mpv.git "$SRC/mpv"
   fi
+  git -C "$SRC/mpv" fetch --depth 200 origin master
+  git -C "$SRC/mpv" checkout --force "$MPV_COMMIT"
 
   # macOS 补丁：-Dvulkan=disabled 时 metal_layer.swift 不进编译，
   # view.swift 里的 MetalLayer 类型就找不到。改成 CAMetalLayer 并显式 import QuartzCore。
@@ -128,11 +136,11 @@ else
     -Dlibarchive=disabled \
     -Dcaca=disabled \
     -Ddrm=disabled \
-    -Dwayland=disabled \
-    -Dx11=disabled \
+    -Dgl=enabled \
     -Dvulkan=disabled \
     -Djavascript=disabled \
     -Dlua=disabled \
+    -Dcplugins=disabled \
     -Dalsa=disabled \
     -Dpulse=disabled \
     -Djack=disabled \
@@ -143,6 +151,7 @@ else
     -Drubberband=disabled
   meson compile -C "$SRC/mpv/_build"
   meson install -C "$SRC/mpv/_build"
+  echo "$MPV_COMMIT" > "$PREFIX/.mpv-commit"
 fi
 
 step "done"

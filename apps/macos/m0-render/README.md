@@ -54,13 +54,20 @@ decoder-frame-drop-count     0
 
 ## 它不能证明什么
 
-- 不能证明 DV：render API 只有 legacy `gpu`，没有 gpu-next。
-  本机 mpv 0.42 连 OpenGL 的 GPU context 都没有（`--vo=gpu` 直接失败），
-  macOS 想走 gpu-next 只能上 Vulkan。
+- **旧版**（mpv 0.42.0，2026-11-19 构建）不能证明 DV：那时 render API 只有
+  legacy `gpu`，没有 gpu-next。**这个限制已经解除**——mpv 在 2026-11-22 合入
+  `ad9d850`（add a gpu-next render backend）/ `eb565a2`（renderer selection）后，
+  render API 可以用 gpu-next，跑在 OpenGL 上，不需要 Vulkan。
+  详见 `.opencode/drag-notes.md`。
+- 这个程序本身没有截图 / 颜色断言代码，只打印属性。「P5 是紫色」是当时
+  **人眼看屏幕**得出的结论，不是测量。
 - 不能替代 Windows 的 D3D11 路径验证。
 - 没有 HDR 显示器时，只能验证渲染是否正常，不能目视验收 HDR10。
 
-## P5 是紫色（预期）
+## P5 是紫色（旧版 mpv 下，已修复）
+
+> 2026-11-23 更新：新版 mpv（`1eb941f` 及之后）用 `MPV_RENDER_PARAM_RENDERER`
+> 选 `gpu-next` 后，P5 颜色正确。下面这段描述的是**旧版 legacy `gpu`** 的行为。
 
 `samples/p5.mkv` 能正常解码、帧率也对，但画面偏紫红。
 

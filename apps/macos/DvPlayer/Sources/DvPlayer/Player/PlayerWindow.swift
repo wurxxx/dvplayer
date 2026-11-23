@@ -246,6 +246,45 @@ final class PlayerLauncher {
         Task { await session.start() }
     }
 
+    /// 自检：直接播一个本地文件，不经过媒体库 / 原盘挂载。
+    ///
+    /// 验证 Dolby Vision 色彩必须走这条：`samples/p5.mkv` 是 Profile 5，
+    /// legacy `gpu` 渲染会发紫，gpu-next 才正常。
+    func playLocalFile(_ path: String, startSeconds: Double? = nil) {
+        if let existing = controller {
+            existing.close()
+            controller = nil
+        }
+
+        let frame = PlayerWindowController.preferredFrame()
+        let local = LocalPlayback(itemId: "local:" + (path as NSString).lastPathComponent,
+                                  title: (path as NSString).lastPathComponent,
+                                  url: path,
+                                  duration: 0,
+                                  startSeconds: startSeconds)
+        guard let session = PlayerSession(itemId: local.itemId,
+                                          startSeconds: startSeconds,
+                                          playlist: [],
+                                          seriesTitle: nil,
+                                          hintTitle: local.title,
+                                          frame: frame,
+                                          local: local) else {
+            AppState.shared.showToast("播放器启动失败")
+            return
+        }
+
+        let window = PlayerWindowController(session: session, frame: frame) { [weak self] in
+            self?.controller = nil
+        }
+        session.onClose = { [weak window] in window?.closePlayer() }
+
+        controller = window
+        window.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window.window?.makeKeyAndOrderFront(nil)
+        Task { await session.start() }
+    }
+
     /// 从观看记录续播：先播记录本身，选集后台补。
     func play(record: PlayRecord) {
         play(itemId: record.itemId,
@@ -342,11 +381,12 @@ final class PlayerLauncher {
 
 // MARK: - 窗口
 
-/// 播放窗是「浮层」：视频由 mpv 自己的窗口画，这个窗口透明地盖在它上面。
+/// 播放窗：视频和控件在**同一个窗口**里。
 ///
-/// 为什么分两个窗口：macOS 上拿 Dolby Vision 必须走 gpu-next，而 gpu-next
-/// 只有 mpv 自己的窗口（cocoa-cb + Vulkan）能用，render API 够不到。
-/// 代价就是位置 / 大小 / 全屏都要自己跟 mpv 同步（`syncGeometry`）。
+/// 和 Windows 的 `PlayWindow` 同构——mpv 通过 render API 把画面画进
+/// `MpvVideoView`（窗口最底层），SwiftUI 控制条是它上面的兄弟视图。
+/// 所以拖动 / 缩放 / 全屏都只是移动这一个窗口，画面天然跟得上，
+/// 不需要 `geometry`、不需要把拖拽交给第二个进程、也不需要改窗口层级。
 @MainActor
 final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     let session: PlayerSession
@@ -354,17 +394,14 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
     private var keyMonitor: Any?
     private var wheelMonitor: Any?
-    /// App 激活 / 失活的通知：播放时靠它把 mpv 窗口提上 / 放下。
-    private var activationObservers: [NSObjectProtocol] = []
     private var lastWheelAt = Date.distantPast
     private var savedFrame: NSRect?
     private var zoomSavedFrame: NSRect?
     private var closeRequested = false
     /// 上一次按视频比例调过的宽高比，避免同一部视频反复改窗口。
     private var fittedAspect: Double = 0
-    /// 已把拖拽交给 mpv，正在等鼠标松开。
-    private var handedOffDrag = false
-    private var dragWatch: Timer?
+    /// 视频画布（窗口最底层）。
+    private var videoView: MpvVideoView?
 
     /// 新播放窗的初始位置：居中，最多 1280×720，四周留点边。
     static func preferredFrame() -> NSRect {
@@ -395,14 +432,14 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.minSize = NSSize(width: 380, height: 380)
         window.center()
 
-        // 透明浮层：底下的 mpv 窗口透出来。
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-
-        // 比普通窗口高：mpv 置顶时是 floating（3），浮层要再高一级（4）才盖得住
-        // 视频和 mpv 自己画的窗口。
-        window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue + 4)
+        // 不透明：视频铺满客户区，没出画时是黑底（和 Windows 一样）。
+        window.isOpaque = true
+        window.backgroundColor = .black
+        window.hasShadow = true
+        // 普通层级：和 Windows 的普通播放窗一致，切到别的 App 会被盖住。
+        window.level = .normal
+        // 让 CA 自己管 layer，视频层和控制条才能稳定合成。
+        window.contentView?.wantsLayer = true
 
         // 和主窗口一样自绘三个按钮，系统红绿灯藏掉。
         window.standardWindowButton(.closeButton)?.isHidden = true
@@ -419,18 +456,29 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         buildContentView()
         installKeyMonitor()
         installWheelMonitor()
-        installActivationObservers()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// 单窗口布局：视频画布在最底层，SwiftUI 控制条盖在它上面。
+    ///
+    /// 视频层和控件层都跟着容器自动伸缩，所以窗口拖动 / 缩放 / 全屏期间
+    /// 两者永远同步——这正是 Windows 里视频和控件同一个窗口的效果。
     private func buildContentView() {
-        guard let window else { return }
+        guard let window, let video = session.mpv?.videoView else {
+            NSLog("[Play] 没有视频画布，播放窗无法建立")
+            return
+        }
+        videoView = video
 
         let container = NSView(frame: window.contentRect(forFrameRect: window.frame))
         container.autoresizingMask = [.width, .height]
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.clear.cgColor
+        container.layer?.backgroundColor = NSColor.black.cgColor
+
+        video.frame = container.bounds
+        video.autoresizingMask = [.width, .height]
+        container.addSubview(video)
 
         let root = PlayerView(
             session: session,
@@ -439,7 +487,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
                 minimize: { [weak self] in self?.window?.miniaturize(nil) },
                 zoom: { [weak self] in self?.zoom() },
                 toggleFullscreen: { [weak self] in self?.toggleFullscreen() },
-                beginDrag: { [weak self] in self?.beginNativeDrag() }))
+                beginDrag: { [weak self] in self?.beginDrag() }))
             .environmentObject(AppState.shared)
 
         let hosting = NSHostingView(rootView: root)
@@ -453,25 +501,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = container
         window.initialFirstResponder = hosting
         window.makeFirstResponder(hosting)
-
-        // mpv 先把窗口摆好，浮层再盖上去。
-        syncGeometry(force: true)
     }
 
-    /// 浮层显示 / 移动 / 缩放 → 告诉 mpv 挪窗口。高频拖动按 40ms 合并。
-    /// 把浮层的当前 frame 交给 mpv。
-    ///
-    /// 以前这里走 0.04s 防抖：拖动 / 缩放时主线程在事件跟踪模式（
-    /// `NSEventTrackingRunLoopMode`），`DispatchQueue` 的延迟任务要等松手才执行，
-    /// 结果控制条跟着窗口走、视频停在原地。写 IPC 只是往 socket 写一行，直接同步发。
-    private func syncGeometry(force: Bool = false) {
-        applyGeometry()
-    }
-
-    private func applyGeometry() {
-        guard let window, !session.isFullscreenSwitching else { return }
-        session.mpv?.syncGeometry(to: window.frame)
-    }
 
     /// 适应窗口 = 窗口跟着视频的宽高比走（竖屏短剧就是竖窗口），
     /// 画面正好铺满客户区，不留左右 / 上下黑边。填充 / 拉伸 / 强制比例不动窗口。
@@ -516,7 +547,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
                              max(visible.minY, visible.maxY - height))
 
         window.setFrame(frame, display: true, animate: false)
-        syncGeometry(force: true)
         NSLog("[Play] fit window aspect=%.3f %.0fx%.0f", aspect, width, height)
     }
 
@@ -537,7 +567,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             zoomSavedFrame = window.frame
             window.setFrame(screen.visibleFrame, display: true)
         }
-        syncGeometry(force: true)
     }
 
     /// 假全屏：视频是另一个进程的窗口，进不了同一个 fullscreen space。
@@ -567,7 +596,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         // 先把「正在切全屏」清掉再同步：applyGeometry 会因这个标志直接返回，
         // 否则进出全屏后 mpv 的子窗口停在旧尺寸上。
         session.isFullscreenSwitching = false
-        syncGeometry(force: true)
     }
 
     // MARK: 键盘
@@ -594,127 +622,26 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    /// mpv 是另一个进程，窗口层级只能靠 `ontop` 调。
-    ///
-    /// 我们 App 活跃时把视频提到库窗口之上（否则视频区透出库页面）；
-    /// 切到别的 App 就放下来，让播放窗像普通窗口一样被盖住。
-    private func installActivationObservers() {
-        let center = NotificationCenter.default
-        for (name, active) in [(NSApplication.didBecomeActiveNotification, true),
-                               (NSApplication.didResignActiveNotification, false)] {
-            let token = center.addObserver(forName: name, object: nil, queue: .main) {
-                [weak self] _ in
-                Task { @MainActor in self?.applyActivation(active) }
-            }
-            activationObservers.append(token)
-        }
-    }
-
     // MARK: 拖动
 
-    /// 把一次窗口拖动交给 mpv 自己的窗口。
+    /// 拖动窗口。视频就在这个窗口里，所以直接让窗口服务器做原生拖动：
+    /// 和 Windows 一样，画面和控制条一起走，没有第二个进程要追。
     ///
-    /// 视频在 mpv 的独立窗口里：如果浮层用 `performDrag` 移、再发 IPC 让 mpv 跟，
-    /// 视频永远慢一拍（实测 20–30ms，快速拖动时非常明显）。这里改成开始移动后把
-    /// 浮层让开，在同一个位置补一个 mouseDown 交给 mpv——它自己就是无边框窗口，
-    /// 原生拖动由窗口服务器做，和 Windows 里视频/控件在同一个窗口一样顺。
-    ///
-    /// 拖动期间控制条不显示（浮层在让位），松手按 mpv 的真实位置摆回来。
-    /// 试过拖动期间把浮层重新显示去跟随：它会截走后续拖拽事件，视频走走停停，
-    /// 所以只能是「让开」。
-    func beginNativeDrag() {
-        guard let window, !handedOffDrag, !session.isFullscreen else { return }
-        guard session.mpv?.isAlive == true else { return }
-        handedOffDrag = true
-        window.orderOut(nil)
-
-        // orderOut 生效后再把按下转交出去，否则事件还落在浮层上。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
-            guard let self else { return }
-            // 只是点一下没拖：把窗口放回来就行。
-            guard NSEvent.pressedMouseButtons & 1 != 0 else {
-                self.finishNativeDrag()
-                return
-            }
-            Self.postMouseDown(at: NSEvent.mouseLocation)
-            self.startDragWatch()
-        }
+    /// 用 `performDrag(with:)` 而不是 `setFrameOrigin` 循环：前者把移动交给
+    /// 窗口服务器，和系统标题栏拖动同一条路径，鼠标多快都不会掉队。
+    func beginDrag() {
+        guard let window, !session.isFullscreen else { return }
+        guard let event = window.currentEvent else { return }
+        window.performDrag(with: event)
     }
 
-    /// 拖动期间只等鼠标松开；mpv 的窗口由窗口服务器自己移动。
-    private func startDragWatch() {
-        dragWatch?.invalidate()
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
-            self.finishNativeDrag()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        dragWatch = timer
-    }
-
-    /// 松手：按 mpv 窗口的真实位置把浮层摆回去，并把画面尺寸记回来。
-    private func finishNativeDrag() {
-        dragWatch?.invalidate()
-        dragWatch = nil
-        guard handedOffDrag, let window else { return }
-        handedOffDrag = false
-
-        if let frame = Self.mpvWindowFrame() {
-            window.setFrame(frame, display: true)
-            session.mpv?.syncGeometry(to: frame)
-        }
-        // 把按下交给 mpv 会让它成为前台 App（拖动期间没影响，它的窗口正好在最上面），
-        // 松手后要把焦点和层级还给我们，否则播放浮层会停在 mpv 窗口下面、看不到控制条。
-        NSApp.activate(ignoringOtherApps: true)
-        applyActivation(true)
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    /// 把按下事件补到鼠标当前位置（事件走 HID，和真鼠标一样会被路由到最上层窗口）。
-    private static func postMouseDown(at point: NSPoint) {
-        let primary = NSScreen.screens.first?.frame ?? .zero
-        // AppKit 左下原点 → CGEvent 左上原点。
-        let cg = CGPoint(x: point.x, y: primary.maxY - point.y)
-        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
-                mouseCursorPosition: cg, mouseButton: .left)?
-            .post(tap: .cghidEventTap)
-    }
-
-    /// mpv 窗口现在在屏幕上的 frame（AppKit 坐标）。
-    private static func mpvWindowFrame() -> NSRect? {
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
-                                             kCGNullWindowID) as? [[String: Any]] ?? []
-        var best: CGRect?
-        for w in list {
-            let owner = w[kCGWindowOwnerName as String] as? String ?? ""
-            guard owner.lowercased().contains("mpv") else { continue }
-            let b = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
-            let rect = CGRect(x: b["X"] as? Double ?? 0, y: b["Y"] as? Double ?? 0,
-                              width: b["Width"] as? Double ?? 0,
-                              height: b["Height"] as? Double ?? 0)
-            if rect.width < 2 || rect.height < 2 { continue }
-            if best == nil || rect.width * rect.height > best!.width * best!.height {
-                best = rect
-            }
-        }
-        guard let cg = best else { return nil }
-        let primary = NSScreen.screens.first?.frame ?? .zero
-        return NSRect(x: cg.minX, y: primary.maxY - cg.maxY,
-                      width: cg.width, height: cg.height)
-    }
-
-    /// 我们 App 活跃时，播放窗（浮层 4 + 视频 3）盖在库窗口上；切到别的 App
-    /// 时两层都落回普通层级，让播放窗像普通窗口一样被盖住（和 Windows 一致）。
-    /// 全屏时不改层级：改全屏窗口的 level 会把系统全屏搞乱。
+    /// 我们 App 活跃时把播放窗提到库窗口之上，切到别的 App 就落回普通层级
+    /// （和 Windows 的普通播放窗一致）。全屏时不改层级，免得把系统全屏搞乱。
     private func applyActivation(_ active: Bool) {
-        // 拖动期间 mpv 会被激活：层级先别动，否则浮层会掉到视频下面，控制条就没了。
-        // 松手后 finishNativeDrag 会显式恢复。
-        if handedOffDrag { return }
-        if !session.isFullscreen {
-            window?.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue
-                                           + (active ? 4 : 0))
-        }
+        guard !session.isFullscreen else { return }
+        window?.level = active
+            ? NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue + 1)
+            : .normal
         session.setOnTop(active)
     }
 
@@ -794,20 +721,17 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: NSWindowDelegate
 
-    func windowDidMove(_ notification: Notification) {
-        syncGeometry()
-    }
-
+    /// 窗口尺寸变化时视频层要重画（`CAOpenGLLayer` 的 bounds 变了）。
     func windowDidResize(_ notification: Notification) {
-        syncGeometry()
+        videoView?.scheduleRender()
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
-        syncGeometry(force: true)
+        videoView?.scheduleRender()
     }
 
-    func windowDidBecomeKey(_ notification: Notification) {
-        syncGeometry(force: true)
+    func windowDidChangeBackingProperties(_ notification: Notification) {
+        videoView?.scheduleRender()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -819,14 +743,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             NSEvent.removeMonitor(wheelMonitor)
             self.wheelMonitor = nil
         }
-        for token in activationObservers {
-            NotificationCenter.default.removeObserver(token)
-        }
-        activationObservers.removeAll()
-        dragWatch?.invalidate()
-        dragWatch = nil
-        handedOffDrag = false
-
         if savedFrame != nil {
             NSApp.presentationOptions = []
         }

@@ -39,3 +39,5 @@ apps/macos/DvPlayer/.build/
 # Python
 __pycache__/
 *.pyc
+# 本地调研笔记（不进仓库）
+.opencode/

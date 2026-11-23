@@ -1,0 +1,4 @@
+module MpvC {
+    header "include/mpv_bridge.h"
+    export *
+}

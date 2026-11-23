@@ -77,6 +77,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // 自检：`DVPLAYER_DRAGTEST=1` 播放开始后连续移动窗口，统计掉帧。
+        if ProcessInfo.processInfo.environment["DVPLAYER_DRAGTEST"] == "1" {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                Self.runDragTest()
+            }
+        }
+
         // 自检：`DVPLAYER_DISC=<iso>` 不经过媒体库，直接开原盘播放窗。
         // `DVPLAYER_DISC_TITLE=N` 选第 N 个标题（不给就弹标题框，远程没法点）。
         if let iso = ProcessInfo.processInfo.environment["DVPLAYER_DISC"], !iso.isEmpty {
@@ -164,6 +172,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if ProcessInfo.processInfo.environment["DVPLAYER_EXIT"] == "1" {
                     NSApp.terminate(nil)
                 }
+            }
+        }
+
+        // 自检：`DVPLAYER_LOCAL=<文件>` 直接播一个本地文件（DV 色彩验证用）。
+        if let path = ProcessInfo.processInfo.environment["DVPLAYER_LOCAL"], !path.isEmpty {
+            Task { @MainActor in
+                let env = ProcessInfo.processInfo.environment
+                let start = Double(env["DVPLAYER_LOCAL_START"] ?? "")
+                PlayerLauncher.shared.playLocalFile(path, startSeconds: start)
+                let wait = Double(env["DVPLAYER_PLAY_SECONDS"] ?? "") ?? 6
+                // UI 自检（暂停 / 全屏 / 切轨 / 面板）要等起播稳定再拨。
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if let spec = env["DVPLAYER_PLAY_UI"] {
+                    Self.runPlayerUI(spec)
+                }
+                try? await Task.sleep(nanoseconds: UInt64(max(0.5, wait) * 1_000_000_000))
+                if let shot = env["DVPLAYER_PLAY_FRAME"] {
+                    PlayerLauncher.shared.current?.mpv.screenshotWindow(to: shot)
+                }
+                Self.logPlayerState()
+                if let shot = env["DVPLAYER_PLAY_SHOT"] {
+                    PlayerLauncher.shared.current?.showChrome()
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    Self.capture(to: shot, window: PlayerLauncher.shared.window)
+                }
+                if env["DVPLAYER_EXIT"] == "1" { NSApp.terminate(nil) }
             }
         }
 
@@ -530,6 +564,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               + "subOnline=\(session.subtitleResults.count)/\(session.subtitleSearching) "
               + "subErr=\(session.subtitleError ?? "-") "
               + "error=\(session.error ?? "-")")
+    }
+
+    /// 自检：`DVPLAYER_DRAGTEST=1` 连续移动播放窗，统计渲染帧率。
+    ///
+    /// 验证「拖动时视频不掉队」：单窗口后视频和控件同一个窗口，窗口移动时
+    /// Core Animation 自己搬 layer，mpv 的渲染队列只负责出新帧，不该被窗口移动
+    /// 拖慢。这里记录拖动前后的 `mpv` 掉帧计数和实际窗口移动速率。
+    @MainActor
+    static func runDragTest() {
+        guard let window = PlayerLauncher.shared.window,
+              let view = PlayerLauncher.shared.current?.mpv?.videoView else {
+            NSLog("[DragTest] 没有播放窗")
+            NSApp.terminate(nil)
+            return
+        }
+
+        let before = PlayerLauncher.shared.current?.mpv?.droppedFrames ?? 0
+        let framesBefore = view.drawnFrames
+        let origin = window.frame.origin
+        let start = Date()
+        let steps = 120
+        for index in 1...steps {
+            var frame = window.frame
+            frame.origin.x = origin.x + Double(index) * 3
+            window.setFrame(frame, display: true, animate: false)
+            // 6ms：比 60Hz（16.6ms）还快，模拟快速拖动。
+            Thread.sleep(forTimeInterval: 0.006)
+
+            // 拖到一半抓一帧：确认画面内容跟着走、不是黑帧 / 冻结帧。
+            if index == steps / 2, let path = ProcessInfo.processInfo
+                .environment["DVPLAYER_DRAGTEST_FRAME"] {
+                if view.snapshot(to: path) {
+                    NSLog("[DragTest] mid-drag frame -> \(path)")
+                } else {
+                    NSLog("[DragTest] mid-drag frame 失败")
+                }
+            }
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        let after = PlayerLauncher.shared.current?.mpv?.droppedFrames ?? 0
+        let framesAfter = view.drawnFrames
+        NSLog("[DragTest] moves=\(steps) elapsed=\(String(format: "%.2f", elapsed))s "
+              + "rate=\(String(format: "%.0f", Double(steps) / elapsed))/s "
+              + "dropped \(before)->\(after) frames \(framesBefore)->\(framesAfter) "
+              + "fps=\(String(format: "%.0f", Double(framesAfter - framesBefore) / elapsed))")
+
+        var frame = window.frame
+        frame.origin = origin
+        window.setFrame(frame, display: true, animate: false)
+        NSApp.terminate(nil)
     }
 
     /// 合成一次鼠标点击 + 几个字符，验证控件真的能拿到焦点。
