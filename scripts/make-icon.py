@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""生成 Windows 可执行文件的图标（`apps/windows/DvPlayer/Assets/DvPlayer.ico`）。
+"""生成两端的应用图标。
+
+- Windows：`apps/windows/DvPlayer/Assets/DvPlayer.ico`（多尺寸 ICO，16 px 下
+  自动用更粗的三角形版本，避免糊成一团）。
+- macOS：`assets/branding/AppIcon.icns`（`build.sh` 拷进 .app，Dock / Finder 用）。
+- 两份预览：`assets/branding/DvPlayer-256.png` 与 Windows 工程内的一份。
 
 图形和侧栏 logo 一致：琥珀色圆角方块 + 深色摄像机（Segoe MDL2 `Video` 的简化版）。
-产物是多尺寸 ICO，16 px 下自动用更粗的三角形版本，避免糊成一团。
 
-用法（需要 Pillow）：
+用法（需要 Pillow；macOS 图标还要系统的 iconutil）：
 
     python3 scripts/make-icon.py
 """
@@ -12,8 +16,11 @@
 from __future__ import annotations
 
 import io
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -27,6 +34,8 @@ OUT = ROOT / "apps" / "windows" / "DvPlayer" / "Assets" / "DvPlayer.ico"
 # （WPF 的 `Image Source` 只认工程内资源）。
 PREVIEW = ROOT / "assets" / "branding" / "DvPlayer-256.png"
 WINDOWS_PREVIEW = ROOT / "apps" / "windows" / "DvPlayer" / "Assets" / "DvPlayer-256.png"
+# macOS 的 .app 图标；Info.plist 的 CFBundleIconFile 指向它（不带扩展名）。
+ICNS = ROOT / "assets" / "branding" / "AppIcon.icns"
 
 AMBER_TOP = (255, 194, 74, 255)     # #FFC24A
 AMBER_BOTTOM = (245, 160, 0, 255)   # #F5A000
@@ -150,6 +159,31 @@ def write_ico(path: Path, frames: list[Image.Image]) -> None:
     path.write_bytes(bytes(directory) + b"".join(data for data, _ in payloads))
 
 
+def write_icns(master: Image.Image) -> None:
+    """iconutil 只认 .iconset 目录：先按 Apple 要求的尺寸导出，再合成 ICNS。
+
+    Linux 上没有 iconutil，跳过（Windows 的 ico 仍会生成）。
+    """
+    if shutil.which("iconutil") is None:
+        print("跳过 macOS 图标：没有 iconutil")
+        return
+
+    ICNS.parent.mkdir(parents=True, exist_ok=True)
+    iconset = Path(tempfile.mkdtemp(suffix=".iconset"))
+    try:
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                suffix = "@2x" if scale == 2 else ""
+                master.resize((size * scale, size * scale), Image.LANCZOS).save(
+                    iconset / f"icon_{size}x{size}{suffix}.png"
+                )
+        subprocess.run(
+            ["iconutil", "-c", "icns", str(iconset), "-o", str(ICNS)], check=True
+        )
+    finally:
+        shutil.rmtree(iconset, ignore_errors=True)
+
+
 def main() -> None:
     master = draw_master()
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +197,9 @@ def main() -> None:
     frames = [draw_small(size) if size <= 32 else master.resize((size, size), Image.LANCZOS)
               for size in SIZES]
     write_ico(OUT, frames)
+    write_icns(master)
     print(f"已生成：{OUT}")
+    print(f"        {ICNS}")
     print(f"预览：  {PREVIEW}")
     print(f"       {WINDOWS_PREVIEW}")
 

@@ -27,6 +27,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resourc
 
 cp "$BIN/DvPlayer" "$APP/Contents/MacOS/DvPlayer"
 cp Info.plist "$APP/Contents/Info.plist"
+# 应用图标：Dock / Finder 读 Info.plist 的 CFBundleIconFile（AppIcon.icns），
+# 由 scripts/make-icon.py 生成。
+cp "$ROOT/assets/branding/AppIcon.icns" "$APP/Contents/Resources/"
 # 品牌图：侧栏左上角和 Windows 的 exe 图标用同一份位图。
 cp "$ROOT/assets/branding/DvPlayer-256.png" "$APP/Contents/Resources/"
 
