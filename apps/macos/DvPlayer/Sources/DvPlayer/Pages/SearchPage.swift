@@ -29,7 +29,7 @@ struct SearchPage: View {
                 SearchField(placeholder: "片名、剧名或关键词", text: $keyword, width: 320)
             }
             .padding(.horizontal, 32)
-            .padding(.top, 40)
+            .padding(.top, 18)
 
             PageScroll {
                 VStack(alignment: .leading, spacing: 14) {
@@ -186,7 +186,7 @@ struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "设置")
                 .padding(.horizontal, 32)
-                .padding(.top, 40)
+                .padding(.top, 18)
 
             PageScroll {
                 VStack(alignment: .leading, spacing: 18) {

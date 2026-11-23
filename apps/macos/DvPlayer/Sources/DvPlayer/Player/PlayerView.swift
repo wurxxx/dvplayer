@@ -145,6 +145,9 @@ struct PlayerView: View {
                     .onChange(of: proxy.size.height) { height in viewHeight = height }
             }
         )
+        // 播放窗是「无标题栏 + 内容满窗」，SwiftUI 默认会按标题栏留 28pt 安全区，
+        // 结果窗口按钮和顶栏比 Windows 低一截。这里铺满整窗。
+        .ignoresSafeArea()
         .onAppear { session.showChrome() }
     }
 

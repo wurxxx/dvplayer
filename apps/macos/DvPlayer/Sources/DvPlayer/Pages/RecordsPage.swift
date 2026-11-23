@@ -78,7 +78,7 @@ struct RecordsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 32)
-                .padding(.top, 40)
+                .padding(.top, 18)
 
             PageScroll {
                 switch tab {

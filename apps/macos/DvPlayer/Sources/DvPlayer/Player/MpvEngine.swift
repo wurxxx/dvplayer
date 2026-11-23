@@ -571,21 +571,33 @@ final class MpvEngine {
         // 先选屏幕再给相对坐标：副屏在主屏左侧时，绝对坐标是负数，
         // mpv 的 geometry 会把负号当成「从右边算」，窗口就跑错屏了。
         let geometry = Self.geometry(for: frame)
+        // 拖动时每次移动都会进来：几何没变就别再发命令。
+        guard geometry.value != lastAppliedGeometry
+                || geometry.screen != lastAppliedScreen else { return }
+        lastAppliedGeometry = geometry.value
+        lastAppliedScreen = geometry.screen
+
         // `geometry` 只在窗口创建时生效；运行时改必须先把 force-window-position 打开，
         // 否则命令返回 success 但窗口纹丝不动（实测：拖动浮层后画面停在原地）。
-        ipc.command(["set_property", "force-window-position", "yes"])
-        ipc.command(["set_property", "screen", geometry.screen])
-        ipc.command(["set_property", "geometry", geometry.value])
-        if geometry.value != lastAppliedGeometry {
-            lastAppliedGeometry = geometry.value
-            NSLog("[Play] sync geometry=\(geometry.value) screen=\(geometry.screen) " +
-                  "frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)) " +
-                  "\(Int(frame.width))x\(Int(frame.height))")
+        // 它是个常驻开关，设一次就够；屏幕没变也别重复发——拖动时每多一条命令
+        // 就多一次排队，视频会更明显地落后于窗口。
+        if !forceWindowPosition {
+            forceWindowPosition = true
+            ipc.command(["set_property", "force-window-position", "yes"])
         }
+        if geometry.screen != lastAppliedScreen {
+            ipc.command(["set_property", "screen", geometry.screen])
+        }
+        ipc.command(["set_property", "geometry", geometry.value])
+        NSLog("[Play] sync geometry=\(geometry.value) screen=\(geometry.screen) " +
+              "frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)) " +
+              "\(Int(frame.width))x\(Int(frame.height))")
     }
 
-    /// 上一次真正发给 mpv 的 geometry，只在变化时打日志。
+    /// 上一次真正发给 mpv 的 geometry / 屏幕，只在变化时发命令。
     private var lastAppliedGeometry = ""
+    private var lastAppliedScreen = -1
+    private var forceWindowPosition = false
 
     func toggleMuteIPC() {
         ipc.command(["set_property", "mute", muted ? "no" : "yes"])

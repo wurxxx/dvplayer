@@ -357,7 +357,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     /// App 激活 / 失活的通知：播放时靠它把 mpv 窗口提上 / 放下。
     private var activationObservers: [NSObjectProtocol] = []
     private var lastWheelAt = Date.distantPast
-    private var syncTask: DispatchWorkItem?
     private var savedFrame: NSRect?
     private var zoomSavedFrame: NSRect?
     private var closeRequested = false
@@ -457,17 +456,13 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     }
 
     /// 浮层显示 / 移动 / 缩放 → 告诉 mpv 挪窗口。高频拖动按 40ms 合并。
+    /// 把浮层的当前 frame 交给 mpv。
+    ///
+    /// 以前这里走 0.04s 防抖：拖动 / 缩放时主线程在事件跟踪模式（
+    /// `NSEventTrackingRunLoopMode`），`DispatchQueue` 的延迟任务要等松手才执行，
+    /// 结果控制条跟着窗口走、视频停在原地。写 IPC 只是往 socket 写一行，直接同步发。
     private func syncGeometry(force: Bool = false) {
-        if force {
-            syncTask?.cancel()
-            applyGeometry()
-            return
-        }
-
-        syncTask?.cancel()
-        let task = DispatchWorkItem { [weak self] in self?.applyGeometry() }
-        syncTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: task)
+        applyGeometry()
     }
 
     private func applyGeometry() {
@@ -728,7 +723,6 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             NotificationCenter.default.removeObserver(token)
         }
         activationObservers.removeAll()
-        syncTask?.cancel()
 
         if savedFrame != nil {
             NSApp.presentationOptions = []
