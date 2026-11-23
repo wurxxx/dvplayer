@@ -354,6 +354,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
     private var keyMonitor: Any?
     private var wheelMonitor: Any?
+    /// App 激活 / 失活的通知：播放时靠它把 mpv 窗口提上 / 放下。
+    private var activationObservers: [NSObjectProtocol] = []
     private var lastWheelAt = Date.distantPast
     private var syncTask: DispatchWorkItem?
     private var savedFrame: NSRect?
@@ -396,8 +398,9 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.backgroundColor = .clear
         window.hasShadow = false
 
-        // 比普通窗口高一级，才盖得住 mpv 自己的窗口（另一个进程）。
-        window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue + 1)
+        // 比普通窗口高：mpv 置顶时是 floating（3），浮层要再高一级（4）才盖得住
+        // 视频和 mpv 自己画的窗口。
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue + 4)
 
         // 和主窗口一样自绘三个按钮，系统红绿灯藏掉。
         window.standardWindowButton(.closeButton)?.isHidden = true
@@ -414,6 +417,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         buildContentView()
         installKeyMonitor()
         installWheelMonitor()
+        installActivationObservers()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -592,6 +596,33 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// mpv 是另一个进程，窗口层级只能靠 `ontop` 调。
+    ///
+    /// 我们 App 活跃时把视频提到库窗口之上（否则视频区透出库页面）；
+    /// 切到别的 App 就放下来，让播放窗像普通窗口一样被盖住。
+    private func installActivationObservers() {
+        let center = NotificationCenter.default
+        for (name, active) in [(NSApplication.didBecomeActiveNotification, true),
+                               (NSApplication.didResignActiveNotification, false)] {
+            let token = center.addObserver(forName: name, object: nil, queue: .main) {
+                [weak self] _ in
+                Task { @MainActor in self?.applyActivation(active) }
+            }
+            activationObservers.append(token)
+        }
+    }
+
+    /// 我们 App 活跃时，播放窗（浮层 4 + 视频 3）盖在库窗口上；切到别的 App
+    /// 时两层都落回普通层级，让播放窗像普通窗口一样被盖住（和 Windows 一致）。
+    /// 全屏时不改层级：改全屏窗口的 level 会把系统全屏搞乱。
+    private func applyActivation(_ active: Bool) {
+        if !session.isFullscreen {
+            window?.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue
+                                           + (active ? 4 : 0))
+        }
+        session.setOnTop(active)
+    }
+
     private func handleKey(_ event: NSEvent) -> Bool {
         let key = event.keyCode
 
@@ -693,6 +724,10 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             NSEvent.removeMonitor(wheelMonitor)
             self.wheelMonitor = nil
         }
+        for token in activationObservers {
+            NotificationCenter.default.removeObserver(token)
+        }
+        activationObservers.removeAll()
         syncTask?.cancel()
 
         if savedFrame != nil {

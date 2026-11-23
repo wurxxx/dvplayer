@@ -73,6 +73,9 @@ final class MpvEngine {
     /// mpv 窗口的 frame（屏幕坐标，左上原点），浮层照这个摆。
     private(set) var videoFrame: NSRect = .zero
 
+    /// 视频窗口当前是否置顶（启动参数带 `--ontop`，所以默认 true）。
+    private var ontop = true
+
     /// mpv 子进程还活着吗：错误面板「重试」用它决定要不要换个新进程。
     var isAlive: Bool { !shuttingDown && process.isRunning }
     /// IPC 也还连着：`isAlive` 为真但控制通道已断的间隙里不能复用这个实例。
@@ -157,6 +160,11 @@ final class MpvEngine {
             // 播放器是浮层里的画面，不该再占一个 Dock 图标 / Cmd-Tab 条目：
             // 默认 regular 会多出一个「mpv」，看起来像开了两个 App。
             "--macos-app-activation-policy=accessory",
+            // 库窗口和 mpv 窗口都是普通层级（0），而 accessory 的 mpv 不再被激活，
+            // 窗口会永远压在库窗口下面——视频区透出的是库页面。提到 floating（3）
+            // 才能盖住库窗口；播放浮层再高一级（4）盖住控制条。切到别的 App 时
+            // 由 `setOnTop(false)` 放下来，行为和 Windows 的普通播放窗一致。
+            "--ontop",
             "--title=DV Player",
             "--geometry=\(geometry.value)",
             "--input-ipc-server=\(socketPath)",
@@ -257,6 +265,9 @@ final class MpvEngine {
         }
         ipc.command(["set_property", "secondary-sub-visibility", "yes"])
         ready = true
+
+        // IPC 连上之前调用过 setOnTop 的话，这里补发一次。
+        applyOnTop()
 
         // 起进程时窗口还没摆好（PlayerWindow 的 buildContentView 早于 IPC 连上）：
         // 那一次 syncGeometry 被 `guard ready` 挡掉，这里补一次，否则 mpv 停在
@@ -529,6 +540,26 @@ final class MpvEngine {
                 NSLog("[Play] 截图失败：\(error)")
             }
         }
+    }
+
+    /// 视频窗口置顶开关。
+    ///
+    /// mpv 是独立进程，它的窗口和库窗口同属普通层级（0）；accessory 策略下 mpv
+    /// 不再被激活，窗口就一直压在库窗口下面，视频区看着是透明的。`--ontop` 把
+    /// 它提到 floating（3），库窗口就盖不住它了。
+    ///
+    /// 切到别的 App 时放下来（`ontop=no`），播放窗像 Windows 的普通窗口一样
+    /// 被别的 App 盖住；回到我们 App 再提上去。运行时改 `ontop` 实测有效。
+    func setOnTop(_ on: Bool) {
+        guard on != ontop else { return }
+        ontop = on
+        applyOnTop()
+    }
+
+    /// IPC 没连上时先记下意愿，连上后补发（窗口是后创建的，不会漏）。
+    private func applyOnTop() {
+        guard ready, !shuttingDown else { return }
+        ipc.command(["set_property", "ontop", ontop ? "yes" : "no"])
     }
 
     /// 把 mpv 窗口挪到浮层窗口的位置。坐标系要换成主屏左上原点。

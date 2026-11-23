@@ -1227,6 +1227,11 @@ final class PlayerSession: ObservableObject {
               + "panscan=\(String(format: "%.2f", aspect.panscan)) override=\(aspect.aspectOverride)")
     }
 
+    /// 视频窗口置顶：我们 App 活跃时盖住库窗口，切到别的 App 时让位。
+    func setOnTop(_ on: Bool) {
+        mpv?.setOnTop(on)
+    }
+
     func setAspect(_ mode: PlayerAspect) {
         aspect = mode
         applyAspect()
