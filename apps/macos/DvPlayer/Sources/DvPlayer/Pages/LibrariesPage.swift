@@ -5,6 +5,8 @@ import DvCore
 struct LibrarySection: Identifiable {
     let library: MediaLibrary
     var items: [MediaItem]
+    /// 库里条目总数（分页接口给的 total），标题右侧显示，和 Windows 的「数量 ›」一致。
+    var total: Int
     var id: String { library.id }
 }
 
@@ -420,8 +422,13 @@ struct LibrariesPage: View {
 
     private func sectionBlock(_ section: LibrarySection) -> some View {
         VStack(alignment: .leading, spacing: 11) {
+            // 右侧显示库里总数，点它进库内网格（和 Windows 的「57 ›」一样）。
             SectionTitle(text: section.library.title,
-                         trailing: section.items.isEmpty ? nil : "更多 ›")
+                         trailing: "\(section.total)") {
+                browseTarget = BrowseTarget(id: section.library.id,
+                                            title: MediaText.clean(section.library.title),
+                                            isLibrary: true)
+            }
 
             if section.items.isEmpty {
                 Caption(text: "这个库里还没有条目。", size: 12.5)
@@ -547,7 +554,9 @@ struct LibrariesPage: View {
             let page = try? await core.items(library.id, pageSize: 18, query: addedQuery)
             // 等待期间切了源：这一页是旧源的，不能再铺上来。
             guard !Task.isCancelled else { return }
-            built.append(LibrarySection(library: library, items: page?.items ?? []))
+            built.append(LibrarySection(library: library,
+                                        items: page?.items ?? [],
+                                        total: page?.total ?? 0))
         }
         guard !Task.isCancelled else { return }
         sections = built

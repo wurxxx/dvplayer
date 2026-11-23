@@ -48,6 +48,8 @@ struct PageTitle: View {
 struct SectionTitle: View {
     let text: String
     var trailing: String?
+    /// 有动作时 trailing 变成可点区域，并在数量后面补一个 ›（和 Windows 的「数量 ›」一致）。
+    var onTrailingTap: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -56,9 +58,25 @@ struct SectionTitle: View {
                 .foregroundStyle(Theme.text)
             Spacer(minLength: 8)
             if let trailing, !trailing.isEmpty {
-                Text(trailing)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.faint)
+                if let onTrailingTap {
+                    Button(action: onTrailingTap) {
+                        HStack(spacing: 4) {
+                            Text(trailing)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.muted)
+                            Text("›")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.faint)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("查看全部")
+                } else {
+                    Text(trailing)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.faint)
+                }
             }
         }
     }
