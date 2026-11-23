@@ -41,7 +41,7 @@ struct PlayerView: View {
 
             // 无标题栏，顶栏那块按住拖窗口；打开 / 打开失败时双击同样是最大化。
             VStack(spacing: 0) {
-                PlayerDragArea(action: actions.dragWindow,
+                PlayerDragArea(action: actions.beginDrag,
                                onDoubleClick: {
                                    if session.loading || session.error != nil {
                                        actions.zoom()
@@ -1136,7 +1136,8 @@ private struct PlayerMenuIcon: View {
 
 /// 无标题栏的拖窗区：按住移动窗口，双击全屏。
 private struct PlayerDragArea: NSViewRepresentable {
-    let action: (NSEvent) -> Void
+    /// 真正开始移动了才触发（点一下 / 双击不触发）。
+    let action: () -> Void
     let onDoubleClick: () -> Void
 
     func makeNSView(context: Context) -> NSView {
@@ -1153,15 +1154,31 @@ private struct PlayerDragArea: NSViewRepresentable {
     }
 
     private final class DragView: NSView {
-        var action: ((NSEvent) -> Void)?
+        var action: (() -> Void)?
         var onDoubleClick: (() -> Void)?
+        private var downPoint: NSPoint?
 
         override func mouseDown(with event: NSEvent) {
             if event.clickCount == 2 {
                 onDoubleClick?()
                 return
             }
-            action?(event)
+            downPoint = event.locationInWindow
+        }
+
+        /// 按下不算拖动：先等鼠标真的移动几像素，再交给 mpv 原生拖动。
+        /// 这样单击 / 双击（最大化）都不会被抢走。
+        override func mouseDragged(with event: NSEvent) {
+            guard let down = downPoint else { return }
+            let dx = event.locationInWindow.x - down.x
+            let dy = event.locationInWindow.y - down.y
+            guard dx * dx + dy * dy > 16 else { return }
+            downPoint = nil
+            action?()
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            downPoint = nil
         }
     }
 }

@@ -362,6 +362,9 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     private var closeRequested = false
     /// 上一次按视频比例调过的宽高比，避免同一部视频反复改窗口。
     private var fittedAspect: Double = 0
+    /// 已把拖拽交给 mpv，正在等鼠标松开。
+    private var handedOffDrag = false
+    private var dragWatch: Timer?
 
     /// 新播放窗的初始位置：居中，最多 1280×720，四周留点边。
     static func preferredFrame() -> NSRect {
@@ -436,7 +439,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
                 minimize: { [weak self] in self?.window?.miniaturize(nil) },
                 zoom: { [weak self] in self?.zoom() },
                 toggleFullscreen: { [weak self] in self?.toggleFullscreen() },
-                dragWindow: { [weak self] event in self?.window?.performDrag(with: event) }))
+                beginDrag: { [weak self] in self?.beginNativeDrag() }))
             .environmentObject(AppState.shared)
 
         let hosting = NSHostingView(rootView: root)
@@ -607,10 +610,107 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    // MARK: 拖动
+
+    /// 把一次窗口拖动交给 mpv 自己的窗口。
+    ///
+    /// 视频在 mpv 的独立窗口里：如果浮层用 `performDrag` 移、再发 IPC 让 mpv 跟，
+    /// 视频永远慢一拍（实测 20–30ms，快速拖动时非常明显）。这里改成开始移动后把
+    /// 浮层让开，在同一个位置补一个 mouseDown 交给 mpv——它自己就是无边框窗口，
+    /// 原生拖动由窗口服务器做，和 Windows 里视频/控件在同一个窗口一样顺。
+    ///
+    /// 拖动期间控制条不显示（浮层在让位），松手按 mpv 的真实位置摆回来。
+    /// 试过拖动期间把浮层重新显示去跟随：它会截走后续拖拽事件，视频走走停停，
+    /// 所以只能是「让开」。
+    func beginNativeDrag() {
+        guard let window, !handedOffDrag, !session.isFullscreen else { return }
+        guard session.mpv?.isAlive == true else { return }
+        handedOffDrag = true
+        window.orderOut(nil)
+
+        // orderOut 生效后再把按下转交出去，否则事件还落在浮层上。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+            guard let self else { return }
+            // 只是点一下没拖：把窗口放回来就行。
+            guard NSEvent.pressedMouseButtons & 1 != 0 else {
+                self.finishNativeDrag()
+                return
+            }
+            Self.postMouseDown(at: NSEvent.mouseLocation)
+            self.startDragWatch()
+        }
+    }
+
+    /// 拖动期间只等鼠标松开；mpv 的窗口由窗口服务器自己移动。
+    private func startDragWatch() {
+        dragWatch?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
+            self.finishNativeDrag()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dragWatch = timer
+    }
+
+    /// 松手：按 mpv 窗口的真实位置把浮层摆回去，并把画面尺寸记回来。
+    private func finishNativeDrag() {
+        dragWatch?.invalidate()
+        dragWatch = nil
+        guard handedOffDrag, let window else { return }
+        handedOffDrag = false
+
+        if let frame = Self.mpvWindowFrame() {
+            window.setFrame(frame, display: true)
+            session.mpv?.syncGeometry(to: frame)
+        }
+        // 把按下交给 mpv 会让它成为前台 App（拖动期间没影响，它的窗口正好在最上面），
+        // 松手后要把焦点和层级还给我们，否则播放浮层会停在 mpv 窗口下面、看不到控制条。
+        NSApp.activate(ignoringOtherApps: true)
+        applyActivation(true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// 把按下事件补到鼠标当前位置（事件走 HID，和真鼠标一样会被路由到最上层窗口）。
+    private static func postMouseDown(at point: NSPoint) {
+        let primary = NSScreen.screens.first?.frame ?? .zero
+        // AppKit 左下原点 → CGEvent 左上原点。
+        let cg = CGPoint(x: point.x, y: primary.maxY - point.y)
+        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                mouseCursorPosition: cg, mouseButton: .left)?
+            .post(tap: .cghidEventTap)
+    }
+
+    /// mpv 窗口现在在屏幕上的 frame（AppKit 坐标）。
+    private static func mpvWindowFrame() -> NSRect? {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                             kCGNullWindowID) as? [[String: Any]] ?? []
+        var best: CGRect?
+        for w in list {
+            let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+            guard owner.lowercased().contains("mpv") else { continue }
+            let b = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
+            let rect = CGRect(x: b["X"] as? Double ?? 0, y: b["Y"] as? Double ?? 0,
+                              width: b["Width"] as? Double ?? 0,
+                              height: b["Height"] as? Double ?? 0)
+            if rect.width < 2 || rect.height < 2 { continue }
+            if best == nil || rect.width * rect.height > best!.width * best!.height {
+                best = rect
+            }
+        }
+        guard let cg = best else { return nil }
+        let primary = NSScreen.screens.first?.frame ?? .zero
+        return NSRect(x: cg.minX, y: primary.maxY - cg.maxY,
+                      width: cg.width, height: cg.height)
+    }
+
     /// 我们 App 活跃时，播放窗（浮层 4 + 视频 3）盖在库窗口上；切到别的 App
     /// 时两层都落回普通层级，让播放窗像普通窗口一样被盖住（和 Windows 一致）。
     /// 全屏时不改层级：改全屏窗口的 level 会把系统全屏搞乱。
     private func applyActivation(_ active: Bool) {
+        // 拖动期间 mpv 会被激活：层级先别动，否则浮层会掉到视频下面，控制条就没了。
+        // 松手后 finishNativeDrag 会显式恢复。
+        if handedOffDrag { return }
         if !session.isFullscreen {
             window?.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue
                                            + (active ? 4 : 0))
@@ -723,6 +823,9 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             NotificationCenter.default.removeObserver(token)
         }
         activationObservers.removeAll()
+        dragWatch?.invalidate()
+        dragWatch = nil
+        handedOffDrag = false
 
         if savedFrame != nil {
             NSApp.presentationOptions = []
@@ -739,6 +842,7 @@ struct PlayerActions {
     let minimize: () -> Void
     let zoom: () -> Void
     let toggleFullscreen: () -> Void
-    /// 顶栏那块无标题栏区域：拖动移窗（`window.performDrag`）。
-    let dragWindow: (NSEvent) -> Void
+    /// 顶栏那块无标题栏区域：拖动移窗。视频在 mpv 自己的窗口里，
+    /// 靠 IPC 挪会慢一拍，所以改成把这次拖拽交给 mpv 原生拖动。
+    let beginDrag: () -> Void
 }
