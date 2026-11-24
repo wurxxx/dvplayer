@@ -289,6 +289,19 @@ struct DetailPage: View {
                         )
                     )
 
+                // 文字区域压一层暗色：横版图有白底的（截图里这部就是），
+                // 纯白标题叠上去会完全看不见。只在下方 45% 渐入，
+                // 上半部分画面保持干净。
+                LinearGradient(
+                    stops: [
+                        .init(color: .black.opacity(0), location: 0.42),
+                        .init(color: .black.opacity(0.45), location: 0.68),
+                        .init(color: .black.opacity(0.72), location: 1),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text(detail?.title ?? "正在读取…")
                         .font(.system(size: 34, weight: .semibold))

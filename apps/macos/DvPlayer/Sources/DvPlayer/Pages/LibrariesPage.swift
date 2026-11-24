@@ -358,8 +358,6 @@ struct LibrariesPage: View {
                     .padding(.horizontal, 24)
                     .padding(.leading, Theme.sidebarWidth)
                     .padding(.bottom, 74)
-                    .contentShape(Rectangle())
-                    .onTapGesture { detailId = item.id }
 
                     if heroes.count > 1 {
                         HStack(spacing: 6) {
@@ -389,6 +387,11 @@ struct LibrariesPage: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
+            .contentShape(Rectangle())
+            // 整块 Hero 都能点进详情（以前手势只绑在文字块上，
+            // 点画面空白处没反应）。里面的箭头是 Button、圆点有自己的
+            // onTapGesture，子视图的手势优先，不会被这层吃掉。
+            .onTapGesture { openHero() }
             .onHover { heroHovering = $0 }
         }
     }
@@ -485,6 +488,13 @@ struct LibrariesPage: View {
     private func stepHero(_ delta: Int) {
         guard !heroes.isEmpty else { return }
         heroIndex = (heroIndex + delta + heroes.count) % heroes.count
+    }
+
+    /// 点 Hero 进当前这一条的详情页。
+    private func openHero() {
+        guard let item = heroes.indices.contains(heroIndex) ? heroes[heroIndex] : heroes.first
+        else { return }
+        detailId = item.id
     }
 
     private func rotateHero() async {
