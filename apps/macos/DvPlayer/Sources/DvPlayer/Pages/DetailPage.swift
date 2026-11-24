@@ -137,99 +137,72 @@ struct DetailPage: View {
     // MARK: - 主体
 
     private var content: some View {
-        ZStack(alignment: .top) {
-            // 详情页整页铺着大图的模糊版，往下滚也不会变成纯黑，
-            // 浮在上面的侧栏才一直有颜色可透。这里照做：整页一张模糊大图，
-            // 上面再压一层暗色让正文读得清。
-            if let path = detail?.backdropPath ?? detail?.posterPath {
-                GeometryReader { geo in
-                    PosterImage(path: path, title: detail?.title ?? "")
-                        // 模糊太重会把画面糊成一片均匀色，侧栏透出来就没层次了；
-                        // 30 下还能看到光斑结构。
-                        .blur(radius: 30, opaque: true)
-                        .scaleEffect(1.12)
-                        .frame(width: geo.size.width, height: geo.size.height)
-                }
-                .overlay {
-                    LinearGradient(
-                        stops: [
-                            .init(color: Color.black.opacity(0.18), location: 0),
-                            .init(color: Color.black.opacity(0.32), location: 0.45),
-                            .init(color: Color.black.opacity(0.42), location: 1),
-                        ],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                }
-                .allowsHitTesting(false)
-            }
+        PageScroll {
+            VStack(alignment: .leading, spacing: 0) {
+                header
 
-            PageScroll {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
+                VStack(alignment: .leading, spacing: 30) {
+                    if !seasons.isEmpty {
+                        seasonBar
+                    }
 
-                    VStack(alignment: .leading, spacing: 30) {
-                        if !seasons.isEmpty {
-                            seasonBar
+                    // 季已知但第一页集还没回来：给一行提示，别让中间空一块。
+                    if !seasons.isEmpty && episodes.isEmpty {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Theme.accent)
+                            Text("正在读取选集…")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.faint)
                         }
+                        .padding(.vertical, 4)
+                    }
 
-                        // 季已知但第一页集还没回来：给一行提示，别让中间空一块。
-                        if !seasons.isEmpty && episodes.isEmpty {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(Theme.accent)
-                                Text("正在读取选集…")
-                                    .font(.system(size: 13))
+                    if !episodes.isEmpty {
+                        episodeBlock
+                    }
+
+                    // 同一部片在多个源里都有：详情页列出来，点一下切源。
+                    if sources.count > 1 {
+                        sourcesBlock
+                    }
+
+                    if !people.isEmpty {
+                        castBlock
+                    }
+
+                    linksBlock
+
+                    if let mediaInfo, hasTracks(mediaInfo) {
+                        mediaInfoBlock(mediaInfo)
+                    }
+
+                    // 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
+                    if let location = locationText {
+                        VStack(alignment: .leading, spacing: 11) {
+                            SectionTitle(text: "存储位置")
+
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 11.5))
                                     .foregroundStyle(Theme.faint)
-                            }
-                            .padding(.vertical, 4)
-                        }
+                                    .padding(.top, 2)
 
-                        if !episodes.isEmpty {
-                            episodeBlock
-                        }
-
-                        // 同一部片在多个源里都有：详情页列出来，点一下切源。
-                        if sources.count > 1 {
-                            sourcesBlock
-                        }
-
-                        if !people.isEmpty {
-                            castBlock
-                        }
-
-                        linksBlock
-
-                        if let mediaInfo, hasTracks(mediaInfo) {
-                            mediaInfoBlock(mediaInfo)
-                        }
-
-                        // 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
-                        if let location = locationText {
-                            VStack(alignment: .leading, spacing: 11) {
-                                SectionTitle(text: "存储位置")
-
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "folder")
-                                        .font(.system(size: 11.5))
-                                        .foregroundStyle(Theme.faint)
-                                        .padding(.top, 2)
-
-                                    Text(location)
-                                        .font(.system(size: 12, design: .monospaced))
-                                        .foregroundStyle(Theme.muted)
-                                        .lineLimit(3)
-                                        .truncationMode(.middle)
-                                        .textSelection(.enabled)
-                                }
+                                Text(location)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Theme.muted)
+                                    .lineLimit(3)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
                             }
                         }
                     }
-                    .padding(.leading, Theme.contentLeading)
-                    .padding(.trailing, 32)
-                    .padding(.top, 26)
-                    .padding(.bottom, 40)
                 }
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
+                .padding(.top, 26)
+                .padding(.bottom, 40)
             }
         }
         .overlay(alignment: .topLeading) {
@@ -273,25 +246,16 @@ struct DetailPage: View {
             ZStack(alignment: .bottomLeading) {
                 PosterImage(path: detail?.backdropPath ?? detail?.posterPath,
                             title: detail?.title ?? "")
-                    // 底部渐隐，让下面整页那张模糊图接上来：
-                    // 否则清晰大图在 460pt 处被硬裁一刀，出现一条横线。
-                    .mask(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .white, location: 0),
-                                .init(color: .white, location: 0.72),
-                                .init(color: .clear, location: 1),
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
 
+                // 和首页 Hero 一样：清晰大图直接铺，底部渐变到实底 Theme.bg。
+                // 下面接的是普通底色，不是另一层模糊图，所以不会出现
+                // 「亮带 / 硬边」——那条线就是两层亮度不连续造成的。
                 LinearGradient(
                     stops: [
-                        .init(color: Theme.bg.opacity(0), location: 0.30),
-                        .init(color: Theme.bg.opacity(0.30), location: 0.62),
-                        .init(color: Theme.bg.opacity(0.50), location: 0.86),
-                        .init(color: Theme.bg.opacity(0.55), location: 1),
+                        .init(color: Theme.bg.opacity(0), location: 0.35),
+                        .init(color: Theme.bg.opacity(0.55), location: 0.68),
+                        .init(color: Theme.bg.opacity(0.9), location: 0.84),
+                        .init(color: Theme.bg, location: 1),
                     ],
                     startPoint: .top, endPoint: .bottom
                 )
