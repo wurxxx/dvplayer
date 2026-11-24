@@ -561,8 +561,9 @@ struct DetailPage: View {
                 }
                 .padding(.horizontal, 15)
                 .padding(.vertical, 8)
-                .background(Theme.surface, in: Capsule())
-                .overlay(Capsule().stroke(Theme.line.opacity(0.6), lineWidth: 1))
+                // 和次级按钮一致：半透明，详情页的模糊背景能透上来。
+                .background(Theme.surface.opacity(0.55), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
             }
             .buttonStyle(.plain)
         }

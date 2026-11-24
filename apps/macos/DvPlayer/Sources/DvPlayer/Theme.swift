@@ -149,11 +149,13 @@ struct SecondaryButtonStyle: ButtonStyle {
             .foregroundStyle(Theme.text)
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
-            .background(Theme.surface.opacity(configuration.isPressed ? 0.7 : 1),
+            // 半透明：详情页背后是模糊大图，实底按钮会变成一块黑胶布。
+            // 深色页面上半透明看着和不透明几乎一样，不影响其它页面。
+            .background(Theme.surface.opacity(configuration.isPressed ? 0.7 : 0.55),
                         in: RoundedRectangle(cornerRadius: Theme.radiusControl))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radiusControl)
-                    .stroke(Theme.line, lineWidth: 1)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
             )
     }
 }
