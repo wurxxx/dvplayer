@@ -203,24 +203,32 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 
 ### 4.3 打包
 
-`build.sh` 往 `.app` 里带三份东西：
+两层脚本，和 Windows 的 `build.sh` / `build-release.ps1` 对应：
+
+| 脚本 | 产物 | 用途 |
+| --- | --- | --- |
+| `apps/macos/DvPlayer/build.sh` | `build/DvPlayer.app` | 日常开发，编完就地能双击跑 |
+| `apps/macos/packaging/build-release.sh` | `out/release/DvPlayer-<版本>-macos-<arch>.{dmg,zip}` | 发布：DMG 安装镜像 + 便携 zip |
+
+`build.sh` 往 `.app` 里带的东西：
 
 | 来源 | 内容 |
 | --- | --- |
-| `prefix/lib` | libass / libav* / libsw*（解码；`libmpv` 不再拷） |
-| `prefix-vk/lib` | `libplacebo.387`（Vulkan 后端）、`libMoltenVK`、`libvulkan.1.4.363` |
-| `prefix-vk/bin/mpv` | 播放器本体 → `Contents/Frameworks/mpv` |
-| `assets/branding/DvPlayer-256.png` | 侧栏品牌图 → `Contents/Resources/`（和 Windows 的 exe 图标同一份设计） |
+| `prefix/lib` | libmpv + libass / libav* / libsw* / libplacebo（进程内播放，ADR-0011） |
+| Homebrew 的 fribidi / harfbuzz / fontconfig / freetype / jpeg | 上面那几个的依赖，一起拷进去 |
+| `core/target/release/libdvplayer_media.dylib` | 共享核心 |
+| `assets/branding/` + `assets/sources/` | 应用图标、侧栏品牌图、各协议源图标 |
 
-- ICD 配置 `MoltenVK_icd.json` 一起拷进 `Frameworks`，
-  `library_path` 改成相对名 `libMoltenVK.dylib`；运行时 `VK_ICD_FILENAMES` 指向它。
 - 所有 dylib 的 install name 都是本机绝对路径，统一改写成 `@rpath/<真实文件名>`
   （`libavcodec.63.dylib` 是软链，真实文件叫 `libavcodec.63.1.102.dylib`，
-  用 `realpath` 映射）；`libplacebo` 引用的 `@rpath/libvulkan.1.dylib`
-  也改指包里那份带版本号的 loader。
-- 每个文件补 `@rpath`：`/executable_path/../Frameworks`（壳）与
-  `@executable_path`（mpv 本身就在 Frameworks 里）。
-- 成品 48MB，`otool -L` 全过一遍没有 `prefix*` 残留。
+  用 `realpath` 映射），再补 `@executable_path/../Frameworks` 的 rpath。
+- 成品 ~39MB，`otool -L` 全过一遍没有 `prefix*` / 本机路径残留。
+- **签名必须自内向外**：先 `Contents/Frameworks/*.dylib`，再整个 `.app`。
+  直接签 `.app` 会报 `code object is not signed at all`（内层还没签）。
+  默认 ad-hoc（`codesign --sign -`），没有公证证书，别人首次打开要右键「打开」。
+  有证书时 `SIGN_IDENTITY="Developer ID Application: xxx"`，公证自己跑 `notarytool`。
+- zip 用 `ditto` 而不是 `zip`，否则会破坏代码签名；包名统一成 `DV Player.app`
+  （和 Finder / Dock 显示名一致）。
 
 ### 4.4 自检参数
 

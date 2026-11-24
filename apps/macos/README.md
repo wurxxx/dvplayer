@@ -24,9 +24,27 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 依赖里现成的东西：
 
 - `core/target/release/libdvplayer_media.dylib`：媒体源适配 + 聚合 + 进度
-- `prefix-vk/`：mpv 子进程（gpu-next + Vulkan/macvk），
-  `build.sh` 会把它、libplacebo、MoltenVK 与 Vulkan loader 一起打进
-  `.app/Contents/Frameworks`（见 [ADR-0010](../../docs/adr/0010-macos-mpv-subprocess.md)）
+- `prefix/lib`：libmpv 与 libass / libav* / libplacebo，
+  `build.sh` 会整条依赖链一起打进 `.app/Contents/Frameworks`
+  （进程内 libmpv render API，见 [ADR-0011](../../docs/adr/0011-macos-libmpv-inprocess.md)）
+
+## 发布打包
+
+```bash
+apps/macos/packaging/build-release.sh              # 编译 + 出 dmg / zip
+apps/macos/packaging/build-release.sh -SkipBuild   # 复用现有 .app
+```
+
+产物在 `out/release/`：
+
+| 文件 | 说明 |
+| --- | --- |
+| `DvPlayer-<版本>-macos-<arch>.dmg` | 安装镜像，拖进 `/Applications` 即可 |
+| `DvPlayer-<版本>-macos-<arch>.zip` | 便携版，解压直接双击 |
+
+版本号取 `DvPlayer/Info.plist` 的 `CFBundleShortVersionString`（`-Version` 可覆盖产物名）。
+默认 ad-hoc 签名、**没有公证**，别人首次打开要右键「打开」放行；
+有开发者证书时传 `SIGN_IDENTITY="Developer ID Application: xxx"`，公证自己跑 `notarytool`。
 
 ## 现在能做什么
 
@@ -42,16 +60,15 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 - 记录页：通用（继续观看分组 + 视频收藏）/ 观看 / 收藏
 - 搜索页：跨源搜索
 - 设置：续播、分辨率角标、自动连接；显示核心版本
-- 播放页：mpv 自己开窗口出画（gpu-next，DV/HDR10），壳贴一个透明浮层
-  （顶栏 / 控制条 / 选集 / 媒体信息 / 键盘 / 假全屏）；音轨、字幕、倍速、
-  进度回写、播完接下一集 / 关窗，和 Windows 同一套行为
+- 播放页：进程内 libmpv（render API + gpu-next / OpenGL）画进自己的窗口，
+  壳贴一层控制浮层（顶栏 / 控制条 / 选集 / 媒体信息 / 键盘 / 假全屏）；
+  音轨、字幕、倍速、进度回写、播完接下一集 / 关窗，和 Windows 同一套行为
 
 ## 还没做
 
-- 画面验收：锁屏时 Vulkan 拿不到 swapchain，目前只跑过 `DVPLAYER_NO_VO=1`
-  的解码 + IPC 链路；出画、浮层覆盖、geometry 跟随、P5 颜色要解锁后目视
 - HDR 真屏验收（这台是 SDR 屏）
 - 顶栏右侧的倍速 / 静音指示、进度条缓冲段
+- 公证与 Sparkle 自动更新（当前 ad-hoc 签名）
 
 ## 截图巡检
 

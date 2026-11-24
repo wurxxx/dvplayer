@@ -96,7 +96,7 @@ for dep in "${HOMEBREW_DEPS[@]}"; do
         cp "$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$dep")" \
             "$FRAMEWORKS/"
     else
-        echo "警告：缺少 $dep（libass / libmpv 的依赖，字幕或解码可能不可用）" >&2
+        echo "警告：缺少 ${dep}（libass / libmpv 的依赖，字幕或解码可能不可用）" >&2
     fi
 done
 
@@ -124,6 +124,13 @@ for file in "$FRAMEWORKS"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
              | grep -E "^(/usr/local/|$PREFIX_LIB/)" || true)
 done
 
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+# 签名：必须自内向外——先 Frameworks 里的 dylib，再整个 .app。
+# 直接 `codesign DvPlayer.app` 会报 `code object is not signed at all`
+# （内层 dylib 还没签），以前用 `|| true` 吞掉了，结果成品其实没签。
+IDENTITY="${SIGN_IDENTITY:--}"
+echo "-- 签名：${IDENTITY}"
+codesign --force --sign "$IDENTITY" --options runtime --timestamp=none \
+    "$FRAMEWORKS/"*.dylib
+codesign --force --sign "$IDENTITY" --options runtime --timestamp=none "$APP"
 
 echo "已生成：$APP"
