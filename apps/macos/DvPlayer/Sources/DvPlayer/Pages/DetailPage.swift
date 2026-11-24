@@ -137,103 +137,154 @@ struct DetailPage: View {
         }
     }
 
-    // MARK: - 主体
+    // MARK: - 背景
 
-    private var content: some View {
-        ZStack(alignment: .top) {
-            // 详情页背景是「同一张图的两种清晰度」：
-            // 整页铺一张模糊大图（滚到哪都有颜色），顶部再叠一张清晰大图，
-            // 清晰图底部渐隐到透明，露出下面同源的模糊图。
-            // 关键是两层**同源**，交界处色相一致，才不会切出亮带。
+    /// 详情页背景：**一张图**，顶部清晰、往下逐渐模糊。
+    ///
+    /// 关键是两层用同一份几何：清晰图和模糊图都按同一块区域做 aspect-fill，
+    /// 像素位置完全一致，mask 交叉淡化时不会有任何错位。
+    /// 以前是「460pt 的清晰图 + 整页的模糊图」，同一张图被裁成两个不同
+    /// 比例，交界线上下根本不是同一块画面 —— 渐变怎么调都能看出接缝。
+    ///
+    /// `height` 由调用方给（视口高度）：这张图是**滚动内容的一部分**，
+    /// 跟着页面上移，滚过去之后就露出页面底色。
+    private func backdrop(height: CGFloat) -> some View {
+        GeometryReader { geo in
             if let path = detail?.backdropPath ?? detail?.posterPath {
-                GeometryReader { geo in
+                ZStack {
                     PosterImage(path: path, title: detail?.title ?? "")
-                        .blur(radius: 34, opaque: true)
-                        // 模糊会让边缘发虚，放大一点把边缘推出可视区。
-                        .scaleEffect(1.18)
-                        .frame(width: geo.size.width, height: geo.size.height)
+                        .frame(width: geo.size.width, height: height)
+
+                    // 模糊层：同源、同尺寸，只多一点缩放把模糊的发虚边缘推出画面。
+                    PosterImage(path: path, title: detail?.title ?? "")
+                        .blur(radius: 36, opaque: true)
+                        .scaleEffect(1.08)
+                        .frame(width: geo.size.width, height: height)
+                        .mask(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0.26),
+                                    .init(color: .white.opacity(0.35), location: 0.42),
+                                    .init(color: .white.opacity(0.8), location: 0.55),
+                                    .init(color: .white, location: 0.68),
+                                ],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
                 }
+                .frame(width: geo.size.width, height: height, alignment: .top)
                 .overlay {
-                    // 统一一层很淡的暗色：只保证正文可读，不压掉画面本身。
-                    // 之前压到 0.46 太重，背景整块发黑，透亮感不够。
+                    // 顶部压一点给返回按钮，中段压一点给白字，整体仍然透亮。
                     LinearGradient(
                         stops: [
-                            .init(color: Color.black.opacity(0.08), location: 0),
-                            .init(color: Color.black.opacity(0.16), location: 0.5),
-                            .init(color: Color.black.opacity(0.24), location: 1),
+                            .init(color: Color.black.opacity(0.30), location: 0),
+                            .init(color: Color.black.opacity(0.12), location: 0.18),
+                            .init(color: Color.black.opacity(0.30), location: 0.48),
+                            .init(color: Color.black.opacity(0.42), location: 0.62),
+                            .init(color: Color.black.opacity(0.50), location: 1),
                         ],
                         startPoint: .top, endPoint: .bottom
                     )
+                    .frame(height: height)
                 }
-                .allowsHitTesting(false)
+                // 底边淡到页面底色：图滚到尽头时不要切出一条硬边。
+                .mask(
+                    VStack(spacing: 0) {
+                        Rectangle().frame(height: max(height - 120, 0))
+                        LinearGradient(colors: [.white, .clear],
+                                       startPoint: .top, endPoint: .bottom)
+                            .frame(height: 120)
+                    }
+                )
+                .frame(width: geo.size.width, height: height, alignment: .top)
+                .clipped()
             }
+        }
+        .frame(height: height)
+        .allowsHitTesting(false)
+    }
 
-            PageScroll {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
+    // MARK: - 主体
 
-                    VStack(alignment: .leading, spacing: 30) {
-                        if !seasons.isEmpty {
-                            seasonBar
-                        }
+    private var content: some View {
+        GeometryReader { screen in
+            ZStack(alignment: .top) {
+                // 图滚过去之后露出来的底色。
+                Theme.bg
 
-                        // 季已知但第一页集还没回来：给一行提示，别让中间空一块。
-                        if !seasons.isEmpty && episodes.isEmpty {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(Theme.accent)
-                                Text("正在读取选集…")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(Theme.faint)
-                            }
-                            .padding(.vertical, 4)
-                        }
+                PageScroll {
+                    // 背景和正文放进同一个滚动内容里：滚动时图跟着上移。
+                    ZStack(alignment: .top) {
+                        backdrop(height: screen.size.height)
 
-                        if !episodes.isEmpty {
-                            episodeBlock
-                        }
+                        VStack(alignment: .leading, spacing: 0) {
+                            header
 
-                        // 同一部片在多个源里都有：详情页列出来，点一下切源。
-                        if sources.count > 1 {
-                            sourcesBlock
-                        }
+                            VStack(alignment: .leading, spacing: 30) {
+                                if !seasons.isEmpty {
+                                    seasonBar
+                                }
 
-                        if !people.isEmpty {
-                            castBlock
-                        }
+                                // 季已知但第一页集还没回来：给一行提示，别让中间空一块。
+                                if !seasons.isEmpty && episodes.isEmpty {
+                                    HStack(spacing: 10) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .tint(Theme.accent)
+                                        Text("正在读取选集…")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(Theme.faint)
+                                    }
+                                    .padding(.vertical, 4)
+                                }
 
-                        linksBlock
+                                if !episodes.isEmpty {
+                                    episodeBlock
+                                }
 
-                        if let mediaInfo, hasTracks(mediaInfo) {
-                            mediaInfoBlock(mediaInfo)
-                        }
+                                // 同一部片在多个源里都有：详情页列出来，点一下切源。
+                                if sources.count > 1 {
+                                    sourcesBlock
+                                }
 
-                        // 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
-                        if let location = locationText {
-                            VStack(alignment: .leading, spacing: 11) {
-                                SectionTitle(text: "存储位置")
+                                if !people.isEmpty {
+                                    castBlock
+                                }
 
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "folder")
-                                        .font(.system(size: 11.5))
-                                        .foregroundStyle(Theme.faint)
-                                        .padding(.top, 2)
+                                linksBlock
 
-                                    Text(location)
-                                        .font(.system(size: 12, design: .monospaced))
-                                        .foregroundStyle(Theme.muted)
-                                        .lineLimit(3)
-                                        .truncationMode(.middle)
-                                        .textSelection(.enabled)
+                                if let mediaInfo, hasTracks(mediaInfo) {
+                                    mediaInfoBlock(mediaInfo)
+                                }
+
+                                // 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
+                                if let location = locationText {
+                                    VStack(alignment: .leading, spacing: 11) {
+                                        SectionTitle(text: "存储位置")
+
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Image(systemName: "folder")
+                                                .font(.system(size: 11.5))
+                                                .foregroundStyle(Theme.faint)
+                                                .padding(.top, 2)
+
+                                            Text(location)
+                                                .font(.system(size: 12, design: .monospaced))
+                                                .foregroundStyle(Theme.muted)
+                                                .lineLimit(3)
+                                                .truncationMode(.middle)
+                                                .textSelection(.enabled)
+                                        }
+                                    }
                                 }
                             }
+                            .padding(.leading, Theme.contentLeading)
+                            .padding(.trailing, 32)
+                            .padding(.top, 26)
+                            .padding(.bottom, 40)
                         }
                     }
-                    .padding(.leading, Theme.contentLeading)
-                    .padding(.trailing, 32)
-                    .padding(.top, 26)
-                    .padding(.bottom, 40)
+                    .frame(width: screen.size.width, alignment: .topLeading)
                 }
             }
         }
@@ -271,84 +322,49 @@ struct DetailPage: View {
         }
     }
 
-    // MARK: - 顶部大图
+    // MARK: - 顶部信息
 
+    /// 顶部只放文字和按钮：大图完全交给 `backdrop`。
+    ///
+    /// 以前 header 自己也画一张清晰图，和背景那张模糊图铺在两个不同
+    /// 尺寸的框里，交界处必然错位。现在图只有一份，header 是纯浮层。
     private var header: some View {
         GeometryReader { geo in
-            ZStack(alignment: .bottomLeading) {
-                // 清晰大图铺在顶部，底部渐隐到透明 —— 下面就是 content 里
-                // 那张同源的模糊图，所以过渡自然，不会出现亮度突变。
-                PosterImage(path: detail?.backdropPath ?? detail?.posterPath,
-                            title: detail?.title ?? "")
-                    .mask(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .white, location: 0),
-                                .init(color: .white, location: 0.70),
-                                .init(color: .white.opacity(0.6), location: 0.88),
-                                .init(color: .clear, location: 1),
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
+            VStack(alignment: .leading, spacing: 12) {
+                Text(detail?.title ?? "正在读取…")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.98))
+                    .lineLimit(2)
 
-                // 文字区域压一层暗色：横版图有白底的（截图里这部就是），
-                // 纯白标题叠上去会完全看不见。只在下方 45% 渐入，
-                // 上半部分画面保持干净。
-                //
-                // 底边必须回到全透明：header 最后会 `.clipped()`，渐变要是
-                // 停在某个不透明度就被硬切一刀，下面紧接明亮模糊图，交界处
-                // 会留下一条深色横带。文字最底（按钮底边）在 0.94 附近，
-                // 最后 26pt 是纯 padding，正好拿来淡出。
-                LinearGradient(
-                    stops: [
-                        .init(color: .black.opacity(0), location: 0.42),
-                        .init(color: .black.opacity(0.48), location: 0.68),
-                        .init(color: .black.opacity(0.55), location: 0.94),
-                        .init(color: .black.opacity(0), location: 1),
-                    ],
-                    startPoint: .top, endPoint: .bottom
-                )
-                .allowsHitTesting(false)
+                if let meta = metaLine, !meta.isEmpty {
+                    Text(meta)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(detail?.title ?? "正在读取…")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.98))
-                        .lineLimit(2)
-
-                    if let meta = metaLine, !meta.isEmpty {
-                        Text(meta)
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(Color.white.opacity(0.85))
-                    }
-
-                    if !chips.isEmpty {
-                        HStack(spacing: 8) {
-                            ForEach(chips, id: \.self) { chip in
-                                Chip(text: chip, tint: Color.white.opacity(0.2))
-                            }
+                if !chips.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(chips, id: \.self) { chip in
+                            Chip(text: chip, tint: Color.white.opacity(0.2))
                         }
                     }
-
-                    if let overview = detail?.overview, !overview.isEmpty {
-                        Text(overview)
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(Color.white.opacity(0.72))
-                            .lineLimit(4)
-                            .frame(maxWidth: 780, alignment: .leading)
-                    }
-
-                    actions
-                        .padding(.top, 4)
                 }
-                .padding(.leading, Theme.contentLeading)
-                .padding(.trailing, 32)
-                .padding(.bottom, 26)
-                .frame(width: geo.size.width, alignment: .leading)
+
+                if let overview = detail?.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Color.white.opacity(0.72))
+                        .lineLimit(4)
+                        .frame(maxWidth: 780, alignment: .leading)
+                }
+
+                actions
+                    .padding(.top, 4)
             }
-            .frame(width: geo.size.width, height: 460)
-            .clipped()
+            .padding(.leading, Theme.contentLeading)
+            .padding(.trailing, 32)
+            .padding(.bottom, 26)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
         }
         .frame(height: 460)
     }
