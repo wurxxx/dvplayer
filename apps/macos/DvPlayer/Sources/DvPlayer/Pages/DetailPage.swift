@@ -151,12 +151,13 @@ struct DetailPage: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
                 .overlay {
-                    // 统一一层暗色：正文和卡片要读得清，同时保留画面的色相。
+                    // 统一一层很淡的暗色：只保证正文可读，不压掉画面本身。
+                    // 之前压到 0.46 太重，背景整块发黑，透亮感不够。
                     LinearGradient(
                         stops: [
-                            .init(color: Color.black.opacity(0.20), location: 0),
-                            .init(color: Color.black.opacity(0.34), location: 0.5),
-                            .init(color: Color.black.opacity(0.46), location: 1),
+                            .init(color: Color.black.opacity(0.08), location: 0),
+                            .init(color: Color.black.opacity(0.16), location: 0.5),
+                            .init(color: Color.black.opacity(0.24), location: 1),
                         ],
                         startPoint: .top, endPoint: .bottom
                     )
@@ -1326,8 +1327,17 @@ private struct MediaInfoCard: View {
                 .contentShape(RoundedRectangle(cornerRadius: Theme.radiusCard))
         }
         .buttonStyle(.plain)
-        .background(hovering && clickable ? Theme.surfaceHover : Theme.surface,
-                    in: RoundedRectangle(cornerRadius: Theme.radiusCard))
+        // 详情页整页是模糊大图，卡片不能再用不透明的 Theme.surface：
+        // 那样在画面上就是一块死黑的板子（截图里红框那块）。
+        // 半透明 + 背景透出来，才有「卡片浮在画面上」的感觉。
+        .background(
+            (hovering && clickable ? Theme.surfaceHover : Theme.surface).opacity(0.55),
+            in: RoundedRectangle(cornerRadius: Theme.radiusCard)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusCard)
+                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+        )
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
     }
