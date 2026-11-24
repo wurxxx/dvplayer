@@ -436,8 +436,9 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.isOpaque = true
         window.backgroundColor = .black
         window.hasShadow = true
-        // 普通层级：和 Windows 的普通播放窗一致，切到别的 App 会被盖住。
-        window.level = .normal
+        // 普通层级：和 Windows 的普通播放窗一致，切到别的 App 会被盖住；
+        // 上次开过「置顶」的话，按存下来的状态起。
+        window.level = session.isAlwaysOnTop ? .floating : .normal
         // 让 CA 自己管 layer，视频层和控制条才能稳定合成。
         window.contentView?.wantsLayer = true
 
@@ -457,6 +458,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         buildContentView()
         installKeyMonitor()
         installWheelMonitor()
+        NSLog("[Play] window level=\(window.level.rawValue) alwaysOnTop=\(session.isAlwaysOnTop)")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

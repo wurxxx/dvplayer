@@ -363,6 +363,8 @@ final class PlayerSession: ObservableObject {
         self.audioPassthrough = settings.audioPassthrough ?? false
         self.hdrPassthrough = settings.hdrPassthrough ?? false
         self.audioDevice = settings.audioDevice ?? ""
+        // 置顶状态跨会话保留：上次开着，下次开播放窗还是置顶。
+        self.isAlwaysOnTop = settings.alwaysOnTop ?? false
         self.markers = SkipMarkerStore.marker(for: Self.cleanSeries(seriesTitle) ?? effectiveId)
 
         guard let engine = MpvEngine(frame: frame,
@@ -1162,6 +1164,10 @@ final class PlayerSession: ObservableObject {
     func toggleAlwaysOnTop() {
         isAlwaysOnTop.toggle()
         onToggleAlwaysOnTop?()
+        // 跨会话保留：写进设置，下次开播放窗按上次的状态起。
+        var settings = AppSettings.load()
+        settings.alwaysOnTop = isAlwaysOnTop
+        settings.save()
         showChrome()
     }
 

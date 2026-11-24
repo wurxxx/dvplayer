@@ -30,6 +30,9 @@ public struct AppSettings: Codable, Sendable {
     /// HDR 直通（mpv 的 `target-colorspace-hint`，系统开了 HDR 才有效）。
     public var hdrPassthrough: Bool?
 
+    /// 播放窗是否置顶（播放页的图钉按钮）。跨会话保留。
+    public var alwaysOnTop: Bool?
+
     /// 弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。
     public var danmakuEnabled: Bool?
     public var danmakuAppId: String?
@@ -61,6 +64,7 @@ public struct AppSettings: Codable, Sendable {
         audioDevice = try c.decodeIfPresent(String.self, forKey: .audioDevice)
         audioPassthrough = try c.decodeIfPresent(Bool.self, forKey: .audioPassthrough)
         hdrPassthrough = try c.decodeIfPresent(Bool.self, forKey: .hdrPassthrough)
+        alwaysOnTop = try c.decodeIfPresent(Bool.self, forKey: .alwaysOnTop)
         danmakuEnabled = try c.decodeIfPresent(Bool.self, forKey: .danmakuEnabled)
         danmakuAppId = try c.decodeIfPresent(String.self, forKey: .danmakuAppId)
         danmakuAppSecret = try c.decodeIfPresent(String.self, forKey: .danmakuAppSecret)
