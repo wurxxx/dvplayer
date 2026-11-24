@@ -447,6 +447,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 session.requestClose()
             case "fullscreen":
                 session.toggleFullscreen()
+            case "ontop":
+                session.toggleAlwaysOnTop()
+                NSLog("[PlayTest] alwaysOnTop=\(session.isAlwaysOnTop)")
             case "audio":
                 let index = Int(parts.count > 1 ? parts[1] : "") ?? 0
                 if session.audioTracks.indices.contains(index) {
@@ -563,6 +566,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               + "danmaku=\(session.danmakuEnabled)/\(session.danmakuStatus ?? "-") "
               + "subOnline=\(session.subtitleResults.count)/\(session.subtitleSearching) "
               + "subErr=\(session.subtitleError ?? "-") "
+              + "cacheSpeed=\(String(format: "%.0f", session.cacheSpeed))B/s "
               + "error=\(session.error ?? "-")")
     }
 

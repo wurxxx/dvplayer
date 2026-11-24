@@ -77,6 +77,9 @@ struct PlayerView: View {
                 && (session.chromeVisible || session.panel != .none) {
                 topBar
                     .frame(maxHeight: .infinity, alignment: .top)
+                    // 控制条藏起来时不能拦点击：透明度 0 的视图仍然参与命中测试，
+                    // 会把右上角（置顶按钮那块）的画面点击吞掉。
+                    .allowsHitTesting(session.chromeVisible)
                 rightActions
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 18)
@@ -173,6 +176,18 @@ struct PlayerView: View {
         }
         .overlay(alignment: .topTrailing) {
             HStack(spacing: 6) {
+                // 缓冲 / 下载速度（和 Windows 的 SpeedText 一样，0.05 MB/s 以下不显示）。
+                if session.cacheSpeed / 1024 / 1024 >= 0.05 {
+                    Text(String(format: "%.1f MB/s", session.cacheSpeed / 1024 / 1024))
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.4),
+                                    in: RoundedRectangle(cornerRadius: 5))
+                }
+
                 if abs(session.speed - 1) > 0.01 {
                     Text(speedLabel(session.speed))
                         .font(.system(size: 11.5, weight: .semibold))
@@ -193,10 +208,26 @@ struct PlayerView: View {
                         .background(Color.black.opacity(0.4),
                                     in: RoundedRectangle(cornerRadius: 5))
                 }
+
+                // 窗口置顶（播放页的图钉）：置顶后切到别的 App 也盖在上面。
+                // 这个要能点，所以放在 allowsHitTesting(false) 之外。
+                Button {
+                    session.toggleAlwaysOnTop()
+                } label: {
+                    Image(systemName: session.isAlwaysOnTop ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(session.isAlwaysOnTop
+                                         ? Theme.accent
+                                         : Color.white.opacity(0.92))
+                        .frame(width: 26, height: 22)
+                        .background(Color.black.opacity(0.4),
+                                    in: RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .help(session.isAlwaysOnTop ? "取消置顶" : "窗口置顶")
             }
             .padding(.top, 13)
             .padding(.trailing, 18)
-            .allowsHitTesting(false)
         }
         .opacity(session.chromeVisible ? 1 : 0)
         .animation(.easeOut(duration: 0.15), value: session.chromeVisible)

@@ -54,6 +54,8 @@ final class MpvEngine {
     var onLog: ((String) -> Void)?
     /// demuxer 缓存到的位置（秒），进度条画「已缓冲」那一段用。
     var onCacheTime: ((Double) -> Void)?
+    /// 实际下载 / 缓存速度（字节每秒），右上角显示「68.3 MB/s」。
+    var onCacheSpeed: ((Double) -> Void)?
     /// 实际输出的动态范围：DV profile（0 = 不是 DV）+ 传递函数（pq / hlg / bt.1886）。
     var onVideoRange: ((Int, String) -> Void)?
     /// mpv 解出来的画面参数（宽、高、帧率、比特率、编码）；原盘没有服务端媒体信息。
@@ -126,6 +128,7 @@ final class MpvEngine {
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
         "track-list", "aid", "sid", "video-params/aspect", "demuxer-cache-time",
+        "cache-speed",
         "current-tracks/video", "video-params", "vo-configured", "video-frame-info",
         "paused-for-cache",
         "width", "height", "estimated-vf-fps", "video-bitrate",
@@ -572,6 +575,9 @@ final class MpvEngine {
             case "demuxer-cache-time":
                 guard let value = data as? Double else { return }
                 onCacheTime?(value)
+            case "cache-speed":
+                guard let value = doubleValue(data) else { return }
+                onCacheSpeed?(value)
             case "current-tracks/video":
                 let map = data as? [String: Any]
                 let profile = (map?["dolby-vision-profile"] as? Int)

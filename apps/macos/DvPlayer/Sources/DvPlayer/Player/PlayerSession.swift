@@ -248,12 +248,18 @@ final class PlayerSession: ObservableObject {
     @Published var panel: Panel = .none
     @Published var toast: String?
     @Published var isFullscreen = false
+    /// 窗口置顶（播放页的图钉）：置顶后切到别的 App 也盖在上面。
+    @Published var isAlwaysOnTop = false
+    /// 窗口控制器接这个：把播放窗的 level 在 .normal / .floating 之间切。
+    var onToggleAlwaysOnTop: (() -> Void)?
     /// 全屏切换那一拍不要跟着窗口 frame 同步（否则 mpv 会被中间态拽一下）。
     var isFullscreenSwitching = false
     @Published var isScrubbing = false
     @Published var seekPosition: Double = 0
     /// demuxer 缓存到的位置（秒）；进度条画「已缓冲」那一段。
     @Published private(set) var bufferedPosition: Double = 0
+    /// 缓存 / 下载速度（字节每秒）。右上角显示，0.05 MB/s 以下不显示。
+    @Published private(set) var cacheSpeed: Double = 0
 
     // —— 画面比例 / 定时关闭 / 片头片尾 ——
     @Published private(set) var aspect: PlayerAspect
@@ -434,6 +440,9 @@ final class PlayerSession: ObservableObject {
             guard let self else { return }
             // 刚 seek 回来缓存位置可能还落在进度后面，至少画到已观看那。
             self.bufferedPosition = max(cache, self.position)
+        }
+        engine.onCacheSpeed = { [weak self] bytesPerSecond in
+            self?.cacheSpeed = bytesPerSecond
         }
         engine.onSpeed = { [weak self] speed in
             self?.speed = speed
@@ -1146,6 +1155,13 @@ final class PlayerSession: ObservableObject {
 
     func toggleFullscreen() {
         onToggleFullscreen?()
+        showChrome()
+    }
+
+    /// 窗口置顶开关（播放页的图钉按钮）。
+    func toggleAlwaysOnTop() {
+        isAlwaysOnTop.toggle()
+        onToggleAlwaysOnTop?()
         showChrome()
     }
 

@@ -451,6 +451,7 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
         // 播放页里的「全屏」按钮 / 双击画面 / 键盘 F 都走这里。
         session.onToggleFullscreen = { [weak self] in self?.toggleFullscreen() }
+        session.onToggleAlwaysOnTop = { [weak self] in self?.applyWindowLevel() }
         session.onVideoAspect = { [weak self] aspect in self?.fitWindowToVideo(aspect) }
 
         buildContentView()
@@ -596,6 +597,16 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         // 先把「正在切全屏」清掉再同步：applyGeometry 会因这个标志直接返回，
         // 否则进出全屏后 mpv 的子窗口停在旧尺寸上。
         session.isFullscreenSwitching = false
+    }
+
+    // MARK: 窗口层级
+
+    /// 置顶：`.floating` 会盖在普通窗口上，切到别的 App 也留在前面。
+    /// 全屏时不用改（系统自己的空间已经独占一屏）。
+    private func applyWindowLevel() {
+        guard let window else { return }
+        window.level = session.isAlwaysOnTop ? .floating : .normal
+        NSLog("[Play] alwaysOnTop=\(session.isAlwaysOnTop) level=\(window.level.rawValue)")
     }
 
     // MARK: 键盘
