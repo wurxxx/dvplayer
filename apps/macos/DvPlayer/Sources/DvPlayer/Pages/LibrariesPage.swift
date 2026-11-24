@@ -446,9 +446,9 @@ struct LibrariesPage: View {
                 Caption(text: "还没有看到一半的内容。", size: 12.5)
             } else {
                 HorizontalRow(items: continueRecords, itemWidth: 264) { record in
-                    ContinueCard(record: record) {
-                        PlayerLauncher.shared.play(record: record)
-                    }
+                    ContinueCard(record: record,
+                                 onPlay: { PlayerLauncher.shared.play(record: record) },
+                                 onOpenDetail: { openDetail(record) })
                 }
             }
         }
@@ -482,6 +482,12 @@ struct LibrariesPage: View {
         // 和 Windows 的 OnCardClick 一致：卡片点击一律进详情页，
         // 不再按 kind 分叉到库内网格（那个网格入口在区块标题右侧的「N ›」）。
         detailId = id ?? item.id
+    }
+
+    /// 「继续观看」卡片点画面进详情：单集记录跳它所属的剧，
+    /// 没有父级（电影 / 单文件）就跳自己。
+    private func openDetail(_ record: PlayRecord) {
+        detailId = record.parentId ?? record.itemId
     }
 
     private var gridColumns: [GridItem] {

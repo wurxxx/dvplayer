@@ -140,9 +140,20 @@ struct PosterCard: View {
 }
 
 /// 「继续观看」横卡：16:9 缩略图 + 进度条 + 剩余时间。
+///
+/// 命中区分两段：
+/// - 底部一条（进度条 + 时间角标，含时间左边的空白）→ 继续播放；
+/// - 其余画面 → 进详情页。
 struct ContinueCard: View {
     let record: PlayRecord
-    var onTap: () -> Void
+    /// 点底部那条：继续播放。
+    var onPlay: () -> Void
+    /// 点画面其它地方：进详情页。
+    var onOpenDetail: () -> Void
+
+    /// 底部播放命中区的高度。进度条只有 3pt、时间角标 ~22pt，
+    /// 单点它们太难，整条 40pt 都算，点时间左边也能起播。
+    private let playZoneHeight: CGFloat = 40
 
     /// 右下角角标：总时长（和 Windows 的 ▶ 时长一致）。
     private var total: String {
@@ -151,10 +162,23 @@ struct ContinueCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: onTap) {
-                ZStack(alignment: .bottomTrailing) {
-                    PosterImage(path: record.posterPath,
-                                title: record.seriesTitle ?? record.title)
+            ZStack(alignment: .bottom) {
+                // 画面：点这里进详情。
+                PosterImage(path: record.posterPath,
+                            title: record.seriesTitle ?? record.title)
+                    .frame(width: 248, height: 140)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpenDetail() }
+
+                // 底部整条是「播放」命中区。用一层透明的 Color 收事件，
+                // 角标和进度条本身 allowsHitTesting(false)，视觉不变。
+                Color.clear
+                    .frame(height: playZoneHeight)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onPlay() }
+
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
 
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill")
@@ -167,28 +191,34 @@ struct ContinueCard: View {
                     .padding(.vertical, 3)
                     .background(Color.black.opacity(0.55),
                                 in: RoundedRectangle(cornerRadius: 6))
-                    .padding(10)
-                }
-                .frame(width: 248, height: 140)
-                .overlay(alignment: .bottom) {
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+
                     ProgressBar(value: record.progress, height: 3)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .contentShape(Rectangle())
+                .allowsHitTesting(false)
             }
-            .buttonStyle(.plain)
+            .frame(width: 248, height: 140)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            Text(recordTitle)
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.text)
-                .lineLimit(1)
-                .padding(.top, 9)
+            // 标题 / 副标题也算「画面以外」，点它们同样进详情。
+            VStack(alignment: .leading, spacing: 0) {
+                Text(recordTitle)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    .padding(.top, 9)
 
-            Text(recordSub)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.faint)
-                .lineLimit(1)
-                .padding(.top, 3)
+                Text(recordSub)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.faint)
+                    .lineLimit(1)
+                    .padding(.top, 3)
+            }
+            .frame(width: 248, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { onOpenDetail() }
         }
         .frame(width: 248, alignment: .leading)
     }

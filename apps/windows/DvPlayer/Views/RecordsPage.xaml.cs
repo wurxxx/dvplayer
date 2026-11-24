@@ -578,29 +578,50 @@ public partial class RecordsPage : Page
             : Visibility.Collapsed;
     }
 
-    private async void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    /// <summary>
+    /// 记录卡片点画面空白处 → 进详情页。
+    /// 底部那条（进度条 + 时间）走 OnContinuePlayClick 续播。
+    /// </summary>
+    private void OnRecordBodyClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
         {
             return;
         }
 
-        // 收藏分段：收藏的是影片 / 剧集本身，进详情。
-        // 观看分段：有记录就续播——收藏过的电影点「继续观看」不该跳详情。
-        if (FavoriteSegment.IsChecked == true)
+        // 单集记录跳它所属的剧；电影 / 单文件就是它自己。
+        var target = _records.FirstOrDefault(r => r.ItemId == id)?.ParentId is { Length: > 0 } parent
+            ? parent
+            : id;
+        NavigationService?.Navigate(new SeriesPage(target));
+    }
+
+    /// <summary>记录卡片点底部进度条 / 时间那一条 → 续播。</summary>
+    private async void OnContinuePlayClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        // 别让事件继续冒泡到外层的 OnRecordBodyClick。
+        e.Handled = true;
+
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
         {
-            NavigationService?.Navigate(new SeriesPage(id));
             return;
         }
 
-        // 续播：单集记录带上它所在那一季的选集。
         if (_records.FirstOrDefault(record => record.ItemId == id) is { } record)
         {
             await Playlists.PlayRecordAsync(Window.GetWindow(this), record);
+        }
+    }
+
+    /// <summary>收藏卡片点击 → 进详情（收藏的是影片 / 剧集本身）。</summary>
+    private void OnCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        {
             return;
         }
 
-        await PlayWindow.OpenAsync(Window.GetWindow(this), id);
+        NavigationService?.Navigate(new SeriesPage(id));
     }
 
     private static string Format(long seconds)

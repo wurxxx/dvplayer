@@ -165,9 +165,13 @@ struct RecordsPage: View {
                         }
 
                         HorizontalRow(items: group.records, itemWidth: 264) { record in
-                            ContinueCard(record: record) {
-                                PlayerLauncher.shared.play(record: record)
-                            }
+                            ContinueCard(record: record,
+                                         onPlay: { PlayerLauncher.shared.play(record: record) },
+                                         onOpenDetail: {
+                                             // 详情页要条目 id；单集记录跳它所属的剧
+                                             // （和 Windows 的 SeriesPage 一样）。
+                                             state.openDetail(record.parentId ?? record.itemId)
+                                         })
                         }
                     }
                 }

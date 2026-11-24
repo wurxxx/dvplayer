@@ -373,6 +373,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            // `DVPLAYER_TAP="x,y"`：滚动之后在窗口里合成一次点击（左上角原点），
+            // 用来验证「点画面进详情 / 点底部条续播」这种命中区拆分。
+            if let spec = env["DVPLAYER_TAP"] {
+                await Self.tap(in: spec)
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+            }
+
             Self.capture(to: shot)
 
             // 截图巡检：`DVPLAYER_SHOT_SHEET=1` 再截一张附着的 sheet
@@ -673,6 +680,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[ClickTest] text=\(String(describing: editor?.string))")
                 NSApp.terminate(nil)
             }
+        }
+    }
+
+    /// 在窗口里合成一次点击（参数按左上角原点给），不退出进程，
+    /// 供 `DVPLAYER_TAP` 验证命中区。
+    @MainActor
+    static func tap(in spec: String) async {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+              let view = window.contentView else {
+            NSLog("[Tap] 找不到窗口")
+            return
+        }
+
+        let parts = spec.split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 2 else {
+            NSLog("[Tap] 坐标格式应为 x,y")
+            return
+        }
+
+        // 窗口不是 key 时合成的点击会被系统丢掉，先真正激活再投递。
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        for _ in 0..<20 where !window.isKeyWindow {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        let point = NSPoint(x: parts[0], y: view.bounds.height - parts[1])
+        let hit = view.hitTest(point)
+        NSLog("[Tap] at \(parts[0]),\(parts[1]) point=\(point) key=\(window.isKeyWindow) hit=\(String(describing: hit))")
+
+        // 先移一下鼠标，SwiftUI 的 hover / 手势才认这次交互。
+        if let move = NSEvent.mouseEvent(
+            with: .mouseMoved, location: point, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 0, pressure: 0) {
+            window.sendEvent(move)
+        }
+
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseUp ? 0 : 1) else { continue }
+            window.sendEvent(event)
+            try? await Task.sleep(nanoseconds: 120_000_000)
         }
     }
 

@@ -1569,6 +1569,41 @@ public partial class LibrariesPage : Page
         await LoadAsync(_libraryId, _libraryTitle, children: false).ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// 「继续观看」卡片点画面空白处 → 进详情页。
+    /// 底部那条（进度条 + 时间）走 OnContinuePlayClick 续播。
+    /// </summary>
+    private void OnContinueBodyClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        // 单集记录跳它所属的剧；电影 / 单文件就是它自己。
+        var target = _continueRecords.TryGetValue(id, out var record) && record.ParentId is { Length: > 0 }
+            ? record.ParentId
+            : id;
+        NavigationService?.Navigate(new SeriesPage(target));
+    }
+
+    /// <summary>「继续观看」卡片点底部进度条 / 时间那一条 → 续播。</summary>
+    private async void OnContinuePlayClick(object sender, MouseButtonEventArgs e)
+    {
+        // 别让事件继续冒泡到外层的 OnContinueBodyClick。
+        e.Handled = true;
+
+        if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        if (_continueRecords.TryGetValue(id, out var record))
+        {
+            await Playlists.PlayRecordAsync(Window.GetWindow(this), record);
+        }
+    }
+
     private async void OnCardClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string id } || string.IsNullOrEmpty(id))

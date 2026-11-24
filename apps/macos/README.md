@@ -80,6 +80,7 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_SHOT_FRAME` | `1` = 连窗口边框一起截（窗口没有标题栏，通常用不上） |
 | `DVPLAYER_WINDOWTEST` | `1` = 依次点三个窗口按钮（最小化 / 缩放 / 关闭），结果打到日志，验证完自动退出 |
 | `DVPLAYER_CLICKTEST` | `x,y`（窗口左上角原点）= 合成一次点击并敲 `abc`，日志里看 `firstResponder` / 输入框内容，排查「点不进去」用 |
+| `DVPLAYER_TAP` | `x,y`（窗口左上角原点）= 先滚到 `DVPLAYER_SCROLL_Y` 再合成一次点击，不退出；验证卡片命中区（点画面进详情 / 点底部条续播） |
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

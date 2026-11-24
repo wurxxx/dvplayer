@@ -65,7 +65,7 @@
                           <StackPanel Width="248" Margin="0,0,14,4">
                             <Border Height="140" CornerRadius="10" Background="{Binding Background}"
                                     SnapsToDevicePixels="True" Tag="{Binding ItemId}"
-                                    Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+                                    Cursor="Hand" MouseLeftButtonUp="OnRecordBodyClick">
                             <Border.ContextMenu>
                               <ContextMenu Style="{StaticResource DarkContextMenu}">
                                 <MenuItem Style="{StaticResource DarkMenuItem}" Header="播放"
@@ -125,19 +125,28 @@
                                   </StackPanel>
                                 </Border>
 
-                                <Border Height="3" VerticalAlignment="Bottom" Background="#33FFFFFF">
+                                <!-- 底部播放命中区：盖住进度条 + 时间那一整条（含时间左边空白） -->
+                                <Border Height="40" VerticalAlignment="Bottom" Background="Transparent"
+                                        Cursor="Hand" Tag="{Binding ItemId}"
+                                        MouseLeftButtonUp="OnContinuePlayClick" />
+                                <Border Height="3" VerticalAlignment="Bottom" Background="#33FFFFFF"
+                                        IsHitTestVisible="False">
                                   <Border Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
                                           Width="{Binding BarWidth}" />
                                 </Border>
                               </Grid>
                             </Border>
 
-                            <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
-                                       Foreground="{StaticResource TextBrush}"
-                                       TextTrimming="CharacterEllipsis" />
-                            <TextBlock Text="{Binding Sub}" FontSize="12"
-                                       Foreground="{StaticResource FaintBrush}" Margin="2,3,0,0"
-                                       TextTrimming="CharacterEllipsis" />
+                            <!-- 标题 / 副标题也算「画面以外」，点它们同样进详情 -->
+                            <StackPanel Background="Transparent" Cursor="Hand"
+                                        Tag="{Binding ItemId}" MouseLeftButtonUp="OnRecordBodyClick">
+                              <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
+                                         Foreground="{StaticResource TextBrush}"
+                                         TextTrimming="CharacterEllipsis" />
+                              <TextBlock Text="{Binding Sub}" FontSize="12"
+                                         Foreground="{StaticResource FaintBrush}" Margin="2,3,0,0"
+                                         TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
                           </StackPanel>
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
@@ -235,7 +244,7 @@
                         Height="{Binding CardHeight, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
                         CornerRadius="10" Background="{Binding Background}"
                         SnapsToDevicePixels="True" Tag="{Binding ItemId}"
-                        Cursor="Hand" MouseLeftButtonUp="OnCardClick">
+                        Cursor="Hand" MouseLeftButtonUp="OnRecordBodyClick">
                 <Border.ContextMenu>
                   <ContextMenu Style="{StaticResource DarkContextMenu}">
                     <MenuItem Style="{StaticResource DarkMenuItem}" Header="播放"
@@ -295,19 +304,28 @@
                     </StackPanel>
                   </Border>
 
-                  <Border Height="3" VerticalAlignment="Bottom" Background="#33FFFFFF">
+                  <!-- 底部播放命中区：盖住进度条 + 时间那一整条（含时间左边空白） -->
+                  <Border Height="40" VerticalAlignment="Bottom" Background="Transparent"
+                          Cursor="Hand" Tag="{Binding ItemId}"
+                          MouseLeftButtonUp="OnContinuePlayClick" />
+                  <Border Height="3" VerticalAlignment="Bottom" Background="#33FFFFFF"
+                          IsHitTestVisible="False">
                     <Border Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
                             Width="{Binding BarWidth}" />
                   </Border>
                 </Grid>
               </Border>
 
-              <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
-                         Foreground="{StaticResource TextBrush}"
-                         TextTrimming="CharacterEllipsis" />
-              <TextBlock Text="{Binding Sub}" FontSize="12"
-                         Foreground="{StaticResource FaintBrush}" Margin="2,3,0,0"
-                         TextTrimming="CharacterEllipsis" />
+              <!-- 标题 / 副标题也算「画面以外」，点它们同样进详情 -->
+              <StackPanel Background="Transparent" Cursor="Hand"
+                          Tag="{Binding ItemId}" MouseLeftButtonUp="OnRecordBodyClick">
+                <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
+                           Foreground="{StaticResource TextBrush}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Sub}" FontSize="12"
+                           Foreground="{StaticResource FaintBrush}" Margin="2,3,0,0"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
             </StackPanel>
           </DataTemplate>
         </controls:PosterGrid.ItemTemplate>
