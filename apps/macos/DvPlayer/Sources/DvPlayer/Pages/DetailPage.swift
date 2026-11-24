@@ -375,10 +375,22 @@ struct DetailPage: View {
                 guard let detail else { return }
                 play(playTargetId ?? detail.id, startSeconds: nil)
             } label: {
-                Label("播放", systemImage: "play.fill")
-                    .labelStyle(.titleAndIcon)
+                // 看过但没看完：按钮上带上「上次看到哪」，对齐 Windows 的
+                // `播放  00:03:16`（SeriesPage.UpdatePlayButton）。
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                    Text("播放")
+                    if resumeSeconds >= 5 {
+                        Text(MediaText.duration(Double(resumeSeconds)))
+                            .monospacedDigit()
+                            .opacity(0.85)
+                    }
+                }
             }
             .buttonStyle(PrimaryButtonStyle())
+            .help(resumeSeconds >= 5
+                  ? "从 \(MediaText.duration(Double(resumeSeconds))) 继续播放"
+                  : "播放")
 
             // 「重头看」只在看过之后才有意义（Windows 同样按
             // playSource 的续播位置 >= 5 秒判断）。没看过的片子
