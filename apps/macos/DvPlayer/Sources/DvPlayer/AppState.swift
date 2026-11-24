@@ -107,6 +107,8 @@ final class AppState: ObservableObject {
         debugLibrary = env["DVPLAYER_LIBRARY"]
 
         switch env["DVPLAYER_PAGE"] {
+        case "home":
+            if let last = settings.lastSourceId { page = .home(last) }
         case "records": page = .records
         case "search": page = .search
         case "settings": page = .settings

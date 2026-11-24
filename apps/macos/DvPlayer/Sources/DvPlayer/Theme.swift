@@ -58,14 +58,17 @@ struct SectionTitle: View {
                 .foregroundStyle(Theme.text)
             Spacer(minLength: 8)
             if let trailing, !trailing.isEmpty {
+                // 数量和标题只差一档：以前这里 11.5pt，比 16pt 的标题小了整整
+                // 两级，看着像漏了样式（用户反馈「右侧字体太小」）。
+                // 可点 / 不可点两条分支也用同一套字号，不再一个 13 一个 11.5。
                 if let onTrailingTap {
                     Button(action: onTrailingTap) {
                         HStack(spacing: 4) {
                             Text(trailing)
-                                .font(.system(size: 13))
+                                .font(.system(size: 14))
                                 .foregroundStyle(Theme.muted)
                             Text("›")
-                                .font(.system(size: 13))
+                                .font(.system(size: 14))
                                 .foregroundStyle(Theme.faint)
                         }
                         .contentShape(Rectangle())
@@ -74,8 +77,8 @@ struct SectionTitle: View {
                     .help("查看全部")
                 } else {
                     Text(trailing)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.faint)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.muted)
                 }
             }
         }
