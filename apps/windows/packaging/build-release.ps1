@@ -23,6 +23,13 @@ param(
     [string]$Configuration = 'Release',
     [string]$MpvDir = 'D:\dvplayer\mpv',
     [string]$OutputDir = '',
+    <#
+      播放后端：
+        process  mpv.exe 子进程（默认，DV P7 FEL 已在真机验证）
+        libmpv   libmpv-2.dll 进程内（包体积约 45 MB，需要真机回归 DV）
+    #>
+    [ValidateSet('process', 'libmpv')]
+    [string]$Backend = 'process',
     [switch]$SkipPublish,
     [switch]$SkipPortable,
     [switch]$SkipInstaller
@@ -70,13 +77,34 @@ if (Test-Path $core) {
 }
 
 # mpv: ship it beside the exe so the package works on a clean machine.
+#
+# 两个后端，用 -Backend 选（默认 process，和线上版本一致）：
+#   process  mpv.exe --wid（子进程）        → mpv\ 目录，约 116 MB
+#   libmpv   libmpv-2.dll（进程内，C API）  → 根目录几个 dll，约 45 MB
+#
+# 进程内后端的 dll 列表由 mpv 官方构建决定，shinchiro 的包解压后就是
+# libmpv-2.dll + 一堆 lib*.dll，全部平铺在 exe 旁边即可。
 $payloadMpv = Join-Path $payload 'mpv'
-if (-not (Test-Path (Join-Path $payloadMpv 'mpv.exe'))) {
-    if (-not (Test-Path (Join-Path $MpvDir 'mpv.exe'))) {
-        throw "mpv.exe not found in $MpvDir. Pass -MpvDir <dir>."
+if ($Backend -eq 'libmpv') {
+    $lib = Join-Path $MpvDir 'libmpv-2.dll'
+    if (-not (Test-Path $lib)) {
+        throw "libmpv-2.dll not found in $MpvDir. Pass -MpvDir <dir> pointing at a shinchiro build."
     }
-    New-Item -ItemType Directory -Force $payloadMpv | Out-Null
-    Copy-Item (Join-Path $MpvDir '*') $payloadMpv -Recurse -Force
+
+    # libmpv 依赖的 dll 一并拷到根目录（DLL 搜索路径优先 exe 所在目录）。
+    Copy-Item (Join-Path $MpvDir '*.dll') $payload -Force
+
+    # mpv.exe 不需要，但 mpv.com / d3dcompiler 之类也不要带。
+    Write-Host 'backend: libmpv (in-process)'
+} else {
+    if (-not (Test-Path (Join-Path $payloadMpv 'mpv.exe'))) {
+        if (-not (Test-Path (Join-Path $MpvDir 'mpv.exe'))) {
+            throw "mpv.exe not found in $MpvDir. Pass -MpvDir <dir>."
+        }
+        New-Item -ItemType Directory -Force $payloadMpv | Out-Null
+        Copy-Item (Join-Path $MpvDir '*') $payloadMpv -Recurse -Force
+    }
+    Write-Host 'backend: process (mpv.exe --wid)'
 }
 
 $readme = @"

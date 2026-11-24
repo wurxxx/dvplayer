@@ -11,7 +11,7 @@ namespace DvPlayer.Player;
 /// mpv 以 <c>--input-ipc-server=\\.\pipe\&lt;name&gt;</c> 启动后，这里连上去发命令、
 /// 订阅属性。壳的快捷键、进度条、音量全走这条通道，所以视频子窗口有没有焦点都无所谓。
 /// </summary>
-public sealed class MpvIpc : IDisposable
+public sealed class MpvIpc : IMpvControl
 {
     private NamedPipeClientStream? _pipe;
     private StreamWriter? _writer;

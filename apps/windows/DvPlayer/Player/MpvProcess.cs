@@ -31,7 +31,7 @@ public sealed record MpvLaunch(
 /// 产品里所有播放能力都来自 mpv 本身：DV P7 FEL 的拆层、EL 合成、gpu-next
 /// 的 DV 整形。壳只做窗口托管和 UI，不需要私有补丁（ADR-0001）。
 /// </summary>
-public sealed class MpvProcess : IDisposable
+public sealed class MpvProcess : IMpvEngine
 {
 
     /// <summary>播放缓冲上限（MB）：设置页的值，夹在 128MB–8GB。
@@ -77,6 +77,13 @@ public sealed class MpvProcess : IDisposable
 
     /// <summary>连上 IPC 的任务；<see cref="Start"/> 之后才有值。</summary>
     public Task<bool>? IpcReady { get; private set; }
+
+    // —— IMpvEngine 的显式实现：对外统一成接口，PlayWindow 只认接口 ——
+
+    /// <summary>控制通道。子进程后端就是命名管道 IPC。</summary>
+    public IMpvControl? Control => _ipc;
+
+    Task<bool>? IMpvEngine.ControlReady => IpcReady;
 
     public event EventHandler? Exited;
 

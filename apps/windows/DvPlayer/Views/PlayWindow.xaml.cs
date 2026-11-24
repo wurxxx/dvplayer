@@ -39,7 +39,7 @@ public partial class PlayWindow : Window
     private const int ReportEverySeconds = 10;
 
     private double? _startSeconds;
-    private readonly MpvProcess _mpv = new();
+    private readonly IMpvEngine _mpv = MpvBackend.Create();
 
     private readonly DispatcherTimer _ticker = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromSeconds(3) };
@@ -63,7 +63,7 @@ public partial class PlayWindow : Window
     private int _switchSeq;
     /// <summary>错误面板点「重试」正在跑：别连点重复解析 / 重复起 mpv。</summary>
     private bool _retrying;
-    private MpvIpc? _ipc;
+    private IMpvControl? _ipc;
     private int _session;
 
     private string _itemId;
@@ -1490,7 +1490,7 @@ public partial class PlayWindow : Window
         Trace.Write($"mpv start url={RedactUrl(launch.Url)} headers={launch.Headers?.Count ?? 0} " +
                     $"start={launch.StartSeconds} resume={source.PositionSeconds} " +
                     $"aspect={_aspect.Key()} introSkip={_pendingIntroSkip?.ToString("0") ?? "-"} " +
-                    $"buffer={MpvProcess.BufferSizeMb}MiB");
+                    $"buffer={MpvBackend.BufferSizeMb}MiB");
 
         try
         {
@@ -1537,8 +1537,8 @@ public partial class PlayWindow : Window
     private async Task AttachIpcAsync()
     {
         var session = ++_session;
-        var ready = _mpv.IpcReady;
-        var ipc = _mpv.Ipc;
+        var ready = _mpv.ControlReady;
+        var ipc = _mpv.Control;
         if (ready is null || ipc is null)
         {
             return;
@@ -3132,7 +3132,7 @@ public partial class PlayWindow : Window
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = Path.GetDirectoryName(MpvProcess.LogPath)!,
+                FileName = Path.GetDirectoryName(MpvBackend.LogPath)!,
                 UseShellExecute = true,
             });
         }
