@@ -73,11 +73,6 @@ struct PlayerView: View {
                 errorPanel(error)
             }
 
-            if session.isFullscreen == false {
-                windowDots
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-
             if !session.loading && session.error == nil
                 && (session.chromeVisible || session.panel != .none) {
                 topBar
@@ -85,6 +80,13 @@ struct PlayerView: View {
                 rightActions
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 18)
+            }
+
+            // 红绿灯放在 topBar **之后**：topBar 顶部那条黑色渐变会盖住
+            // 先画的东西，按钮被压暗（截图里三个点发灰发暗就是这个）。
+            if session.isFullscreen == false {
+                windowDots
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
             if !session.loading && session.error == nil && session.chromeVisible {
