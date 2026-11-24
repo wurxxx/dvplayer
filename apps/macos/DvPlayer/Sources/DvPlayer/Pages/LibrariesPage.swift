@@ -360,16 +360,21 @@ struct LibrariesPage: View {
                     .padding(.bottom, 74)
 
                     if heroes.count > 1 {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 0) {
                             ForEach(heroes.indices, id: \.self) { index in
                                 Circle()
                                     .fill(Color.white.opacity(index == heroIndex ? 0.9 : 0.35))
                                     .frame(width: 6, height: 6)
+                                    // 圆点只有 6pt，间距也是 6pt。整块 Hero 现在
+                                    // 都能点进详情，点偏一点就会穿透进去，所以把
+                                    // 命中区撑到 12×18（视觉大小、点间距都不变）。
+                                    .frame(width: 12, height: 18)
+                                    .contentShape(Rectangle())
                                     .onTapGesture { heroIndex = index }
                             }
                         }
-                        .padding(.leading, Theme.sidebarWidth)
-                        .padding(.bottom, 22)
+                        .padding(.leading, Theme.sidebarWidth - 3)
+                        .padding(.bottom, 16)
                     }
 
                     if heroHovering && heroes.count > 1 {
