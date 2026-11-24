@@ -138,9 +138,10 @@ struct DetailPage: View {
 
     private var content: some View {
         ZStack(alignment: .top) {
-            // 详情页只有**一层**背景：整页一张模糊大图，
-            // 文字和卡片直接浮在上面。注意不要「清晰大图 + 模糊大图」两层叠着 ——
-            // 两层亮度在交界处对不上，就会切出一条亮带。
+            // 详情页背景是「同一张图的两种清晰度」：
+            // 整页铺一张模糊大图（滚到哪都有颜色），顶部再叠一张清晰大图，
+            // 清晰图底部渐隐到透明，露出下面同源的模糊图。
+            // 关键是两层**同源**，交界处色相一致，才不会切出亮带。
             if let path = detail?.backdropPath ?? detail?.posterPath {
                 GeometryReader { geo in
                     PosterImage(path: path, title: detail?.title ?? "")
@@ -271,8 +272,22 @@ struct DetailPage: View {
     private var header: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottomLeading) {
-                // 背景整页只有一层（content 里那张模糊大图），
-                // 这里不再铺清晰大图 —— 两层叠着必然在交界处切出亮带。
+                // 清晰大图铺在顶部，底部渐隐到透明 —— 下面就是 content 里
+                // 那张同源的模糊图，所以过渡自然，不会出现亮度突变。
+                PosterImage(path: detail?.backdropPath ?? detail?.posterPath,
+                            title: detail?.title ?? "")
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white, location: 0),
+                                .init(color: .white, location: 0.70),
+                                .init(color: .white.opacity(0.6), location: 0.88),
+                                .init(color: .clear, location: 1),
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text(detail?.title ?? "正在读取…")
                         .font(.system(size: 34, weight: .semibold))
@@ -309,10 +324,10 @@ struct DetailPage: View {
                 .padding(.bottom, 26)
                 .frame(width: geo.size.width, alignment: .leading)
             }
-            .frame(width: geo.size.width, height: 240)
+            .frame(width: geo.size.width, height: 460)
             .clipped()
         }
-        .frame(height: 240)
+        .frame(height: 460)
     }
 
     private var actions: some View {
