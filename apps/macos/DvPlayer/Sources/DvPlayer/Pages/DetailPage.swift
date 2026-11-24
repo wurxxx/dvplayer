@@ -137,72 +137,99 @@ struct DetailPage: View {
     // MARK: - 主体
 
     private var content: some View {
-        PageScroll {
-            VStack(alignment: .leading, spacing: 0) {
-                header
+        ZStack(alignment: .top) {
+            // 详情页只有**一层**背景：整页一张模糊大图，
+            // 文字和卡片直接浮在上面。注意不要「清晰大图 + 模糊大图」两层叠着 ——
+            // 两层亮度在交界处对不上，就会切出一条亮带。
+            if let path = detail?.backdropPath ?? detail?.posterPath {
+                GeometryReader { geo in
+                    PosterImage(path: path, title: detail?.title ?? "")
+                        .blur(radius: 34, opaque: true)
+                        // 模糊会让边缘发虚，放大一点把边缘推出可视区。
+                        .scaleEffect(1.18)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
+                .overlay {
+                    // 统一一层暗色：正文和卡片要读得清，同时保留画面的色相。
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.black.opacity(0.20), location: 0),
+                            .init(color: Color.black.opacity(0.34), location: 0.5),
+                            .init(color: Color.black.opacity(0.46), location: 1),
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                }
+                .allowsHitTesting(false)
+            }
 
-                VStack(alignment: .leading, spacing: 30) {
-                    if !seasons.isEmpty {
-                        seasonBar
-                    }
+            PageScroll {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
 
-                    // 季已知但第一页集还没回来：给一行提示，别让中间空一块。
-                    if !seasons.isEmpty && episodes.isEmpty {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(Theme.accent)
-                            Text("正在读取选集…")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Theme.faint)
+                    VStack(alignment: .leading, spacing: 30) {
+                        if !seasons.isEmpty {
+                            seasonBar
                         }
-                        .padding(.vertical, 4)
-                    }
 
-                    if !episodes.isEmpty {
-                        episodeBlock
-                    }
-
-                    // 同一部片在多个源里都有：详情页列出来，点一下切源。
-                    if sources.count > 1 {
-                        sourcesBlock
-                    }
-
-                    if !people.isEmpty {
-                        castBlock
-                    }
-
-                    linksBlock
-
-                    if let mediaInfo, hasTracks(mediaInfo) {
-                        mediaInfoBlock(mediaInfo)
-                    }
-
-                    // 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
-                    if let location = locationText {
-                        VStack(alignment: .leading, spacing: 11) {
-                            SectionTitle(text: "存储位置")
-
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "folder")
-                                    .font(.system(size: 11.5))
+                        // 季已知但第一页集还没回来：给一行提示，别让中间空一块。
+                        if !seasons.isEmpty && episodes.isEmpty {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(Theme.accent)
+                                Text("正在读取选集…")
+                                    .font(.system(size: 13))
                                     .foregroundStyle(Theme.faint)
-                                    .padding(.top, 2)
+                            }
+                            .padding(.vertical, 4)
+                        }
 
-                                Text(location)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(Theme.muted)
-                                    .lineLimit(3)
-                                    .truncationMode(.middle)
-                                    .textSelection(.enabled)
+                        if !episodes.isEmpty {
+                            episodeBlock
+                        }
+
+                        // 同一部片在多个源里都有：详情页列出来，点一下切源。
+                        if sources.count > 1 {
+                            sourcesBlock
+                        }
+
+                        if !people.isEmpty {
+                            castBlock
+                        }
+
+                        linksBlock
+
+                        if let mediaInfo, hasTracks(mediaInfo) {
+                            mediaInfoBlock(mediaInfo)
+                        }
+
+                        // 视频存放位置：电影 / 单集给文件路径，剧集 / 季给所在目录。
+                        if let location = locationText {
+                            VStack(alignment: .leading, spacing: 11) {
+                                SectionTitle(text: "存储位置")
+
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.faint)
+                                        .padding(.top, 2)
+
+                                    Text(location)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(Theme.muted)
+                                        .lineLimit(3)
+                                        .truncationMode(.middle)
+                                        .textSelection(.enabled)
+                                }
                             }
                         }
                     }
+                    .padding(.leading, Theme.contentLeading)
+                    .padding(.trailing, 32)
+                    .padding(.top, 26)
+                    .padding(.bottom, 40)
                 }
-                .padding(.leading, Theme.contentLeading)
-                .padding(.trailing, 32)
-                .padding(.top, 26)
-                .padding(.bottom, 40)
             }
         }
         .overlay(alignment: .topLeading) {
@@ -244,22 +271,8 @@ struct DetailPage: View {
     private var header: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottomLeading) {
-                PosterImage(path: detail?.backdropPath ?? detail?.posterPath,
-                            title: detail?.title ?? "")
-
-                // 和首页 Hero 一样：清晰大图直接铺，底部渐变到实底 Theme.bg。
-                // 下面接的是普通底色，不是另一层模糊图，所以不会出现
-                // 「亮带 / 硬边」——那条线就是两层亮度不连续造成的。
-                LinearGradient(
-                    stops: [
-                        .init(color: Theme.bg.opacity(0), location: 0.35),
-                        .init(color: Theme.bg.opacity(0.55), location: 0.68),
-                        .init(color: Theme.bg.opacity(0.9), location: 0.84),
-                        .init(color: Theme.bg, location: 1),
-                    ],
-                    startPoint: .top, endPoint: .bottom
-                )
-
+                // 背景整页只有一层（content 里那张模糊大图），
+                // 这里不再铺清晰大图 —— 两层叠着必然在交界处切出亮带。
                 VStack(alignment: .leading, spacing: 12) {
                     Text(detail?.title ?? "正在读取…")
                         .font(.system(size: 34, weight: .semibold))
@@ -296,10 +309,10 @@ struct DetailPage: View {
                 .padding(.bottom, 26)
                 .frame(width: geo.size.width, alignment: .leading)
             }
-            .frame(width: geo.size.width, height: 460)
+            .frame(width: geo.size.width, height: 240)
             .clipped()
         }
-        .frame(height: 460)
+        .frame(height: 240)
     }
 
     private var actions: some View {
