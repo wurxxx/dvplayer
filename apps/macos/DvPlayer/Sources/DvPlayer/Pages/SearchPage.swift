@@ -28,7 +28,8 @@ struct SearchPage: View {
                 Spacer()
                 SearchField(placeholder: "片名、剧名或关键词", text: $keyword, width: 320)
             }
-            .padding(.horizontal, 32)
+            .padding(.leading, Theme.contentLeading)
+            .padding(.trailing, 32)
             .padding(.top, 18)
 
             PageScroll {
@@ -66,7 +67,8 @@ struct SearchPage: View {
                         }
                     }
                 }
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 20)
                 .padding(.bottom, 40)
             }
@@ -185,7 +187,8 @@ struct SettingsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "设置")
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 18)
 
             PageScroll {
@@ -323,7 +326,8 @@ struct SettingsPage: View {
 
                     Spacer(minLength: 20)
                 }
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 20)
                 .padding(.bottom, 32)
                 .frame(maxWidth: 880, alignment: .leading)

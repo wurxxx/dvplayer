@@ -5,24 +5,37 @@ import DvCore
 
 /// 侧栏 + 内容区。侧栏结构和 Windows 一致：品牌、导航、服务器列表、连接状态；
 /// 「媒体库」不单独做菜单——点某个服务器就是它的首页。
+///
+/// 布局：内容（Hero 大图）铺满整个窗口一直延伸到最左边，
+/// 侧栏是浮在它上面的毛玻璃，颜色会跟着下面的画面变化。
 struct ShellView: View {
     @EnvironmentObject private var state: AppState
 
     var body: some View {
-        HStack(spacing: 0) {
-            SidebarView()
-                .frame(width: Theme.sidebarWidth)
-                .background(Theme.sidebar)
-                .overlay(alignment: .trailing) {
-                    Rectangle().fill(Theme.line).frame(width: 1)
-                }
-
+        ZStack(alignment: .leading) {
             ZStack(alignment: .bottom) {
                 Theme.bg
                 content
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.bg)
+
+            // 侧栏浮在内容之上，半透明 + 背后模糊。
+            ZStack {
+                // 模糊窗口内、侧栏背后的内容（不是桌面壁纸）。
+                VisualEffectBackdrop()
+                // 再压一层深色：亮画面上白字也要够对比。
+                // 关键是「暗但不闷」：详情页背后是亮画面时，
+                // 侧栏是偏暖的深棕而不是灰白 —— 颜色要透，明度要低。
+                Color(hex: 0x121118).opacity(0.22)
+                SidebarView()
+            }
+            .frame(width: Theme.sidebarWidth)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 1)
+            }
         }
         .background(Theme.bg)
         .ignoresSafeArea(.container, edges: .top)
@@ -349,6 +362,34 @@ struct WindowControls: View {
     }
 }
 
+
+/// 侧栏的毛玻璃底。
+///
+/// 侧栏是**薄**的——首页背后是暗画面时看着像实心深灰，
+/// 详情页背后是亮画面时能明显透出暖色调。
+/// 所以不能靠厚遮罩压死颜色，颜色要透出来，只把细节轮廓交给模糊。
+/// 遮罩那一层在 `ShellView` 里压，不放在这里。
+struct VisualEffectBackdrop: NSViewRepresentable {
+    // `.hudWindow` 在深色模式下自带一层白色叠加，侧栏会比背后画面还亮
+    // （实测背后 #1d1c23 时侧栏是 #322f32），发灰。
+    // `.sidebar` 才是往下压的深色材质。
+    var material: NSVisualEffectView.Material = .sidebar
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        // 要模糊的是「同一窗口里侧栏背后的 Hero 大图」，不是桌面壁纸：
+        // `.behindWindow` 取的是窗口后面的桌面，颜色不会跟着画面走。
+        view.blendingMode = .withinWindow
+        view.state = .active
+        view.isEmphasized = false
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        if view.material != material { view.material = material }
+    }
+}
 
 /// 品牌图：打包进 `Contents/Resources/DvPlayer-256.png`（build.sh 从
 /// `assets/branding/` 拷过来）。没有就退回侧栏自绘的图标。

@@ -57,11 +57,13 @@ struct BrowseView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 40)
 
             controls
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 14)
 
             // 网格页要能看出「还能往下滚」，这里把纵向滚动条常显出来。
@@ -71,7 +73,8 @@ struct BrowseView: View {
                         PosterCard(item: item, width: 168) { onOpen(item.id) }
                     }
                 }
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 18)
                 .padding(.bottom, 20)
 

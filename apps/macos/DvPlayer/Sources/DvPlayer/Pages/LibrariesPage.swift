@@ -125,6 +125,7 @@ struct LibrariesPage: View {
                 }
 
                 tabBar
+                    .padding(.leading, Theme.sidebarWidth)
                     .padding(.top, 16)
             }
         }
@@ -209,7 +210,8 @@ struct LibrariesPage: View {
                         sectionBlock(section)
                     }
                 }
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 26)
                 .padding(.bottom, 48)
             }
@@ -257,7 +259,8 @@ struct LibrariesPage: View {
                     }
                 }
             }
-            .padding(.horizontal, 32)
+            .padding(.leading, Theme.contentLeading)
+            .padding(.trailing, 32)
             .padding(.bottom, 40)
         }
         .onChange(of: searchText) { _ in
@@ -285,7 +288,8 @@ struct LibrariesPage: View {
                     }
                 }
             }
-            .padding(.horizontal, 32)
+            .padding(.leading, Theme.contentLeading)
+            .padding(.trailing, 32)
             .padding(.bottom, 40)
         }
     }
@@ -303,6 +307,10 @@ struct LibrariesPage: View {
                     // 和 Windows 一样直接铺，让「糊」这条路彻底消失。
                     PosterImage(path: item.backdrop ?? item.poster, title: item.title)
 
+                    // 画面一直铺到窗口最左边，侧栏是浮在上面的毛玻璃：
+                    // 这里不要再压黑，否则侧栏背后是「被压暗的画面」，
+                    // 毛玻璃取不到真实颜色，看着就不跟着画面变了。
+
                     LinearGradient(
                         stops: [
                             .init(color: Theme.bg.opacity(0), location: 0.45),
@@ -313,6 +321,8 @@ struct LibrariesPage: View {
                         startPoint: .top, endPoint: .bottom
                     )
 
+                    // 文字 / 圆点 / 箭头要居中在「侧栏右侧的可见区域」，
+                    // 而不是整窗居中：侧栏是浮层，盖住左边 216pt。
                     VStack(spacing: 10) {
                         Text(item.title)
                             .font(.system(size: 36, weight: .semibold))
@@ -344,6 +354,7 @@ struct LibrariesPage: View {
                         }
                     }
                     .padding(.horizontal, 24)
+                    .padding(.leading, Theme.sidebarWidth)
                     .padding(.bottom, 74)
                     .contentShape(Rectangle())
                     .onTapGesture { detailId = item.id }
@@ -357,6 +368,7 @@ struct LibrariesPage: View {
                                     .onTapGesture { heroIndex = index }
                             }
                         }
+                        .padding(.leading, Theme.sidebarWidth)
                         .padding(.bottom, 22)
                     }
 
@@ -366,7 +378,8 @@ struct LibrariesPage: View {
                             Spacer()
                             heroArrow("chevron.right") { stepHero(1) }
                         }
-                        .padding(.horizontal, 28)
+                        .padding(.leading, Theme.sidebarWidth + 28)
+                        .padding(.trailing, 28)
                     }
                 }
             }

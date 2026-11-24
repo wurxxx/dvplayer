@@ -77,7 +77,8 @@ struct RecordsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 18)
 
             PageScroll {
@@ -189,7 +190,8 @@ struct RecordsPage: View {
                 }
             }
         }
-        .padding(.horizontal, 32)
+        .padding(.leading, Theme.contentLeading)
+        .padding(.trailing, 32)
         .padding(.top, 22)
         .padding(.bottom, 40)
     }
@@ -247,7 +249,8 @@ struct RecordsPage: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.vertical, 10)
 
                 Divider().overlay(Theme.line.opacity(0.5)).padding(.leading, 32)
@@ -270,7 +273,8 @@ struct RecordsPage: View {
                         }
                     }
                 }
-                .padding(.horizontal, 32)
+                .padding(.leading, Theme.contentLeading)
+                .padding(.trailing, 32)
                 .padding(.top, 22)
                 .padding(.bottom, 40)
             }

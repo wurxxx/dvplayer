@@ -18,6 +18,10 @@ enum Theme {
     static let radiusCard: CGFloat = 12
     static let radiusControl: CGFloat = 9
     static let sidebarWidth: CGFloat = 216
+
+    /// 侧栏是浮在内容上的毛玻璃层（Hero 大图从窗口最左边铺到底），
+    /// 正文要躲开它：左内边距 = 侧栏宽 + 常规留白。
+    static let contentLeading: CGFloat = sidebarWidth + 32
 }
 
 extension Color {

@@ -87,6 +87,15 @@ private final class ScrollStyleProbe: NSView {
                 // 系统滚动条一律藏掉；要显示时由右侧自绘的那条画。
                 if scroll.hasVerticalScroller { scroll.hasVerticalScroller = false }
                 if scroll.hasHorizontalScroller { scroll.hasHorizontalScroller = false }
+                // 只把 hasVerticalScroller 设成 false 不够：传统（legacy）滚动样式下
+                // NSScrollView 仍然给滚动条留 17pt，document 比 clip 窄一截，
+                // 页面右边就空出一条缝。overlay 样式不占宽度，但改完要重新
+                // tile 一次几何才会按新样式重算。
+                if scroll.scrollerStyle != .overlay {
+                    scroll.scrollerStyle = .overlay
+                    scroll.tile()
+                }
+                if scroll.autohidesScrollers != true { scroll.autohidesScrollers = true }
                 if scroll.verticalScrollElasticity != .allowed {
                     scroll.verticalScrollElasticity = .allowed
                 }
@@ -137,6 +146,10 @@ struct PageScroll<Content: View>: View {
         GeometryReader { outer in
             ScrollView {
                 content
+                    // SwiftUI 的 ScrollView 会按系统的「传统滚动条」样式给内容
+                    // 预留 17pt，document 比 clip 窄一截，页面右边就空出一条缝。
+                    // 显式把内容宽度定成容器宽度，这条缝才没有。
+                    .frame(width: outer.size.width, alignment: .topLeading)
                     .background {
                         GeometryReader { inner in
                             Color.clear.preference(

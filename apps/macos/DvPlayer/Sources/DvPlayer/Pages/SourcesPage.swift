@@ -144,7 +144,8 @@ struct SourcesPage: View {
 
                 Spacer(minLength: 20)
             }
-            .padding(.horizontal, 32)
+            .padding(.leading, Theme.contentLeading)
+            .padding(.trailing, 32)
             .padding(.top, 18)
             .padding(.bottom, 32)
             .frame(maxWidth: 900, alignment: .leading)
