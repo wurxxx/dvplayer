@@ -53,7 +53,9 @@ struct LibrariesPage: View {
     @State private var searchText = ""
     @State private var searchResults: [LibrarySearchHit] = []
     @State private var searching = false
-    @State private var heroHovering = false
+    /// 截图巡检：`DVPLAYER_HERO_HOVER=1` 强制显示 Hero 左右箭头（平时只在悬停时出现）。
+    @State private var heroHovering =
+        ProcessInfo.processInfo.environment["DVPLAYER_HERO_HOVER"] == "1"
     @State private var tab: SourceTab = .media
     /// 这份页面状态属于哪个源：切源时要把详情 / 网格 / 页签清掉。
     @State private var loadedSourceId: String?
@@ -373,6 +375,7 @@ struct LibrariesPage: View {
                     }
 
                     if heroHovering && heroes.count > 1 {
+                        // 箭头要垂直居中在 Hero 上，而不是跟着 ZStack 的 .bottom 贴到底部。
                         HStack {
                             heroArrow("chevron.left") { stepHero(-1) }
                             Spacer()
@@ -380,6 +383,7 @@ struct LibrariesPage: View {
                         }
                         .padding(.leading, Theme.sidebarWidth + 28)
                         .padding(.trailing, 28)
+                        .frame(maxHeight: .infinity)
                     }
                 }
             }
@@ -467,14 +471,9 @@ struct LibrariesPage: View {
     // MARK: - 动作
 
     private func open(_ item: MediaItem, id: String? = nil) {
-        let target = id ?? item.id
-        if item.isSeason || item.isSeries || item.isFolder {
-            browseTarget = BrowseTarget(id: target,
-                                        title: MediaText.clean(item.title),
-                                        isLibrary: false)
-        } else {
-            detailId = target
-        }
+        // 和 Windows 的 OnCardClick 一致：卡片点击一律进详情页，
+        // 不再按 kind 分叉到库内网格（那个网格入口在区块标题右侧的「N ›」）。
+        detailId = id ?? item.id
     }
 
     private var gridColumns: [GridItem] {
