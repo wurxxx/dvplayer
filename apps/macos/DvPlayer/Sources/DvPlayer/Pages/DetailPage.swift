@@ -99,6 +99,9 @@ struct DetailPage: View {
     @State private var episodes: [EpisodeRow] = []
     @State private var people: [Person] = []
     @State private var mediaInfo: MediaInfo?
+    /// 当前播放目标的续播位置（秒）。和 Windows 一样靠它决定
+    /// 「重头看」要不要出现、播放键上要不要带「上次看到 01:23」。
+    @State private var resumeSeconds: Int = 0
     /// 同一部片在各源的条目（详情页「资源」）。
     @State private var sources: [ItemSource] = []
     @State private var loading = true
@@ -292,11 +295,17 @@ struct DetailPage: View {
                 // 文字区域压一层暗色：横版图有白底的（截图里这部就是），
                 // 纯白标题叠上去会完全看不见。只在下方 45% 渐入，
                 // 上半部分画面保持干净。
+                //
+                // 底边必须回到全透明：header 最后会 `.clipped()`，渐变要是
+                // 停在某个不透明度就被硬切一刀，下面紧接明亮模糊图，交界处
+                // 会留下一条深色横带。文字最底（按钮底边）在 0.94 附近，
+                // 最后 26pt 是纯 padding，正好拿来淡出。
                 LinearGradient(
                     stops: [
                         .init(color: .black.opacity(0), location: 0.42),
-                        .init(color: .black.opacity(0.45), location: 0.68),
-                        .init(color: .black.opacity(0.72), location: 1),
+                        .init(color: .black.opacity(0.48), location: 0.68),
+                        .init(color: .black.opacity(0.55), location: 0.94),
+                        .init(color: .black.opacity(0), location: 1),
                     ],
                     startPoint: .top, endPoint: .bottom
                 )
@@ -355,13 +364,19 @@ struct DetailPage: View {
             }
             .buttonStyle(PrimaryButtonStyle())
 
-            Button {
-                guard let detail else { return }
-                play(playTargetId ?? detail.id, startSeconds: 0)
-            } label: {
-                Text("重头看")
+            // 「重头看」只在看过之后才有意义（Windows 同样按
+            // playSource 的续播位置 >= 5 秒判断）。没看过的片子
+            // 这个按钮点了等于「播放」，纯属噪音。
+            if resumeSeconds >= 5 {
+                Button {
+                    guard let detail else { return }
+                    play(playTargetId ?? detail.id, startSeconds: 0)
+                } label: {
+                    Text("重头看")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .help("重头看（上次看到 \(MediaText.duration(Double(resumeSeconds)))）")
             }
-            .buttonStyle(SecondaryButtonStyle())
 
             Button {
                 toggleFavorite()
@@ -1160,7 +1175,16 @@ struct DetailPage: View {
 
     private func loadMediaInfo() async {
         guard let core = state.core, let target = playTargetId else { return }
-        mediaInfo = try? await core.mediaInfo(target)
+
+        // 媒体信息（轨道清单）和播放源（续播位置）互不依赖，并发发出去。
+        // 续播位置决定「重头看」出不出现：没看过的片子不该有这一项。
+        async let infoTask = try? await core.mediaInfo(target)
+        async let playTask = try? await core.playSource(target)
+        let (info, play) = await (infoTask, playTask)
+
+        mediaInfo = info
+        resumeSeconds = max(0, play?.positionSeconds ?? 0)
+        NSLog("[Detail] \(target) resume=\(resumeSeconds) info=\(info != nil)")
 
         // 截图巡检：直接展开音轨 / 字幕菜单（等界面铺好再弹）。
         if let menu = ProcessInfo.processInfo.environment["DVPLAYER_MENU"] {
