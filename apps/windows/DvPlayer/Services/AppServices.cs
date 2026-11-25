@@ -144,6 +144,11 @@ public sealed class AppServices
             return (false, "无法加载共享核心 dvplayer_media（检查 DLL 是否在输出目录）");
         }
 
+        // hub 一建好就交给界面：核心那边「谁连完谁先挂」，先连上的源可以立刻
+        // 出首页，不用等最慢的那个（慢源可能几十秒才超时）。还没出结果的源在
+        // Connections 里是 Connecting，页面按「正在连接」显示，不会画成空首页。
+        Core = core;
+
         // 每个源先以「正在连接」出现在列表里，之后谁先连完谁先变状态，
         // 不用等最慢的那个（以前是全部完成才一次性写结果）。
         var gate = new object();
@@ -268,12 +273,13 @@ public sealed class AppServices
 
         if (!results.Any(r => r.Ok))
         {
+            // 一个都没连上：提前交出去的那个句柄要先摘掉，不能再让页面拿到。
+            Core = null;
             core.Dispose();
             var errors = results.Select(r => $"{r.Name}：{r.Error}");
             return (false, string.Join("；", errors));
         }
 
-        Core = core;
         Settings.Save();
 
         ConnectionChanged?.Invoke(this, EventArgs.Empty);

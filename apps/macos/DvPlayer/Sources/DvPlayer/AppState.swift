@@ -45,6 +45,8 @@ final class AppState: ObservableObject {
 
     private(set) var core: Core?
     private var toastTask: Task<Void, Never>?
+    /// 「先连上的源先出首页」的防抖任务，见 `scheduleEarlyRefresh()`。
+    private var earlyRefreshTask: Task<Void, Never>?
 
     var coreVersion: String { Core.version }
 
@@ -82,6 +84,14 @@ final class AppState: ObservableObject {
         guard hasSources else {
             page = .sources
             return
+        }
+
+        // 自检：直接落到某个源的首页（`DVPLAYER_SOURCE=<id 或名字>`）。
+        // 放在连接之前——另一个源很慢时，不用等它连完才能点到这个源。
+        if let wanted = ProcessInfo.processInfo.environment["DVPLAYER_SOURCE"],
+           !wanted.isEmpty,
+           let match = settings.sources.first(where: { $0.id == wanted || $0.name == wanted }) {
+            page = .home(match.id)
         }
 
         // 自检：把第一个源拖到最后一个位置，验证排序真的写回设置。
@@ -185,6 +195,12 @@ final class AppState: ObservableObject {
                              ok: false, error: nil)
         }
 
+        // hub 一建好就交给界面：已连上的源可以立刻出首页，不用等最慢的那个。
+        // 还没出结果的源由 `pendingConnections` 挡着（页面显示「正在连接…」），
+        // 不会因为 core 提前出现就画一个空首页。
+        core = hub
+        coreError = nil
+
         // 文件协议源（SMB / NFS / WebDAV）先让系统挂载，再当本地目录接核心。
         // 挂载和登录都是网络等待：每源一个任务并行做，3 个服务器不用等 3 份时间。
         var prepared: [(config: SourceConfig, effective: SourceConfig?, error: String?)] = []
@@ -277,6 +293,7 @@ final class AppState: ObservableObject {
         }
 
         guard current.contains(where: \.ok) else {
+            core = nil
             coreError = current.map { "\($0.name)：\($0.error ?? "连接失败")" }
                 .joined(separator: "；")
             return
@@ -300,6 +317,22 @@ final class AppState: ObservableObject {
             connections.append(connection)
         }
         pendingConnections.remove(connection.id)
+
+        // 先连上的源先出内容：立刻刷一次库 / 记录 / 收藏，
+        // 不等最慢的那个源把整轮连接拖完。
+        if connection.ok {
+            scheduleEarlyRefresh()
+        }
+    }
+
+    /// 防抖 150ms：几个源同时连上只刷一次。
+    private func scheduleEarlyRefresh() {
+        earlyRefreshTask?.cancel()
+        earlyRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.refresh()
+        }
     }
 
     /// 拖动排序：把 id 挪到 targetId 的位置，顺序写回设置。

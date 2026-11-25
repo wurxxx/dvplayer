@@ -192,6 +192,11 @@ struct LibrariesPage: View {
             return ("这个源没有连上，去「服务器」检查地址或账号。", false)
         }
 
+        // 已经连上、只是库列表还没回来（其它源还在连，refresh 还没跑完）。
+        if connection?.ok == true, state.libraries(of: sourceId).isEmpty, state.connecting {
+            return ("正在读取媒体库…", true)
+        }
+
         if let error = state.coreError {
             return (error, false)
         }

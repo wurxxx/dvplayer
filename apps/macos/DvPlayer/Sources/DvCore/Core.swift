@@ -37,6 +37,10 @@ public struct DoviProbe: Decodable, Sendable {
 public final class Core: @unchecked Sendable {
     private var hub: DVHub?
     private let queue = DispatchQueue(label: "com.dvplayer.core", qos: .userInitiated)
+    /// 建连单独一条队列：慢源可能几十秒才超时，不能占着 `queue`，
+    /// 否则已经连上的源连首页都读不了（库 / 条目查询全排在它后面）。
+    private let connectQueue =
+        DispatchQueue(label: "com.dvplayer.core.connect", qos: .userInitiated)
     /// DV 探测不碰 hub 句柄，单独一条队列，没连上服务器（只有本地文件）时也能跑。
     private static let probeQueue =
         DispatchQueue(label: "com.dvplayer.dovi-probe", qos: .userInitiated)
@@ -101,12 +105,15 @@ public final class Core: @unchecked Sendable {
         }
 
         // [box] 捕获保证回调期间盒子还活着；核心调用返回时所有回调都已结束。
-        return try await perform { [box] hub in
+        // 走 connectQueue：核心那边每连完一个源就只短暂加锁推一条，
+        // 这里的查询（libraries / items）不用等最慢的源。
+        let text = try await raw(on: connectQueue) { [box] hub in
             json.withCString {
                 dv_hub_add_many_stream(hub, $0, callback,
                                        Unmanaged.passUnretained(box).toOpaque())
             }
         }
+        return try Self.decodeEnvelope([SourceConnection].self, from: text)
     }
 
     public func sources() async throws -> [SourceInfo] {
@@ -326,6 +333,13 @@ public final class Core: @unchecked Sendable {
 
     /// 只取字符串，不解码（报错也要先拿到文本）。
     private func raw(_ body: @escaping (DVHub) -> UnsafeMutablePointer<CChar>?)
+        async throws -> String {
+        try await raw(on: queue, body)
+    }
+
+    /// 指定队列的 `raw`：建连走自己的队列，不挡住其它调用。
+    private func raw(on queue: DispatchQueue,
+                     _ body: @escaping (DVHub) -> UnsafeMutablePointer<CChar>?)
         async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {

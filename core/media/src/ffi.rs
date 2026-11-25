@@ -395,7 +395,14 @@ pub extern "C" fn dv_hub_add_many(handle: *mut HubHandle, configs: *const c_char
             }
         };
 
-        reply(Ok(h.hub().add_many(&parsed)))
+        // 和流式版本一样逐条挂：即便调用方不等回调，查询也不用整轮连完才通。
+        let results = crate::hub::connect_many(&parsed, |config, result, _info| {
+            if let Ok(source) = result {
+                h.hub().push_source(&config.id, source);
+            }
+        });
+
+        reply(Ok(results))
     })
 }
 
@@ -452,7 +459,17 @@ pub extern "C" fn dv_hub_add_many_stream(
             cb(cstr.as_ptr(), user as *mut c_void);
         };
 
-        reply(Ok(h.hub().add_many_stream(&parsed, emit)))
+        // 每连好一个就立刻挂进 hub（只持锁推一条），再通知界面。
+        // 以前整个调用期间都拿着 `Mutex<MediaHub>`：首页明明已经有一个源连上了，
+        // 所有查询也要等最慢的那个超时才返回，界面只能一直转圈。
+        let results = crate::hub::connect_many(&parsed, |config, result, info| {
+            emit(info);
+            if let Ok(source) = result {
+                h.hub().push_source(&config.id, source);
+            }
+        });
+
+        reply(Ok(results))
     })
 }
 

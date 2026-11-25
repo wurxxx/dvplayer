@@ -50,6 +50,108 @@ pub struct SourceConnect {
     pub latency_ms: Option<u64>,
 }
 
+/// 一个源建连的结果：适配器（成功时）+ 给界面的状态。失败时带错误文本。
+type LoginOutcome = (
+    SourceConfig,
+    std::result::Result<Box<dyn MediaSource>, String>,
+    SourceConnect,
+);
+
+/// 创建 + 登录一个源，顺带测一次延迟。跑在建连线程里，不碰任何共享结构。
+fn login_one(config: SourceConfig) -> LoginOutcome {
+    let started = Instant::now();
+    let result = match create(&config) {
+        Some(mut source) => source
+            .login()
+            .map(|()| source)
+            .map_err(|err| err.to_string()),
+        None => Err(format!("不支持的源类型：{}", config.kind)),
+    };
+    // 登录成功后再测一次往返：连接池已热，量到的是真正的延迟，
+    // 而不是 DNS / TLS 握手的开销。
+    let latency = if result.is_ok() {
+        probe_latency(&config)
+    } else {
+        None
+    };
+
+    let info = match &result {
+        Ok(_) => SourceConnect {
+            id: config.id.clone(),
+            name: config.name.clone(),
+            kind: config.kind.clone(),
+            ok: true,
+            error: None,
+            ms: started.elapsed().as_millis() as u64,
+            latency_ms: latency,
+        },
+        Err(error) => SourceConnect {
+            id: config.id.clone(),
+            name: config.name.clone(),
+            kind: config.kind.clone(),
+            ok: false,
+            error: Some(error.clone()),
+            ms: started.elapsed().as_millis() as u64,
+            latency_ms: None,
+        },
+    };
+
+    (config, result, info)
+}
+
+/// 并行建连多个源，**不碰聚合层**：每连好一个就把适配器交给 `on_result`。
+///
+/// FFI 用它来实现「谁连完谁先挂」：回调里短暂持有 `Mutex<MediaHub>` 推一条，
+/// 慢源不会挡住其它源的查询——以前整个 `dv_hub_add_many_stream` 期间都持有
+/// 那把锁，首页明明有一个源已经连上，也要等最慢的那个超时才出内容。
+///
+/// `on_result` 从多个建连线程同时进来，实现方自己保证线程安全。
+/// 返回结果保持 `configs` 的顺序。
+pub fn connect_many<F>(configs: &[SourceConfig], on_result: F) -> Vec<SourceConnect>
+where
+    F: Fn(SourceConfig, std::result::Result<Box<dyn MediaSource>, String>, SourceConnect) + Sync,
+{
+    let on_result = &on_result;
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, SourceConnect)>();
+    let mut slots: Vec<Option<SourceConnect>> = (0..configs.len()).map(|_| None).collect();
+
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(configs.len());
+        for (index, config) in configs.iter().cloned().enumerate() {
+            let tx = tx.clone();
+            let worker = config.clone();
+            handles.push((index, config, scope.spawn(move || {
+                let (config, result, info) = login_one(worker);
+                on_result(config, result, info.clone());
+                let _ = tx.send((index, info));
+            })));
+        }
+        drop(tx);
+
+        for (index, info) in rx {
+            slots[index] = Some(info);
+        }
+
+        for (index, config, handle) in handles {
+            if handle.join().is_err() && slots[index].is_none() {
+                let info = SourceConnect {
+                    id: config.id.clone(),
+                    name: config.name.clone(),
+                    kind: config.kind.clone(),
+                    ok: false,
+                    error: Some("建连线程异常退出".to_string()),
+                    ms: 0,
+                    latency_ms: None,
+                };
+                on_result(config, Err("建连线程异常退出".to_string()), info.clone());
+                slots[index] = Some(info);
+            }
+        }
+    });
+
+    slots.into_iter().flatten().collect()
+}
+
 /// 合并前先记下是哪个源给的库，重名时要用源名区分。
 struct QualifiedLibrary {
     entry_id: String,
@@ -120,114 +222,79 @@ impl MediaHub {
         self.add_source(&config.id, source)
     }
 
+    /// 把已经登录好的适配器挂进来。
+    ///
+    /// FFI 走的是「谁连完谁先挂」：`connect_many` 每交出一个源就短暂加锁调它一次，
+    /// 慢源不会再挡住其它源的 `libraries()` / `items()`。
+    pub fn push_source(&mut self, id: &str, source: Box<dyn MediaSource>) {
+        self.entries.push(Entry {
+            id: id.to_string(),
+            source,
+        });
+    }
+
     /// 并行建连多个源，不回报中间状态（一次性拿全部结果）。
     pub fn add_many(&mut self, configs: &[SourceConfig]) -> Vec<SourceConnect> {
         self.add_many_stream(configs, |_| {})
     }
 
-    /// 并行建连多个源：每个源一个线程去创建 + 登录，全部结束后再按配置顺序
-    /// 挂进聚合层。登录是网络等待，串行时 3 个服务器就要等 3 份时间。
+    /// 并行建连多个源：每个源一个线程去创建 + 登录，**谁先连完谁先挂进聚合层**。
+    /// 登录是网络等待，串行时 3 个服务器就要等 3 份时间。
     ///
     /// `on_done` 在**每个源刚连完时**立即调用（哪个快哪个先到），界面不用等
-    /// 最慢的那个才更新状态。线程里只碰自己的适配器，`entries` 始终由当前
-    /// 线程写入，所以不用加锁。
+    /// 最慢的那个才更新状态。线程里只碰自己的适配器，`entries` 只由本线程写，
+    /// 所以不用加锁；慢源还没连完，先连上的源已经可以查了。
     ///
     /// 失败的源带 `error` 返回，不影响其它源；`ms` 是建连（含登录）耗时。
+    /// 返回结果保持 `configs` 的顺序。
     pub fn add_many_stream<F>(&mut self, configs: &[SourceConfig], on_done: F) -> Vec<SourceConnect>
     where
         F: Fn(SourceConnect) + Sync,
     {
         let on_done = &on_done;
-        let attempts: Vec<(
-            SourceConfig,
-            std::result::Result<Box<dyn MediaSource>, String>,
-            SourceConnect,
-        )> =
-            std::thread::scope(|scope| {
-                let handles: Vec<_> = configs
-                    .iter()
-                    .cloned()
-                    .map(|config| {
-                        scope.spawn(move || {
-                            let started = Instant::now();
-                            let result = match create(&config) {
-                                Some(mut source) => source
-                                    .login()
-                                    .map(|()| source)
-                                    .map_err(|err| err.to_string()),
-                                None => Err(format!("不支持的源类型：{}", config.kind)),
-                            };
-                            // 登录成功后再测一次往返：连接池已热，量到的是真正的延迟，
-                            // 而不是 DNS / TLS 握手的开销。
-                            let latency = if result.is_ok() {
-                                probe_latency(&config)
-                            } else {
-                                None
-                            };
+        let (tx, rx) = std::sync::mpsc::channel::<(usize, LoginOutcome)>();
+        let mut slots: Vec<Option<SourceConnect>> = (0..configs.len()).map(|_| None).collect();
 
-                            let info = match &result {
-                                Ok(_) => SourceConnect {
-                                    id: config.id.clone(),
-                                    name: config.name.clone(),
-                                    kind: config.kind.clone(),
-                                    ok: true,
-                                    error: None,
-                                    ms: started.elapsed().as_millis() as u64,
-                                    latency_ms: latency,
-                                },
-                                Err(error) => SourceConnect {
-                                    id: config.id.clone(),
-                                    name: config.name.clone(),
-                                    kind: config.kind.clone(),
-                                    ok: false,
-                                    error: Some(error.clone()),
-                                    ms: started.elapsed().as_millis() as u64,
-                                    latency_ms: None,
-                                },
-                            };
-
-                            // 这个源已经出结果了，立刻告诉界面。
-                            on_done(info.clone());
-
-                            (config, result, info)
-                        })
-                    })
-                    .collect();
-
-                handles
-                    .into_iter()
-                    .zip(configs.iter().cloned())
-                    .map(|(handle, config)| match handle.join() {
-                        Ok(done) => done,
-                        Err(_) => {
-                            let info = SourceConnect {
-                                id: config.id.clone(),
-                                name: config.name.clone(),
-                                kind: config.kind.clone(),
-                                ok: false,
-                                error: Some("建连线程异常退出".to_string()),
-                                ms: 0,
-                                latency_ms: None,
-                            };
-                            on_done(info.clone());
-                            (config, Err("建连线程异常退出".to_string()), info)
-                        }
-                    })
-                    .collect()
-            });
-
-        let mut out = Vec::with_capacity(attempts.len());
-        for (config, result, info) in attempts {
-            if let Ok(source) = result {
-                self.entries.push(Entry {
-                    id: config.id,
-                    source,
-                });
+        std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(configs.len());
+            for (index, config) in configs.iter().cloned().enumerate() {
+                let tx = tx.clone();
+                let worker = config.clone();
+                handles.push((index, config, scope.spawn(move || {
+                    let done = login_one(worker);
+                    on_done(done.2.clone());
+                    let _ = tx.send((index, done));
+                })));
             }
-            out.push(info);
-        }
+            drop(tx);
 
-        out
+            // 谁先连完谁先到：先到的源立刻挂进来，后面的查询不用等慢源。
+            for (index, (config, result, info)) in rx {
+                if let Ok(source) = result {
+                    self.push_source(&config.id, source);
+                }
+                slots[index] = Some(info);
+            }
+
+            // 建连线程 panic 的源补一条失败结果（以前靠 join 的 Err 分支）。
+            for (index, config, handle) in handles {
+                if handle.join().is_err() && slots[index].is_none() {
+                    let info = SourceConnect {
+                        id: config.id,
+                        name: config.name,
+                        kind: config.kind,
+                        ok: false,
+                        error: Some("建连线程异常退出".to_string()),
+                        ms: 0,
+                        latency_ms: None,
+                    };
+                    on_done(info.clone());
+                    slots[index] = Some(info);
+                }
+            }
+        });
+
+        slots.into_iter().flatten().collect()
     }
 
     /// 已连接的源（id, 名称, 类型），设置页用它显示健康状态。

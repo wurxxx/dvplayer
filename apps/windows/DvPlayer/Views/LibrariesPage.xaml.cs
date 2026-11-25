@@ -179,7 +179,10 @@ public partial class LibrariesPage : Page
     /// </summary>
     private static string ConnectionSignature() =>
         (AppServices.Instance.IsConnected ? "core" : "nocore") + "|" +
-        string.Join("|", AppServices.Instance.Connections.Select(c => $"{c.Id}:{c.Ok}"));
+        // 连完变 ok、连完变失败都要重载：只看 Ok 的话，慢源超时后
+        // 页面会永远停在「正在连接媒体源…」。
+        string.Join("|", AppServices.Instance.Connections.Select(c =>
+            $"{c.Id}:{(c.Connecting ? "c" : c.Ok ? "ok" : "no")}"));
 
     /// <summary>截图巡检用：等首页数据就绪后直接进第一个库的网格。</summary>
     public async Task ShowFirstLibraryAsync()
@@ -344,6 +347,27 @@ public partial class LibrariesPage : Page
 
         if (sourceName is not null && !sourceOk)
         {
+            // hub 已经能用了（别的源先连上、页面可以出内容），只是这个源自己
+            // 还在连：说清楚是在连它，而不是「没有连上」。以前这里直接把还
+            // 没返回的源当失败，慢源在连的时候点它就只有一句「没有连上」。
+            if (services.Connections.Any(c => c.Id == sourceId && c.Connecting))
+            {
+                StatusText.Text = "正在连接媒体源…";
+                _heroTimer.Stop();
+                _heroPool.Clear();
+                HeroTitle.Text = "正在连接媒体源…";
+                HeroMeta.Text = "连上后会显示库和海报";
+                HeroOverview.Text = string.Empty;
+                HeroChips.ItemsSource = null;
+                HeroChips.Visibility = Visibility.Collapsed;
+                HeroDots.ItemsSource = null;
+                HeroDots.Visibility = Visibility.Collapsed;
+                HeroPrev.Visibility = Visibility.Collapsed;
+                HeroNext.Visibility = Visibility.Collapsed;
+                Services.Trace.Write($"home source connecting v={version} source={sourceName}");
+                return;
+            }
+
             StatusText.Text = "这个服务器没有连上，去「服务器」检查地址或账号。";
             // Hero 的 XAML 默认文案是「正在读取…」。源没连上时必须换成明确状态，
             // 否则整页看起来像一直卡在加载（冒烟截图里就是这样）。

@@ -429,7 +429,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     static func waitForCore() async {
         for _ in 0..<120 {
-            if AppState.shared.core != nil { return }
+            // `core` 现在连第一个源连上就有（首页可以提前出），自检要等整轮结束，
+            // 否则按 itemId 取播放源时可能撞上还没连完的那个源。
+            if AppState.shared.core != nil, !AppState.shared.connecting { return }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
         NSLog("[PlayTest] core 一直没连上")
