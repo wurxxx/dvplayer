@@ -129,7 +129,11 @@ jobs:
           if ! command -v cargo >/dev/null 2>&1; then
             curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           fi
+          # 让后续步骤也能找到 cargo（rustup 默认装在 ~/.cargo/bin）。
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # runner 预装的 Rust 有时不在 PATH 里；这里先确认能用，别等下一步才炸。
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo --version
 
       - name: 缓存依赖栈
         uses: actions/cache@v4
@@ -155,7 +159,14 @@ jobs:
       - name: 编 Rust 核心
         run: |
           set -euo pipefail
-          source "$HOME/.cargo/env" 2>/dev/null || true
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo --version
+          # workspace 根在 core/ 下，仓库根没有 Cargo.toml。
+          # 这里以前少了 cd core，cargo 直接报
+          #   error: could not find `Cargo.toml` in ... or any parent directory
+          # 并 exit 101。因为更早的步骤先失败过，这一步从没真正跑起来，
+          # 所以一直没暴露。
+          cd core
           cargo build -p dvplayer-media --release
 
       - name: 编 App 并打包

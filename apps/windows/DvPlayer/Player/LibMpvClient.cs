@@ -249,9 +249,11 @@ public sealed class LibMpvClient : IMpvControl
                     : ToElement(Marshal.ReadInt64(prop.Data).ToString(CultureInfo.InvariantCulture));
 
             case LibMpv.MpvFormatDouble:
+                // Marshal 只有整数重载（ReadInt32 / ReadInt64 …），没有 ReadDouble。
+                // double 按 IEEE-754 的位模式读 8 字节再转回来即可。
                 return prop.Data == IntPtr.Zero
                     ? default
-                    : ToElement(Marshal.ReadDouble(prop.Data)
+                    : ToElement(BitConverter.Int64BitsToDouble(Marshal.ReadInt64(prop.Data))
                         .ToString("R", CultureInfo.InvariantCulture));
 
             case LibMpv.MpvFormatNode:
