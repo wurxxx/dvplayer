@@ -1,0 +1,199 @@
+name: Windows
+
+# 在 GitHub 托管的 Windows runner 上出绿色版 zip + Inno Setup 安装包。
+#
+# 和 macos.yml 的分工：
+#   - macOS 要在 runner 上现编 ffmpeg / libplacebo / mpv（有缓存也要 40-60 分钟）；
+#   - Windows 直接用 mpv 官方 shinchiro 构建（就是打包机上的那一版），
+#     只编 Rust 核心 + WPF 外壳，10 分钟级别。
+#
+# 核心工具链和打包机不同：打包机用 windows-gnu（不装 Visual Studio），
+# 这里用 runner 自带的 windows-msvc。两边产出同 ABI 的 C 接口 dll，
+# 打包脚本会自己挑存在的那个（见 apps/windows/packaging/build-release.ps1）。
+#
+# 触发：
+#   - 手动（Actions → Windows → Run workflow），可选版本号；
+#   - 打 tag（v*）时自动出包，并附到和 macOS 共用的那个 Release。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（留空则用 DvPlayer.csproj 里的）'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+# softprops/action-gh-release 要写 Release；仓库默认 token 可能只有只读权限，
+# 显式声明，别等附产物时才 403。
+permissions:
+  contents: write
+
+env:
+  # mpv 官方构建（shinchiro/mpv-winbuild-cmake）。**钉死版本**：上游每天发新版，
+  # 让 CI 跟着飘意味着同一个 tag 重跑会编出不同的包。
+  # 本地打包机上跑的就是这一版：mpv v0.42.0-38-gbcde6b93c（2026-11-11）。
+  # 换版本时三处一起改，并在真机上重跑一遍 DV P7 FEL 自检。
+  MPV_RELEASE_TAG: '20261111'
+  MPV_ASSET: 'mpv-x86_64-20261111-git-bcde6b93cc.7z'
+
+jobs:
+  build:
+    name: Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          # csproj 是 net10.0-windows；装最新 10.0.x 补丁版。
+          dotnet-version: '10.0.x'
+
+      - name: 装 Rust（windows-msvc）
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: 报告运行环境
+        shell: pwsh
+        run: |
+          "OS:   $env:RUNNER_OS / $env:ImageOS"
+          "CPU:  $((Get-CimInstance Win32_Processor).Name)"
+          "disk: $([math]::Round((Get-PSDrive C).Free / 1GB, 1)) GB free on C:"
+          dotnet --version
+          (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+
+      - name: 下载 mpv
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/$env:MPV_RELEASE_TAG/$env:MPV_ASSET"
+          New-Item -ItemType Directory -Force D:\mpv | Out-Null
+          curl.exe -L --fail --retry 3 --retry-delay 5 --max-time 900 -o D:\mpv\mpv.7z $url
+          if ($LASTEXITCODE -ne 0) { throw "下载 mpv 失败：$url" }
+
+          $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) { throw "runner 上没有 7-Zip：$sevenZip" }
+          & $sevenZip x D:\mpv\mpv.7z -oD:\mpv -y | Select-Object -Last 2
+          if ($LASTEXITCODE -ne 0) { throw '解压 mpv 失败' }
+          Remove-Item D:\mpv\mpv.7z
+
+          if (-not (Test-Path D:\mpv\mpv.exe)) {
+            Get-ChildItem D:\mpv -Recurse | Select-Object -First 20 FullName
+            throw 'mpv.exe 不在解压根目录'
+          }
+          & D:\mpv\mpv.exe --version | Select-Object -First 1
+
+      - name: 编 Rust 核心（dvplayer_media.dll）
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cd core
+          cargo build -p dvplayer-media --release --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'core 编译失败' }
+          $dll = 'target\x86_64-pc-windows-msvc\release\dvplayer_media.dll'
+          if (-not (Test-Path $dll)) { throw "缺少 $dll" }
+          Get-Item $dll | Select-Object Name, Length
+
+      - name: 打包装包（zip + setup）
+        shell: pwsh
+        env:
+          # 弹幕（弹弹play）凭据：仓库 Secrets 里配了才会注入；没配就是空值，
+          # 打出来的包不带弹幕（和 macos.yml 的处理一致）。
+          DVPLAYER_DANMAKU_APP_ID: ${{ secrets.DVPLAYER_DANMAKU_APP_ID }}
+          DVPLAYER_DANMAKU_APP_SECRET: ${{ secrets.DVPLAYER_DANMAKU_APP_SECRET }}
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # 版本号优先级：手动输入的 > tag（v1.2.3）> csproj 里的 <Version>。
+          $ver = $env:VERSION_INPUT
+          if (-not $ver -and $env:GITHUB_REF -like 'refs/tags/v*') {
+            $ver = $env:GITHUB_REF_NAME -replace '^v', ''
+          }
+          if (-not $ver) {
+            $csproj = Get-Content apps\windows\DvPlayer\DvPlayer.csproj -Raw
+            $ver = ([regex]'<Version>([^<]+)</Version>').Match($csproj).Groups[1].Value
+          }
+          if (-not $ver) { throw '拿不到版本号' }
+          "打包版本：$ver"
+
+          # NuGet.config 里有个本地源 packages\（打包机用它躲 nuget.org 超时）。
+          # 仓库里没有这个目录，先建空的，免得 restore 报源不存在。
+          New-Item -ItemType Directory -Force apps\windows\packages | Out-Null
+
+          # runner 直连 github.com，别走脚本默认的国内镜像。
+          $env:DVPLAYER_GH_PROXY = ''
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File apps\windows\packaging\build-release.ps1 `
+            -Version $ver -MpvDir D:\mpv -CoreDll core\target\x86_64-pc-windows-msvc\release\dvplayer_media.dll
+          if ($LASTEXITCODE -ne 0) { throw '打包失败' }
+
+      - name: 校验产物
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $payload = 'out\release\payload'
+          foreach ($need in @(
+              "$payload\DvPlayer.exe",
+              "$payload\dvplayer_media.dll",
+              "$payload\mpv\mpv.exe",
+              "$payload\README-portable.txt")) {
+            if (-not (Test-Path $need)) { throw "产物缺文件：$need" }
+          }
+          Get-ChildItem out\release -File | Select-Object Name, @{ N = 'MB'; E = { [math]::Round($_.Length / 1MB, 1) } }
+          if (-not (Get-ChildItem out\release -Filter *.zip)) { throw '没有 zip' }
+          if (-not (Get-ChildItem out\release -Filter *setup.exe)) { throw '没有 setup.exe' }
+
+      - name: 启动冒烟测试（无桌面环境）
+        # runner 是 Session 0，没有真实桌面；这一项只验证 WPF 能起来、核心 dll 能加载。
+        # 失败不拦发布：打包机（真实桌面）上每次发版都会人工跑一遍截图巡检，
+        # 这里挂掉更多是 runner 图形栈的问题，不该把产物扣下。
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $shots = Join-Path $env:RUNNER_TEMP 'shots'
+          New-Item -ItemType Directory -Force $shots | Out-Null
+          $exe = 'out\release\payload\DvPlayer.exe'
+          $p = Start-Process -FilePath $exe -PassThru `
+            -ArgumentList '--screenshot', $shots, '--window', '1280x800', 'sources'
+          if (-not $p.WaitForExit(120000)) {
+            $p.Kill()
+            throw '冒烟测试超时（120s）'
+          }
+          "退出码：$($p.ExitCode)"
+          $png = Get-ChildItem $shots -Filter *.png | Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $png -or $png.Length -lt 5000) {
+            Get-ChildItem $shots | Select-Object Name, Length
+            throw '冒烟测试失败：没有像样的截图'
+          }
+          "冒烟通过：$($png.Name) $([math]::Round($png.Length / 1KB)) KB"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            out/release/*.zip
+            out/release/*setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 附到 Release（仅 tag 触发）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          # 和 macos.yml 的 job 一起往同一个 Release 里加文件。
+          files: |
+            out/release/*.zip
+            out/release/*setup.exe
+          generate_release_notes: true

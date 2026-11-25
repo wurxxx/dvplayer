@@ -24,6 +24,11 @@ param(
     [string]$MpvDir = 'D:\dvplayer\mpv',
     [string]$OutputDir = '',
     <#
+      共享核心 dll。默认自动找：windows-gnu（打包机）→ windows-msvc（GitHub
+      Actions）→ host target。也可以显式传路径，或设 DVPLAYER_CORE_DLL。
+    #>
+    [string]$CoreDll = '',
+    <#
       播放后端：
         process  mpv.exe 子进程（默认，DV P7 FEL 已在真机验证）
         libmpv   libmpv-2.dll 进程内（官方 dev 包是静态链接，体积和 mpv.exe 相同）
@@ -106,12 +111,24 @@ if (-not (Test-Path (Join-Path $payload 'DvPlayer.exe'))) {
     throw "payload missing DvPlayer.exe: $payload"
 }
 
-# Shared Rust core (dvplayer_media.dll, built by scripts/windows/build-core.ps1).
-$core = Join-Path $repo 'core\target\x86_64-pc-windows-gnu\release\dvplayer_media.dll'
-if (Test-Path $core) {
+# Shared Rust core (dvplayer_media.dll)。两条构建路线，产出的都是同 ABI 的
+# C 接口 dll：
+#   打包机  scripts\windows\build-core.ps1 → target\x86_64-pc-windows-gnu
+#    CI      cargo build --target x86_64-pc-windows-msvc
+# 顺序：-CoreDll / DVPLAYER_CORE_DLL → gnu → msvc → host target。
+$coreCandidates = @(
+    $CoreDll,
+    $env:DVPLAYER_CORE_DLL,
+    (Join-Path $repo 'core\target\x86_64-pc-windows-gnu\release\dvplayer_media.dll'),
+    (Join-Path $repo 'core\target\x86_64-pc-windows-msvc\release\dvplayer_media.dll'),
+    (Join-Path $repo 'core\target\release\dvplayer_media.dll')
+) | Where-Object { $_ -and (Test-Path $_) }
+$core = $coreCandidates | Select-Object -First 1
+if ($core) {
     Copy-Item $core $payload -Force
+    Write-Host "core: $core"
 } elseif (-not (Test-Path (Join-Path $payload 'dvplayer_media.dll'))) {
-    throw 'dvplayer_media.dll not found. Run scripts\windows\build-core.ps1 first.'
+    throw 'dvplayer_media.dll not found. Run scripts\windows\build-core.ps1 (or -CoreDll <path>) first.'
 }
 
 # mpv: ship it beside the exe so the package works on a clean machine.

@@ -237,6 +237,30 @@ DvPlayer.exe --screenshot D:\dvplayer\tmp\ui
 > 注意：PowerShell 5.1 按 ANSI 读 `.ps1`，带中文的脚本必须存成 **UTF-8 with BOM**，
 > 否则解析直接报「字符串缺少终止符」。仓库里的 `run-session2.ps1` 已经带 BOM。
 
+## GitHub Actions（CI 打包）
+
+`.github/workflows/windows.yml` 在 `windows-2025` runner 上出同样的两个产物
+（zip / setup），和 macOS 共用一个 Release：打 `v*` tag 时两个 workflow 都会
+把文件附上去。
+
+和本机打包机的差别只有三处：
+
+| | 打包机 | CI |
+| --- | --- | --- |
+| Rust 目标 | `x86_64-pc-windows-gnu`（`scripts\windows\build-core.ps1`） | `x86_64-pc-windows-msvc`（runner 自带） |
+| mpv | `D:\dvplayer\mpv` | 下载钉死的 shinchiro 构建（`MPV_RELEASE_TAG` / `MPV_ASSET`） |
+| Inno Setup | `tools\innosetup` 或系统安装 | 脚本自己下载（`DVPLAYER_GH_PROXY=''` 直连） |
+
+`build-release.ps1` 的 `-CoreDll <路径>` 或 `DVPLAYER_CORE_DLL` 环境变量可以
+显式指定核心 dll；不传就按 gnu → msvc → host target 的顺序找。
+
+弹幕凭据走仓库 Secrets：`DVPLAYER_DANMAKU_APP_ID` / `DVPLAYER_DANMAKU_APP_SECRET`
+（Settings → Secrets and variables → Actions）。没配也能出包，只是包里不带弹幕。
+
+CI 的「启动冒烟测试」是 `continue-on-error`：runner 在 Session 0，没有真实桌面，
+WPF 图形栈偶尔起不来，这一项挂了不该把产物扣下——发版前在打包机上跑的截图巡检
+才是准的。
+
 ## 相关
 
 - `docs/adr/0008-rust-shared-core.md`：为什么用 Rust + C ABI

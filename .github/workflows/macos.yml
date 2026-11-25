@@ -41,6 +41,10 @@ on:
     tags:
       - 'v*'
 
+# softprops/action-gh-release 要写 Release；仓库默认 token 可能只有只读权限。
+permissions:
+  contents: write
+
 env:
   # 改了 mpv commit 或依赖版本时，把这个数字加一让缓存失效。
   DEPS_CACHE_KEY: v1
@@ -261,3 +265,4 @@ jobs:
           files: |
             out/release/*.dmg
             out/release/*.zip
+          generate_release_notes: true
