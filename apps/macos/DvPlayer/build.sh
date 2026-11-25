@@ -95,6 +95,12 @@ HOMEBREW_DEPS=(
     "$BREW_PREFIX/opt/freetype/lib/libfreetype.6.dylib"
     "$BREW_PREFIX/opt/jpeg/lib/libjpeg.9.dylib"
 )
+# little-cms2：mpv 的 `lcms` 是 auto 检测，CI runner 预装了它，编出来的 libmpv
+# 就会链接 liblcms2（本机没装就不会）。不补进包里，发布包在用户机器上启动就
+# 报 `Library not loaded: @rpath/liblcms2.2.dylib`。ABI 版本号会变，用 glob 取。
+for lcms in "$BREW_PREFIX"/opt/little-cms2/lib/liblcms2.*.dylib; do
+    [[ -f "$lcms" ]] && HOMEBREW_DEPS+=("$lcms")
+done
 for dep in "${HOMEBREW_DEPS[@]}"; do
     if [[ -f "$dep" ]]; then
         cp "$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$dep")" \
@@ -102,6 +108,31 @@ for dep in "${HOMEBREW_DEPS[@]}"; do
     else
         echo "警告：缺少 ${dep}（libass / libmpv 的依赖，字幕或解码可能不可用）" >&2
     fi
+done
+
+# 依赖是链式的：freetype → libpng、harfbuzz → graphite2 + glib、glib →
+# libintl + pcre2 … 硬编码清单永远追不上（先是漏了 lcms2，补上 lcms2 又发现
+# 漏了 png / graphite2 / glib）。这里循环扫描包里每个 dylib 的**绝对路径**
+# 依赖，源文件存在就拷进来，直到没有新增。
+for round in 1 2 3 4 5 6; do
+    added=0
+    for file in "$FRAMEWORKS"/*.dylib; do
+        while read -r dep; do
+            [[ -z "$dep" ]] && continue
+            case "$dep" in
+                @rpath/*|@loader_path/*|@executable_path/*|/usr/lib/*|/System/*) continue ;;
+            esac
+            [[ -f "$dep" ]] || continue
+            real="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$dep")"
+            realbase="$(basename "$real")"
+            if [[ ! -f "$FRAMEWORKS/$realbase" ]]; then
+                cp "$real" "$FRAMEWORKS/"
+                echo "  补齐依赖 $realbase"
+                added=1
+            fi
+        done < <(otool -L "$file" | tail -n +2 | awk '{print $1}')
+    done
+    [[ $added -eq 0 ]] && break
 done
 
 # 依赖名 -> 包里的真实文件名（`libavcodec.63.dylib` -> `libavcodec.63.1.102.dylib`）。
@@ -127,6 +158,36 @@ for file in "$FRAMEWORKS"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
     done < <(otool -L "$file" | tail -n +2 | awk '{print $1}' \
              | grep -E "^($BREW_PREFIX/|$PREFIX_LIB/)" || true)
 done
+
+# 发布包自检：改写后所有依赖都应该是 @rpath/xxx 或系统库，@rpath 的目标必须
+# 真的在 Frameworks 里。漏一个，到用户机器上就是
+#   Library not loaded: @rpath/xxx.dylib
+# 而这种错误只在冒烟测试（或用户那边）才暴露，日志里只有一句 dyld 报错。
+# 这里提前失败，并指出是谁依赖它。
+missing=0
+for file in "$FRAMEWORKS"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
+    while read -r dep; do
+        [[ -z "$dep" ]] && continue
+        case "$dep" in
+            @rpath/*)
+                base="${dep#@rpath/}"
+                if [[ ! -f "$FRAMEWORKS/$base" ]]; then
+                    echo "错误：$(basename "$file") 依赖 ${dep}，但 Frameworks 里没有 ${base}" >&2
+                    missing=1
+                fi
+                ;;
+            @loader_path/*|@executable_path/*|/usr/lib/*|/System/*) ;;
+            *)
+                echo "错误：$(basename "$file") 还有没改写的绝对路径依赖：$dep" >&2
+                missing=1
+                ;;
+        esac
+    done < <(otool -L "$file" | tail -n +2 | awk '{print $1}')
+done
+if [[ $missing -ne 0 ]]; then
+    echo "打包中止：发布包缺依赖，见上面的错误。" >&2
+    exit 1
+fi
 
 # 签名：必须自内向外——先 Frameworks 里的 dylib，再整个 .app。
 # 直接 `codesign DvPlayer.app` 会报 `code object is not signed at all`
