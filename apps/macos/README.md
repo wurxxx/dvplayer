@@ -103,7 +103,8 @@ Gitee 官方文档说海外访问需要特殊 DNS，runner 在海外会随机失
 - 设置：续播、分辨率角标、自动连接；显示核心版本
 - 播放页：进程内 libmpv（render API + gpu-next / OpenGL）画进自己的窗口，
   壳贴一层控制浮层（顶栏 / 控制条 / 选集 / 媒体信息 / 键盘 / 假全屏）；
-  音轨、字幕、倍速、进度回写、播完接下一集 / 关窗，和 Windows 同一套行为
+  音轨、字幕、倍速、进度回写、播完接下一集 / 关窗，和 Windows 同一套行为；
+  播放期间不让系统熄屏 / 休眠（暂停或播完就恢复，见下）
 
 ## 还没做
 
@@ -144,6 +145,26 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_TYPE_SEARCH` | 配合 `DVPLAYER_PROBE_SEARCH`：投递这几个字符的真实键盘事件，验证控件可编辑、绑定能同步 |
 | `DVPLAYER_CLICK_CLEAR` | `1` = 点搜索框右侧的清除按钮，日志看点击前后文字，验证按钮没被编辑区盖住 |
 | `DVPLAYER_COMPOSE_SEARCH` | 模拟输入法组字（marked text），验证组字期间占位文字会隐藏、不和拼音重叠 |
+| `DVPLAYER_PLAY` | `<itemId>` = 核心连上后直接开播放窗（远程验证播放 / 字幕用） |
+| `DVPLAYER_PLAY_UI` | 逗号分隔的播放页动作，按顺序执行：`pause` / `next` / `prev` / `info` / `episodes` / `speed:2` / `mute` / `close` / `fullscreen` / `ontop` / `audio:N` / `subtitle:N` / `audioout` / `aspect:fit` / `sleep:HH:MM` / `danmaku` 等；`wait:N` 在两条之间停顿 N 秒（可带小数） |
+| `DVPLAYER_PLAY_SHOT` | 截播放窗到该路径 |
+| `DVPLAYER_LOCAL` | `<文件路径>` = 直接本地播放一个文件（不走媒体源，验证解码 / 渲染用） |
+
+### 验证「播放时不熄屏」
+
+`IOPMAssertion` 是系统级的，用 `pmset` 直接看，比截图可靠：
+
+```bash
+# 播放中（不设 DVPLAYER_EXIT，让它一直播）
+DVPLAYER_LOCAL=samples/p7-fel.mkv DVPLAYER_SHOT_DELAY=999 \
+  ./build/DvPlayer.app/Contents/MacOS/DvPlayer &
+
+pmset -g assertions | grep -E "PreventUserIdleDisplaySleep|PreventUserIdleSystemSleep"
+#   两条都应该是 1，且下面按进程列里有 DvPlayer
+
+# 暂停后应该都变回 0（只剩别的进程的）
+DVPLAYER_LOCAL=samples/p7-fel.mkv DVPLAYER_PLAY_UI="wait:6,pause" ...
+```
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

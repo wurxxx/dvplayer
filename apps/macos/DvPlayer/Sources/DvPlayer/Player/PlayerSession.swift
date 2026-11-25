@@ -228,6 +228,9 @@ final class PlayerSession: ObservableObject {
     @Published var muted = false
     @Published var eof = false
 
+    /// 播放期间不让系统熄屏 / 休眠（暂停时释放，让系统按用户设置正常熄屏）。
+    private let sleepBlocker = SleepBlocker()
+
     // —— 音频输出 / 直通 / HDR ——
     @Published private(set) var audioDevices: [AudioDeviceInfo] = []
     @Published private(set) var audioDevice: String = ""
@@ -384,6 +387,7 @@ final class PlayerSession: ObservableObject {
         engine.onPause = { [weak self] paused in
             guard let self else { return }
             self.paused = paused
+            self.refreshSleepBlocker()
         }
         engine.onBuffering = { [weak self] value in
             self?.buffering = value
@@ -407,6 +411,9 @@ final class PlayerSession: ObservableObject {
             guard let self, let engine, self.mpv === engine,
                   !Self.openingHold else { return }
             self.finishLoading("first-frame")
+            // 真正出画了才算在播：这时按当前 paused / eof 决定是否阻止熄屏。
+            // 不在这里补一次的话，起播时 paused 可能还是上一集的值。
+            self.refreshSleepBlocker()
         }
         engine.onEOF = { [weak self] in
             self?.handleEOF()
@@ -800,6 +807,8 @@ final class PlayerSession: ObservableObject {
 
     private func handleEOF() {
         eof = true
+        // 播完了，别再拦着系统熄屏。
+        refreshSleepBlocker()
 
         // 续播点正好是片尾：mpv 一加载就 EOF，这不是「播完」，从头来一遍。
         let instant = Date().timeIntervalSince(launchAt) < 3
@@ -1588,12 +1597,35 @@ final class PlayerSession: ObservableObject {
         onClose?()
     }
 
+    /// 按当前状态决定要不要阻止熄屏 / 休眠。
+    ///
+    /// 只在**真正在播**时持有断言：
+    /// - 还在加载（`loading`）→ 不持有，还没出画；
+    /// - 暂停 → 释放，让系统按用户设置正常熄屏（暂停了还亮着屏幕很怪）；
+    /// - 播完（eof）→ 释放，已经没有内容了；
+    /// - 关窗 / stop → 释放。
+    ///
+    /// 判据里用 `loading` 而不是只看 `paused`：起播时 mpv 是先暂停再放开
+    /// （等首帧），`paused` 在那个瞬间还是初始的 true，只看它会导致
+    /// 「建断言 → 立刻释放 → 再建」的抖动。`loading` 在首帧到达时变 false，
+    /// 语义正好是「已经开始出画了」。
+    private func refreshSleepBlocker() {
+        if !isStopped && !loading && !paused && !eof {
+            sleepBlocker.start()
+        } else {
+            sleepBlocker.stop()
+        }
+    }
+
     /// <param name="flush">
     /// 退出 App 时同步等最后一次上报；普通关窗不用等，免得界面卡住。
     /// </param>
     func stop(flush: Bool = false) {
         guard !isStopped else { return }
         isStopped = true
+
+        // 关窗就恢复系统熄屏 / 睡眠，别让断言跟着进程活到退出。
+        sleepBlocker.stop()
         danmakuTask?.cancel()
         danmakuTask = nil
         hideTask?.cancel()

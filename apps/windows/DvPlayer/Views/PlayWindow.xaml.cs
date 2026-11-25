@@ -122,6 +122,8 @@ public partial class PlayWindow : Window
     private bool _seeking;
     private bool _volumeDragging;
     private bool _paused;
+    /// <summary>当前是否已阻止关屏 / 睡眠。只在状态变化时操作系统 API。</summary>
+    private bool _sleepBlocked;
     private bool _eof;
     private int _sinceReport;
     private bool _chromeVisible = true;
@@ -1721,6 +1723,7 @@ public partial class PlayWindow : Window
                 case "pause" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
                     _paused = value.GetBoolean();
                     PlayPauseGlyph.Text = _paused ? "\uE768" : "\uE769";
+                    RefreshSleepBlocker();
                     break;
 
                 case "paused-for-cache" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
@@ -1781,6 +1784,7 @@ public partial class PlayWindow : Window
 
                 case "eof-reached" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
                     _eof = value.GetBoolean();
+                    RefreshSleepBlocker();
                     if (_eof)
                     {
                         HandleEof();
@@ -4079,6 +4083,47 @@ public partial class PlayWindow : Window
         await Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 按当前状态决定要不要阻止关屏 / 睡眠。
+    ///
+    /// 只在**真正在播**时持有：
+    /// - 暂停 → 释放，让系统按用户设置正常关屏（暂停了还亮着屏幕很怪）；
+    /// - 播完（eof）→ 释放，已经没有内容了；
+    /// - 关窗 → 释放。
+    ///
+    /// 两个必须注意的点：
+    ///
+    /// 1. <c>SetThreadExecutionState</c> 只作用于**调用它的线程**，而 mpv 的
+    ///    property-change 是从读线程抛上来的（<see cref="OnMpvProperty"/> 没切
+    ///    Dispatcher）。所以这里强制回 UI 线程，否则 Stop 清不掉。
+    /// 2. 用一个「目标状态」而不是计数：mpv 会反复报 pause / eof，每次都 Start
+    ///    会让计数只增不减，最后永远释放不掉。状态没变就什么都不做。
+    /// </summary>
+    private void RefreshSleepBlocker()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(RefreshSleepBlocker);
+            return;
+        }
+
+        var want = _ready && !_paused && !_eof && !_closed;
+        if (want == _sleepBlocked)
+        {
+            return;
+        }
+
+        _sleepBlocked = want;
+        if (want)
+        {
+            SleepBlocker.Start();
+        }
+        else
+        {
+            SleepBlocker.Stop();
+        }
+    }
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     // —— 窗口 ——
@@ -4086,6 +4131,12 @@ public partial class PlayWindow : Window
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _closed = true;
+        // 关窗就恢复系统关屏 / 睡眠，别让状态跟着进程活到退出。
+        if (_sleepBlocked)
+        {
+            _sleepBlocked = false;
+            SleepBlocker.Stop();
+        }
         _ticker.Stop();
         _hideTimer.Stop();
         _dragTimer.Stop();
@@ -4406,6 +4457,9 @@ public partial class PlayWindow : Window
         Trace.Write($"opening finish reason={reason} pos={_position:0.0} " +
                     $"launch={_launchStart:0.0} " +
                     $"after={(DateTime.UtcNow - _launchAt).TotalSeconds:0.0}s");
+        // 真正出画了才算在播：这时按当前 _paused / _eof 决定是否阻止关屏。
+        // 不在这里补一次的话，起播时 _paused 可能还是上一集的值。
+        RefreshSleepBlocker();
         StopSpinner();
         LoadingPanel.Visibility = Visibility.Collapsed;
 

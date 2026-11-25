@@ -436,6 +436,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 播放页自检：`episodes` / `info` / `audio:N` / `subtitle:N`（-1 关闭）/ `pause` / `close`。
+    ///
+    /// 支持 `wait:N`（秒，可带小数）在两条动作之间停顿。以前没实现 `wait`，
+    /// 它被 switch 的 default 静默吞掉，导致 `pause,wait:3,pause` 会在同一毫秒
+    /// 连按两次、等于没暂停——验证播放状态时踩过这个坑。
     @MainActor
     static func runPlayerUI(_ spec: String) {
         guard let session = PlayerLauncher.shared.current else {
@@ -444,8 +448,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // 和 Windows 的 `--play-features` 一样，支持逗号分隔的多条。
-        for item in spec.split(separator: ",") {
-            applyPlayerUI(String(item), session: session)
+        // 有 wait 时整体放后台串行跑，不阻塞调用方（截图 / 退出那些后续步骤）。
+        let items = spec.split(separator: ",").map(String.init)
+        Task { @MainActor in
+            for item in items {
+                let parts = item.split(separator: ":", maxSplits: 1).map(String.init)
+                if parts[0] == "wait" {
+                    let seconds = Double(parts.count > 1 ? parts[1] : "") ?? 0
+                    if seconds > 0 {
+                        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                    }
+                    continue
+                }
+                applyPlayerUI(item, session: session)
+            }
         }
     }
 
@@ -571,7 +587,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSLog("[PlayTest] subauto results=\(session.subtitleResults.count)")
                 }
             default:
-                break
+                // 以前这里是静默 break：写错的动作名（比如没实现的 wait）
+                // 会被当成执行成功，排查时白费时间。现在明确报出来。
+                NSLog("[PlayTest] 未知动作，已忽略：\(spec)")
         }
 
         NSLog("[PlayTest] ui=\(spec) panel=\(session.panel) chrome=\(session.chromeVisible)")
