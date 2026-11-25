@@ -1,7 +1,7 @@
 name: macOS
 
 # 在 GitHub 托管的 macOS runner 上编 dmg + zip，两种架构各一个 job：
-#   arm64（Apple Silicon）—— 跑 macos-15（arm64）
+#   arm64（Apple Silicon）—— 跑 macos-26（arm64，也就是 macos-latest）
 #   x86_64（Intel）      —— 跑 macos-15-intel
 #
 # 为什么 arm64 要放 CI：开发机是 Intel，交叉编译能出 arm64 产物但**无法运行
@@ -12,7 +12,12 @@ name: macOS
 #   - macos-13 已于 2025-12-04 退役
 #   - Intel 只剩 macos-15-intel / macos-26-intel，且 macos-15-intel
 #     到 2027-08 结束，之后 Actions 不再提供 x86_64 macOS
-# 所以两边都用 15 代：arm64 用 macos-15，Intel 用 macos-15-intel。
+#   - arm64 的 macos-15 池子长期排不到：v0.1.4 发版时连续两次都在排队满
+#     15 分钟时被 GitHub 取消（2026-11-25，11:57 与 12:21 各一次，一步没跑），
+#     所以 arm64 改用 macos-26（= macos-latest，池子更大、退役更晚）。
+#     两者硬件一样（3 核 M1 / 7 GB），差别只在系统与 Xcode：15 是 SDK 15.x，
+#     26 是 SDK 26.x —— 所以下面必须钉死 MACOSX_DEPLOYMENT_TARGET，不然
+#     编译器会按 SDK 版本给依赖栈写上 minos 26.0，只能跑在 macOS 26 上。
 #
 # 源码就在这个仓库里。**不能**让 runner 去拉 Gitee：Gitee 官方有「海外用户
 # 如何访问」专页，说明海外访问需要特殊 DNS，runner 在海外，直连会随机失败。
@@ -47,7 +52,17 @@ permissions:
 
 env:
   # 改了 mpv commit 或依赖版本时，把这个数字加一让缓存失效。
-  DEPS_CACHE_KEY: v1
+  # v2：加了部署目标 13.0 —— v1 缓存里的 dylib 是 minos 15.0，必须重编。
+  DEPS_CACHE_KEY: v2
+
+  # 产物最低支持 macOS 13（和 apps/macos/DvPlayer/Info.plist 的
+  # LSMinimumSystemVersion、Package.swift 的 .macOS(.v13) 对齐）。
+  #
+  # 不写的话 clang 按 **SDK 版本**取默认值：在 macos-15 上编出来是 15.0，
+  # 在 macos-26 上编出来是 26.0 —— v0.1.4 的 x86_64 包就是这么中招的，
+  # App 本体写着 13.0，附带的 libav*/libmpv/libplacebo 却是 15.0，
+  # macOS 13/14 上直接加载失败。这里显式钉死，并在依赖栈编完后校验。
+  MACOSX_DEPLOYMENT_TARGET: '13.0'
 
 jobs:
   # 先算出这次要编哪些架构。
@@ -69,7 +84,7 @@ jobs:
           WANT='${{ inputs.arch }}'
           [[ -z "$WANT" ]] && WANT=both
 
-          ARM='{"arch":"arm64","runner":"macos-15"}'
+          ARM='{"arch":"arm64","runner":"macos-26"}'
           INTEL='{"arch":"x86_64","runner":"macos-15-intel"}'
 
           case "$WANT" in
@@ -157,6 +172,24 @@ jobs:
           if ! JOBS=$(sysctl -n hw.ncpu) ./scripts/build-deps-macos.sh 2>&1 | tee "$RUNNER_TEMP/deps.log"; then
             echo "::error::依赖栈编译失败"
             tail -80 "$RUNNER_TEMP/deps.log"
+            exit 1
+          fi
+
+      - name: 校验依赖栈的最低系统版本
+        # 部署目标写错很隐蔽：包在编译机上能跑，发给 macOS 13/14 用户却
+        # 起不来。这里直接读每个 dylib 的 LC_BUILD_VERSION → minos。
+        run: |
+          set -euo pipefail
+          BAD=0
+          for f in prefix/lib/libavcodec*.dylib prefix/lib/libavformat*.dylib \
+                   prefix/lib/libmpv*.dylib prefix/lib/libplacebo*.dylib \
+                   prefix/lib/libass*.dylib; do
+            minos=$(xcrun vtool -show-build "$f" | awk '/minos/{print $2; exit}')
+            printf '%-40s minos %s\n' "$(basename "$f")" "${minos:-?}"
+            if [[ "${minos:-}" != "$MACOSX_DEPLOYMENT_TARGET" ]]; then BAD=1; fi
+          done
+          if [[ "$BAD" -ne 0 ]]; then
+            echo "::error::有 dylib 的 minos 不是 $MACOSX_DEPLOYMENT_TARGET"
             exit 1
           fi
 

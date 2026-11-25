@@ -21,6 +21,22 @@ done
 export PATH
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
+# ---------------------------------------------------------- 最低系统版本
+# clang 不给 -mmacosx-version-min 时，链接器按 **SDK 版本**写 minos：在
+# macos-15 上编出来是 15.0，在 macos-26 上编出来是 26.0。这样打出来的包
+# 只能跑在编译机的系统上，和 App 声明的 13.0 对不上（v0.1.4 就这样发出去
+# 过：libav*/libmpv/libplacebo 全是 minos 15.0）。
+# 这里统一钉到 13.0，和 Info.plist / Package.swift 对齐。
+#
+# ffmpeg 的 configure 不读环境变量，下面单独用 --extra-cflags/-ldflags 传；
+# meson（libplacebo / mpv）和 autotools（libass）读 CFLAGS / LDFLAGS。
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+DEPLOY_FLAG="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+export CFLAGS="${CFLAGS:+$CFLAGS }$DEPLOY_FLAG"
+export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }$DEPLOY_FLAG"
+export OBJCFLAGS="${OBJCFLAGS:+$OBJCFLAGS }$DEPLOY_FLAG"
+export LDFLAGS="${LDFLAGS:+$LDFLAGS }$DEPLOY_FLAG"
+
 mkdir -p "$PREFIX" "$SRC"
 
 need() {
@@ -51,6 +67,8 @@ else
   if [ ! -f config.h ]; then
     ./configure \
       --prefix="$PREFIX" \
+      --extra-cflags="$DEPLOY_FLAG" \
+      --extra-ldflags="$DEPLOY_FLAG" \
       --disable-autodetect \
       --disable-doc \
       --disable-debug \
