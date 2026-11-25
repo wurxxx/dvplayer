@@ -247,7 +247,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_UI=sleep:15` / `sleepepisode` / `nosleep` | 设定时关闭（分钟，可带小数） |
 | `DVPLAYER_PLAY_UI=mark:intro\|outro\|clear` | 按当前位置标记片头结束 / 片尾开始 / 清除 |
 | `DVPLAYER_PLAY_UI=skipoutro` | 触发「跳过片尾」（seek 到片长 − 0.4 秒） |
-| `DVPLAYER_PLAY_UI=danmaku:on\|off` | 开关弹幕（需要弹弹play 凭据） |
+| `DVPLAYER_PLAY_UI=danmaku:on\|off` | 开关弹幕（凭据打包时内置；没有凭据的开发构建不联网） |
 | `DVPLAYER_PLAY_UI=audioout` | 打印音频输出设备列表与当前直通状态 |
 | `DVPLAYER_PLAY_UI=audiotoggle` | 切一次音频直通 + HDR 直通（走 set_property + 落盘） |
 | `DVPLAYER_PLAY_UI=audiodevice:N` | 选第 N 个音频输出设备 |
