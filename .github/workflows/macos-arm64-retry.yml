@@ -8,8 +8,8 @@ name: macOS arm64 排队重试
 # 换标签（macos-15 / macos-26 / macos-latest）没用，都在同一批 arm64 池子里。
 #
 # 所以这里做自动重试：macOS 工作流没成功、且 arm64 job 一步没跑（被取消）时，
-# 自动再发一次 arm64 构建，最多 8 次。真编失败（有步骤跑过）不重试——那不是
-# 容量问题。
+# 自动再发一次 arm64 构建；上限按「最近一次成功之后连续失败 12 次」算。
+# 真编失败（有步骤跑过）不重试——那不是容量问题。
 #
 # 注意：重试在 master 上编，用的是 master 当前代码。发起重试时 master 如果已经
 # 越过待发布的 tag，就应该改发新版本，而不是继续拿这个 tag 的号。
@@ -61,13 +61,14 @@ jobs:
             exit 0
           fi
 
-          # 次数上限：最近 50 次 macOS 运行里「没成功」的条数（队列取消会记成
-          # cancelled 或 failure，两种都算）。
+          # 次数上限：只数「最近一次成功之后」连续没成功了几次。
+          # （早先写成「最近 50 次里失败的条数」，把仓库历史里的失败也算进来，
+          #   一上来就是 14 次，直接把闸拉死了。）
           n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/macos.yml/runs?per_page=50" \
-            --jq '[.workflow_runs[] | select(.conclusion == "cancelled" or .conclusion == "failure")] | length')
-          echo "最近 macOS 运行中没成功的：$n 次"
-          if (( n > 8 )); then
-            echo "已到重试上限（8 次），停手等 GitHub 容量恢复；产物缺失请手工处理"
+            --jq '[.workflow_runs[].conclusion] | (index("success") // length)')
+          echo "最近一次成功之后，连续没成功：$n 次"
+          if (( n > 12 )); then
+            echo "已到重试上限（12 次），停手等 GitHub 容量恢复；产物缺失请手工处理"
             exit 0
           fi
 
