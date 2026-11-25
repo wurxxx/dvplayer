@@ -15,8 +15,9 @@ name: macOS arm64 排队重试
 # 事件驱动那一圈就断了（实测 2026-11-25：14:37 之后彻底静默，票全挂在队列里
 # 没人补）。schedule 由 GitHub 调度器创建，不受这条规则影响。
 #
-# 补票策略：两个 arm64 镜像各排一张（macos-26 / macos-15），多一次抽签；
-# 已在排的池子不重复加，同时最多 3 个运行，避免滚雪球。
+# 补票策略：只排 macos-26 一张。曾经两个镜像各排一张（macos-26 / macos-15），
+# 结果两张票同时拿到机器、并行编一样的东西，白烧一倍时间，而 macos-15 的
+# 命中率并不比 26 好。现在只补 macos-26，已在排就不再加。
 
 on:
   workflow_run:
@@ -141,16 +142,15 @@ jobs:
           echo "当前排队/进行中的运行："
           echo "${active:-（无）}"
 
-          for runner in macos-26 macos-15; do
-            if grep -q "@$runner" <<< "$active"; then
-              echo "已有 $runner 的票，跳过"
-              continue
-            fi
-            gh workflow run macos.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              --ref master \
-              -f arch=arm64 \
-              -f "arm_runner=$runner" \
-              -f "release_tag=$TAG"
-            echo "已补票：$runner（release_tag=${TAG:-无}）"
-          done
+          runner=macos-26
+          if grep -q "@$runner" <<< "$active"; then
+            echo "已有 $runner 的票，跳过"
+            exit 0
+          fi
+          gh workflow run macos.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref master \
+            -f arch=arm64 \
+            -f "arm_runner=$runner" \
+            -f "release_tag=$TAG"
+          echo "已补票：$runner（release_tag=${TAG:-无}）"
