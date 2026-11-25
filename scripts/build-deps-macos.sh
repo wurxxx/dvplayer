@@ -124,15 +124,12 @@ else
   git -C "$SRC/mpv" fetch --depth 200 origin master
   git -C "$SRC/mpv" checkout --force "$MPV_COMMIT"
 
-  # macOS 补丁：-Dvulkan=disabled 时 metal_layer.swift 不进编译，
-  # view.swift 里的 MetalLayer 类型就找不到。改成 CAMetalLayer 并显式 import QuartzCore。
-  patch_file="$ROOT/patches/mpv/0001-view-cametal-layer.patch"
-  if git -C "$SRC/mpv" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
-    step "mpv 补丁已应用，跳过"
-  else
-    git -C "$SRC/mpv" apply --check "$patch_file"
-    git -C "$SRC/mpv" apply "$patch_file"
-  fi
+  # 以前这里要打一个 macOS 补丁（把 view.swift 的 MetalLayer 换成 CAMetalLayer
+  # 并补 import QuartzCore）。上游已经自己改成 CAMetalLayer 了，补丁从 2026-11
+  # 起打不上，也不需要——metal_layer.swift 里的 MetalLayer 子类只在
+  # -Dmetal=enabled 时进编译，我们编的是 vulkan=disabled 的 render API，
+  # view.swift 只需要 Cocoa（它转发 QuartzCore），CAMetalLayer 直接可用。
+  # 见 patches/mpv/README.md。
 
   rm -rf "$SRC/mpv/_build"
   meson setup "$SRC/mpv/_build" "$SRC/mpv" \
