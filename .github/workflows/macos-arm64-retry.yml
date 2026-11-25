@@ -93,5 +93,15 @@ jobs:
           TAG: ${{ steps.gate.outputs.release_tag }}
         run: |
           set -euo pipefail
-          gh workflow run macos.yml --ref master -f arch=arm64 -f "release_tag=$TAG"
+          # 这个 job 没有 checkout，gh 默认会去读本地 .git 找仓库，直接报
+          #   failed to run git: fatal: not a git repository
+          # 所以必须显式 --repo。
+          gh workflow run macos.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref master \
+            -f arch=arm64 \
+            -f "release_tag=$TAG"
           echo "已重新触发：arch=arm64 release_tag=${TAG:-（无）}"
+          sleep 5
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow=macos.yml --limit 1 \
+            --json databaseId,displayTitle,status --jq '.[0] | "最新运行：\(.databaseId) \(.displayTitle) \(.status)"'
