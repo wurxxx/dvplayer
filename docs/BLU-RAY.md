@@ -214,6 +214,18 @@ macOS 随包的 mpv 没有 libbluray（`--list-options` 里没有 `--bluray-devi
 - 原盘进度同样存本地 JSON（`~/Library/Application Support/DvPlayer/local-progress.json`）。
 - 自检：`DVPLAYER_DISC=<iso> DVPLAYER_DISC_TITLE=N DVPLAYER_PLAY_SHOT=<png>`。
 
+## 5.3 Android / TV
+
+- 原盘统一走 mpv：本地 / SAF 的 ISO、BDMV 目录用 `--bluray-device=<path>`，
+  不自己解析 UDF。
+- 选集与章节：`:player-disc`（libbluray JNI）直接读 title / chapter，不再解析 mpv 日志；
+  libbluray 1.5 还会给出 HDR / DV 标记与章节名，可直接喂徽标和章节面板。
+- NAS 原盘：v1 先下载到缓存（和 Windows 口径一致）；「边读边播」用
+  `bd_open_stream` + `mpv_stream_cb_add_ro`，排在 M2-B 之后。
+- 边界与桌面一致：AACS / BD+ 不支持；AACS2（UHD）没有开源方案；BD-J 菜单不跑 JVM，
+  用标题列表代替；3D MVC 不做。
+- Media3 不参与原盘（没有 UDF / MPLS 这一层），见
+  [ADR-0014](adr/0014-android-dual-engine.md)。
 
 ## 6. 与 4K/8K/HDR 的关系
 

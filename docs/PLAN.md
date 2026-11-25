@@ -2,7 +2,8 @@
 
 > 状态：M0 完成（仅 A6 Android 真机待设备）；M1（Windows Alpha）功能收尾，剩
 > Emby / Jellyfin 联调与打包；macOS 壳的浏览 + 播放 + 五项功能已完成（画面待目视验收）；
-> Android / TV 未开始。最后更新：2026-11-21，剩余工作见 §5。
+> Android / TV 进入 M2，方案已定（双壳 + 双内核），实现未开始。
+> 最后更新：2026-11-25，剩余工作见 §5。
 
 ## 1. 目标
 
@@ -42,7 +43,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | --- | --- | --- | --- | --- |
 | Windows | .NET 10 + WPF + WPF-UI | mpv 子 HWND（`wid`），mpv 自管 swapchain | 官方 `mpv.exe` 子进程 + JSON IPC（ADR-0009，`vo=gpu-next`） | DV P7 FEL 完整；HDR10 / HDR10+ / HLG；硬解看 GPU（已验 4K120 / 8K60） |
 | macOS | SwiftUI + AppKit | 应用自己的 `NSOpenGLView`，控制层叠在同一窗口 | 进程内 libmpv + render API（ADR-0011，gpu-next 跑在 OpenGL 上） | gpu-next：DV P5/P7 整形、HDR10 识别，HDR 输出未接（默认 tone-map 到 SDR）；解码走 VideoToolbox；见 [M2-MACOS.md](M2-MACOS.md) |
-| Android / TV | Kotlin + Compose for TV | SurfaceView / SurfaceTexture | Media3 (ExoPlayer) | 取决于设备解码器；DV 按机型，P7 回退 BL 并标注 |
+| Android / TV | Kotlin + Compose（手机 Material3 / TV tv-material） | SurfaceView（壳持有） | mpv 进程内 render API（默认）+ Media3（第二引擎，ADR-0014） | 设备解码器决定；DV P5 走 mpv 整形，P7 只播 BL；直通按设备 |
 
 关键结论（详见 ADR）：
 
@@ -62,7 +63,9 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | libplacebo | 7.387.x | FEL 残差重建（`pl_frame.enhancement_layer`） |
 | libdovi | 最新稳定 | RPU 解析、FEL/MEL 判定 |
 | libass | 最新稳定 | ASS 特效字幕 |
-| Media3 | 当前稳定线 | Android / TV 播放内核 |
+| Media3 | 当前稳定线 | Android 第二引擎，HDR / 直通路径 |
+| libmpv（Android） | 0.42.x | Android 默认播放内核（LGPL 构建） |
+| libbluray | 1.5.x | 原盘 title / 章节（mpv 与 `player-disc` 共用） |
 
 版本钉在 `deps/pins.env`。M0 已经开始 vendored 构建（`scripts/build-deps-macos.sh`
 把 FFmpeg / libplacebo / libass / mpv 全部装进项目内 `prefix/`），不依赖系统库。
@@ -73,7 +76,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | --- | --- | --- |
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
 | M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包 | **基本完成**：功能已落地，Emby 联调已通过，安装版 / 绿色版已打包，剩 Jellyfin 实测与自动更新发布地址；清单见 [M1.md](M1.md) |
-| M2 Android / TV | Media3 管线、格式矩阵（DV 探测与回退）、TV 焦点 | 未开始（只有 README 与选型） |
+| M2 Android / TV | 双壳、双内核（mpv 默认 + Media3 按能力路由）、原盘、VFS、TV 焦点 | 未开始（方案见 [M2-ANDROID.md](M2-ANDROID.md)） |
 | M3 macOS | 进程内 libmpv + render API 全链路、DV / HDR10 或 SDR 回退、公证与 Sparkle | **进行中**：浏览、播放、五项功能已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、公证 / Sparkle 待做 |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | 未开始（共享核心已提前在 M1 落地） |
 
@@ -90,7 +93,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | HDR10 / HDR10+ / HLG 识别 | **已验**（元数据正确） | 待验（`video-params` 已可读） | 待验 |
 | HDR 直通到 HDR 屏 | 开关已接（`target-colorspace-hint`），真屏待验 | 开关已接（`target-colorspace-hint`），真屏待验 | 待验 |
 | 音频直通（DTS-HD / TrueHD / Atmos） | 已接开关与设备选择（`audio-spdif`），听感待 AVR 实测 | 已接开关与设备选择（`audio-spdif` / `audio-device`），听感待 AVR 实测 | 未做 |
-| PGS / ASS 字幕 | ASS / SRT 已验证；PGS 未单独验 | ASS / SRT 已验证；PGS 未单独验 | libass NDK 未做 |
+| PGS / ASS 字幕 | ASS / SRT 已验证；PGS 未单独验 | ASS / SRT 已验证；PGS 未单独验 | mpv 自带 libass（含内嵌字体）；Media3 侧 ASS 只显示基础文本，均未验 |
 
 ### M0 — 技术验证（完成）
 
@@ -121,7 +124,9 @@ Windows 绿色版 / Inno Setup 安装版打包；自动更新暂缓。Plex 排�
 
 ### M2 — Android / TV Alpha
 
-Media3 管线、DV 探测与回退、TV 焦点与 Leanback、下载与续播、libass NDK。
+双壳（`:app-phone` / `:app-tv`）、双内核（mpv 默认 + Media3 按能力路由）、
+原盘（mpv 原生 libbluray）、Kotlin VFS（SMB / NFS / WebDAV）、TV 焦点。
+手机先行，TV 冒烟关卡通过后再开大屏 UI。详见 [M2-ANDROID.md](M2-ANDROID.md)。
 
 ### M3 — macOS
 
@@ -160,7 +165,7 @@ HDR 真屏与直通听感、公证与 Sparkle 自动更新。
 | Windows 自动更新 | 安装版（Inno Setup）与绿色版 zip 已出；自动更新需要发布地址（`.appinstaller` 或自建 feed），代码还没接（M1 B14） |
 | macOS 公证 + Sparkle | `.app` 未签名、未做自动更新（§4 M3） |
 | Plex 适配器 | `/library/*` + `X-Plex-Token`，与 Emby 差异大，单独一个适配器（M1 B15） |
-| Android / TV | Media3 管线、TV 焦点、libass NDK，目前只有 README 与选型 |
+| Android / TV | 双内核、原盘、VFS、TV 焦点；方案已定（[M2-ANDROID.md](M2-ANDROID.md)），实现未开始 |
 | M4 跨端同步 | 播放记录 / 收藏 / 续播点跨源、跨端合并；现在只回写播放的那个源 |
 
 ## 6. 非目标（v1）
@@ -178,6 +183,13 @@ HDR 真屏与直通听感、公证与 Sparkle 自动更新。
 | libplacebo / FFmpeg soname 变动 | 升级即崩 | vendored 固定版本，不依赖系统库 |
 | mpv 自己的窗口在 macOS 上没有 OpenGL 后端 | 让 mpv 开窗的路不可行 | 不走 mpv 自己的 VO：GL 上下文由应用提供，用 render API（ADR-0011） |
 | Android DV 碎片化 | 同 APK 行为不一致 | 运行时探测 + BL 回退 + 明确提示 |
+| libmpv Android 构建链 | 头号排期风险，CI 全量编译拖慢迭代 | 钉版本、缓存产物、预编译 fallback |
+| Android HDR 输出（mpv） | 默认内核可能是 SDR 输出 | 壳侧设 dataspace / colorMode；盒子补不齐就路由 Media3 |
+| mpv 音频直通未验证 | 默认引擎可能不能直通 | 实测；不支持就路由 Media3，不打私有补丁 |
+| 双引擎 QA | 组合爆炸 | `DeviceProfile` + 同一样片跑两套能力矩阵 |
+| 包体积 +25–35MB/ABI | 下载 / 安装成本 | ABI splits |
+| 原盘 AACS / AACS2 | 加密盘打不开 | 扫描阶段识别并明确拒绝；引导先解密 |
+| VFS 仅 Android / NFS 仅 AUTH_SYS | 与桌面收敛要重写；企业 Kerberos 不可用 | 接口边界清楚；能力矩阵标注 |
 | 编解码专利 + Dolby 授权 | 商业分发风险 | 商业版走 Dolby 官方 SDK 或法务评估 |
 | Intel Mac 无 HDR 显示器 | macOS HDR 无法目视验收 | 外接 HDR 屏或先验 SDR 映射 |
 
@@ -188,13 +200,16 @@ HDR 真屏与直通听感、公证与 Sparkle 自动更新。
 | ADR-0001 | 桌面嵌入：mpv 自管窗口，零 fork |
 | ADR-0002 | Windows 壳：.NET 10 + WPF + WPF-UI |
 | ADR-0003 | macOS v1：render API + HDR10，不含 DV（已被 ADR-0011 取代） |
-| ADR-0004 | Android：Media3 主 + libass NDK |
+| ADR-0004 | Android：Media3 主 + libass NDK（部分被 ADR-0014 取代） |
 | ADR-0005 | 徽标：DV P7 (FEL/MEL) 明确区分 |
 | ADR-0007 | 正式壳是媒体库聚合客户端（M0 壳只做验证） |
 | ADR-0008 | 共享媒体库核心：Rust + C ABI，四端复用 |
 | ADR-0009 | Windows 改用 mpv 子进程 + JSON IPC（修正 ADR-0001 的备选判断） |
 | ADR-0011 | macOS 改用进程内 libmpv + render API + 单窗口（取代 ADR-0003，拿到 DV） |
 | ADR-0012 | Windows 加一条进程内 libmpv 后端（保留子进程为默认） |
+| ADR-0013 | Android 拆两个壳，共享一套核心 |
+| ADR-0014 | Android 双内核：默认 mpv，按设备能力兜底 |
+| ADR-0015 | Android 存储：Kotlin VFS + 核心虚拟源 |
 
 ## 9. 目录结构
 
@@ -208,7 +223,7 @@ core/dovi/       libdovi 封装（占位）：RPU / EL 类型
 apps/windows/DvPlayer/         正式壳：媒体库客户端（.NET 10 + WPF-UI）
 apps/windows/DvPlayer.Windows/ M0 验证壳：HwndHost / IPC / DV 徽标（保留参考）
 apps/macos/      SwiftUI + AppKit（M0 验证程序 m0-render）
-apps/android/    Kotlin + Compose for TV（未开始）
+apps/android/    Kotlin + Compose（手机 Material3 / TV tv-material），双内核，未开始
 samples/         测试片源（不入库）
 out/             运行产物（不入库）
 ```

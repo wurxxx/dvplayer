@@ -45,7 +45,7 @@ core/dovi/       libdovi 封装（占位）：RPU / EL 类型
 apps/windows/DvPlayer/         正式壳：媒体库客户端（.NET 10 + WPF-UI）
 apps/windows/DvPlayer.Windows/ M0 验证壳：HwndHost / IPC / DV 徽标（保留参考）
 apps/macos/      SwiftUI + AppKit：正式客户端 DvPlayer + M0 验证程序 m0-render（留档）
-apps/android/    Kotlin + Compose for TV（未开始）
+apps/android/    Kotlin + Compose（手机 / TV 双壳），双内核（未开始）
 samples/         测试片源（不入库）
 out/             运行产物（不入库）
 ```

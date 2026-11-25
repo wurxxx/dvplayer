@@ -4,22 +4,23 @@
 
 ```
 ┌──────────────────────────────────────────────┐
-│ UI 壳                                         │
-│  WPF (Win) / SwiftUI (macOS) / Compose (TV)  │
+│ UI 壳                                        │
+│ WPF / SwiftUI / Compose（手机 / TV）         │
 ├──────────────────────────────────────────────┤
-│ 播放服务层                                    │
-│  Windows：mpv 子进程 + JSON IPC               │
-│  macOS：进程内 libmpv render API              │
-│  壳只做浮层与状态（WPF / SwiftUI）            │
-│  Media3 Player（Android）                     │
+│ 播放服务层                                   │
+│ Windows：mpv 子进程 + JSON IPC               │
+│ macOS：进程内 libmpv render API              │
+│ Android：mpv render API（默认）+ Media3      │
+│ 壳只做浮层与状态                             │
 ├──────────────────────────────────────────────┤
-│ 内核（mpv 进程内）                            │
-│  mpv 0.42 · FFmpeg 9 · libplacebo 7.387       │
-│  libdovi（RPU / EL 解析）                     │
+│ 内核                                         │
+│ mpv 0.42 · FFmpeg 9 · libplacebo 7.387       │
+│ Media3（Android 第二引擎）                   │
+│ libdovi（RPU / EL 解析）                     │
 ├──────────────────────────────────────────────┤
-│ 输出（mpv 自己建）                            │
-│  GPU surface（D3D11 / OpenGL / SurfaceView）  │
-│  音频（WASAPI / CoreAudio / AudioTrack）      │
+│ 输出                                         │
+│ GPU surface（D3D11 / OpenGL / SurfaceView）  │
+│ 音频（WASAPI / CoreAudio / AudioTrack）      │
 └──────────────────────────────────────────────┘
 ```
 
@@ -132,7 +133,7 @@ C ABI 多一组 `dv_hub_*`；界面（`AppServices`）只持有一个 hub，设�
 | --- | --- | --- |
 | Windows | 起官方 `mpv.exe`：`--wid=<子窗口>`，控制走 `--input-ipc-server=<命名管道>` 的 JSON IPC，进程用 Job Object 绑在壳上 | `apps/windows/DvPlayer/Player/`（`MpvProcess` / `MpvIpc` / `MpvHost`） |
 | macOS | 进程内 libmpv（render API + gpu-next / OpenGL）画进自己的窗口，SwiftUI 控制浮层叠在同一窗口里；控制直接调 C API，单窗口（ADR-0011） | `apps/macos/DvPlayer/Sources/DvPlayer/Player/`（`MpvEngine` / `PlayerSession` / `PlayerWindow`） |
-| Android / TV | Media3，进程内 | 未开始 |
+| Android / TV | mpv 进程内（render API + EGL，默认）+ Media3（第二引擎，按能力路由，ADR-0014） | 未开始；规划 `apps/android/player-mpv/` / `player-media3/` |
 
 Windows 用子进程（[ADR-0009](adr/0009-windows-mpv-subprocess.md)）：让 mpv 自己建 VO
 和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）。
@@ -188,11 +189,11 @@ macOS 的回调里直接取属性值。两端都切回 UI 线程，属性用观�
 
 | 环节 | 做法 | 现状 |
 | --- | --- | --- |
-| 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60；macOS 参数已带，画面待目视 |
-| HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | Windows 开关已接、识别已验，真屏待验；macOS 还没传这个参数（默认 tone-map 到 SDR） |
-| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS P5 目视正常、P7 FEL 同帧 A/B 已验 |
-| 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | Windows 已接开关与设备选择（`audioDevice` / `audioPassthrough`，起 mpv 时带成参数），听感待 AVR 实测；macOS 未做 |
-| 字幕 | PGS / ASS / SRT 走内核；Android 用 libass NDK 自绘 | ASS / SRT 两端已验证，PGS 未单独验，Android 未做 |
+| 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60；macOS 参数已带，画面待目视；Android 走 mpv `hwdec=mediacodec` / Media3 MediaCodec，待验 |
+| HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | Windows 开关已接、识别已验，真屏待验；macOS 还没传这个参数（默认 tone-map 到 SDR）；Android 由壳设 dataspace / colorMode，待验 |
+| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS P5 目视正常、P7 FEL 同帧 A/B 已验；Android mpv 走 P5/P8 整形、P7 只播 BL，待验 |
+| 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | Windows 已接开关与设备选择（`audioDevice` / `audioPassthrough`，起 mpv 时带成参数），听感待 AVR 实测；macOS 未做；Android mpv 的 audiotrack 直通待验，Media3 走 FFmpeg 音频扩展 |
+| 字幕 | PGS / ASS / SRT 走内核；Android 由 mpv 的 libass 渲染（含 MKV 内嵌字体），Media3 侧 ASS 只显示基础文本 | ASS / SRT 两端已验证，PGS 未单独验；Android 未验 |
 
 原则：**UI 显示的是实际行为，不是文件声称的格式**。播放页要给一条「源 → 输出」的信息
 （例如 `DV P7 (FEL) → HDR10 直通`、`DV P7 → 本机只播 BL`），
@@ -233,10 +234,26 @@ macOS 的回调里直接取属性值。两端都切回 UI 线程，属性用观�
 
 ## 6. Android / TV
 
-- Media3 + `SurfaceView`，TV 开 tunneling。
-- 运行时用 `MediaCodecInfo` 探测 DV profile；探不到播 BL 轨并标 HDR10。
-- ASS 字幕：NDK 编 libass 自绘。不给 TV 挂 libmpv 软解。
-- 一个 module，两个 launcher activity；`androidx.tv:tv-material` 做 TV 皮肤。
+双引擎、两个壳，决策见 [ADR-0013](adr/0013-android-two-shells.md) /
+[ADR-0014](adr/0014-android-dual-engine.md) / [ADR-0015](adr/0015-android-vfs.md)，
+实现计划与里程碑见 [M2-ANDROID.md](M2-ANDROID.md)。
+
+- **双内核**：mpv 进程内（render API + EGL，默认）+ Media3（第二引擎）。
+  引擎契约在 `:player`，视频 Surface 由壳的 `SurfaceView` 提供；
+  切换 = 停一个、按当前位置重开另一个，约 1 秒空档。
+- **默认路由 mpv**，三条硬例外走 Media3：HDR/DV 且设备支持、需要直通且 mpv 不支持、
+  `DeviceProfile` 判定性能不达标。`DeviceProfile` 由能力探测页生成并缓存。
+- **HDR 输出由壳接**：`ANativeWindow_setBuffersDataSpace(BT2020_PQ)`、
+  `window.colorMode`、TV 上 `preferredDisplayModeId`；盒子合成器只认 tunneled HDR 时
+  mpv 拿不到 HDR，归入能力例外。
+- **原盘**：mpv 原生 libbluray，本地 / SAF 的 ISO、BDMV 直接播；NAS 原盘先下载到缓存。
+  Media3 不参与原盘。
+- **字幕**：mpv 自带 libass（含 MKV 内嵌字体）；Media3 侧 SRT/PGS 原生，
+  ASS 只显示基础文本。没有单独的 libass NDK。
+- **存储**：Kotlin VFS（smbj / libnfs / OkHttp）+ `core/media` 虚拟源；
+  NFS 仅 AUTH_SYS。播放走 Media3 `DataSource` 或 mpv 自定义 stream。
+- **两个 application 模块**：`:app-phone`（Material3）与 `:app-tv`（tv-material），
+  共享 `:feature` / `:player` / `:data`，不共享屏幕布局。
 
 ## 7. 徽标
 
