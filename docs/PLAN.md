@@ -74,7 +74,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
 | M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包 | **基本完成**：功能已落地，Emby 联调已通过，安装版 / 绿色版已打包，剩 Jellyfin 实测与自动更新发布地址；清单见 [M1.md](M1.md) |
 | M2 Android / TV | Media3 管线、格式矩阵（DV 探测与回退）、TV 焦点 | 未开始（只有 README 与选型） |
-| M3 macOS | mpv 子进程 + 浮层窗全链路、DV / HDR10 或 SDR 回退、公证与 Sparkle | **进行中**：浏览、播放、五项功能已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、公证 / Sparkle 待做 |
+| M3 macOS | 进程内 libmpv + render API 全链路、DV / HDR10 或 SDR 回退、公证与 Sparkle | **进行中**：浏览、播放、五项功能已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、公证 / Sparkle 待做 |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | 未开始（共享核心已提前在 M1 落地） |
 
 ### 解码与呈现能力矩阵（横跨 M1–M3，不是独立里程碑）
@@ -86,7 +86,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | HEVC / H.264 硬解 | **已验**（4K/8K、120 fps） | 待验（VideoToolbox 参数已带） | 待验 |
 | AV1 / VP9 | 待验（mpv 支持，缺样片） | 待验 | 待验 |
 | DV P7（FEL） | **已验**（官方 mpv 自带 FEL 合成；徽标 `DV P7 (FEL/MEL)`） | 结构性已验（`fel-ab.sh` 同帧开关 EL：PSNR≈49、`>2` 像素≈1%）；HDR 屏目视待做；徽标 `DV P7 (FEL/MEL)` | 回退 BL |
-| DV P5 / P8 | 部分验（P5 颜色待修，见 M0 §5.3） | 产品路径待目视（gpu-next 已在 render API 上跑通） | 待验 |
+| DV P5 / P8 | 部分验（P5 颜色待修，见 M0 §5.3） | **已验**：产品路径抓帧肤色正常（`samples/p5.mkv` 11s，gpu-next render API） | 待验 |
 | HDR10 / HDR10+ / HLG 识别 | **已验**（元数据正确） | 待验（`video-params` 已可读） | 待验 |
 | HDR 直通到 HDR 屏 | 开关已接（`target-colorspace-hint`），真屏待验 | 开关已接（`target-colorspace-hint`），真屏待验 | 待验 |
 | 音频直通（DTS-HD / TrueHD / Atmos） | 已接开关与设备选择（`audio-spdif`），听感待 AVR 实测 | 已接开关与设备选择（`audio-spdif` / `audio-device`），听感待 AVR 实测 | 未做 |

@@ -8,7 +8,8 @@
 │  WPF (Win) / SwiftUI (macOS) / Compose (TV)  │
 ├──────────────────────────────────────────────┤
 │ 播放服务层                                    │
-│  mpv 子进程 + JSON IPC（Windows / macOS）     │
+│  Windows：mpv 子进程 + JSON IPC               │
+│  macOS：进程内 libmpv render API              │
 │  壳只做浮层与状态（WPF / SwiftUI）            │
 │  Media3 Player（Android）                     │
 ├──────────────────────────────────────────────┤
@@ -143,8 +144,9 @@ macOS 一开始也走子进程（该方案已废弃），后来改为进程内 l
 
 ### 2.0 打开播放窗的过渡（两端一致）
 
-播放窗是「视频层 + 透明浮层」两个窗口。视频层要先起进程 / 拿首帧，浮层如果
-一出现就画控制条，前面那几百毫秒就是「一条控制条悬在桌面上」。
+播放窗是「视频层 + 控制浮层」：Windows 是两个窗口（视频子 HWND + 透明浮层窗），
+macOS 是同一个窗口里的视频画布 + SwiftUI 控制层（ADR-0011）。视频层要先就位 /
+拿首帧，浮层如果一出现就画控制条，前面那几百毫秒就是「一条控制条悬在桌面上」。
 
 所以两端都按同一套节奏：
 
@@ -157,15 +159,16 @@ macOS 一开始也走子进程（该方案已废弃），后来改为进程内 l
 | 首帧到达 | 黑底淡出 140ms，控制条淡入 180ms |
 | 兜底 | 4 秒还没等到 VO 就绪就先 unpause；黑底仍等首帧 / 位置。控制通道连不上直接报错重试 |
 
-首帧的判定：两端都看 IPC 的 `video-frame-info`（VO 真正交出一帧），
-位置 `time-pos > 起播点 + 0.5` 作为兜底（无头 / 特殊 VO）。切集走同一条路径：
-先盖黑底，新进程同样先暂停、VO 就绪再放开。无头自检（`DVPLAYER_MPV_HEADLESS=1`
-/ `DVPLAYER_NO_VO=1`）不暂停。
+首帧的判定：两端都看 `video-frame-info`（VO 真正交出一帧；Windows 走 IPC 事件，
+macOS 读同名属性），位置 `time-pos > 起播点 + 0.5` 作为兜底。
+切集走同一条路径：先盖黑底，新文件同样先暂停、VO 就绪再放开。
 黑底在浮层里面画，所以视频窗口还没就位时也看不到桌面。
 
-### 2.1 两端的 IPC 契约（已落地）
+### 2.1 播放控制契约（两端语义一致）
 
-两端控制器走同一套 mpv JSON IPC，只是传输不同（Windows 命名管道 / macOS unix socket）：
+Windows 走 mpv 的 JSON IPC（命名管道）；macOS 进程内直接调 libmpv 的 C API
+（`mpv_set_property` / `mpv_command` / `mpv_observe_property`），事件名与 JSON IPC
+的约定保持一致，`MpvEngine` 对上层不分叉。等价关系：
 
 | 用途 | 命令 |
 | --- | --- |
@@ -174,10 +177,10 @@ macOS 一开始也走子进程（该方案已废弃），后来改为进程内 l
 | 选轨 | `set_property aid \| sid`（关字幕传 `no`） |
 | 状态 | `observe_property`：`time-pos`、`duration`、`pause`、`eof-reached`、`speed`、`volume`、`mute`、`track-list`、`aid`、`sid` |
 | 事件 | `file-loaded`、`end-file`、`property-change` |
-| 位置同步 | macOS 额外用 `set_property geometry`（Windows 走 `wm_size`） |
+| 窗口尺寸 | Windows 走 `wm_size` 同步子 HWND；macOS 重建 GL viewport |
 
-原则：一条连接既发命令又收事件；命令带 `request_id`，回复按 id 分发；
-事件切回 UI 线程。属性用 `observe_property`，不轮询。
+原则：Windows 一条连接既发命令又收事件，命令带 `request_id`、回复按 id 分发；
+macOS 的回调里直接取属性值。两端都切回 UI 线程，属性用观察而不是轮询。
 
 ### 2.2 格式覆盖与降级策略
 
@@ -187,7 +190,7 @@ macOS 一开始也走子进程（该方案已废弃），后来改为进程内 l
 | --- | --- | --- |
 | 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60；macOS 参数已带，画面待目视 |
 | HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | Windows 开关已接、识别已验，真屏待验；macOS 还没传这个参数（默认 tone-map 到 SDR） |
-| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS 整形与 FEL 合成已验，产品路径待目视 |
+| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS P5 目视正常、P7 FEL 同帧 A/B 已验 |
 | 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | Windows 已接开关与设备选择（`audioDevice` / `audioPassthrough`，起 mpv 时带成参数），听感待 AVR 实测；macOS 未做 |
 | 字幕 | PGS / ASS / SRT 走内核；Android 用 libass NDK 自绘 | ASS / SRT 两端已验证，PGS 未单独验，Android 未做 |
 
@@ -199,10 +202,11 @@ macOS 一开始也走子进程（该方案已废弃），后来改为进程内 l
 
 | 线程 | 职责 |
 | --- | --- |
-| mpv 进程（两端） | 自己解复用、解码、渲染；壳通过 JSON IPC `observe_property` 收事件 |
-| IPC 读线程 | 逐行读 mpv 的 JSON，切分事件交给 UI 线程 |
-| UI 线程 | 接收事件，更新界面；macOS 还要把浮层窗口的 frame 同步给 mpv |
-| 渲染线程 | 都在 mpv 进程内（gpu-next），壳不参与渲染 |
+| mpv 核心线程（两端） | 解复用、解码、渲染（gpu-next） |
+| Windows：IPC 读线程 | 逐行读 mpv 的 JSON，切分事件交给 UI 线程 |
+| macOS：事件线程 | `mpv_wait_event` 循环，属性事件 / 命令回复切回主线程 |
+| macOS：渲染队列 | 串行执行 `mpv_render_context_render`（GL 上下文 current 的那条线程） |
+| UI 线程 | 接收事件，更新界面；Windows 还要同步子 HWND 的尺寸 |
 
 ## 4. Windows
 
