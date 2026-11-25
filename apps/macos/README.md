@@ -46,6 +46,34 @@ apps/macos/packaging/build-release.sh -SkipBuild   # 复用现有 .app
 默认 ad-hoc 签名、**没有公证**，别人首次打开要右键「打开」放行；
 有开发者证书时传 `SIGN_IDENTITY="Developer ID Application: xxx"`，公证自己跑 `notarytool`。
 
+### arm64（Apple Silicon）
+
+开发机是 Intel，交叉编译虽然能出 arm64 产物，但**跑不起来就无法验证**。
+所以 arm64 包交给 GitHub Actions 编：`macos-14` runner 是原生 Apple Silicon，
+既能编译也能跑冒烟测试。
+
+workflow：`.github/workflows/macos-arm64.yml`
+
+| 触发 | 产物 |
+| --- | --- |
+| Actions 页面手动 Run workflow | artifact `macos-arm64`（保留 14 天） |
+| 推送 `v*` tag | artifact + 自动附到该 Release |
+
+前提：仓库要有 GitHub 副本（源码由 `actions/checkout` 拉取，**不**去拉 Gitee——
+Gitee 官方文档说海外访问需要特殊 DNS，runner 在海外会随机失败）。
+
+几点要知道：
+
+- **私有仓库额度不够**：Actions 免费 2000 分钟/月，macOS runner 按 10 倍计费，
+  等于只有 200 分钟。这套依赖栈首次编译约 40-60 分钟，缓存失效就超标。
+  所以需要**公开仓库**（公开仓库的 Actions 不计费）。
+- **依赖栈很慢**：ffmpeg + libplacebo + libass + mpv 全从源码编。`prefix/` 有缓存
+  （key 在 workflow 的 `DEPS_CACHE_KEY`），命中时几分钟完成；改了 mpv commit 或
+  依赖版本就把那个数字加一。
+- **产物必须全是 arm64**：workflow 会逐文件 `lipo -archs` 检查，混架构直接失败。
+
+本机构建仍然是 x86_64（`build-release.sh` 的 `ARCH` 取 `uname -m`）。
+
 ## 现在能做什么
 
 - 窗口：没有标题栏、内容满窗，左上角三个圆点（关闭 / 最小化 / 缩放）
