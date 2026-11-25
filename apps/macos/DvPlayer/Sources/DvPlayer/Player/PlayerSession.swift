@@ -1800,8 +1800,22 @@ final class PlayerSession: ObservableObject {
     /// 异步做，失败就算了（徽标退回「DV P7」）。
     private func probeDolbyVisionIfNeeded() {
         guard dvProfile == 7, !doviProbeStarted else { return }
+
         // 原盘的 url 是 bd://，没有可直接读的码流；空地址也探不了。
-        guard let source, !source.disc, !source.url.isEmpty else {
+        // 本地文件没有 `source`（`beginLocal` 里置 nil），但 `localSource.url`
+        // 就是磁盘路径，可以直接读前缀。
+        let url: String
+        let headers: [HttpHeader]
+        let proxy: String?
+        if let source, !source.disc, !source.url.isEmpty {
+            url = source.url
+            headers = source.headers
+            proxy = source.proxy
+        } else if discSource == nil, let local = localSource, !local.url.isEmpty {
+            url = local.url
+            headers = []
+            proxy = nil
+        } else {
             return
         }
 
@@ -1813,14 +1827,10 @@ final class PlayerSession: ObservableObject {
             return
         }
 
-        let url = source.url
-        let headers = source.headers
-        let proxy = source.proxy
-
         Task { @MainActor [weak self] in
-            guard let self, let core = AppState.shared.core else { return }
+            guard let self else { return }
             do {
-                let probe = try await core.probeDovi(url: url, headers: headers, proxy: proxy)
+                let probe = try await Core.probeDovi(url: url, headers: headers, proxy: proxy)
                 guard self.itemId == item, self.dvProfile == 7 else { return }
                 self.dvElType = probe.elType
                 Self.doviCache[item] = probe.elType

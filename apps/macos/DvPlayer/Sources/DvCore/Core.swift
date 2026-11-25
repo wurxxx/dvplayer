@@ -37,6 +37,9 @@ public struct DoviProbe: Decodable, Sendable {
 public final class Core: @unchecked Sendable {
     private var hub: DVHub?
     private let queue = DispatchQueue(label: "com.dvplayer.core", qos: .userInitiated)
+    /// DV 探测不碰 hub 句柄，单独一条队列，没连上服务器（只有本地文件）时也能跑。
+    private static let probeQueue =
+        DispatchQueue(label: "com.dvplayer.dovi-probe", qos: .userInitiated)
 
     /// 加载到的核心版本号；DLL 缺失时是 "unavailable: ..."。
     public static let version: String = {
@@ -237,15 +240,15 @@ public final class Core: @unchecked Sendable {
 
     /// 判定 Dolby Vision P7 是 FEL 还是 MEL：只读码流前缀，找到 RPU 就返回。
     ///
-    /// 这个不需要 hub（url 已经带齐鉴权），单独走核心队列，省得给
-    /// `dv_hub_probe_dovi` 再造一个句柄。
-    public func probeDovi(
+    /// 这个不需要 hub（url 已经带齐鉴权），所以是静态的、走自己的队列：
+    /// 本机直接播一个文件时没有任何源连着，也要能标出 FEL/MEL。
+    public static func probeDovi(
         url: String, headers: [HttpHeader], proxy: String?) async throws -> DoviProbe {
         let headersJson = (try? JSONEncoder().encode(headers))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
 
         return try await withCheckedThrowingContinuation { continuation in
-            queue.async {
+            probeQueue.async {
                 let pointer = url.withCString { urlPointer in
                     headersJson.withCString { headersPointer in
                         (proxy ?? "").withCString { proxyPointer in

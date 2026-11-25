@@ -584,8 +584,8 @@ final class MpvEngine {
                 onCacheSpeed?(value)
             case "current-tracks/video":
                 let map = data as? [String: Any]
-                let profile = (map?["dolby-vision-profile"] as? Int)
-                    ?? Int((map?["dolby-vision-profile"] as? Double) ?? 0)
+                // node 里的整数是 Int64，`as? Int` 会失败（`intValue` 走 NSNumber 兜底）。
+                let profile = intValue(map?["dolby-vision-profile"]) ?? 0
                 dvProfile = profile
                 videoCodecName = map?["codec"] as? String ?? ""
                 emitVideoStats()
