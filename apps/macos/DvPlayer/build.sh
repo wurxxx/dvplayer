@@ -84,12 +84,16 @@ done
 
 # libass / libmpv 还依赖 Homebrew 的几个库（fribidi / harfbuzz / fontconfig /
 # freetype / jpeg）。它们在别人机器上不一定有，而且路径是本机的，一起拷进来。
+#
+# 路径不能写死 /usr/local：Intel Mac 的 Homebrew 在 /usr/local，
+# Apple Silicon 在 /opt/homebrew。用 brew --prefix 问出来，CI 上才编得过。
+BREW_PREFIX="${BREW_PREFIX:-$(brew --prefix 2>/dev/null || echo /usr/local)}"
 HOMEBREW_DEPS=(
-    /usr/local/opt/fribidi/lib/libfribidi.0.dylib
-    /usr/local/opt/harfbuzz/lib/libharfbuzz.0.dylib
-    /usr/local/opt/fontconfig/lib/libfontconfig.1.dylib
-    /usr/local/opt/freetype/lib/libfreetype.6.dylib
-    /usr/local/opt/jpeg/lib/libjpeg.9.dylib
+    "$BREW_PREFIX/opt/fribidi/lib/libfribidi.0.dylib"
+    "$BREW_PREFIX/opt/harfbuzz/lib/libharfbuzz.0.dylib"
+    "$BREW_PREFIX/opt/fontconfig/lib/libfontconfig.1.dylib"
+    "$BREW_PREFIX/opt/freetype/lib/libfreetype.6.dylib"
+    "$BREW_PREFIX/opt/jpeg/lib/libjpeg.9.dylib"
 )
 for dep in "${HOMEBREW_DEPS[@]}"; do
     if [[ -f "$dep" ]]; then
@@ -103,7 +107,7 @@ done
 # 依赖名 -> 包里的真实文件名（`libavcodec.63.dylib` -> `libavcodec.63.1.102.dylib`）。
 real_name() {
     local base="$1" dir
-    for dir in "$FRAMEWORKS" "$PREFIX_LIB" /usr/local/opt/*/lib; do
+    for dir in "$FRAMEWORKS" "$PREFIX_LIB" "$BREW_PREFIX"/opt/*/lib; do
         if [[ -e "$dir/$base" ]]; then
             python3 -c 'import os,sys;print(os.path.basename(os.path.realpath(sys.argv[1])))' \
                 "$dir/$base"
@@ -121,7 +125,7 @@ for file in "$FRAMEWORKS"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
         [[ -z "$dep" ]] && continue
         install_name_tool -change "$dep" "@rpath/$(real_name "$(basename "$dep")")" "$file"
     done < <(otool -L "$file" | tail -n +2 | awk '{print $1}' \
-             | grep -E "^(/usr/local/|$PREFIX_LIB/)" || true)
+             | grep -E "^($BREW_PREFIX/|$PREFIX_LIB/)" || true)
 done
 
 # 签名：必须自内向外——先 Frameworks 里的 dylib，再整个 .app。

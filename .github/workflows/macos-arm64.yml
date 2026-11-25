@@ -1,0 +1,176 @@
+name: macOS arm64
+
+# 在 Apple Silicon runner 上编 macOS arm64 包（dmg + zip）。
+#
+# 为什么在 GitHub 上编：开发机是 Intel（x86_64），交叉编译能出 arm64 产物
+# 但**无法运行验证**。macos-14 runner 是原生 Apple Silicon，能编也能跑。
+#
+# 源码就在这个仓库里（从 Gitee 镜像过来）。**不能**让 runner 去拉 Gitee：
+# Gitee 官方有「海外用户如何访问」专页，说明海外访问需要特殊 DNS，runner
+# 在海外，直连会随机失败。
+#
+# 触发：
+#   - 手动（Actions → macOS arm64 → Run workflow）
+#   - 打 tag（v*）时自动出包并附到 Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（留空则用 Info.plist 里的）'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+env:
+  # 改了 mpv commit 或依赖版本时，把这个数字加一让缓存失效。
+  DEPS_CACHE_KEY: v1
+
+jobs:
+  build:
+    # macos-14 = Apple Silicon（M1）。macos-13 是 Intel，别用。
+    runs-on: macos-14
+    timeout-minutes: 180
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 报告运行环境
+        run: |
+          set -euo pipefail
+          uname -m
+          sw_vers
+          echo "---"
+          xcodebuild -version
+          echo "---"
+          brew --prefix
+
+      - name: 装构建工具
+        run: |
+          set -euo pipefail
+          # meson / ninja / nasm：编 ffmpeg、libplacebo、mpv 用
+          brew install meson ninja nasm pkg-config
+
+          # libass 的依赖（build-deps 脚本不编它们，从 Homebrew 拿）。
+          # macos-14 runner 上的 brew 就是 /opt/homebrew（arm64），直接装即可。
+          brew install fribidi harfbuzz fontconfig freetype jpeg
+
+          # Rust 工具链：编 core（共享媒体库）
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: 缓存依赖栈
+        uses: actions/cache@v4
+        with:
+          # 只缓存 prefix（编好的 dylib + 头文件），不缓存源码树：
+          # build/src 有几个 GB，而且 ffmpeg 的 config.h 残留会让下次
+          # configure 直接跳过、编出架构不对的东西。
+          path: prefix
+          key: deps-${{ env.DEPS_CACHE_KEY }}-${{ runner.os }}-arm64
+
+      - name: 编依赖栈（ffmpeg / libplacebo / libass / mpv）
+        run: |
+          set -euo pipefail
+          # 缓存命中时脚本内部会各自跳过（按 prefix/lib/pkgconfig/*.pc 判断）。
+          # 首次约 40-60 分钟。
+          if ! JOBS=$(sysctl -n hw.ncpu) ./scripts/build-deps-macos.sh 2>&1 | tee "$RUNNER_TEMP/deps.log"; then
+            echo "::error::依赖栈编译失败"
+            tail -80 "$RUNNER_TEMP/deps.log"
+            exit 1
+          fi
+
+      - name: 编 Rust 核心
+        run: |
+          set -euo pipefail
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          cargo build -p dvplayer-media --release
+
+      - name: 编 App 并打包
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [[ -n "${VERSION_INPUT:-}" ]]; then
+            ARGS+=(-Version "$VERSION_INPUT")
+          fi
+          ./apps/macos/packaging/build-release.sh "${ARGS[@]}"
+
+      - name: 检查产物架构
+        run: |
+          set -euo pipefail
+          DMG=$(ls out/release/*.dmg | head -1)
+          echo "产物: $DMG"
+
+          MP=$(hdiutil attach "$DMG" -nobrowse -readonly | grep -o '/Volumes/.*' | tail -1)
+          APP="$MP/DV Player.app"
+
+          echo "--- 主程序"
+          lipo -archs "$APP/Contents/MacOS/DvPlayer"
+
+          echo "--- Frameworks"
+          for f in "$APP/Contents/Frameworks/"*.dylib; do
+            printf '%-45s %s\n' "$(basename "$f")" "$(lipo -archs "$f")"
+          done
+
+          # 任何一个不是 arm64 就让构建失败，别把混架构的包发出去。
+          BAD=0
+          for f in "$APP/Contents/MacOS/DvPlayer" "$APP/Contents/Frameworks/"*.dylib; do
+            if ! lipo -archs "$f" | grep -qw arm64; then
+              echo "::error file=$f::不是 arm64（$(lipo -archs "$f")）"
+              BAD=1
+            fi
+          done
+
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          hdiutil detach "$MP" -force || true
+          exit $BAD
+
+      - name: 启动冒烟测试
+        run: |
+          set -euo pipefail
+          DMG=$(ls out/release/*.dmg | head -1)
+          MP=$(hdiutil attach "$DMG" -nobrowse -readonly | grep -o '/Volumes/.*' | tail -1)
+          APP="$MP/DV Player.app"
+
+          # 用自检入口：打开首页、截一张图、退出。
+          # 能走到截图就说明 SwiftUI 起来了、libmpv 也加载了。
+          OUT="$RUNNER_TEMP/smoke.jpg"
+          rm -f "$OUT"
+          DVPLAYER_PAGE=home \
+          DVPLAYER_SHOT="$OUT" \
+          DVPLAYER_SHOT_DELAY=12 \
+          DVPLAYER_EXIT=1 \
+            "$APP/Contents/MacOS/DvPlayer" 2>&1 | tee "$RUNNER_TEMP/smoke.log" || true
+
+          hdiutil detach "$MP" -force || true
+
+          if [[ ! -s "$OUT" ]]; then
+            echo "::error::冒烟测试失败：没有产出截图"
+            cat "$RUNNER_TEMP/smoke.log" || true
+            exit 1
+          fi
+          echo "冒烟测试通过，截图 $(du -h "$OUT" | cut -f1)"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: |
+            out/release/*.dmg
+            out/release/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 附到 Release（仅 tag 触发）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/release/*.dmg
+            out/release/*.zip

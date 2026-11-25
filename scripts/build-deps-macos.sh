@@ -11,7 +11,14 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PREFIX=${PREFIX:-$ROOT/prefix}
 SRC=${SRC:-$ROOT/build/src}
 JOBS=${JOBS:-$(sysctl -n hw.ncpu)}
-export PATH="$HOME/Library/Python/3.9/bin:$PREFIX/bin:$PATH"
+export PATH="$PREFIX/bin:$PATH"
+# meson / ninja 可能来自 pip --user（~/.local 或 ~/Library/Python/<ver>/bin），
+# 也可能是 brew（/opt/homebrew/bin，已经在 PATH 里）。
+# 不写死 Python 版本：开发机是 3.9，CI runner 是 3.12+。
+for pybin in "$HOME"/Library/Python/*/bin "$HOME"/.local/bin; do
+    [ -d "$pybin" ] && PATH="$pybin:$PATH"
+done
+export PATH
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
 mkdir -p "$PREFIX" "$SRC"
