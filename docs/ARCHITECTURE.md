@@ -17,7 +17,7 @@
 │  libdovi（RPU / EL 解析）                     │
 ├──────────────────────────────────────────────┤
 │ 输出（mpv 自己建）                            │
-│  GPU surface（D3D11 / Vulkan-Metal / Surface）│
+│  GPU surface（D3D11 / OpenGL / SurfaceView）  │
 │  音频（WASAPI / CoreAudio / AudioTrack）      │
 └──────────────────────────────────────────────┘
 ```
@@ -130,13 +130,17 @@ C ABI 多一组 `dv_hub_*`；界面（`AppServices`）只持有一个 hub，设�
 | 平台 | 接入方式 | 代码 |
 | --- | --- | --- |
 | Windows | 起官方 `mpv.exe`：`--wid=<子窗口>`，控制走 `--input-ipc-server=<命名管道>` 的 JSON IPC，进程用 Job Object 绑在壳上 | `apps/windows/DvPlayer/Player/`（`MpvProcess` / `MpvIpc` / `MpvHost`） |
-| macOS | 起带 Vulkan 的 `mpv` 子进程（gpu-next + macvk），视频在 mpv 自己的窗口，壳贴一层透明浮层；控制走 unix socket 上的 JSON IPC（ADR-0010） | `apps/macos/DvPlayer/Sources/DvPlayer/Player/`（`MpvEngine` / `MpvIPC` / `PlayerWindow`） |
+| macOS | 进程内 libmpv（render API + gpu-next / OpenGL）画进自己的窗口，SwiftUI 控制浮层叠在同一窗口里；控制直接调 C API，单窗口（ADR-0011） | `apps/macos/DvPlayer/Sources/DvPlayer/Player/`（`MpvEngine` / `PlayerSession` / `PlayerWindow`） |
 | Android / TV | Media3，进程内 | 未开始 |
 
-两端都用子进程：Windows 见 [ADR-0009](adr/0009-windows-mpv-subprocess.md)，
-macOS 见 [ADR-0010](adr/0010-macos-mpv-subprocess.md)。要点是让 mpv 自己建 VO
-和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）；换 mpv 版本
-只是换个可执行文件，不碰 libmpv 的 C++ 工具链。`core/mpv` 的 C++ 封装不再需要。
+Windows 用子进程（[ADR-0009](adr/0009-windows-mpv-subprocess.md)）：让 mpv 自己建 VO
+和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）。
+
+macOS 一开始也走这条路（[ADR-0010](adr/0010-macos-mpv-subprocess.md)，带 Vulkan 的
+`mpv` 子进程），后来改为进程内 libmpv + render API（[ADR-0011](adr/0011-macos-libmpv-inprocess.md)）：
+mpv 从 2026-11-22 起在 render API 上也支持 gpu-next 后端，DV 整形不再是子进程
+独有的能力。这样包更小（不用带 Vulkan loader 与 MoltenVK）、控制也不用绕 IPC。
+`core/mpv` 的 C++ 封装不再需要。
 
 ### 2.0 打开播放窗的过渡（两端一致）
 
@@ -215,12 +219,12 @@ macOS 见 [ADR-0010](adr/0010-macos-mpv-subprocess.md)。要点是让 mpv 自己
 
 ## 5. macOS
 
-- mpv 以子进程运行：`--vo=gpu-next --gpu-api=vulkan --gpu-context=macvk`，
-  视频在 mpv 自己的窗口（cocoa-cb），行内 Vulkan loader + MoltenVK 随包分发。
-- 壳是另一个窗口：`isOpaque = false`、`level = normal + 1`，SwiftUI 浮层透明处透出视频；
-  窗口 move / resize 用 40ms 合并后 `set_property geometry` 跟随。
-- 控制走 unix socket 上的 JSON IPC，协议与 Windows 的 `MpvIpc` 相同。
-- 全屏是「假全屏」：两个窗口铺满屏幕 + 隐藏菜单栏 / Dock，不用系统 fullscreen space。
+- libmpv 跑在应用进程内，用 render API（`MPV_RENDER_API_TYPE_OPENGL`）画进自己的
+  `NSOpenGLView`，gpu-next + OpenGL；不需要 Vulkan / MoltenVK，包里也没有它们（ADR-0011）。
+- 单窗口：控制浮层和视频在同一个 `NSWindow` 里，浮层是叠在上面的 SwiftUI 层，
+  不需要用 `set_property geometry` 去跟另一个窗口对齐。
+- 控制直接调 libmpv 的 C API（`libmpv` 的事件循环在进程内），不走 IPC。
+- 全屏是「假全屏」：窗口铺满屏幕 + 隐藏菜单栏 / Dock，不用系统 fullscreen space。
 - Dolby Vision P5/P7 由 gpu-next 的 `pl_shader_dovi_reshape()` 处理；HDR10 走
   `target-colorspace-hint`，SDR 屏上是固定 tone-map。
 

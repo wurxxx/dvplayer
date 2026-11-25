@@ -211,10 +211,10 @@
   最小化按钮也走同一条路：先藏浮层再最小化视频层。
   浮层根节点的底色必须是 `#01000000` 这类 alpha=1 的色，**不能是 `Transparent`**：
   分层窗口 alpha=0 的像素会让鼠标穿透到下面那层，点画面就收不到事件了；
-- **macOS 也是两个窗口**：mpv 在自己的进程里开窗（gpu-next + Vulkan），
-  浮层是 `isOpaque=false` 的普通窗口、`level = normal + 1`，移动 / 缩放通过
-  `set_property geometry` 同步（40ms 合并）。全屏是「假全屏」——两个窗口铺满屏幕
-  + 隐藏菜单栏 / Dock，不进系统 fullscreen space。浮层那一套视觉规则和 Windows 完全一致；
+- **macOS 是单窗口**：libmpv 在进程内用 render API（gpu-next + OpenGL）画进自己的
+  `NSOpenGLView`，控制浮层是同一个窗口里叠在上面的 SwiftUI 层（不是独立窗口），
+  所以不需要跨窗口同步几何。全屏是「假全屏」——窗口铺满屏幕 + 隐藏菜单栏 / Dock，
+  不进系统 fullscreen space。浮层那一套视觉规则和 Windows 完全一致；
 - **海报网格**：一律用 `Controls/PosterGrid`，不要在页面里自己算列宽。
   它按可用宽度算列数（`floor(宽度 / (MinCardWidth + 16))`），卡片宽度铺满格子，
   窗口变宽不会在右侧留白；翻到下一列时卡片缩回去。默认是 2:3 竖版海报，

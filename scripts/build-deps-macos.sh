@@ -76,7 +76,16 @@ else
   if [ ! -d "$SRC/libplacebo" ]; then
     git clone --depth 1 --branch v7.387.0 https://code.videolan.org/videolan/libplacebo.git "$SRC/libplacebo"
   fi
-  git -C "$SRC/libplacebo" submodule update --init --recursive
+  # libplacebo 有 6 个子模块，我们的配置只需要 4 个：
+  #   fast_float / jinja / markupsafe —— shader 模板与数值解析
+  #   glad                            —— OpenGL 函数加载（render API 走 GL）
+  # Vulkan-Headers 只在 vulkan=enabled 时用、demos/3rdparty/nuklear 只在
+  # demos=true 时用，两个都禁了。但 `--recursive` 会把它们一起拉下来
+  # （Vulkan-Headers 约 20MB，CI 日志里还会出现 `Cloning into ...Vulkan-Headers`，
+  #  看起来像在编 Vulkan）。vulkan=disabled 时 libplacebo 只编译 vulkan_stubs.c，
+  # 不需要真头文件；meson 仍会把 -I 指过去，目录不存在也无害。
+  git -C "$SRC/libplacebo" submodule update --init \
+      3rdparty/fast_float 3rdparty/jinja 3rdparty/markupsafe 3rdparty/glad
   rm -rf "$SRC/libplacebo/_build"
   meson setup "$SRC/libplacebo/_build" "$SRC/libplacebo" \
     --prefix="$PREFIX" \
