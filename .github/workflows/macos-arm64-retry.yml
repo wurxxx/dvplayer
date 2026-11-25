@@ -3,48 +3,49 @@ name: macOS arm64 排队重试
 # 为什么需要它：GitHub 托管的 macOS **arm64** 机器从 2026-11 起长期容量不足。
 # 排队抢不到机器时，job 会在满 15 分钟时被自动取消，日志里只有
 #   The job was not acquired by Runner of type hosted even after multiple attempts
-# 一步都不会跑。官方在 actions/runner-images#15291 里确认是容量问题、没有 ETA，
-# 并且说「重跑通常能偶到一台可用的机器」（有人试了 7 次）。
+# 一步都不会跑。官方在 actions/runner-images#15291 里确认是容量问题、没有 ETA。
 # 换标签（macos-15 / macos-26 / macos-latest）没用，都在同一批 arm64 池子里。
 #
-# 所以这里做自动重试：macOS 工作流没成功、且 arm64 job 一步没跑（被取消）时，
-# 自动再发 arm64 构建；上限按「最近一次成功之后连续失败 12 次」算。
-# 真编失败（有步骤跑过）不重试——那不是容量问题。
+# 这里做两件事：
+#   1) 事件驱动（快）：macOS 工作流没成功、arm64 job 一步没跑时，立刻补票；
+#   2) 定时兜底（稳）：每 10 分钟看一次，没有在排的 arm64 票就补上。
 #
-# 官方对取消原因的解释是「分到了一台 arm64 主机但它没起来」，所以每次尝试都是
-# 独立抽签。为了尽快抽到，这里同时给两个 arm64 镜像各排一张票（macos-26 /
-# macos-15），已在排的不重复加，总数最多 3 个（见 gate 里的 active 判断），
-# 避免「票被取消 → 又补票」滚雪球。
+# 为什么必须有第 2 条：GitHub 的防递归规则——**用 GITHUB_TOKEN 触发的运行
+# 结束后不会再产生 workflow_run 事件**。所以「重试自己发出来的票」失败时，
+# 事件驱动那一圈就断了（实测 2026-11-25：14:37 之后彻底静默，票全挂在队列里
+# 没人补）。schedule 由 GitHub 调度器创建，不受这条规则影响。
 #
-# 注意：重试在 master 上编，用的是 master 当前代码。发起重试时 master 如果已经
-# 越过待发布的 tag，就应该改发新版本，而不是继续拿这个 tag 的号。
+# 补票策略：两个 arm64 镜像各排一张（macos-26 / macos-15），多一次抽签；
+# 已在排的池子不重复加，同时最多 3 个运行，避免滚雪球。
 
 on:
   workflow_run:
     workflows: ["macOS"]
     types: [completed]
+  schedule:
+    # GitHub 的定时最早 5 分钟粒度，高负载时可能延迟几分钟。
+    - cron: '*/10 * * * *'
 
 permissions:
   actions: write
   contents: read
 
 concurrency:
-  # 同一时间只允许一个重试动作，避免几次取消同时到达时连发好几个构建。
   group: macos-arm64-retry
   cancel-in-progress: false
 
 jobs:
   retry:
-    # 注意别写成 conclusion == 'cancelled'：arm64 job 抢不到机器被取消时，
-    # 运行记录的结论可能是 failure（prepare 成功 + 一个 cancelled job 聚合），
-    # 真正该看的判据是「arm64 job 被取消且一步没跑」，下面 gate 里查。
-    if: github.event.workflow_run.conclusion != 'success'
+    # 定时触发没有 workflow_run 上下文；事件触发时只要不是 success 就进来看，
+    # 真正的判据在 gate 里（arm64 job 必须 cancelled 且 steps 为空）。
+    if: github.event_name == 'schedule' || github.event.workflow_run.conclusion != 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: 判断是不是「抢不到机器」被取消
+      - name: 判断要不要补票
         id: gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_EVENT: ${{ github.event.workflow_run.event }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
@@ -52,11 +53,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 只认 arm64 job 被取消、且 steps 为空的情况。
-          info=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" \
-            --jq '.jobs[] | select(.name=="macOS arm64") | "\(.conclusion // "none") \(.steps | length)"' | head -1)
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            ARM_RUN=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=macos.yml --limit 10 \
+              --json databaseId,displayTitle --jq '[.[] | select(.displayTitle | test("arm64"))][0].databaseId // empty')
+            if [[ -z "$ARM_RUN" ]]; then
+              echo "找不到 arm64 运行记录，跳过"
+              exit 0
+            fi
+            echo "定时检查：最近一次 arm64 运行 $ARM_RUN"
+          else
+            ARM_RUN="$RUN_ID"
+          fi
+
+          # 统一判据：那次运行的 arm64 job 必须是 cancelled 且 steps 为空
+          # （真编失败会有步骤，不重试）。
+          info=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARM_RUN/jobs" \
+            --jq '[.jobs[] | select(.name == "macOS arm64")][0] | "\(.conclusion // "none") \(.steps | length)"')
           if [[ -z "$info" ]]; then
-            echo "这次运行里没有 arm64 job（比如只编了 x86_64），跳过"
+            echo "那次运行里没有 arm64 job，跳过"
             exit 0
           fi
           read -r CONCL STEPS <<< "$info"
@@ -66,9 +80,7 @@ jobs:
             exit 0
           fi
 
-          # 次数上限：只数「最近一次成功之后」连续没成功了几次。
-          # （早先写成「最近 50 次里失败的条数」，把仓库历史里的失败也算进来，
-          #   一上来就是 14 次，直接把闸拉死了。）
+          # 上限：最近一次成功之后连续没成功了几次。
           n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/macos.yml/runs?per_page=50" \
             --jq '[.workflow_runs[].conclusion] | (index("success") // length)')
           echo "最近一次成功之后，连续没成功：$n 次"
@@ -77,8 +89,7 @@ jobs:
             exit 0
           fi
 
-          # 排队/进行中的 macOS 运行数量上限：每轮重试都会补票，不设上限的话
-          # 「票被取消 → 再补票」会越滚越多。最多同时 3 个。
+          # 并发上限：最多 3 个排队/进行中的 macOS 运行。
           active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=macos.yml --limit 20 \
             --json status --jq '[.[] | select(.status != "completed")] | length')
           echo "当前排队/进行中的 macOS 运行：$active 个"
@@ -87,19 +98,33 @@ jobs:
             exit 0
           fi
 
-          # tag 触发的运行才需要往 Release 里补产物。
-          # 两条来源：
-          #   1) push tag：head_branch 就是 tag 名；
-          #   2) 上一次是手工/重试触发：从显示名里的 `release:vX.Y.Z` 取回来。
+          # 要附到哪个 Release：
+          #   1) push tag → head_branch 就是 tag；
+          #   2) 手工/重试触发 → 从显示名里的 release:vX.Y.Z 取回；
+          #   3) 定时触发 → 取最新 Release，前提是它缺 arm64 且 tag 就指向 master HEAD
+          #      （否则拿 master 编出来的包会挂到内容对不上的版本上）。
           TAG=""
-          if [[ "$RUN_EVENT" == "push" && "$HEAD_BRANCH" =~ ^v[0-9] ]]; then
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            REL=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // empty')
+            if [[ -n "$REL" ]]; then
+              MISSING=$(gh release view "$REL" --repo "$GITHUB_REPOSITORY" --json assets \
+                --jq '[.assets[].name] | any(test("macos-arm64")) | not')
+              HEAD_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/master" --jq .sha)
+              TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$REL" --jq .sha)
+              echo "最新 Release $REL：缺 arm64=$MISSING，tag=$TAG_SHA master=$HEAD_SHA"
+              if [[ "$MISSING" == "true" && "$TAG_SHA" == "$HEAD_SHA" ]]; then
+                TAG="$REL"
+              fi
+            fi
+          elif [[ "$RUN_EVENT" == "push" && "$HEAD_BRANCH" =~ ^v[0-9] ]]; then
             TAG="$HEAD_BRANCH"
           elif [[ "$TITLE" =~ release:(v[0-9][^[:space:]]*) ]]; then
             TAG="${BASH_REMATCH[1]}"
           fi
+
           echo "retry=true" >> "$GITHUB_OUTPUT"
           echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "将重试 arm64，release_tag=${TAG:-（无）}"
+          echo "将补票，release_tag=${TAG:-（无）}"
 
       - name: 补上缺的 arm64 排队票
         if: steps.gate.outputs.retry == 'true'
@@ -111,9 +136,6 @@ jobs:
           # 这个 job 没有 checkout，gh 默认会去读本地 .git 找仓库，所以必须
           # 显式 --repo，否则报
           #   failed to run git: fatal: not a git repository
-          #
-          # 「被取消」的根因是分到的主机起不来，不是队列没位置，所以两个 arm64
-          # 池子各排一张票（macos-26 / macos-15），多一次抽签；已经在排的就不重复加。
           active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=macos.yml --limit 20 \
             --json displayTitle,status --jq '.[] | select(.status != "completed") | .displayTitle')
           echo "当前排队/进行中的运行："
