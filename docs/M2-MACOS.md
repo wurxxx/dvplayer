@@ -1,23 +1,23 @@
 # M2 · macOS 客户端
 
-> 状态：壳、浏览链路、播放页都可用（2026-11-21）；播放走 mpv 子进程 + 浮层窗
-> （[ADR-0010](adr/0010-macos-mpv-subprocess.md)），DV 路径与 Windows 同一条；
+> 状态：壳、浏览链路、播放页都可用（2026-11-21）；播放走进程内 libmpv +
+> render API（[ADR-0011](adr/0011-macos-libmpv-inprocess.md)），DV 路径与 Windows 同一条；
 > 锁屏状态下已端到端跑通，画面待解锁后目视验收。
 > 产物：`apps/macos/DvPlayer`（Swift Package + `build.sh` 出 `.app`）。
 
 ## 1. 范围
 
-和 Windows 端一样的界面与行为，播放内核是本机编的 mpv（gpu-next + Vulkan）：
+和 Windows 端一样的界面与行为，播放内核是本机编的 libmpv（gpu-next + OpenGL）：
 
 | 层 | 选型 | 说明 |
 | --- | --- | --- |
 | UI | SwiftUI + AppKit | 视觉规范沿用 [UI-DESIGN.md](UI-DESIGN.md)，色板 / 字号 / 组件一致 |
 | 业务 | 共享核心 `core/media` | C ABI + JSON，和 Windows 是同一份 Rust 库 |
-| 视频 | mpv 子进程 + Vulkan/macvk | gpu-next 出画，Dolby Vision 整形走这里（ADR-0010） |
+| 视频 | 进程内 libmpv + render API | gpu-next 画进应用自己的 `NSOpenGLView`，Dolby Vision 整形与 FEL 合成走这里（ADR-0011） |
 | 窗口 | 单窗口 + 无标题栏 | 侧栏 216 + 内容区，和 Windows 同骨架；窗口按钮自己画 |
 
-`--wid` 在 macOS 上不可靠，render API 又只有 legacy `gpu` 后端（拿不到 DV），
-所以播放页改成「mpv 自己开窗口 + 我们贴一个透明浮层」，和 Windows 同一套骨架。
+`--wid` 在 macOS 上不可靠；render API 从 mpv 2026-11-22 起能用 gpu-next，
+所以播放页是**单窗口**：视频画进应用自己的 `NSOpenGLView`，控制浮层叠在上面。
 
 ## 2. 已完成（浏览链路）
 
@@ -126,25 +126,26 @@
 
 ### 4.1 管线
 
-视频和控件是两个窗口（[ADR-0010](adr/0010-macos-mpv-subprocess.md)）：
+视频和控件在同一个窗口里（[ADR-0011](adr/0011-macos-libmpv-inprocess.md)）：
 
 ```
 core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
         │
-        ├─► MpvEngine（拉子进程 Contents/Frameworks/mpv）
-        │     --vo=gpu-next --gpu-api=vulkan --gpu-context=macvk
-        │     --geometry=<浮层 frame> --input-ipc-server=<unix socket>
-        │     窗口 move/resize → 40ms 合并 → set_property geometry
+        ├─► MpvEngine（进程内 libmpv，render API）
+        │     vo=libmpv，renderer=gpu-next，GL 上下文由 MpvVideoView 提供
+        │     事件走 mpv_wait_event 线程回调，不再有 IPC
         │
-        └─► PlayerWindowController（NSWindow，isOpaque=false，level=normal+1）
-              PlayerView（SwiftUI）：顶栏 / 控制条 / 选集 / 媒体信息 / 3 秒淡出
-              透明处透出底下的 mpv 窗口
+        └─► PlayerWindowController（NSWindow）
+              ├─ MpvVideoView（NSOpenGLView）：mpv 渲染到自己的 GL framebuffer
+              └─ PlayerView（SwiftUI）：顶栏 / 控制条 / 选集 / 媒体信息 / 3 秒淡出
+                 透明，盖在视频上
 ```
 
-- `MpvIPC`：unix socket 上的 JSON IPC。一条连接既发命令又收事件；命令带
-  `request_id`，回复按 id 分发；事件切回主线程（`property-change` /
-  `file-loaded` / `end-file`）。
-- `MpvEngine`：起进程、订阅属性（`time-pos` / `duration` / `pause` /
+- `MpvClient`：`mpv_create` + 选项 + `mpv_initialize`；事件线程跑
+  `mpv_wait_event`，属性事件和命令回复按 id 分发、切回主线程；渲染上下文在
+  渲染队列上建（`MPV_RENDER_API_TYPE_OPENGL`），每次 `render` 到 FBO 0 后
+  `flushBuffer`。
+- `MpvEngine`：订阅属性（`time-pos` / `duration` / `pause` /
   `eof-reached` / `speed` / `volume` / `mute` / `track-list` / `aid` / `sid` /
   `paused-for-cache`），
   暴露 loadfile / seek / 音量 / 静音 / 倍速 / 选轨 / 截图 / `shutdown`。
@@ -164,7 +165,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   DVPLAYER_RANGE=31 DVPLAYER_SCROLL_Y=430 DVPLAYER_SHOT=…`，日志应有
   `[Detail] range jump 31-60 -> E31`，截图里集行从 E31 开始。
 - 打开失败（取地址失败 / 播放器退出）时窗口不关：黑底上显示原因和
-  「重试 / 关闭」。重试会按原参数重跑；mpv 子进程已经退出时先换一个新实例。
+  「重试 / 关闭」。重试会按原参数重跑；mpv 核心已经销毁时先换一个新实例。
   自检：`DVPLAYER_PLAY=bogus DVPLAYER_PLAY_RETRY=1`，日志应出现 `[Play] retry`
   且错误面板仍在。
 - 服务器图标：服务器卡片和侧栏名字左边都显示源自己的图标（飞牛官方牛头 / Emby
@@ -180,26 +181,24 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   空代理 = 直连。
 - `PlayerSession`：起播、切集、EOF 接下一集、进度回写（10 秒一次）、
   轨道解析与中文默认、规格 chips、截图、浮层自动隐藏。
-- `PlayerWindowController`：透明浮层窗 + geometry 同步 + 假全屏 + 键盘 / 滚轮。
+- `PlayerWindowController`：单窗口 + 假全屏 + 键盘 / 滚轮。
 - `PlaylistLoader`：继续观看只有一条记录，要顺着 `parentId`（或剧名）把整季找回来；
   先播记录本身，选集后台补上（播放中 core 被拉流挤到 11–22 秒，不能挡起播）。
 - 入口：详情页「播放 / 重头看 / 选集卡」、记录页与库首页的「继续观看」卡片。
 
 ### 4.2 窗口与全屏
 
-- 浮层窗口 `isOpaque = false`、`hasShadow = false`、
-  `level = NSWindow.Level(rawValue: normal + 1)`，才盖得住另一个进程的 mpv 窗口；
-  `--focus-on=never` + `NSApp.activate` 保证焦点在壳这边，键盘 / 滚轮都能收到。
-- 移动 / 缩放：`windowDidMove` / `windowDidResize` 触发 `syncGeometry()`，
-  40ms 合并后发 `set_property geometry WxH+X+Y`（左上原点，主屏坐标）；拖动结束时
-  `windowDidEndLiveResize` 强制同步一次（`force: true` 不走节流）。
+- 单窗口：`MpvVideoView` 在底层，SwiftUI 控制层用 `NSHostingView` 盖在上面，
+  没有跨窗口同步。
+- 缩放 / 全屏：`MpvVideoView` 的 `layout` 里重建 GL viewport，mpv 按新尺寸重排
+  字幕与 OSD；窗口拖动只移动一个窗口，画面天然同帧。
 - 窗口按钮：自绘三个圆点，缩放走 `zoom()`（屏幕可见区域最大化，单独记一个
   `zoomSavedFrame`，不和全屏的 `savedFrame` 混用）。
-- **假全屏**：系统 fullscreen space 只收本进程的窗口，mpv 那个窗口进不去。
-  所以两个窗口都铺满 `screen.frame`，同时 `NSApp.presentationOptions =
+- **假全屏**：窗口铺满 `screen.frame`，同时 `NSApp.presentationOptions =
   [.autoHideMenuBar, .autoHideDock]`；退出时恢复 `[]` 和原 frame。
 - 关闭窗：`windowWillClose` 里先摘事件监听，再 `session.stop()` →
-  `MpvEngine.shutdown()`（发 `quit`，最多等 2 秒，不退就 `terminate`）。
+  `MpvEngine.shutdown()`（销毁渲染上下文 → `mpv_terminate_destroy`；
+  事件线程先 `mpv_wakeup` 再等它退出，避免与 `mpv_wait_event` 并发）。
 
 ### 4.3 打包
 
@@ -253,21 +252,22 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_UI=audiotoggle` | 切一次音频直通 + HDR 直通（走 set_property + 落盘） |
 | `DVPLAYER_PLAY_UI=audiodevice:N` | 选第 N 个音频输出设备 |
 | `DVPLAYER_PLAY_UI=speed:1.5` / `mute` | 改倍速 / 静音（验证顶栏状态），多项用逗号连起来 |
+| `DVPLAYER_PLAY_UI=seek:<秒>` | 精确定位（配合 `pause` 做同帧对比，`fel-ab.sh` 在用） |
+| `DVPLAYER_VF=<vf>` | 注入 mpv 的 `vf` 链（`fel-ab.sh` 用 `format=enhancement-layer=no` 关增强层做对照） |
 | `DVPLAYER_BUFFER_MB=<MB>` | 临时覆盖播放缓冲（自检时压小才看得到未缓冲段） |
 | `DVPLAYER_PLAY_UI=danmakufile:<ass>` | 直接挂一份本地弹幕 ASS（不联网，自检用） |
 | `DVPLAYER_PLAY_UI=subsearch` | 打开字幕面板并搜索 |
 | `DVPLAYER_PLAY_UI=subload:N` / `subauto` | 下载第 N 条 / 自动下载第一条 |
 | `DVPLAYER_DANDANPLAY_BASE` / `DVPLAYER_OPENSUBTITLES_BASE` | 指向本地假服务器做离线联调 |
-| `DVPLAYER_PLAY_FRAME=<png>` | 让 mpv 抓窗口帧（`screenshot-to-file ... window`，含 gpu-next 后处理） |
+| `DVPLAYER_PLAY_FRAME=<png>` | 从应用自己的 GL framebuffer 抓一帧（含 gpu-next 的 DV 整形；mpv 的 `screenshot-to-file` 在 render API 下会退回软件路径、颜色不对） |
 | `DVPLAYER_PLAY_SHOT=<png>` / `DVPLAYER_PLAY_SHOT_DELAY=` | 截播放窗的 SwiftUI 浮层 |
 | `DVPLAYER_PLAY_SECONDS=<秒>` | 到点打印 `[PlayTest]` 状态（位置 / 时长 / 轨道 / playlist） |
-| `DVPLAYER_NO_VO=1` | 加 `--vo=null`：锁屏 / 无图形会话时只跑解码 + IPC |
 | `DVPLAYER_OPENING_HOLD=1` | 假装首帧一直没来，验证打开遮罩一直不透明 |
 | `DVPLAYER_BUFFERING_HOLD=1` | 出画后强制显示「正在缓冲…」小胶囊 |
 
 日志前缀：`[Play] open / load / loaded / tracks / select / eof / report`、`[PlayTest]`。
-mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（子进程的
-stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开关。
+mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（`.app` 里
+没有终端，出问题先看这个），不需要额外开关。
 
 ### 4.5 画面比例 / 定时关闭 / 片头片尾 / 音频输出
 
@@ -390,8 +390,6 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
   否则 `sid` 和 `secondary-sid` 指向同一条，画面叠两遍。
 - **弹幕 ASS 的文本要转义**：`{}` 是样式指令、`\` 是转义符，弹幕里换成全角字符；
   换行换成空格。颜色是 ASS 的 `&HAABBGGRR`，弹弹play 给的是 `0xRRGGBB`。
-- **锁屏时 Vulkan 拿不到 swapchain**：mpv 建完 pipeline 就卡住，`--length` 也不退出。
-  不是代码问题（ADR-0006 在 11-19 同一台机器上验过），自检改用 `DVPLAYER_NO_VO=1`。
 - **FFmpeg 必须显式开 TLS**：`build-deps-macos.sh` 里用了 `--disable-autodetect`，
   只开 `--enable-videotoolbox` / `--enable-audiotoolbox` 时 FFmpeg 没有任何 TLS 后端，
   `--list-protocols` 里没有 `https://`，mpv 报
@@ -411,11 +409,10 @@ stderr 在 `.app` 里看不到，出问题先看这个），不需要额外开�
 
 ## 5. 下一步
 
-1. **DV 目视验收**：架构已经换成 gpu-next（ADR-0010），P5 不再偏紫是 ADR-0006
-   在本机验过的结论；解锁后要用 `DVPLAYER_PLAY_FRAME` 抓一帧和
-   [M0「已知限制：P5 在本机渲染成紫色」](M0.md) 的紫色基准对照一次，再补进这里。
-2. **解锁后的播放页观感**：mpv 出画、浮层覆盖、geometry 跟随、`--no-border`、
-   拖动 / 缩放 / 假全屏的手感。
+1. **DV 目视验收**：产品路径已经是 gpu-next + render API（ADR-0011），
+   `./scripts/fel-ab.sh samples/p7-fel.mkv 8` 同帧开关增强层的 PSNR 约 49、
+   `>2` 像素约 1%，说明 EL 进了 shader；剩下的只是拿 HDR 屏做一次目视。
+2. **解锁后的播放页观感**：单窗口出画、控制层覆盖、拖动 / 缩放 / 假全屏的手感。
 3. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，
    真正的 PQ 输出要在 HDR 显示器上看一次。
 4. ~~音频输出 / 直通 / HDR 开关~~ **已完成**（2026-11-21，与 Windows B13 对齐）：

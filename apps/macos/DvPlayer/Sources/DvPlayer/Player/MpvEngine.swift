@@ -144,8 +144,7 @@ final class MpvEngine {
         // 选项直接对应旧的命令行参数。和子进程时代相比去掉的：
         // `--input-ipc-server`（进程内了）、`--geometry` / `--screen` / `--ontop` /
         // `--no-border` / `--macos-app-activation-policy` / `--focus-on`
-        // （不再有独立窗口）、`--gpu-api=vulkan` / `--gpu-context=macvk`
-        // （render API 跑在 OpenGL 上）。
+        // （不再有独立窗口）、GPU 后端相关的那几个（render API 跑在 OpenGL 上）。
         var options: [String: String] = [
             "config": "no",
             // 先起核心，文件稍后用命令送进来。
@@ -161,6 +160,11 @@ final class MpvEngine {
             // 出问题看这个文件：.app 里没有终端。
             "log-file": NSTemporaryDirectory() + "dvplayer-mpv.log",
         ]
+
+        // 自检 / A/B 用：注入任意 vf（`scripts/fel-ab.sh` 用它关掉增强层做对照）。
+        if let vf = ProcessInfo.processInfo.environment["DVPLAYER_VF"], !vf.isEmpty {
+            options["vf"] = vf
+        }
 
         // 音频输出 / 直通 / HDR 跟着设置走：换集不重建 mpv，也一直是用户选的。
         let settings = AppSettings.load()

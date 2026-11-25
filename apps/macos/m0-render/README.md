@@ -57,7 +57,7 @@ decoder-frame-drop-count     0
 - **旧版**（mpv 0.42.0，2026-11-19 构建）不能证明 DV：那时 render API 只有
   legacy `gpu`，没有 gpu-next。**这个限制已经解除**——mpv 在 2026-11-22 合入
   `ad9d850`（add a gpu-next render backend）/ `eb565a2`（renderer selection）后，
-  render API 可以用 gpu-next，跑在 OpenGL 上，不需要 Vulkan。
+  render API 可以用 gpu-next，跑在 OpenGL 上。
   详见 `.opencode/drag-notes.md`。
 - 这个程序本身没有截图 / 颜色断言代码，只打印属性。「P5 是紫色」是当时
   **人眼看屏幕**得出的结论，不是测量。
@@ -86,11 +86,11 @@ MPV_EXTRA='vf=format:colormatrix=bt.2020-ncl' ./m0-render samples/p5.mkv 15
 ```
 
 结论：**这个程序不用于验收色彩**，只验证渲染管线。
-想看 P5 的正确颜色，用 Vulkan 验证路径（ADR-0006）：
+想看 P5 的正确颜色，用产品播放器（进程内 libmpv + render API，gpu-next 负责 DV 整形）：
 
 ```bash
-./scripts/build-vk-macos.sh
-./scripts/mpv-vk.sh samples/p5.mkv
+cd apps/macos/DvPlayer && ./build.sh
+DVPLAYER_LOCAL=../../samples/p5.mkv ./build/DvPlayer.app/Contents/MacOS/DvPlayer
 ```
 
-P7/P8.1 的 DV 整形在 gpu-next 上验（`fel-ab.sh --vk`，或 Windows 的 A4）。
+P7/P8.1 的 DV 整形同样在 gpu-next 上验（`fel-ab.sh`，或 Windows 的 A4）。

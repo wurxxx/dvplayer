@@ -6,7 +6,7 @@
 
 早期 mpv 的 `video/out/mac/view.swift` 在 `isOpaque` 里写的是 `layer as? MetalLayer`，
 而 `MetalLayer` 定义在 `metal_layer.swift`，那个文件只在 `-Dmetal=enabled` 时进编译。
-我们编的是 render API（`-Dvulkan=disabled`、不带 metal），`MetalLayer` 类型不存在，
+我们编的是 render API（不带 metal），`MetalLayer` 类型不存在，
 编译会报找不到类型。补丁做了两件事：
 
 1. `import QuartzCore`（为了 `CAMetalLayer`）

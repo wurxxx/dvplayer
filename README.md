@@ -25,8 +25,9 @@ macOS 客户端的浏览与播放也已可用。底层能力见 [docs/M0.md](doc
   设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1.2
 - 适配器文档：[docs/FNOS-API.md](docs/FNOS-API.md)、[docs/EMBY-API.md](docs/EMBY-API.md)
 - 播放：Windows 用 mpv 子进程挂 `wid`，`gpu-next` + `d3d11va`，DV P7 FEL 走官方构建；
-  macOS 也是 mpv 子进程（gpu-next + Vulkan/macvk）+ 透明浮层窗，DV 走同一条整形路径
-  （[ADR-0010](docs/adr/0010-macos-mpv-subprocess.md)，画面验收待解锁）
+  macOS 用进程内 libmpv + render API（`gpu-next` + OpenGL）画进自己的窗口，控制浮层
+  叠在同一窗口里，DV 走同一条整形路径
+  （[ADR-0011](docs/adr/0011-macos-libmpv-inprocess.md)）
 - 两端对齐的功能：断点续播、自动接下一集、蓝光原盘、进度条三层 + 缓冲大小、
   弹幕 / 片头片尾 / 定时关闭 / 画面比例 / 字幕搜索、窄窗单行控制条
 - 续播：进度回写到服务器，详情页「继续观看 第 N 集」
@@ -67,19 +68,18 @@ dotnet build apps\windows\DvPlayer -c Release        # WPF 壳
 ```bash
 cd core && ~/.cargo/bin/cargo build -p dvplayer-media --release && cd ..
 
-./scripts/build-deps-macos.sh   # 首次：FFmpeg / libass / libplacebo 到 prefix/
-./scripts/build-vk-macos.sh     # 首次：mpv + Vulkan loader + MoltenVK 到 prefix-vk/
+./scripts/build-deps-macos.sh   # 首次：FFmpeg / libass / libplacebo / mpv 到 prefix/
 
 cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 ```
 
-`build.sh` 会把 mpv、libplacebo、MoltenVK、Vulkan loader 和共享核心一起打进
-`.app/Contents/Frameworks`（约 48MB），换台机器也能直接跑。
+`build.sh` 会把 mpv、libplacebo、共享核心和它们的 Homebrew 依赖一起打进
+`.app/Contents/Frameworks`，换台机器也能直接跑（不用装 Homebrew）。
 详见 [docs/M2-MACOS.md](docs/M2-MACOS.md)。
 
-DV / FEL 的验证脚本（用同一份 `prefix-vk`）：
+DV / FEL 的验证脚本（走产品同一份 mpv + render API）：
 
 ```bash
 ./scripts/split-el.sh /path/to/p7-fel.mkv
-./scripts/fel-ab.sh /path/to/p7-fel.mkv 60 --vk
+./scripts/fel-ab.sh /path/to/p7-fel.mkv 60
 ```

@@ -11,7 +11,7 @@ M0 起就走项目内源码构建，全部装进 `prefix/`，不碰系统目录�
 | FFmpeg | `n9.0.2` | `--disable-autodetect --disable-x86asm`，保留 `dovi_split` |
 | libplacebo | `v7.387.0` | 只开 OpenGL；`PL_API_VER=387`，有 `enhancement_layer` |
 | libass | `0.17.4` | mpv 0.42 的硬依赖 |
-| mpv | `v0.42.0` | `-Dgpl=false`，关 Vulkan/X11/Wayland/Lua；打一个 `CAMetalLayer` 补丁 |
+| mpv | `v0.42.0` | `-Dgpl=false`，关掉用不到的 X11 / Wayland / Lua 等（见 `scripts/build-deps-macos.sh`） |
 | dovi_tool | `2.3.4` | 官方 universal 预编译，放在 `tools/bin/` |
 
 ## 为什么不用 Homebrew
@@ -23,16 +23,6 @@ M0 起就走项目内源码构建，全部装进 `prefix/`，不碰系统目录�
 ## 为什么不用 IINA 的库
 
 IINA 1.5.0 内置 `libplacebo.360`（`PL_API_VER 360 < 370`），没有 FEL API。
-
-## 为什么要打 mpv 补丁
-
-`-Dvulkan=disabled` 时 `video/out/mac/metal_layer.swift` 不进编译，
-而 `view.swift` 里还在用 `MetalLayer` 类型，编译直接失败。
-补丁改成 `CAMetalLayer` 并显式 `import QuartzCore`：
-
-```
-patches/mpv/0001-view-cametal-layer.patch
-```
 
 ## 为什么 M1 还要继续 vendored
 

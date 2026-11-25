@@ -2,16 +2,14 @@
 # FEL A/B：同一帧，开/关增强层各截一张，算 PSNR / SSIM 与像素差统计。
 #
 # 用法:
-#   ./scripts/fel-ab.sh <input.mkv> [seconds]          # legacy gpu（无 DV）
-#   ./scripts/fel-ab.sh <input.mkv> [seconds] --vk     # gpu-next + Vulkan（DV 正解）
+#   ./scripts/fel-ab.sh <input.mkv> [seconds]
 #
-# 只有 --vk 这条路会真正应用 Dolby Vision 整形与增强层；
-# legacy gpu 连 P5 都会偏紫，更不会合成 EL。
+# 走产品自己的播放路径（进程内 libmpv + render API + gpu-next），截图读的是
+# 应用自己的 GL framebuffer，所以**包含 Dolby Vision 整形与增强层**。
+# 两张图的唯一区别是 `--vf=format=enhancement-layer=no`（`DVPLAYER_VF` 注入）。
 #
 # 判读（重要）：SDR 显示器上的 8bit 截图会把 FEL 残差大幅压掉，
-# 所以「PSNR 高」不等于「EL 没参与」。要证明链路通，用
-#   ./scripts/fel-amplify.sh <input.mkv> [seconds] [factor]
-# 把 NLQ 残差放大后重跑 A/B。
+# 所以「PSNR 高」不等于「EL 没参与」。
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -19,53 +17,48 @@ ROOT=$(cd "$here/.." && pwd)
 # shellcheck source=env.sh
 source "$here/env.sh"
 
-mode=legacy
-for a in "$@"; do
-  case "$a" in --vk) mode=vk ;; esac
-done
-
-args=()
-for a in "$@"; do
-  case "$a" in --vk) ;; *) args+=("$a") ;; esac
-done
-set -- "${args[@]}"
-
 if [ $# -lt 1 ]; then
-  echo "usage: $0 <input.mkv> [seconds] [--vk]" >&2
+  echo "usage: $0 <input.mkv> [seconds]" >&2
   exit 2
 fi
 
-in=$1
+in=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 t=${2:-60}
 out=$ROOT/out/ab
 mkdir -p "$out"
 
-grab=(python3 "$here/grab_frame.py")
-if [ "$mode" = "vk" ]; then
-  if [ ! -x "$ROOT/prefix-vk/bin/mpv" ]; then
-    echo "prefix-vk/bin/mpv 不存在，先跑 scripts/build-vk-macos.sh" >&2
-    exit 1
-  fi
-  export DYLD_LIBRARY_PATH="$ROOT/prefix-vk/lib:$ROOT/prefix/lib:${DYLD_LIBRARY_PATH:-}"
-  export VK_ICD_FILENAMES="$ROOT/prefix-vk/share/vulkan/icd.d/MoltenVK_icd.json"
-  grab+=(--mpv "$ROOT/prefix-vk/bin/mpv" --vo gpu-next --gpu-context=macvk)
+APP="$ROOT/apps/macos/DvPlayer/build/DvPlayer.app/Contents/MacOS/DvPlayer"
+if [ ! -x "$APP" ]; then
+  echo "没找到 $APP，先跑：cd apps/macos/DvPlayer && ./build.sh" >&2
+  exit 1
 fi
 
-echo "== with EL (FEL active) =="
-a_raw=$("${grab[@]}" "$in" "$t" with-el --outdir "$out") || {
-  echo "抓帧失败（with EL）" >&2
-  exit 1
+# 产品 app 的 mpv 日志落在 NSTemporaryDirectory()，抓完留着方便对照。
+# `pause,seek:` 保证两次都在**同一帧**：起播后暂停，再精确定位到 t，
+# 否则两次的播放位置差几十毫秒，PSNR 就成了帧间差而非 EL 差。
+grab() { # <输出 png> <日志名> [额外 env...]
+  local png=$1 log=$2
+  shift 2
+  env DVPLAYER_LOCAL="$in" DVPLAYER_LOCAL_START="$t" \
+      DVPLAYER_PLAY_UI="wait:1,pause,seek:$t" DVPLAYER_PLAY_SECONDS=4 \
+      DVPLAYER_PLAY_FRAME="$png" DVPLAYER_EXIT=1 \
+      "$@" "$APP" >/dev/null 2>&1 || true
+  [ -f "$png" ] || { echo "抓帧失败（没有产出 $png）" >&2; return 1; }
+  for cand in "${TMPDIR:-/tmp}/dvplayer-mpv.log" "${TMPDIR:-/tmp}dvplayer-mpv.log"; do
+    [ -f "$cand" ] && cp "$cand" "$out/$log.log" && break
+  done
+  return 0
 }
-a=$(printf '%s\n' "$a_raw" | tail -1)
-[ -f "$a" ] || { echo "抓帧没有产出文件（with EL）：$a" >&2; exit 1; }
+
+echo "== with EL (FEL active) =="
+a="$out/with-el.png"
+rm -f "$a"
+grab "$a" with-el || exit 1
 
 echo "== base layer only =="
-b_raw=$("${grab[@]}" "$in" "$t" bl-only --no-el --outdir "$out") || {
-  echo "抓帧失败（base layer）" >&2
-  exit 1
-}
-b=$(printf '%s\n' "$b_raw" | tail -1)
-[ -f "$b" ] || { echo "抓帧没有产出文件（base layer）：$b" >&2; exit 1; }
+b="$out/bl-only.png"
+rm -f "$b"
+grab "$b" bl-only DVPLAYER_VF=format=enhancement-layer=no || exit 1
 
 echo
 echo "with EL: $a"
@@ -73,7 +66,7 @@ echo "base   : $b"
 echo
 
 echo "== mpv log（EL 相关）=="
-grep -iE 'Dolby Vision Profile|enhancement|splitter|el_pair' "$out/with-el.log" | head -10 || true
+grep -iE 'Dolby Vision Profile|enhancement|splitter|el_pair' "$out/with-el.log" 2>/dev/null | head -10 || true
 echo
 
 echo "== psnr =="
@@ -109,4 +102,4 @@ PY
 
 echo
 echo "判读：SDR 8bit 输出会压掉大部分 FEL 残差，差异小是正常的。"
-echo "要确认 EL 真的进了 shader：./scripts/fel-amplify.sh \"$in\" \"$t\" 100"
+echo "确认 EL 是否参与：看上面的 mpv log 里有没有 \"Dolby Vision Profile\" / enhancement 行。"

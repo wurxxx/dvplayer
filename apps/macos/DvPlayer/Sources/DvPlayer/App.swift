@@ -481,6 +481,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 session.togglePanel(.info)
             case "pause":
                 session.togglePause()
+            case "seek":
+                if let value = Double(parts.count > 1 ? parts[1] : "") {
+                    session.seek(to: value)
+                    NSLog("[PlayTest] seek=\(value)")
+                }
             case "speed":
                 if let value = Double(parts.count > 1 ? parts[1] : ""), value > 0 {
                     session.setSpeed(value)

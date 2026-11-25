@@ -4,7 +4,7 @@
 # 用法: m0-p7-report.sh <p7文件> [报告目录]
 #
 # A1 在任何机器上都能跑（只用到 ffmpeg / dovi_tool）。
-# A2 需要 gpu-next（Windows d3d11，或 macOS 的 Vulkan 构建），否则会跳过并说明原因。
+# A2 需要 gpu-next（Windows d3d11，或 macOS 的 gpu-next + OpenGL），否则会跳过并说明原因。
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -125,63 +125,33 @@ say
 say "## 3. A2 增强层是否被重建"
 say
 
-VK_MPV="$ROOT/prefix-vk/bin/mpv"
-VK_ICD="$ROOT/prefix-vk/share/vulkan/icd.d/MoltenVK_icd.json"
+APP="$ROOT/apps/macos/DvPlayer/build/DvPlayer.app/Contents/MacOS/DvPlayer"
 
 # A2 的取样点：默认 60s，短片（比如 P5 冒烟样本）取 40%
 DUR=$("$ROOT/prefix/bin/ffprobe" -v error -show_entries format=duration \
       -of csv=p=0 "$IN" 2>/dev/null || true)
 AB_T=$(python3 -c "d=float('${DUR:-120}' or 120); print(f'{max(1.0, min(60.0, d*0.4)):.0f}')" 2>/dev/null || echo 60)
 
-if [ -x "$VK_MPV" ] && [ -f "$VK_ICD" ]; then
-  say "使用 gpu-next + Vulkan（\`prefix-vk\`）做 A/B 截帧，取样点 ${AB_T}s。"
-  say
-  if "$ROOT/scripts/fel-ab.sh" "$IN" "$AB_T" --vk 2>&1 | tee "$OUT/ab.txt"; then
+run_ab() {
+  if "$ROOT/scripts/fel-ab.sh" "$IN" "$AB_T" 2>&1 | tee "$OUT/ab.txt"; then
     say
     say '```'
     say "$(cat "$OUT/ab.txt")"
     say '```'
     say
     say "判读：SDR 8bit 会压掉大部分 FEL 残差，PSNR 高**不代表** EL 未参与。"
-    say "结构性复验（临时放大 NLQ 残差，证明 EL 进了 shader）："
-    say
-    say '```bash'
-    say "./scripts/fel-amplify.sh \"$IN\" $AB_T 100"
-    say '```'
+    say "确认 EL 是否参与：看上面的 mpv log 里有没有 \"Dolby Vision Profile\" / enhancement 行。"
   else
     say "A/B 失败，见 \`$OUT/ab.txt\`。"
   fi
+}
+
+if [ ! -x "$APP" ]; then
+  say "跳过：\`$APP\` 不存在，先 \`cd apps/macos/DvPlayer && ./build.sh\`。"
 else
-  gpu_out=$("$ROOT/prefix/bin/mpv" --no-config --vo=gpu-next --gpu-api=auto \
-            --frames=1 --ao=null --hwdec=no --msg-level=all=error "$IN" 2>&1 || true)
-  if printf '%s' "$gpu_out" | grep -qiE 'Failed initializing|could not|not supported|no gpu context'; then
-    say "跳过：本机 mpv 没有可用的 GPU context（macOS 需要 Vulkan 才能跑 gpu-next）。"
-    say
-    say "要在本机跑 A2，先构建 Vulkan 版 mpv："
-    say
-    say '```bash'
-    say "./scripts/build-vk-macos.sh"
-    say "./scripts/fel-ab.sh \"$IN\" 60 --vk"
-    say '```'
-  else
-    say "gpu-next 可用，开始 A/B 截帧。"
-    say
-    if "$ROOT/scripts/fel-ab.sh" "$IN" 60 2>&1 | tee "$OUT/ab.txt"; then
-      say
-      say '```'
-      say "$(cat "$OUT/ab.txt")"
-      say '```'
-      say
-      say "判读：SDR 8bit 会压掉大部分 FEL 残差，PSNR 高**不代表** EL 未参与。"
-    say "结构性复验（临时放大 NLQ 残差，证明 EL 进了 shader）："
-    say
-    say '```bash'
-    say "./scripts/fel-amplify.sh \"$IN\" $AB_T 100"
-    say '```'
-    else
-      say "A/B 失败，见 \`$OUT/ab.txt\`。"
-    fi
-  fi
+  say "使用产品渲染路径（进程内 libmpv + gpu-next）做 A/B 截帧，取样点 ${AB_T}s。"
+  say
+  run_ab
 fi
 
 say

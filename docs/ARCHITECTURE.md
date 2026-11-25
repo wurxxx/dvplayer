@@ -136,10 +136,9 @@ C ABI 多一组 `dv_hub_*`；界面（`AppServices`）只持有一个 hub，设�
 Windows 用子进程（[ADR-0009](adr/0009-windows-mpv-subprocess.md)）：让 mpv 自己建 VO
 和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）。
 
-macOS 一开始也走这条路（[ADR-0010](adr/0010-macos-mpv-subprocess.md)，带 Vulkan 的
-`mpv` 子进程），后来改为进程内 libmpv + render API（[ADR-0011](adr/0011-macos-libmpv-inprocess.md)）：
-mpv 从 2026-11-22 起在 render API 上也支持 gpu-next 后端，DV 整形不再是子进程
-独有的能力。这样包更小（不用带 Vulkan loader 与 MoltenVK）、控制也不用绕 IPC。
+macOS 一开始也走子进程（该方案已废弃），后来改为进程内 libmpv + render API
+（[ADR-0011](adr/0011-macos-libmpv-inprocess.md)）：mpv 从 2026-11-22 起在 render API
+上也支持 gpu-next 后端，DV 整形不再是子进程独有的能力。这样包更小、控制也不用绕 IPC。
 `core/mpv` 的 C++ 封装不再需要。
 
 ### 2.0 打开播放窗的过渡（两端一致）
@@ -188,7 +187,7 @@ mpv 从 2026-11-22 起在 render API 上也支持 gpu-next 后端，DV 整形不
 | --- | --- | --- |
 | 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60；macOS 参数已带，画面待目视 |
 | HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | Windows 开关已接、识别已验，真屏待验；macOS 还没传这个参数（默认 tone-map 到 SDR） |
-| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS 在 `prefix-vk` 上验过整形与 FEL 合成，产品路径待目视 |
+| DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS 整形与 FEL 合成已验，产品路径待目视 |
 | 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | Windows 已接开关与设备选择（`audioDevice` / `audioPassthrough`，起 mpv 时带成参数），听感待 AVR 实测；macOS 未做 |
 | 字幕 | PGS / ASS / SRT 走内核；Android 用 libass NDK 自绘 | ASS / SRT 两端已验证，PGS 未单独验，Android 未做 |
 
@@ -220,7 +219,7 @@ mpv 从 2026-11-22 起在 render API 上也支持 gpu-next 后端，DV 整形不
 ## 5. macOS
 
 - libmpv 跑在应用进程内，用 render API（`MPV_RENDER_API_TYPE_OPENGL`）画进自己的
-  `NSOpenGLView`，gpu-next + OpenGL；不需要 Vulkan / MoltenVK，包里也没有它们（ADR-0011）。
+  `NSOpenGLView`，gpu-next + OpenGL（ADR-0011）。
 - 单窗口：控制浮层和视频在同一个 `NSWindow` 里，浮层是叠在上面的 SwiftUI 层，
   不需要用 `set_property geometry` 去跟另一个窗口对齐。
 - 控制直接调 libmpv 的 C API（`libmpv` 的事件循环在进程内），不走 IPC。

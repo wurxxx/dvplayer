@@ -1,6 +1,6 @@
 # ADR-0003 macOS 首版范围：render API + HDR10
 
-- 状态：已被 [ADR-0010](0010-macos-mpv-subprocess.md) 取代（2026-11-21）
+- 状态：已被 [ADR-0011](0011-macos-libmpv-inprocess.md) 取代（2026-11-23；DV 限制已解除）
 - 日期：2026-11-19
 
 ## 背景
@@ -12,7 +12,7 @@ macOS 没有可靠的 `wid` 嵌入；render API 只有 legacy `gpu` 后端，
 
 - v1 使用 libmpv render API + `NSOpenGLView`。
 - 只保证 HDR10（或 SDR tone-map），**不承诺 Dolby Vision**。
-- 不引入 Metal、不引入 MoltenVK。
+- 不引入 Metal 或其它 GPU 后端。
 - DV 支持推迟到 M3 之后，届时再评估：
   1. 上游合并 gpu-next render API（#18607 方向）；
   2. 自维护补丁；
@@ -30,14 +30,10 @@ mpv 0.42 在 macOS 上**已经没有 OpenGL 的 GPU context**：
 `video/out/gpu/context.c` 的 `contexts[]` 没有 Cocoa 项，
 `--gpu-api=help` 只列出 `auto`，`--vo=gpu` 报
 `Failed initializing any suitable GPU context`。
-原生窗口走的是 cocoa-cb + Vulkan（`macvk`）。
+mpv 自己的窗口当时要把一整套 GPU 后端与驱动拖进产品。
 
-也就是说 macOS 上只有两条路：
-
-1. Vulkan（MoltenVK）+ gpu-next —— 才能谈 DV，但把 MoltenVK 拖进产品；
-2. render API + OpenGL —— 本 ADR 的选择，4K24 已验证可用，没有 DV。
-
-本机自建构建（Vulkan 关闭）实测 render API 正常出画，
+所以本 ADR 选 render API + OpenGL —— 4K24 已验证可用，但没有 DV。
+本机自建构建实测 render API 正常出画，
 所以这个决策在 0.42 上不是“偏好”，而是“唯一可行”。
 
 ### 补充实测：P5 会显示成紫色
@@ -46,16 +42,8 @@ P5 的像素是 IPTPQc2，没有 HDR10 兼容层。legacy `gpu` 在
 `video/out/gpu/video.c` 里调 `mp_image_params_restore_dovi_mapping()`，
 把 `repr.sys` 从 `DOLBYVISION` 换回 BT.2020-NCL —— 等于把 IPT 当 YCbCr 解，
 画面必然偏紫。正确路径是 gpu-next 的 `pl_shader_dovi_reshape()`，
-本机的 render API 够不到。
+当时的 render API 够不到（2026-11-23 起支持，见 ADR-0011）。
 
 P7 / P8.1 不受影响：BL 是真 HDR10，可以正常 tone map，只是增强层不参与。
 这是 macOS v1「只保证 HDR10」的又一个具体后果：**P5 素材在 macOS v1 上不可用**
 （要么转码成 P8.1，要么等 DV 路径）。详见 `docs/M0.md` §5.3。
-
-### 后续：验证用的 Vulkan 构建
-
-为了在 macOS 上验证 P5 的正确颜色与 A2（FEL A/B），新增了独立的
-`prefix-vk/`（MoltenVK + gpu-next + mpv 原生窗口），见 ADR-0006。
-它**不改变**本 ADR 的产品决策：产品仍走 render API + HDR10。
-原因是 libmpv 的 render API 没有 gpu-next 后端，
-Vulkan 只能让 mpv 自己的窗口拿到 DV。

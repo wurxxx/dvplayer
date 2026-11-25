@@ -1,11 +1,11 @@
 # ADR-0011：macOS 播放层改回进程内 libmpv + render API（单窗口）
 
-- 状态：已接受（取代 ADR-0010）
+- 状态：已接受
 - 日期：2026-11-23
 
 ## 背景
 
-ADR-0010 把 macOS 播放器改成「mpv 子进程 + 透明浮层窗」，原因是当时 render API
+此前 macOS 播放器是「mpv 子进程 + 透明浮层窗」，原因是当时 render API
 只有 legacy `gpu` 后端，DV 整形（`pl_shader_dovi_reshape()`）只在 `vo_gpu_next`
 里，而 gpu-next 只能用 mpv 自己的窗口。
 
@@ -31,8 +31,7 @@ mpv 在 2026-11-22 合入三个提交，让 render API 可以用 gpu-next：
 | `3e8aa53` | `libmpv: use the gpu-next renderer by default in the render API` |
 
 `libmpv_gpu_next.c` 用 `mppl_video_*`（vo_gpu_next 同一个渲染器），跑在
-**OpenGL** 上，**不需要 Vulkan**。`prefix/lib` 的 libplacebo 是
-`-Dvulkan=disabled` 编的，正好匹配。
+**OpenGL** 上。`prefix/lib` 的 libplacebo 也只编 OpenGL 后端，正好匹配。
 
 ### 结构
 
@@ -63,7 +62,7 @@ PlayerWindow (NSWindow)
   零掉帧、拖动期间保持源帧率 24fps）
 - 不再需要 `geometry` 同步、`ontop` 层级、拖拽转交、窗口查找
 - 和 Windows 的 libmpv 嵌入同构，两边行为一致
-- 打包不再需要 `prefix-vk`（Vulkan / MoltenVK / ICD），依赖更少
+- 打包不用再带任何 GPU 驱动，依赖更少
 
 代价：
 
@@ -75,7 +74,5 @@ PlayerWindow (NSWindow)
 
 ## 相关
 
-- ADR-0003（macOS 播放实现，已被 ADR-0010 取代）
-- ADR-0006（Vulkan 验证路径，DV 验证仍然有效，但不再是产品路径）
-- ADR-0010（子进程 + 浮层，已被本 ADR 取代）
+- ADR-0003（macOS 首版范围：render API + HDR10，本 ADR 在其基础上解锁 DV）
 - `.opencode/drag-notes.md`（完整调研记录、framebuffer 验证数据、踩过的坑）

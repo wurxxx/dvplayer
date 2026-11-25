@@ -32,11 +32,11 @@ samples/p7-fel.mkv
 
 > ⚠️ P5 是 IPTPQc2，没有 HDR10 兼容层。macOS 的 legacy `gpu` 不做 DV 整形，
 > 所以 `samples/p5.mkv` 在 m0-render 里必然偏紫——这是预期，不是样本坏了。
-> 想看它的正确颜色（gpu-next + Vulkan）：
+> 想看它的正确颜色，用产品播放器（进程内 libmpv + render API，gpu-next 整形）：
 >
 > ```bash
-> ./scripts/build-vk-macos.sh   # 首次构建
-> ./scripts/mpv-vk.sh samples/p5.mkv
+> cd apps/macos/DvPlayer && ./build.sh
+> DVPLAYER_LOCAL=../../samples/p5.mkv ./build/DvPlayer.app/Contents/MacOS/DvPlayer
 > ```
 >
 > 颜色回归仍建议用 P8.1（NAS 上的 `F1` / `Zootopia 2`），P5 用来冒烟 P5 路径本身。

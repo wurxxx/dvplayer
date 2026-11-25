@@ -5,7 +5,7 @@
 后来两端都改成 **mpv 子进程 + JSON IPC**，让 mpv 自己建 VO 和 swapchain：
 
 - Windows：ADR-0009（官方 `mpv.exe` + `--wid` + 命名管道）
-- macOS：ADR-0010（`prefix-vk` 的 mpv + Vulkan/macvk，壳贴透明浮层，unix socket）
+- macOS：当时也走子进程，该方案后来废弃
 
 **2026-11-23 更新**：macOS 已改回**进程内 libmpv + render API + 单窗口**
 （ADR-0011），因为 mpv 2026-11-22 起 render API 支持 gpu-next 后端，
