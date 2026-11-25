@@ -53,7 +53,7 @@ case "$profile:$el" in
   7:1) echo "结论: Dolby Vision Profile 7，双层。跑 scripts/m0-p7-report.sh 判定 FEL/MEL";;
   7:0) echo "结论: 标称 P7 但没有增强层（el_present_flag=0），实际只能当单层用";;
   5:*) echo "结论: Profile 5（单层 IPTPQc2，无 EL，无 HDR10 兼容）";;
-  8:*) echo "结论: Profile 8.x（单层 BL+RPU，compat=$compat；1=HDR10 兼容）";;
+  8:*) echo "结论: Profile 8.x（单层 BL+RPU，compat=${compat}；1=HDR10 兼容）";;
   4:*) echo "结论: Profile 4";;
-  *)   echo "结论: Profile $profile（el_present=${el:-?}）";;
+  *)   echo "结论: Profile ${profile}（el_present=${el:-?}）";;
 esac

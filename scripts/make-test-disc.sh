@@ -16,7 +16,7 @@ OUT="${1:-${TMPDIR:-/tmp}/dvplayer-test-disc}"
 FFMPEG="$ROOT/prefix/bin/ffmpeg"
 
 if [ ! -x "$FFMPEG" ]; then
-    echo "找不到 ffmpeg：$FFMPEG（先跑 scripts/build-deps-macos.sh）" >&2
+    echo "找不到 ffmpeg：${FFMPEG}（先跑 scripts/build-deps-macos.sh）" >&2
     exit 1
 fi
 

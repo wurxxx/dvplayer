@@ -29,7 +29,7 @@ mkdir -p "$out"
 
 APP="$ROOT/apps/macos/DvPlayer/build/DvPlayer.app/Contents/MacOS/DvPlayer"
 if [ ! -x "$APP" ]; then
-  echo "没找到 $APP，先跑：cd apps/macos/DvPlayer && ./build.sh" >&2
+  echo "没找到 ${APP}，先跑：cd apps/macos/DvPlayer && ./build.sh" >&2
   exit 1
 fi
 
@@ -43,7 +43,7 @@ grab() { # <输出 png> <日志名> [额外 env...]
       DVPLAYER_PLAY_UI="wait:1,pause,seek:$t" DVPLAYER_PLAY_SECONDS=4 \
       DVPLAYER_PLAY_FRAME="$png" DVPLAYER_EXIT=1 \
       "$@" "$APP" >/dev/null 2>&1 || true
-  [ -f "$png" ] || { echo "抓帧失败（没有产出 $png）" >&2; return 1; }
+  [ -f "$png" ] || { echo "抓帧失败（没有产出 ${png}）" >&2; return 1; }
   for cand in "${TMPDIR:-/tmp}/dvplayer-mpv.log" "${TMPDIR:-/tmp}dvplayer-mpv.log"; do
     [ -f "$cand" ] && cp "$cand" "$out/$log.log" && break
   done

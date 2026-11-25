@@ -78,7 +78,7 @@ done
 
 # 2) 目录扫描：只挑 8GB 以上、2160p/UHD 的片源（双层 DV 只出现在 4K 盘源里）
 echo
-echo "== 扫描 $ROOT_DIR（最多 $MAX_FILES 个）=="
+echo "== 扫描 ${ROOT_DIR}（最多 $MAX_FILES 个）=="
 n=0
 find "$ROOT_DIR" -type f \
   \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.m2ts' \) \
@@ -110,7 +110,7 @@ fi
 
 while IFS= read -r f; do
   n=$((n + 1))
-  [ "$n" -gt "$MAX_FILES" ] && { echo "达到上限 $MAX_FILES，停止"; break; }
+  [ "$n" -gt "$MAX_FILES" ] && { echo "达到上限 ${MAX_FILES}，停止"; break; }
   printf '[%d/%d] %s\n' "$n" "$MAX_FILES" "$(basename "$f")" >&2
   probe "$f"
 done < /tmp/dvscan.$$

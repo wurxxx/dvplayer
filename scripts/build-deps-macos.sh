@@ -125,7 +125,7 @@ fi
 MPV_COMMIT=${MPV_COMMIT:-1eb941f}
 MPV_STAMP="$PREFIX/lib/libmpv.2.dylib"
 if [ -f "$MPV_STAMP" ] && [ "$(cat "$PREFIX/.mpv-commit" 2>/dev/null)" = "$MPV_COMMIT" ]; then
-  step "mpv 已安装（$MPV_COMMIT），跳过"
+  step "mpv 已安装（${MPV_COMMIT}），跳过"
 else
   step "mpv $MPV_COMMIT"
   if [ ! -d "$SRC/mpv" ]; then
