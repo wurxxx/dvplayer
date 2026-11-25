@@ -155,16 +155,23 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 `IOPMAssertion` 是系统级的，用 `pmset` 直接看，比截图可靠：
 
 ```bash
-# 播放中（不设 DVPLAYER_EXIT，让它一直播）
-DVPLAYER_LOCAL=samples/p7-fel.mkv DVPLAYER_SHOT_DELAY=999 \
+# 播放中（不设 DVPLAYER_EXIT，让它一直播；Ctrl+C 结束）
+DVPLAYER_LOCAL=samples/p7-fel.mkv \
   ./build/DvPlayer.app/Contents/MacOS/DvPlayer &
 
 pmset -g assertions | grep -E "PreventUserIdleDisplaySleep|PreventUserIdleSystemSleep"
-#   两条都应该是 1，且下面按进程列里有 DvPlayer
+#   两条都应该是 1，且下面「Listed by owning process」里有两行
+#   pid NNN(DvPlayer) 的断言（一条 Display、一条 System）
 
-# 暂停后应该都变回 0（只剩别的进程的）
-DVPLAYER_LOCAL=samples/p7-fel.mkv DVPLAYER_PLAY_UI="wait:6,pause" ...
+# 暂停后应该都变回 0。剩下还有 1 的话看是哪一行：
+# bluetoothd / coreaudiod 的请求与播放器无关，不要误判。
+DVPLAYER_LOCAL=samples/p7-fel.mkv DVPLAYER_PLAY_UI="wait:6,pause" \
+  ./build/DvPlayer.app/Contents/MacOS/DvPlayer &
+sleep 12 && pmset -g assertions | grep -E "PreventUserIdle(Display|System)Sleep"
 ```
+
+`DVPLAYER_PLAY_UI` 里的 `wait:N` 是异步串行的（不阻塞后面的截图 / 退出），
+所以暂停后用 `sleep` 等 mpv 把 `pause` 回传再查。
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，
