@@ -1512,10 +1512,8 @@ final class PlayerSession: ObservableObject {
 
         if enabled {
             NSLog("[Danmaku] enabled")
-            let current = AppSettings.load()
-            if (current.danmakuAppId ?? "").isEmpty
-                || (current.danmakuAppSecret ?? "").isEmpty {
-                toast("弹幕需要先在「设置」里填 AppId / AppSecret")
+            if !DanmakuCredential.isConfigured {
+                toast("这个构建没有内置弹幕凭据")
             }
             loadDanmakuIfNeeded()
         } else {
@@ -1529,16 +1527,16 @@ final class PlayerSession: ObservableObject {
     }
 
     /// 按「剧名 + 集号」去弹弹play 找弹幕，写成 ASS 交给 mpv 当第二字幕。
-    /// 没配置 AppId / AppSecret 就安静跳过（日志里留一行），不打扰观看。
+    /// 打包时没注入凭据（开发版）就安静跳过，日志里留一行，不打扰观看。
     private func loadDanmakuIfNeeded() {
         danmakuTask?.cancel()
         guard danmakuEnabled else { return }
         guard let series = seriesTitle, let episode = episodeNumber else { return }
 
-        let settings = AppSettings.load()
-        guard let appId = settings.danmakuAppId, !appId.isEmpty,
-              let secret = settings.danmakuAppSecret, !secret.isEmpty else {
-            NSLog("[Danmaku] 未配置 danmakuAppId / danmakuAppSecret")
+        let appId = DanmakuCredential.appId
+        let secret = DanmakuCredential.appSecret
+        guard !appId.isEmpty, !secret.isEmpty else {
+            NSLog("[Danmaku] 这个构建没有内置弹幕凭据")
             return
         }
 

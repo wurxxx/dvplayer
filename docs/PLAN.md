@@ -145,7 +145,7 @@ HDR 真屏与直通听感、公证与 Sparkle 自动更新。
 | 项 | 卡在哪 |
 | --- | --- |
 | Jellyfin 联调 | Emby 已在 Monta HD（4.9.3）实测通过，含播放直链与进度回写；Jellyfin 共用同一适配器，但还没有实例可测（[EMBY-API.md](EMBY-API.md) §5） |
-| 弹幕（弹弹play） | 需要 AppId / AppSecret。两端设置页已有输入入口（Windows「设置 → 弹幕 / 字幕」、macOS 设置页的弹幕卡片），签名、XML → ASS、`sub-add` + `secondary-sid` 同屏已用本地假服务器验过 |
+| 弹幕（弹弹play） | 凭据内置（打包时注入，见 [SECRETS.md](SECRETS.md)），用户不用申请；签名、XML → ASS、`sub-add` + `secondary-sid` 同屏已用本地假服务器验过，真实接口待内置凭据后回归 |
 | 在线字幕（OpenSubtitles） | 需要 API Key。两端设置页已有 API Key / 可选账号的输入入口，搜索 / 下载 / `sub-add select` 已用本地假服务器验过 |
 | HDR 直通到 HDR 屏 | 缺 HDR 显示器。Windows 开关已接（`target-colorspace-hint`），只能证明元数据解析正确 |
 | 音频直通听感 | 缺 AVR / 支持 DTS-HD 的接收端。Windows 已接 `audio-spdif` 与设备选择 |

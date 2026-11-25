@@ -52,6 +52,38 @@ mkdir -p "$APP/Contents/MacOS" "$FRAMEWORKS" "$APP/Contents/Resources"
 
 cp "$BIN/DvPlayer" "$APP/Contents/MacOS/DvPlayer"
 cp Info.plist "$APP/Contents/Info.plist"
+
+# 弹幕（弹弹play）凭据：打包时注入 Info.plist，仓库和 settings.json 里都不放。
+# 优先级：环境变量 > 本地密钥文件（默认 ~/.config/dvplayer/danmaku.env，
+# 可用 DVPLAYER_DANMAKU_ENV 换路径）。文件格式：
+#   DANMAKU_APP_ID=xxx
+#   DANMAKU_APP_SECRET=yyy
+# 找不到就注入空值：这个包不带弹幕（开发构建就是这样），运行时不联网。
+DANMAKU_ENV="${DVPLAYER_DANMAKU_ENV:-$HOME/.config/dvplayer/danmaku.env}"
+danmaku_value() {
+    local key="$1"
+    [[ -f "$DANMAKU_ENV" ]] || { echo ""; return 0; }
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$DANMAKU_ENV" \
+        | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//' || true
+}
+DANMAKU_APP_ID="${DVPLAYER_DANMAKU_APP_ID:-$(danmaku_value DANMAKU_APP_ID)}"
+DANMAKU_APP_SECRET="${DVPLAYER_DANMAKU_APP_SECRET:-$(danmaku_value DANMAKU_APP_SECRET)}"
+python3 - "$APP/Contents/Info.plist" "$DANMAKU_APP_ID" "$DANMAKU_APP_SECRET" <<'PLIST'
+import plistlib, sys
+
+path, app_id, secret = sys.argv[1:4]
+with open(path, "rb") as handle:
+    info = plistlib.load(handle)
+info["DVDanmakuAppId"] = app_id
+info["DVDanmakuAppSecret"] = secret
+with open(path, "wb") as handle:
+    plistlib.dump(info, handle)
+PLIST
+if [[ -n "$DANMAKU_APP_ID" ]]; then
+    echo "-- 弹幕凭据：已注入（AppId ${DANMAKU_APP_ID:0:4}…）"
+else
+    echo "-- 弹幕凭据：没有找到 ${DANMAKU_ENV}，这个包不带弹幕" >&2
+fi
 # 应用图标：Dock / Finder 读 Info.plist 的 CFBundleIconFile（AppIcon.icns），
 # 由 scripts/make-icon.py 生成。
 cp "$ROOT/assets/branding/AppIcon.icns" "$APP/Contents/Resources/"

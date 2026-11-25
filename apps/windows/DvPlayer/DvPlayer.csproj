@@ -25,6 +25,20 @@
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
+  <!-- 弹幕（弹弹play）凭据：打包脚本从本地密钥文件读出来，用 -p: 传进来。
+       写成程序集元数据，用户不用也不能在设置里填。开发构建没有这两个属性，
+       运行时就是空字符串（弹幕关闭）。 -->
+  <ItemGroup Condition="'$(DanmakuAppId)' != '' and '$(DanmakuAppSecret)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>DvDanmakuAppId</_Parameter1>
+      <_Parameter2>$(DanmakuAppId)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>DvDanmakuAppSecret</_Parameter1>
+      <_Parameter2>$(DanmakuAppSecret)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- 侧栏左上角的品牌图（和 ApplicationIcon 同一份设计，scripts/make-icon.py 生成）。 -->
   <ItemGroup>
     <Resource Include="Assets\DvPlayer-256.png" />

@@ -71,8 +71,6 @@ public partial class SettingsPage : Page
         SelectTag(BufferSizeBox, settings.BufferSizeMb.ToString());
 
         DanmakuSwitch.IsChecked = settings.DanmakuEnabled ?? false;
-        DanmakuIdBox.Text = settings.DanmakuAppId ?? "";
-        DanmakuSecretBox.Password = settings.DanmakuAppSecret ?? "";
         SubtitleKeyBox.Password = settings.OpenSubtitlesApiKey ?? "";
         SubtitleUserBox.Text = settings.OpenSubtitlesUsername ?? "";
         SubtitlePassBox.Password = settings.OpenSubtitlesPassword ?? "";
@@ -221,8 +219,6 @@ public partial class SettingsPage : Page
         }
 
         var settings = AppServices.Instance.Settings;
-        settings.DanmakuAppId = NullIfEmpty(DanmakuIdBox.Text);
-        settings.DanmakuAppSecret = NullIfEmpty(DanmakuSecretBox.Password);
         settings.OpenSubtitlesApiKey = NullIfEmpty(SubtitleKeyBox.Password);
         settings.OpenSubtitlesUsername = NullIfEmpty(SubtitleUserBox.Text);
         settings.OpenSubtitlesPassword = NullIfEmpty(SubtitlePassBox.Password);
@@ -241,11 +237,9 @@ public partial class SettingsPage : Page
         }
 
         var settings = AppServices.Instance.Settings;
-        var hasDanmaku = !string.IsNullOrWhiteSpace(settings.DanmakuAppId)
-            && !string.IsNullOrWhiteSpace(settings.DanmakuAppSecret);
-        DanmakuHint.Text = hasDanmaku
-            ? "已配置：播放页打开弹幕时会按「剧名 + 集号」自动匹配。"
-            : "还没填全：打开弹幕时只会提示缺少 AppId / AppSecret，不会联网。";
+        DanmakuHint.Text = DanmakuCredential.IsConfigured
+            ? "已内置：播放页打开弹幕时会按「剧名 + 集号」自动匹配。"
+            : "这个构建没有内置弹幕凭据（开发版）：打开弹幕不会联网。";
 
         var hasSubtitle = !string.IsNullOrWhiteSpace(settings.OpenSubtitlesApiKey);
         SubtitleHint.Text = hasSubtitle

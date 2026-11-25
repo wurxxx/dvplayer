@@ -33,10 +33,8 @@ public struct AppSettings: Codable, Sendable {
     /// 播放窗是否置顶（播放页的图钉按钮）。跨会话保留。
     public var alwaysOnTop: Bool?
 
-    /// 弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。
+    /// 弹幕默认开关。凭据不在这里：打包时写进 Info.plist（见 DanmakuCredential）。
     public var danmakuEnabled: Bool?
-    public var danmakuAppId: String?
-    public var danmakuAppSecret: String?
 
     /// 在线字幕（OpenSubtitles）。API Key 注册即得；用户名 / 密码可选，
     /// 配了才会去换下载用的 token。
@@ -66,8 +64,6 @@ public struct AppSettings: Codable, Sendable {
         hdrPassthrough = try c.decodeIfPresent(Bool.self, forKey: .hdrPassthrough)
         alwaysOnTop = try c.decodeIfPresent(Bool.self, forKey: .alwaysOnTop)
         danmakuEnabled = try c.decodeIfPresent(Bool.self, forKey: .danmakuEnabled)
-        danmakuAppId = try c.decodeIfPresent(String.self, forKey: .danmakuAppId)
-        danmakuAppSecret = try c.decodeIfPresent(String.self, forKey: .danmakuAppSecret)
         openSubtitlesApiKey = try c.decodeIfPresent(String.self, forKey: .openSubtitlesApiKey)
         openSubtitlesUsername = try c.decodeIfPresent(String.self, forKey: .openSubtitlesUsername)
         openSubtitlesPassword = try c.decodeIfPresent(String.self, forKey: .openSubtitlesPassword)

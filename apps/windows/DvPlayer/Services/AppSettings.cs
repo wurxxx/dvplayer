@@ -61,10 +61,9 @@ public sealed class AppSettings
     /// <summary>音频输出设备（mpv audio-device 的名字）；空 = 系统默认。</summary>
     public string? AudioDevice { get; set; }
 
-    /// <summary>弹幕（弹弹play）。AppId / AppSecret 在弹弹play 控制台申请。</summary>
+    /// <summary>弹幕默认开关。凭据不在这里：打包时写进程序集元数据
+    /// （见 Services/DanmakuCredential.cs），用户不用填。</summary>
     public bool? DanmakuEnabled { get; set; }
-    public string? DanmakuAppId { get; set; }
-    public string? DanmakuAppSecret { get; set; }
 
     /// <summary>在线字幕（OpenSubtitles）。API Key 注册即得；用户名 / 密码可选。</summary>
     public string? OpenSubtitlesApiKey { get; set; }
@@ -149,7 +148,6 @@ public sealed class AppSettings
         copy.Sources = (Sources ?? new List<SourceConfig>())
             .Select(source => source with { Password = Seal(source.Password) })
             .ToList();
-        copy.DanmakuAppSecret = Seal(DanmakuAppSecret);
         copy.OpenSubtitlesPassword = Seal(OpenSubtitlesPassword);
         copy.OpenSubtitlesApiKey = Seal(OpenSubtitlesApiKey);
         return copy;
@@ -161,7 +159,6 @@ public sealed class AppSettings
         Sources = (Sources ?? new List<SourceConfig>())
             .Select(source => source with { Password = Unseal(source.Password) })
             .ToList();
-        DanmakuAppSecret = Unseal(DanmakuAppSecret);
         OpenSubtitlesPassword = Unseal(OpenSubtitlesPassword);
         OpenSubtitlesApiKey = Unseal(OpenSubtitlesApiKey);
     }

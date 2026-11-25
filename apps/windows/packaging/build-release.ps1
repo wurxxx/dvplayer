@@ -57,11 +57,49 @@ function Remove-WithRetry([string]$path) {
     Remove-Item $path -Recurse -Force
 }
 
+# 弹幕（弹弹play）凭据：打包时写进 exe 的程序集元数据，用户不用填。
+# 优先级：环境变量 > 本地密钥文件（默认 ~\.config\dvplayer\danmaku.env，
+# 可用 DVPLAYER_DANMAKU_ENV 换路径）。文件格式：
+#   DANMAKU_APP_ID=xxx
+#   DANMAKU_APP_SECRET=yyy
+$danmakuEnv = if ($env:DVPLAYER_DANMAKU_ENV) {
+    $env:DVPLAYER_DANMAKU_ENV
+} else {
+    Join-Path $env:USERPROFILE '.config\dvplayer\danmaku.env'
+}
+$danmakuFile = @{}
+if (Test-Path $danmakuEnv) {
+    Get-Content $danmakuEnv -Encoding UTF8 |
+        Where-Object { $_ -match '^\s*[A-Za-z_]+\s*=' } |
+        ForEach-Object {
+            $name, $value = $_.Split('=', 2)
+            $danmakuFile[$name.Trim()] = $value.Trim()
+        }
+}
+$danmakuAppId = if ($env:DVPLAYER_DANMAKU_APP_ID) {
+    $env:DVPLAYER_DANMAKU_APP_ID
+} else {
+    $danmakuFile['DANMAKU_APP_ID']
+}
+$danmakuAppSecret = if ($env:DVPLAYER_DANMAKU_APP_SECRET) {
+    $env:DVPLAYER_DANMAKU_APP_SECRET
+} else {
+    $danmakuFile['DANMAKU_APP_SECRET']
+}
+$danmakuArgs = @()
+if ($danmakuAppId -and $danmakuAppSecret) {
+    Write-Host ("-- 弹幕凭据：已注入（AppId {0}…）" -f `
+        $danmakuAppId.Substring(0, [Math]::Min(4, $danmakuAppId.Length)))
+    $danmakuArgs = @("-p:DanmakuAppId=$danmakuAppId", "-p:DanmakuAppSecret=$danmakuAppSecret")
+} else {
+    Write-Warning "-- 弹幕凭据：没有找到 $danmakuEnv，这个包不带弹幕"
+}
+
 if (-not $SkipPublish) {
     if (Test-Path $payload) { Remove-WithRetry $payload }
     New-Item -ItemType Directory -Force $payload | Out-Null
     dotnet publish $proj -c $Configuration -r win-x64 --self-contained true `
-        -p:Version=$Version -p:DebugType=none -o $payload
+        -p:Version=$Version -p:DebugType=none -o $payload @danmakuArgs
     if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
 }
 if (-not (Test-Path (Join-Path $payload 'DvPlayer.exe'))) {

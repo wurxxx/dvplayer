@@ -3648,16 +3648,15 @@ public partial class PlayWindow : Window
             return;
         }
 
-        var settings = AppServices.Instance.Settings;
-        var appId = settings.DanmakuAppId;
-        var secret = settings.DanmakuAppSecret;
+        var appId = DanmakuCredential.AppId;
+        var secret = DanmakuCredential.AppSecret;
         if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(secret))
         {
-            Trace.Write("danmaku skipped: 未配置 danmakuAppId / danmakuAppSecret");
+            Trace.Write("danmaku skipped: 这个构建没有内置弹幕凭据");
             if (!_danmakuNoticeShown)
             {
                 _danmakuNoticeShown = true;
-                ShowToast("弹幕需要先在「设置 → 弹幕 / 字幕」里填 AppId / AppSecret");
+                ShowToast("这个构建没有内置弹幕凭据");
             }
 
             return;

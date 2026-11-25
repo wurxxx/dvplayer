@@ -242,8 +242,8 @@ struct SettingsPage: View {
                     SurfaceCard(padding: 18) {
                         VStack(alignment: .leading, spacing: 14) {
                             SectionTitle(text: "弹幕（弹弹play）")
-                            Text("在弹弹play 控制台申请 AppId / AppSecret 后填在这里，"
-                                 + "播放页「更多」里的弹幕开关才能拉到弹幕。")
+                            Text("弹幕凭据已经内置在应用里，不用填任何东西；打开播放页「更多」里的"
+                                 + "弹幕开关，会按「剧名 + 集号」自动匹配。")
                                 .font(.system(size: 12))
                                 .foregroundStyle(Theme.faint)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -252,17 +252,6 @@ struct SettingsPage: View {
                                 .font(.system(size: 13.5))
                                 .foregroundStyle(Theme.text)
                                 .toggleStyle(.switch)
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                FieldLabel(text: "AppId")
-                                InputField(placeholder: "弹弹play AppId", text: textBinding(\.danmakuAppId))
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                FieldLabel(text: "AppSecret")
-                                InputField(placeholder: "弹弹play AppSecret",
-                                           text: textBinding(\.danmakuAppSecret), secure: true)
-                            }
 
                             Text(danmakuHint)
                                 .font(.system(size: 11.5))
@@ -349,12 +338,9 @@ struct SettingsPage: View {
     }
 
     private var danmakuHint: String {
-        let settings = state.settings
-        let filled = !(settings.danmakuAppId ?? "").isEmpty
-            && !(settings.danmakuAppSecret ?? "").isEmpty
-        return filled
-            ? "已配置：播放页打开弹幕时会按「剧名 + 集号」自动匹配。"
-            : "还没填全：打开弹幕时只会提示缺少 AppId / AppSecret，不会联网。"
+        DanmakuCredential.isConfigured
+            ? "已内置：播放页打开弹幕时会按「剧名 + 集号」自动匹配。"
+            : "这个构建没有内置弹幕凭据（开发版）：打开弹幕不会联网。"
     }
 
     private var subtitleHint: String {

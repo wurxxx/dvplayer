@@ -172,6 +172,10 @@ jobs:
       - name: 编 App 并打包
         env:
           VERSION_INPUT: ${{ inputs.version }}
+          # 弹幕（弹弹play）凭据：仓库 Settings → Secrets 里配了才会注入，
+          # 没配就是空值，打出来的包不带弹幕（本地打包走 ~/.config/dvplayer/danmaku.env）。
+          DVPLAYER_DANMAKU_APP_ID: ${{ secrets.DVPLAYER_DANMAKU_APP_ID }}
+          DVPLAYER_DANMAKU_APP_SECRET: ${{ secrets.DVPLAYER_DANMAKU_APP_SECRET }}
         run: |
           set -euo pipefail
           # 不要用 `ARGS=(); ... "${ARGS[@]}"`：macOS 自带的 /bin/bash 是 3.2，

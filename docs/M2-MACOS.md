@@ -318,10 +318,10 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
 
 ### 4.6 弹幕与在线字幕
 
-凭据在设置页填：`弹幕（弹弹play）` 一张卡（默认开关 + AppId + AppSecret），
-`在线字幕（OpenSubtitles）` 一张卡（API Key + 可选用户名 / 密码 + 搜索语言）。
-输入直接写回 `settings.json`（清空即视为没填），卡片底部一行小字显示
-「已配置 / 还没填全」；没配时播放页只弹一句提示，不联网。
+弹幕凭据是**内置**的：设置页只剩「打开播放页时默认开弹幕」一个开关，
+用户什么都不用填。`在线字幕（OpenSubtitles）` 仍是自己填的一张卡
+（API Key + 可选用户名 / 密码 + 搜索语言）：输入直接写回 `settings.json`
+（清空即视为没填），卡片底部一行小字显示「已配置 / 还没填全」。
 
 **音轨 / 字幕菜单的文案**
 
@@ -343,8 +343,13 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
   写到 `~/Library/Caches/DvPlayer/danmaku/DVPlayer-danmaku-<episodeId>.ass`，
   再用 `sub-add` 挂上、`secondary-sid` 让弹幕和正片字幕**同时**显示。
   弹幕轨不进字幕菜单：按 `external-filename` 过滤掉。
-- 配置在 `settings.json`：`danmakuAppId` / `danmakuAppSecret`（弹弹play 控制台申请）、
-  `danmakuEnabled`。默认关；没配凭据时打开只给一句提示，不联网。
+- `settings.json` 里只剩 `danmakuEnabled`（默认关）。凭据不在这里：打包时由
+  `apps/macos/DvPlayer/build.sh` 从本地密钥文件（默认
+  `~/.config/dvplayer/danmaku.env`，或环境变量 `DVPLAYER_DANMAKU_APP_ID` /
+  `DVPLAYER_DANMAKU_APP_SECRET`）写进 `Info.plist` 的 `DVDanmakuAppId` /
+  `DVDanmakuAppSecret`，运行时 `DanmakuCredential` 从 bundle 读。
+  仓库、`settings.json` 里都没有，用户也不用申请。
+  直接 `swift build` 的二进制没有 bundle，读不到凭据 → 弹幕安静关闭（日志一行）。
 - 切集重新匹配；上一集晚到的绑定回调用 `loadGeneration` 丢掉。
 
 **在线字幕（OpenSubtitles）**

@@ -15,9 +15,11 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 | 弹幕 | `Player/Danmaku.cs` | 弹弹play v2 签名（`Base64(SHA256(AppId+Timestamp+Path+AppSecret))`）→ XML 解析 → 写 ASS → `sub-add` + `secondary-sid` |
 | 在线字幕 | `Player/OpenSubtitles.cs` | OpenSubtitles REST v1：搜索 → `/downloads` 取临时链接 → 存缓存 → `sub-add select` |
 
-配置项都在 `Services/AppSettings.cs`：`videoAspect`、`danmakuEnabled` /
-`danmakuAppId` / `danmakuAppSecret`、`openSubtitlesApiKey` /
-`openSubtitlesUsername` / `openSubtitlesPassword`、`subtitleLanguages`。
+配置项都在 `Services/AppSettings.cs`：`videoAspect`、`danmakuEnabled`、
+`openSubtitlesApiKey` / `openSubtitlesUsername` / `openSubtitlesPassword`、
+`subtitleLanguages`。弹幕凭据不在设置里：打包时由
+`packaging/build-release.ps1` 从本地密钥文件读出来，以程序集元数据写进 exe
+（详见 [SECRETS.md](SECRETS.md)）。
 
 ## 2. 和 macOS 的差异
 
@@ -179,9 +181,10 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 **这个开关只给自检用**，正常启动不要设。
 
 弹幕 / 字幕的真实接口需要凭据（弹弹play AppId + AppSecret、OpenSubtitles API Key）。
-设置页「弹幕 / 字幕」分组里可以直接填（AppSecret / API Key / 密码用 `PasswordBox`，
-AppId 与语言是普通输入框）：边输入边写 `settings.json`，卡片底部一行小字显示
-「已配置 / 还没填全」。没配时播放页的弹幕开关与「搜索字幕」只给一句提示，不联网。
+弹幕凭据是内置的：打包时写进 exe 的程序集元数据，用户不用填；设置页只有默认开
+弹幕的开关。在线字幕仍在「弹幕 / 字幕」分组里自己填（API Key / 密码用
+`PasswordBox`）：边输入边写 `settings.json`，卡片底部一行小字显示
+「已配置 / 还没填全」。没配时「搜索字幕」只给一句提示，不联网。
 离线自检用 `DVPLAYER_DANDANPLAY_BASE` / `DVPLAYER_OPENSUBTITLES_BASE` 指向本地
 假服务器（仓库里 `scripts/windows/fake-player-api.ps1`，拷到主机上跑），可以完整验证签名之外的每条链路：
 搜索、下载、`sub-add`、`secondary-sid` 绑定、切集重挂。

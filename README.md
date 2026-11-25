@@ -77,6 +77,9 @@ cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
 `.app/Contents/Frameworks`，换台机器也能直接跑（不用装 Homebrew）。
 详见 [docs/M2-MACOS.md](docs/M2-MACOS.md)。
 
+弹幕（弹弹play）的 AppId / AppSecret 不打进仓库，也不在设置里填：打包时从
+`~/.config/dvplayer/danmaku.env` 注入产物，详见 [docs/SECRETS.md](docs/SECRETS.md)。
+
 DV / FEL 的验证脚本（走产品同一份 mpv + render API）：
 
 ```bash
