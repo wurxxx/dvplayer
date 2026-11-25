@@ -2,7 +2,7 @@ name: macOS
 
 # 显示名里带上架构和要附的 Release tag：重试流程（macos-arm64-retry.yml）
 # 靠它把 release_tag 原样传下去（workflow_dispatch 的输入不出现在运行记录里）。
-run-name: macOS ${{ inputs.arch || 'both' }}${{ inputs.release_tag != '' && format(' release:{0}', inputs.release_tag) || '' }}
+run-name: macOS ${{ inputs.arch || 'both' }}${{ inputs.arch == 'arm64' && format('@{0}', inputs.arm_runner || 'macos-26') || '' }}${{ inputs.release_tag != '' && format(' release:{0}', inputs.release_tag) || '' }}
 
 # 在 GitHub 托管的 macOS runner 上编 dmg + zip，两种架构各一个 job：
 #   arm64（Apple Silicon）—— 跑 macos-26（arm64，也就是 macos-latest）
@@ -50,6 +50,14 @@ on:
         description: '产物附到这个 tag 的 Release（排队重试用；留空则看 github.ref）'
         required: false
         default: ''
+      arm_runner:
+        description: 'arm64 跑哪个 runner（容量不足时可以两个都排）'
+        required: false
+        default: macos-26
+        type: choice
+        options:
+          - macos-26
+          - macos-15
   push:
     tags:
       - 'v*'
@@ -92,7 +100,11 @@ jobs:
           WANT='${{ inputs.arch }}'
           [[ -z "$WANT" ]] && WANT=both
 
-          ARM='{"arch":"arm64","runner":"macos-26"}'
+          # arm64 跑哪个镜像可以由输入指定：两个 arm64 池子（macos-26 / macos-15）
+          # 都可能一时没机器，多排一张票就是多一次抽签。
+          ARM_RUNNER='${{ inputs.arm_runner }}'
+          [[ -z "$ARM_RUNNER" ]] && ARM_RUNNER=macos-26
+          ARM="{\"arch\":\"arm64\",\"runner\":\"$ARM_RUNNER\"}"
           INTEL='{"arch":"x86_64","runner":"macos-15-intel"}'
 
           case "$WANT" in

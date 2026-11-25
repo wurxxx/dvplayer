@@ -8,8 +8,13 @@ name: macOS arm64 排队重试
 # 换标签（macos-15 / macos-26 / macos-latest）没用，都在同一批 arm64 池子里。
 #
 # 所以这里做自动重试：macOS 工作流没成功、且 arm64 job 一步没跑（被取消）时，
-# 自动再发一次 arm64 构建；上限按「最近一次成功之后连续失败 12 次」算。
+# 自动再发 arm64 构建；上限按「最近一次成功之后连续失败 12 次」算。
 # 真编失败（有步骤跑过）不重试——那不是容量问题。
+#
+# 官方对取消原因的解释是「分到了一台 arm64 主机但它没起来」，所以每次尝试都是
+# 独立抽签。为了尽快抽到，这里同时给两个 arm64 镜像各排一张票（macos-26 /
+# macos-15），已在排的不重复加，总数最多 3 个（见 gate 里的 active 判断），
+# 避免「票被取消 → 又补票」滚雪球。
 #
 # 注意：重试在 master 上编，用的是 master 当前代码。发起重试时 master 如果已经
 # 越过待发布的 tag，就应该改发新版本，而不是继续拿这个 tag 的号。
@@ -72,6 +77,16 @@ jobs:
             exit 0
           fi
 
+          # 排队/进行中的 macOS 运行数量上限：每轮重试都会补票，不设上限的话
+          # 「票被取消 → 再补票」会越滚越多。最多同时 3 个。
+          active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=macos.yml --limit 20 \
+            --json status --jq '[.[] | select(.status != "completed")] | length')
+          echo "当前排队/进行中的 macOS 运行：$active 个"
+          if (( active >= 3 )); then
+            echo "已经有 $active 个在排队，不再加票"
+            exit 0
+          fi
+
           # tag 触发的运行才需要往 Release 里补产物。
           # 两条来源：
           #   1) push tag：head_branch 就是 tag 名；
@@ -86,22 +101,34 @@ jobs:
           echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "将重试 arm64，release_tag=${TAG:-（无）}"
 
-      - name: 重新触发 arm64 构建
+      - name: 补上缺的 arm64 排队票
         if: steps.gate.outputs.retry == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.gate.outputs.release_tag }}
         run: |
           set -euo pipefail
-          # 这个 job 没有 checkout，gh 默认会去读本地 .git 找仓库，直接报
+          # 这个 job 没有 checkout，gh 默认会去读本地 .git 找仓库，所以必须
+          # 显式 --repo，否则报
           #   failed to run git: fatal: not a git repository
-          # 所以必须显式 --repo。
-          gh workflow run macos.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref master \
-            -f arch=arm64 \
-            -f "release_tag=$TAG"
-          echo "已重新触发：arch=arm64 release_tag=${TAG:-（无）}"
-          sleep 5
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow=macos.yml --limit 1 \
-            --json databaseId,displayTitle,status --jq '.[0] | "最新运行：\(.databaseId) \(.displayTitle) \(.status)"'
+          #
+          # 「被取消」的根因是分到的主机起不来，不是队列没位置，所以两个 arm64
+          # 池子各排一张票（macos-26 / macos-15），多一次抽签；已经在排的就不重复加。
+          active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=macos.yml --limit 20 \
+            --json displayTitle,status --jq '.[] | select(.status != "completed") | .displayTitle')
+          echo "当前排队/进行中的运行："
+          echo "${active:-（无）}"
+
+          for runner in macos-26 macos-15; do
+            if grep -q "@$runner" <<< "$active"; then
+              echo "已有 $runner 的票，跳过"
+              continue
+            fi
+            gh workflow run macos.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref master \
+              -f arch=arm64 \
+              -f "arm_runner=$runner" \
+              -f "release_tag=$TAG"
+            echo "已补票：$runner（release_tag=${TAG:-无}）"
+          done
