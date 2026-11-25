@@ -21,7 +21,23 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 `packaging/build-release.ps1` 从本地密钥文件读出来，以程序集元数据写进 exe
 （详见 [SECRETS.md](SECRETS.md)）。
 
-## 2. 和 macOS 的差异
+## 2. 播放后端：子进程（默认）/ 进程内 libmpv
+
+默认是子进程：`mpv\mpv.exe --wid` + 命名管道 IPC。打包时用
+`-Backend libmpv -MpvDir <shinchiro dev 包解压目录>` 可以换成进程内的
+`libmpv-2.dll`（C API，仍然是 `wid`，不是 render API），运行时再设
+`DVPLAYER_MPV_BACKEND=libmpv` 才会走这条路。
+
+体积上**两者几乎一样**：官方 dev 包的 `libmpv-2.dll` 也是静态链接（116 MB，
+和 `mpv.exe` 相同），实测 zip 只差 2.9 MB。默认保持子进程（崩溃隔离）。DV P7
+FEL 在进程内后端已真机验证通过，细节和实测数据见
+[ADR-0012](adr/0012-windows-libmpv-backend.md)。
+
+日志：mpv 自己的日志两个后端都写到 `%LOCALAPPDATA%\dvplayer\mpv.log`
+（进程内后端靠 `log-file`，子进程靠重定向 stderr）；进程内后端还有
+`mpv-shell.log`，放壳侧的初始化 / 选项错误。
+
+## 3. 和 macOS 的差异
 
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
   「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
@@ -142,7 +158,7 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
   「搜索字幕…」在「更多」里就地弹出结果菜单（语言 + 发行名 + 下载数），
   点一条即下载并选中。
 
-## 3. 远程自检
+## 4. 远程自检
 
 Windows 主机在 `D:\dvplayer`，没有 `.git`，改完用 zip + scp 覆盖
 `apps\windows`，再 `dotnet build -c Release`。播放相关的自检走两个参数：
@@ -189,7 +205,7 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 假服务器（仓库里 `scripts/windows/fake-player-api.ps1`，拷到主机上跑），可以完整验证签名之外的每条链路：
 搜索、下载、`sub-add`、`secondary-sid` 绑定、切集重挂。
 
-## 4. 踩过的坑
+## 5. 踩过的坑
 
 - `sub-add` 的 IPC 回复是 `null`，拿不到轨道 id；只能等 `observe_property`
   推 `track-list`，再从 `external-filename` 里认。

@@ -31,7 +31,7 @@ public interface IMpvControl : IDisposable
 /// 两个实现：
 /// <list type="bullet">
 /// <item><see cref="MpvProcess"/>：子进程 <c>mpv.exe --wid</c> + 命名管道（默认，已验证）</item>
-/// <item><see cref="LibMpvProcess"/>：进程内 <c>libmpv-2.dll</c> + C API（体积小，待验证）</item>
+/// <item><see cref="LibMpvProcess"/>：进程内 <c>libmpv-2.dll</c> + C API（真机 DV 已验证，体积和子进程相当）</item>
 /// </list>
 ///
 /// 用 <c>DVPLAYER_MPV_BACKEND=libmpv</c> 切到进程内后端，默认走子进程，

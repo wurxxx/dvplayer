@@ -4,9 +4,9 @@ namespace DvPlayer.Player;
 /// 选播放后端。默认走**子进程**（<c>mpv.exe --wid</c>）——这条路径在真机上
 /// 验证过 DV P7 FEL，是最稳的。
 ///
-/// 设 <c>DVPLAYER_MPV_BACKEND=libmpv</c> 切到进程内 libmpv，包体积能小一半
-/// 以上（不用带 116 MB 的 mpv.exe），但 mpv 崩了会连累整个 App，
-/// 而且 DV 链路需要重新验证。
+/// 设 <c>DVPLAYER_MPV_BACKEND=libmpv</c> 切到进程内 libmpv。注意它**不省体积**：
+/// 官方 dev 包的 libmpv-2.dll 同样是静态链接（116 MB），和 mpv.exe 一样大。
+/// 而且 mpv 崩了会连累整个 App（DV 链路真机验过，见 ADR-0012）。
 ///
 /// 两条路径共用同一份 <see cref="MpvLaunch"/> 和选项集，行为差异只在
 /// "谁来装 mpv"。

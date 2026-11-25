@@ -26,7 +26,7 @@ param(
     <#
       播放后端：
         process  mpv.exe 子进程（默认，DV P7 FEL 已在真机验证）
-        libmpv   libmpv-2.dll 进程内（包体积约 45 MB，需要真机回归 DV）
+        libmpv   libmpv-2.dll 进程内（官方 dev 包是静态链接，体积和 mpv.exe 相同）
     #>
     [ValidateSet('process', 'libmpv')]
     [string]$Backend = 'process',
@@ -118,7 +118,7 @@ if (Test-Path $core) {
 #
 # 两个后端，用 -Backend 选（默认 process，和线上版本一致）：
 #   process  mpv.exe --wid（子进程）        → mpv\ 目录，约 116 MB
-#   libmpv   libmpv-2.dll（进程内，C API）  → 根目录几个 dll，约 45 MB
+#   libmpv   libmpv-2.dll（进程内，C API）  → 根目录一个 dll，约 116 MB（静态链接）
 #
 # 进程内后端的 dll 列表由 mpv 官方构建决定，shinchiro 的包解压后就是
 # libmpv-2.dll + 一堆 lib*.dll，全部平铺在 exe 旁边即可。

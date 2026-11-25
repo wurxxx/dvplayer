@@ -16,8 +16,10 @@ namespace DvPlayer.Player;
 /// 所以 DV P7 的拆层、EL 合成、gpu-next 整形走的是同一套代码（ADR-0001），
 /// 差别只在"谁来装这份 mpv"。
 ///
-/// 收益：不用带 116 MB 的 <c>mpv.exe</c>，只带 <c>libmpv-2.dll</c> 和它依赖的
-/// dll，包体积能小一半以上。
+/// 体积：**几乎不省**。官方（shinchiro）的 dev 包里 <c>libmpv-2.dll</c> 是
+/// 静态链接的，116.1 MB，和 <c>mpv.exe</c> 的 116.2 MB 一样大；实测 zip
+/// 只从 110.1 MB 降到 107.2 MB（省的是 mpv 目录里的 doc / d3dcompiler）。
+/// 要真正瘦身必须自己编共享链接的 ffmpeg + libmpv（见 ADR-0012）。
 ///
 /// 代价：mpv 和壳在同一个进程里，mpv 崩了壳也一起死。所以默认后端仍是
 /// 子进程；用 <c>DVPLAYER_MPV_BACKEND=libmpv</c> 显式切换。
@@ -34,6 +36,14 @@ public sealed class LibMpvProcess : IMpvEngine
 
     /// <summary>日志路径和子进程后端一致，排查时不用记两套。</summary>
     public static string LogPath => MpvProcess.LogPath;
+
+    /// <summary>
+    /// 壳自己那几行（初始化失败、选项设置失败、terminate 错误）写这个文件。
+    /// 不能和 <see cref="LogPath"/> 共用：进程内后端把 mpv 日志交给
+    /// <c>log-file</c> 写，两边各持一个写句柄会互相把对方顶掉。
+    /// </summary>
+    private static string ShellLogPath =>
+        Path.Combine(Path.GetDirectoryName(MpvProcess.LogPath)!, "mpv-shell.log");
 
     public bool IsRunning
     {
@@ -191,6 +201,11 @@ public sealed class LibMpvProcess : IMpvEngine
         // 选项一致能避免行为分叉（比如 mpv 抢键盘）。
         Opt("input-default-bindings", "no");
         Opt("input-vo-keyboard", "no");
+
+        // mpv 自己的日志落盘。子进程后端靠重定向 stderr 拿到这些行，
+        // 进程内没有 stderr，不设 log-file 的话 `[el_pair]`、滤镜、
+        // 解码器这类信息在真机上根本看不到（DV 回归就没法验）。
+        Opt("log-file", LogPath);
         Opt("msg-level", "all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info");
 
         if (!string.IsNullOrWhiteSpace(launch.Title))
@@ -307,12 +322,12 @@ public sealed class LibMpvProcess : IMpvEngine
 
     private void OpenLog(int session)
     {
-        var dir = Path.GetDirectoryName(LogPath)!;
+        var dir = Path.GetDirectoryName(ShellLogPath)!;
 
         try
         {
             Directory.CreateDirectory(dir);
-            var stream = new FileStream(LogPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+            var stream = new FileStream(ShellLogPath, FileMode.Create, FileAccess.Write, FileShare.Read);
             var writer = new StreamWriter(stream) { AutoFlush = true };
 
             lock (_logGate)
