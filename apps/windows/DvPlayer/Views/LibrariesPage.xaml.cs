@@ -12,8 +12,8 @@ using DvPlayer.Services;
 namespace DvPlayer.Views;
 
 /// <summary>
-/// 媒体库页。服务器首页：顶部一个源名、媒体 / 搜索 / 收藏
-/// 分段，下面是 Hero 横幅、「我的媒体」库卡片、继续观看，以及每个库一行横向海报。
+/// 媒体库页。服务器首页：顶部是源名与「媒体 / 搜索 / 收藏」分段，
+/// 下面是 Hero 横幅、「我的媒体」库卡片、继续观看，以及每个库一行横向海报。
 /// 点库卡片或某行的箭头进入原来的网格视图（可下钻目录、加载更多）。
 /// </summary>
 public partial class LibrariesPage : Page

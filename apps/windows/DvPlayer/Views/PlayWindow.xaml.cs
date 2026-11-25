@@ -24,7 +24,7 @@ public sealed record PlayEpisode(
     string? Title = null);
 
 /// <summary>
-/// 播放窗口：逐像素透明的浮层控制条，视频在下面那个
+/// 播放窗口：逐像素透明的浮层控制条，视频在下层的
 /// <see cref="PlayerSurfaceWindow"/> 里。
 ///
 /// 为什么要分两个窗口：WPF 的 <see cref="MpvHost"/> 是 HwndHost，原生子窗口

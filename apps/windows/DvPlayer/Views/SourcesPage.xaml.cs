@@ -12,8 +12,8 @@ using DvPlayer.Services;
 namespace DvPlayer.Views;
 
 /// <summary>
-/// 媒体源管理页。源是一张张卡片，
-/// 顶栏一个刷新、一个添加，添加表单按需展开，不常驻占地方。
+/// 媒体源管理页。源是一张张卡片：顶栏一个刷新、一个添加，
+/// 添加表单按需展开，不常驻占地方。
 /// </summary>
 public partial class SourcesPage : Page
 {
