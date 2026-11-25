@@ -37,6 +37,7 @@ for _dir in \
     "${JAVA_HOME:-}/bin" \
     "$HOME/.cargo/bin" \
     "$ANDROID_HOME/platform-tools" \
+    "$ANDROID_HOME/emulator" \
     "$ANDROID_HOME/cmdline-tools/latest/bin"; do
     [ -n "$_dir" ] && [ -d "$_dir" ] || continue
     case ":$PATH:" in

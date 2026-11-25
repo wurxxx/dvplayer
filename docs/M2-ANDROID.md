@@ -1,7 +1,8 @@
 # M2 · Android / TV 客户端
 
 > 状态：方案定稿（2026-11-25）；A0 环境与 A2 骨架已落地（2026-11-26），
-> 两个 APK 可构建、native 自检库通过 16KB 校验，libmpv 构建链未完成。
+> 两个 APK 可构建、native 自检库通过 16KB 校验，并在 Android 33 x86_64
+> 模拟器上装起、显示 native 版本；libmpv 构建链未完成。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）。

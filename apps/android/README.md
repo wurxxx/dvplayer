@@ -9,7 +9,8 @@ Kotlin + Compose。手机（Material3）与 TV（tv-material）两个壳，共�
 - 存储：[ADR-0015](../../docs/adr/0015-android-vfs.md)
 
 状态（2026-11-26）：**A0 环境 + A2 骨架已落地**。两个 APK 能构建，`:core` 通过
-`libdvplayer_media_jni.so` 加载 JNI 自检；libmpv 构建链还没接通。
+`libdvplayer_media_jni.so` 加载 JNI 自检，并已在 Android 33 x86_64 模拟器上
+安装、启动、显示 native 版本；libmpv 构建链还没接通。
 
 ## 模块
 
