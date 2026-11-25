@@ -31,6 +31,12 @@ apps/windows/**/obj/
 
 # Rust
 core/target/
+
+# Android（Gradle / AGP）
+apps/android/.gradle/
+apps/android/.kotlin/
+apps/android/local.properties
+apps/android/core/src/main/jniLibs/
 apps/windows/packages/
 
 # Swift

@@ -1,7 +1,8 @@
 # M2 · Android / TV 客户端
 
-> 状态：方案定稿（2026-11-25），实现未开始。双壳 + 双内核，手机先行。
-> 决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
+> 状态：方案定稿（2026-11-25）；A0 环境与 A2 骨架已落地（2026-11-26），
+> 两个 APK 可构建、native 自检库通过 16KB 校验，libmpv 构建链未完成。
+> 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）。
 
@@ -174,6 +175,15 @@ interface PlaybackEngine {
 | A11 | TV 冒烟（门禁） | TV 壳接 `:feature` + 两个引擎 + 一个播放页 | 遥控器完成选片 → 起播 → 暂停 → 切轨 → 退出 |
 
 **A1 与 A11 是门禁**：A1 决定例外表，A11 不通过就不开 M2-B。
+
+A0 / A2 已落地（2026-11-26）：
+
+- `scripts/android/{env,build-native,check-apk}.sh`：JDK 17 / SDK 36 / NDK r28 环境，
+  `cargo ndk` 出 `arm64-v8a` + `x86_64`，`zipalign -c -P 16` 校验；
+- `apps/android`：AGP 8.13.2 / Gradle 8.13 / Kotlin 2.2.21，约定插件在 `build-logic`；
+- Compose BOM 钉在 **2026.06.01**（ui 1.11.x，minCompileSdk 35）。2026.11.01 的
+  Compose 1.13 要求 compileSdk 37 / AGP 9.1，和当前基线冲突；
+- `core/media-jni` 的 JNI 自检桩 + 两个 APK 的 16KB 校验通过。
 
 ### M2-B TV
 

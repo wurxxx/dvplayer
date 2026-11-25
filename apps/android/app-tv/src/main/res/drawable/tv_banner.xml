@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Leanback 桌面横幅：320×180 的逻辑尺寸，深色底 + 居中图标。
+     正式素材在 M2-B4 交付时再换成整张 banner。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#141419" />
+        </shape>
+    </item>
+    <item android:gravity="center">
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/ic_launcher" />
+    </item>
+</layer-list>

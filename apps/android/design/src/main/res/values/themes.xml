@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 两个壳共用；Compose 负责实际界面，这里只把窗口底色与系统栏先压深。 -->
+    <style name="Theme.DvPlayer" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#141419</item>
+        <item name="android:colorBackground">#141419</item>
+        <item name="android:statusBarColor">#141419</item>
+        <item name="android:navigationBarColor">#141419</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
