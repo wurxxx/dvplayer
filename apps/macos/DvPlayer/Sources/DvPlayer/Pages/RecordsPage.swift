@@ -12,10 +12,19 @@ struct RecordsPage: View {
     }
 
     /// 截图巡检用：`DVPLAYER_RECORD_TAB=favorites|watch` 直接落在某个分段。
-    @State private var tab: Tab = switch ProcessInfo.processInfo.environment["DVPLAYER_RECORD_TAB"] {
-    case "favorites": .favorites
-    case "watch": .watch
-    default: .general
+    ///
+    /// 用 static 计算属性，而不是在 `@State` 的默认值里直接写 `switch` 表达式：
+    /// Xcode 16.4（Swift 6.0）对后者会报
+    ///   struct declaration cannot close over value '$match'
+    /// 本机 6.3 能编、CI 不能，这种写法两边都没问题。
+    @State private var tab: Tab = Self.initialTab
+
+    private static var initialTab: Tab {
+        switch ProcessInfo.processInfo.environment["DVPLAYER_RECORD_TAB"] {
+        case "favorites": return .favorites
+        case "watch": return .watch
+        default: return .general
+        }
     }
     @State private var loading = false
 
