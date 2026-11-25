@@ -656,7 +656,7 @@
     </Setter>
   </Style>
 
-  <!-- 右键菜单：深色圆角浮层 + 图标 + 分隔线（。
+  <!-- 右键菜单：深色圆角浮层 + 图标 + 分隔线。
        ContextMenu 是独立弹出窗口，模板整套重画，不然是系统浅色底。 -->
   <Style x:Key="DarkContextMenu" TargetType="ContextMenu">
     <Setter Property="OverridesDefaultStyle" Value="True" />

@@ -242,7 +242,7 @@ struct DetailPage: View {
                                     episodeBlock
                                 }
 
-                                // 同一部片在多个源里都有：详情页列出来，点一下切源。
+                                // 同一部片在多个源里都有：详情页列出来，点一下切源（详情页的「资源」）。
                                 if sources.count > 1 {
                                     sourcesBlock
                                 }
