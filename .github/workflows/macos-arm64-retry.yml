@@ -7,8 +7,9 @@ name: macOS arm64 排队重试
 # 并且说「重跑通常能偶到一台可用的机器」（有人试了 7 次）。
 # 换标签（macos-15 / macos-26 / macos-latest）没用，都在同一批 arm64 池子里。
 #
-# 所以这里做自动重试：macOS 工作流被取消、且 arm64 job 一步没跑时，自动再发一次
-# arm64 构建，最多 6 次。真编失败（有步骤跑过）不重试——那不是容量问题。
+# 所以这里做自动重试：macOS 工作流没成功、且 arm64 job 一步没跑（被取消）时，
+# 自动再发一次 arm64 构建，最多 8 次。真编失败（有步骤跑过）不重试——那不是
+# 容量问题。
 #
 # 注意：重试在 master 上编，用的是 master 当前代码。发起重试时 master 如果已经
 # 越过待发布的 tag，就应该改发新版本，而不是继续拿这个 tag 的号。
@@ -29,7 +30,10 @@ concurrency:
 
 jobs:
   retry:
-    if: github.event.workflow_run.conclusion == 'cancelled'
+    # 注意别写成 conclusion == 'cancelled'：arm64 job 抢不到机器被取消时，
+    # 运行记录的结论可能是 failure（prepare 成功 + 一个 cancelled job 聚合），
+    # 真正该看的判据是「arm64 job 被取消且一步没跑」，下面 gate 里查。
+    if: github.event.workflow_run.conclusion != 'success'
     runs-on: ubuntu-latest
     steps:
       - name: 判断是不是「抢不到机器」被取消
@@ -57,12 +61,13 @@ jobs:
             exit 0
           fi
 
-          # 次数上限：最近 50 次 macOS 运行里被取消的条数。
+          # 次数上限：最近 50 次 macOS 运行里「没成功」的条数（队列取消会记成
+          # cancelled 或 failure，两种都算）。
           n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/macos.yml/runs?per_page=50" \
-            --jq '[.workflow_runs[] | select(.conclusion=="cancelled")] | length')
-          echo "最近 macOS 运行中已取消的：$n 次"
-          if (( n > 6 )); then
-            echo "已到重试上限（6 次），停手等 GitHub 容量恢复；产物缺失请手工处理"
+            --jq '[.workflow_runs[] | select(.conclusion == "cancelled" or .conclusion == "failure")] | length')
+          echo "最近 macOS 运行中没成功的：$n 次"
+          if (( n > 8 )); then
+            echo "已到重试上限（8 次），停手等 GitHub 容量恢复；产物缺失请手工处理"
             exit 0
           fi
 
