@@ -6,10 +6,12 @@
 
 pub mod emby;
 pub mod fnos;
+pub mod jellyfin;
 pub mod local;
 
 pub use emby::EmbySource;
 pub use fnos::FnOsSource;
+pub use jellyfin::JellyfinSource;
 pub use local::LocalSource;
 
 use serde::{Deserialize, Serialize};
@@ -159,10 +161,18 @@ pub fn create(config: &SourceConfig) -> Option<Box<dyn MediaSource>> {
             config.password.clone(),
             config.proxy.clone(),
         ))),
-        "emby" | "jellyfin" => Some(Box::new(EmbySource::new(
+        "emby" => Some(Box::new(EmbySource::new(
             config.id.clone(),
             config.name.clone(),
-            if kind == "jellyfin" { "Jellyfin" } else { "Emby" }.to_string(),
+            "Emby".to_string(),
+            config.base.clone(),
+            config.username.clone(),
+            config.password.clone(),
+            config.proxy.clone(),
+        ))),
+        "jellyfin" => Some(Box::new(JellyfinSource::new(
+            config.id.clone(),
+            config.name.clone(),
             config.base.clone(),
             config.username.clone(),
             config.password.clone(),

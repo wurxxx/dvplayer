@@ -86,8 +86,12 @@ struct SourcesPage: View {
             return "NFS 不需要密码；Windows 需要在「启用或关闭 Windows 功能」里装 NFS 客户端。"
         case "webdav":
             return "WebDAV 会挂载成一个目录；Windows 需要 WebClient 服务（默认关闭）。"
+        case "emby":
+            return "Emby 用账号密码登录；也可以只填 API Key（用户名留空，密码框填 Key）。"
+        case "jellyfin":
+            return "Jellyfin 用账号密码登录；也可以只填 API Key（用户名留空，密码框填 Key）。"
         default:
-            return "飞牛影视 / Emby / Jellyfin 用账号密码登录；Emby 也可以只填 API Key（用户名留空）。"
+            return "飞牛影视用账号密码登录。"
         }
     }
 

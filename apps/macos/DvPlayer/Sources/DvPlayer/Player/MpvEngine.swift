@@ -275,8 +275,12 @@ final class MpvEngine {
         lastPositionEmit = 0
         firstFrameSent = false
 
-        // 请求头：每集可能不一样（飞牛带 token）。
-        let fields = headers.map { "\($0.key): \($0.value)" }.joined(separator: ",")
+        // 请求头：每集可能不一样（飞牛带 token）。mpv 的列表选项用 `,` 分隔、
+        // `\` 转义；Jellyfin 的 `Authorization` 值里本身就带逗号
+        // （`Token="…", Client="…"`），不转义会被拆成好几条头。
+        let fields = headers
+            .map { "\($0.key): \(Self.escapeListValue($0.value))" }
+            .joined(separator: ",")
         client.command(["set_property", "http-header-fields", fields])
 
         // 服务器的代理设置：设了就一直用，切集换成新源时会重新设。
@@ -332,6 +336,13 @@ final class MpvEngine {
         waitingFirstFrame = false
         firstFrameTimeout?.cancel()
         firstFrameTimeout = nil
+    }
+
+    /// mpv 列表选项（`http-header-fields`）的单项转义：`\` 和 `,` 都要逃。
+    private static func escapeListValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: ",", with: "\\,")
     }
 
     /// 代理地址允许只写 `127.0.0.1:7890`；空表示直连（mpv 要的是空串）。

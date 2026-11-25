@@ -236,6 +236,13 @@ public sealed class MpvProcess : IMpvEngine
         "dvplayer", "mpv.log");
 
     /// <summary>
+    /// mpv 列表选项（`http-header-fields`）的单项转义：`\` 和 `,` 都要逃，
+    /// 否则 Jellyfin 的 `Authorization` 会被拆成好几条头。
+    /// </summary>
+    private static string EscapeListValue(string value) =>
+        value.Replace("\\", "\\\\").Replace(",", "\\,");
+
+    /// <summary>
     /// 日志脱敏：鉴权头只留头名，URL 去掉 query 和 userinfo。
     /// mpv 的参数里既有 `--http-header-fields-add=Authorization: ...`，
     /// 也有带 `api_key=` 的直链，原样落盘等于把 token 写进 mpv.log。
@@ -329,10 +336,12 @@ public sealed class MpvProcess : IMpvEngine
                 yield return "--http-proxy=" + NormalizeProxy(launch.Proxy);
             }
 
-            // 飞牛、Emby 都要带鉴权头；-add 形式不会把值里的逗号切开。
+            // 飞牛、Emby、Jellyfin 都要带鉴权头。`http-header-fields` 是
+            // 列表选项，`-add` 的值还是按 `,` 分隔，所以项内逗号（Jellyfin 的
+            // `Authorization` 是 `Token="…", Client="…"`）必须转义。
             foreach (var header in launch.Headers ?? Array.Empty<MpvHeader>())
             {
-                yield return $"--http-header-fields-add={header.Name}: {header.Value}";
+                yield return $"--http-header-fields-add={EscapeListValue($"{header.Name}: {header.Value}")}";
             }
         }
 

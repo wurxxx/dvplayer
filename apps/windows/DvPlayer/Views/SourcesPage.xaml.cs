@@ -153,7 +153,9 @@ public partial class SourcesPage : Page
             "smb" or "cifs" => "写到共享名，例如 smb://192.168.1.10/影视；系统挂载后直接读本地路径，ISO 原盘也能播。",
             "nfs" => "Windows 需要先启用「NFS 客户端」功能；不需要账号密码就留空。",
             "webdav" => "Windows 需要启用「WebClient」服务（默认关闭），服务器要支持 WebDAV。",
-            _ => "飞牛影视 / Emby / Jellyfin 用账号密码登录；Emby 也可以只填 API Key（用户名留空）。",
+            "emby" => "Emby 用账号密码登录；也可以只填 API Key（用户名留空，密码框填 Key）。",
+            "jellyfin" => "Jellyfin 用账号密码登录；也可以只填 API Key（用户名留空，密码框填 Key）。",
+            _ => "飞牛影视用账号密码登录。",
         };
 
         UserLabel.Text = kind is "emby" or "jellyfin"

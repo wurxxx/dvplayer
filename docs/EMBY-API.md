@@ -1,6 +1,7 @@
-# Emby / Jellyfin 接口（适配器实现记录）
+# Emby 接口（适配器实现记录）
 
-> 2026-11-20。适配器在 `core/media/src/sources/emby.rs`，Jellyfin 复用同一份实现。
+> 2026-11-20。适配器在 `core/media/src/sources/emby.rs`。
+> Jellyfin 从 2026-11-25 起是独立适配器，见 [JELLYFIN-API.md](JELLYFIN-API.md)。
 > **状态：已在一个 Emby 4.10 的 https 实例上跑通**——登录、库列表、层级、
 > 详情、图片都验证过；播放直链与进度回写还差实测（换服务器后重跑）。
 
@@ -85,10 +86,10 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 | 播放直链 | **已验证**：`PlaybackInfo` 只传 `{UserId}` 就够了；`Static=true&MediaSourceId=…&api_key=…` 直连原文件，Monta HD 上 mpv 解出 4K HEVC + eac3/aac 两轨 |
 | 进度回写 | **已验证**：走 `POST /Sessions/Playing` → `/Sessions/Playing/Progress` → `/Sessions/Playing/Stopped`，`Stopped` 之后服务端才写 `UserData.PlaybackPositionTicks`。`POST /Users/{uid}/Items/{id}/UserData` 在 Monta HD 的反代上直接 404，只作兜底 |
 | 外挂字幕 | 只给了轨道信息，没给 `DeliveryUrl`；字幕选择（B12）做的时候再拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` |
-| Jellyfin 差异 | 同一套 API、登录字段一致；认证头两个都发。暂未单独验证 |
+| Jellyfin | 独立适配器（`jellyfin.rs`），端点与认证头不同，见 [JELLYFIN-API.md](JELLYFIN-API.md) |
 
 播放直链与进度回写已在 Monta HD（Emby 4.9.3，https + openresty 反代）实测通过。
-Jellyfin 与 Emby 共用 `emby.rs`，登录与上报路径一致，等有实例再补一次
+Jellyfin 另走 `jellyfin.rs`，两套实现互不影响
 （[PLAN.md](PLAN.md) §5.1、[M1.md](M1.md) B10）。
 
 **上报细节**：`Sessions/Playing` 先注册会话（`PlaySessionId` 由客户端生成），

@@ -117,7 +117,7 @@
                 HorizontalAlignment="Left" Visibility="Collapsed" Margin="0,4,0,0">
           <StackPanel>
             <TextBlock x:Name="AddTitle" Text="添加服务器" Style="{StaticResource SectionTitle}" />
-            <TextBlock x:Name="FormHint" Text="Emby / Jellyfin 用账号密码登录，也可以只填 API Key（用户名留空）。"
+            <TextBlock x:Name="FormHint" Text="飞牛影视用账号密码登录。"
                        Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap" />
 
             <TextBlock Text="类型" Style="{StaticResource FieldLabel}" />
@@ -167,7 +167,7 @@
             </Grid>
 
             <StackPanel x:Name="CredentialPanel">
-              <TextBlock x:Name="UserLabel" Text="用户名（Emby 可留空）" Style="{StaticResource FieldLabel}" />
+              <TextBlock x:Name="UserLabel" Text="用户名" Style="{StaticResource FieldLabel}" />
               <TextBox x:Name="UserBox" Style="{StaticResource Input}" />
 
               <TextBlock x:Name="PassLabel" Text="密码 / API Key" Style="{StaticResource FieldLabel}" />
