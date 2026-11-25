@@ -29,6 +29,8 @@ final class MpvClient: @unchecked Sendable {
     /// mpv 的事件循环线程。
     private var eventThread: Thread?
     private var running = false
+    /// 事件线程退出（离开 `mpv_wait_event`）后才允许销毁 handle。
+    private let eventDone = DispatchSemaphore(value: 0)
 
     private let gate = NSLock()
     private var pending: [Int: (Reply) -> Void] = [:]
@@ -403,6 +405,16 @@ final class MpvClient: @unchecked Sendable {
             box.release()
         }
         if let ctx = handle {
+            // `mpv_terminate_destroy` 内部会 `mpv_destroy`，与其它 mpv 调用
+            // **不能并发**（client.h 明说）。事件线程此刻多半正阻塞在
+            // `mpv_wait_event` 里，直接 terminate 就是 use-after-free（实测
+            // 退出时 SIGSEGV 在 mpv_wait_event+420）。先 wakeup，等它退出循环。
+            mpv_wakeup(ctx)
+            if eventThread != nil {
+                if eventDone.wait(timeout: .now() + 2) == .timedOut {
+                    NSLog("[Mpv] 事件线程 2 秒内没退出，仍继续销毁")
+                }
+            }
             handle = nil
             mpv_terminate_destroy(ctx)
         }
@@ -412,6 +424,7 @@ final class MpvClient: @unchecked Sendable {
 
     private func eventLoop() {
         guard let ctx = handle else { return }
+        defer { eventDone.signal() }
         while running {
             guard let event = mpv_wait_event(ctx, 0.1) else { continue }
 
