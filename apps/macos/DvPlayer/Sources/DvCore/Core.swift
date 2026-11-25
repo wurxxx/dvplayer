@@ -35,7 +35,8 @@ public struct DoviProbe: Decodable, Sendable {
 }
 
 public final class Core: @unchecked Sendable {
-    private var hub: DVHub?
+    // 建连（connectQueue）和查询（queue）会并发读这个句柄，只在 init 里写一次。
+    private let hub: DVHub?
     private let queue = DispatchQueue(label: "com.dvplayer.core", qos: .userInitiated)
     /// 建连单独一条队列：慢源可能几十秒才超时，不能占着 `queue`，
     /// 否则已经连上的源连首页都读不了（库 / 条目查询全排在它后面）。
