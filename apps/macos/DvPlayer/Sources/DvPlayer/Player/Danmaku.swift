@@ -14,19 +14,19 @@ struct DanmakuComment {
 }
 
 enum DanmakuError: LocalizedError {
-    case missingCredentials
     case notMatched
-    case http(Int)
+    /// 状态码 + 服务器给的 `X-Error-Message`（`Invalid AppId` 这类，没给就是空）。
+    case http(Int, String)
     case empty
 
     var errorDescription: String? {
         switch self {
-            case .missingCredentials:
-                return "弹幕需要弹弹play AppId / AppSecret"
             case .notMatched:
                 return "弹弹play 没匹配到这一集"
-            case .http(let code):
-                return "弹弹play 返回 HTTP \(code)"
+            case .http(let code, let detail):
+                return detail.isEmpty
+                    ? "弹弹play 返回 HTTP \(code)"
+                    : "弹弹play 返回 HTTP \(code)（\(detail)）"
             case .empty:
                 return "这一集没有弹幕"
         }
@@ -77,7 +77,10 @@ final class DanmakuService {
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw DanmakuError.notMatched }
-        guard http.statusCode == 200 else { throw DanmakuError.http(http.statusCode) }
+        guard http.statusCode == 200 else {
+            throw DanmakuError.http(http.statusCode,
+                                    http.value(forHTTPHeaderField: "X-Error-Message") ?? "")
+        }
 
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let animes = root["animes"] as? [[String: Any]] else {
@@ -145,7 +148,10 @@ final class DanmakuService {
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw DanmakuError.empty }
-        guard http.statusCode == 200 else { throw DanmakuError.http(http.statusCode) }
+        guard http.statusCode == 200 else {
+            throw DanmakuError.http(http.statusCode,
+                                    http.value(forHTTPHeaderField: "X-Error-Message") ?? "")
+        }
 
         let comments = DanmakuXML.parse(data)
         guard !comments.isEmpty else { throw DanmakuError.empty }

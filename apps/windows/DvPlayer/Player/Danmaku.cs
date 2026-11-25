@@ -62,7 +62,14 @@ public sealed class DanmakuService
         using var response = await _http.SendAsync(request, token).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new DanmakuException($"弹弹play 返回 HTTP {(int)response.StatusCode}");
+            // 服务器把原因放在 X-Error-Message（Invalid AppId / Invalid Signature …），
+            // 凭据是内置的，出问题时这一行比光看状态码有用得多。
+            var detail = response.Headers.TryGetValues("X-Error-Message", out var values)
+                ? string.Join(" ", values)
+                : "";
+            throw new DanmakuException(detail.Length == 0
+                ? $"弹弹play 返回 HTTP {(int)response.StatusCode}"
+                : $"弹弹play 返回 HTTP {(int)response.StatusCode}（{detail}）");
         }
 
         return await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
