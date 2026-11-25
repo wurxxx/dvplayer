@@ -84,7 +84,18 @@ BASE="DvPlayer-$VERSION-macos-$ARCH"
 # 两个产物都要一份叫「DV Player.app」的拷贝（和 Finder / Dock 显示名一致），
 # 统一在退出时清掉。
 STAGES=()
-cleanup() { for d in "${STAGES[@]:-}"; do [[ -n "$d" ]] && rm -rf "$d"; done; }
+# `"${STAGES[@]:-}"` 在 macOS 自带的 bash 3.2 上会被当成**一个字面词**展开，
+# 于是 for 只跑一次、d 是空串，`[[ -n "" ]]` 判假 → cleanup 返回 1。
+# 而 EXIT trap 的返回码会盖掉脚本末尾的 `exit 0`，整个打包步骤就变成失败
+# （产物其实已经生成好了）。用 `${STAGES[@]+"${STAGES[@]}"}`：bash 3.2 与
+# 5.x 都正确，数组为空时也不触发 set -u；结尾再 return 0 兜底。
+cleanup() {
+    local d
+    for d in ${STAGES[@]+"${STAGES[@]}"}; do
+        [[ -n "$d" ]] && rm -rf "$d"
+    done
+    return 0
+}
 trap cleanup EXIT
 
 stage_app() {
