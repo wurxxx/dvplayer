@@ -1,17 +1,25 @@
-name: macOS arm64
+name: macOS
 
-# 在 Apple Silicon runner 上编 macOS arm64 包（dmg + zip）。
+# 在 GitHub 托管的 macOS runner 上编 dmg + zip，两种架构各一个 job：
+#   arm64（Apple Silicon）—— 跑 macos-15（arm64）
+#   x86_64（Intel）      —— 跑 macos-15-intel
 #
-# 为什么在 GitHub 上编：开发机是 Intel（x86_64），交叉编译能出 arm64 产物
-# 但**无法运行验证**。macos-14 runner 是原生 Apple Silicon，能编也能跑。
+# 为什么 arm64 要放 CI：开发机是 Intel，交叉编译能出 arm64 产物但**无法运行
+# 验证**。arm64 runner 是原生 Apple Silicon，能编也能跑冒烟测试。
 #
-# 源码就在这个仓库里（从 Gitee 镜像过来）。**不能**让 runner 去拉 Gitee：
-# Gitee 官方有「海外用户如何访问」专页，说明海外访问需要特殊 DNS，runner
-# 在海外，直连会随机失败。
+# runner 标签的选择不是随便挑的，有明确的时间线（2026-11 查证）：
+#   - macos-14 已于 2026-11-02 从 GitHub Actions 退役，写它直接失败
+#   - macos-13 已于 2025-12-04 退役
+#   - Intel 只剩 macos-15-intel / macos-26-intel，且 macos-15-intel
+#     到 2027-08 结束，之后 Actions 不再提供 x86_64 macOS
+# 所以两边都用 15 代：arm64 用 macos-15，Intel 用 macos-15-intel。
+#
+# 源码就在这个仓库里。**不能**让 runner 去拉 Gitee：Gitee 官方有「海外用户
+# 如何访问」专页，说明海外访问需要特殊 DNS，runner 在海外，直连会随机失败。
 #
 # 触发：
-#   - 手动（Actions → macOS arm64 → Run workflow）
-#   - 打 tag（v*）时自动出包并附到 Release
+#   - 手动（Actions → macOS → Run workflow），可选只编一种架构
+#   - 打 tag（v*）时自动出两种架构并附到 Release
 
 on:
   workflow_dispatch:
@@ -20,6 +28,15 @@ on:
         description: '版本号（留空则用 Info.plist 里的）'
         required: false
         default: ''
+      arch:
+        description: '只编哪种架构'
+        required: false
+        default: both
+        type: choice
+        options:
+          - both
+          - arm64
+          - x86_64
   push:
     tags:
       - 'v*'
@@ -29,9 +46,45 @@ env:
   DEPS_CACHE_KEY: v1
 
 jobs:
+  # 先算出这次要编哪些架构。
+  #
+  # 为什么不直接在 build 的 matrix 里写死两个、再用 job 级 `if` 过滤：
+  # `matrix` 上下文在 `jobs.<job_id>.if` 里**不可用**（那里只有 github /
+  # needs / vars / inputs），写了会报 Unrecognized named-value。
+  # 所以用一个几秒钟的 prepare job 把矩阵算好传过去。
+  prepare:
+    name: 选择架构
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        run: |
+          set -euo pipefail
+          # push（tag）触发时 inputs.arch 为空，当成 both。
+          WANT='${{ inputs.arch }}'
+          [[ -z "$WANT" ]] && WANT=both
+
+          ARM='{"arch":"arm64","runner":"macos-15"}'
+          INTEL='{"arch":"x86_64","runner":"macos-15-intel"}'
+
+          case "$WANT" in
+            both)   echo "matrix={\"include\":[$ARM,$INTEL]}" >> "$GITHUB_OUTPUT" ;;
+            arm64)  echo "matrix={\"include\":[$ARM]}" >> "$GITHUB_OUTPUT" ;;
+            x86_64) echo "matrix={\"include\":[$INTEL]}" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::未知架构 '$WANT'"; exit 1 ;;
+          esac
+          echo "本次要编：$WANT"
+
   build:
-    # macos-14 = Apple Silicon（M1）。macos-13 是 Intel，别用。
-    runs-on: macos-14
+    name: macOS ${{ matrix.arch }}
+    needs: prepare
+    strategy:
+      # 一种架构挂了不要取消另一种：Intel 和 arm64 的依赖栈互不影响，
+      # 让两边都跑完，才能一次看到全部问题。
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
 
     steps:
@@ -41,12 +94,27 @@ jobs:
       - name: 报告运行环境
         run: |
           set -euo pipefail
-          uname -m
+          echo "runner 标签: ${{ matrix.runner }}"
+          echo "目标架构:    ${{ matrix.arch }}"
+          echo "实际架构:    $(uname -m)"
           sw_vers
           echo "---"
           xcodebuild -version
           echo "---"
           brew --prefix
+
+      - name: 校验 runner 架构与目标一致
+        run: |
+          set -euo pipefail
+          # 防呆：如果 runner 标签写错（比如把 Intel 包编在 arm64 上），
+          # 依赖栈会编出错误架构的库，最后才在产物校验那里失败，白等 40 分钟。
+          # 这里提前失败。
+          HOST="$(uname -m)"
+          if [[ "$HOST" != "${{ matrix.arch }}" ]]; then
+            echo "::error::runner 是 $HOST，但目标是 ${{ matrix.arch }}（标签 ${{ matrix.runner }}）"
+            exit 1
+          fi
+          echo "架构一致：$HOST"
 
       - name: 装构建工具
         run: |
@@ -55,7 +123,6 @@ jobs:
           brew install meson ninja nasm pkg-config
 
           # libass 的依赖（build-deps 脚本不编它们，从 Homebrew 拿）。
-          # macos-14 runner 上的 brew 就是 /opt/homebrew（arm64），直接装即可。
           brew install fribidi harfbuzz fontconfig freetype jpeg
 
           # Rust 工具链：编 core（共享媒体库）
@@ -70,8 +137,9 @@ jobs:
           # 只缓存 prefix（编好的 dylib + 头文件），不缓存源码树：
           # build/src 有几个 GB，而且 ffmpeg 的 config.h 残留会让下次
           # configure 直接跳过、编出架构不对的东西。
+          # key 里带 arch，两种架构的库不能混用。
           path: prefix
-          key: deps-${{ env.DEPS_CACHE_KEY }}-${{ runner.os }}-arm64
+          key: deps-${{ env.DEPS_CACHE_KEY }}-${{ runner.os }}-${{ matrix.arch }}
 
       - name: 编依赖栈（ffmpeg / libplacebo / libass / mpv）
         run: |
@@ -118,11 +186,11 @@ jobs:
             printf '%-45s %s\n' "$(basename "$f")" "$(lipo -archs "$f")"
           done
 
-          # 任何一个不是 arm64 就让构建失败，别把混架构的包发出去。
+          # 任何一个不是目标架构就让构建失败，别把混架构的包发出去。
           BAD=0
           for f in "$APP/Contents/MacOS/DvPlayer" "$APP/Contents/Frameworks/"*.dylib; do
-            if ! lipo -archs "$f" | grep -qw arm64; then
-              echo "::error file=$f::不是 arm64（$(lipo -archs "$f")）"
+            if ! lipo -archs "$f" | grep -qw "${{ matrix.arch }}"; then
+              echo "::error file=$f::不是 ${{ matrix.arch }}（$(lipo -archs "$f")）"
               BAD=1
             fi
           done
@@ -160,7 +228,8 @@ jobs:
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: macos-arm64
+          # 两种架构的 artifact 名不同，否则会互相覆盖。
+          name: macos-${{ matrix.arch }}
           path: |
             out/release/*.dmg
             out/release/*.zip
