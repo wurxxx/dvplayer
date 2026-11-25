@@ -236,11 +236,23 @@ private struct SearchFieldControl: NSViewRepresentable {
     let placeholder: String
     @Binding var text: String
 
+    /// 占位文字的样式。占位由 `SearchFieldCell` 自己居中绘制，不交给 cell。
+    static func placeholderAttributed(for text: String) -> NSAttributedString {
+        NSAttributedString(
+            string: text,
+            attributes: [
+                .foregroundColor: NSColor(Theme.faint),
+                .font: NSFont.systemFont(ofSize: 13.5),
+            ]
+        )
+    }
+
     func makeNSView(context: Context) -> NSSearchField {
         let field = SearchTextField()
         // 换成自定义 cell：让光标和占位文字用同一块矩形。
         // 必须在设 font / placeholder 之前换，否则这些属性会留在旧 cell 上。
-        field.cell = SearchFieldCell()
+        let cell = SearchFieldCell()
+        field.cell = cell
         // 换 cell 会把 NSControl 转发给 cell 的状态一起换掉：新 cell 的
         // isEditable / isSelectable 默认是 false，不显式打开的话输入框
         // 就变成只读、点不进去。
@@ -248,13 +260,10 @@ private struct SearchFieldControl: NSViewRepresentable {
         field.isSelectable = true
         field.font = .systemFont(ofSize: 13.5)
         field.textColor = NSColor(Theme.text)
-        field.placeholderAttributedString = NSAttributedString(
-            string: placeholder,
-            attributes: [
-                .foregroundColor: NSColor(Theme.faint),
-                .font: NSFont.systemFont(ofSize: 13.5),
-            ]
-        )
+        // 占位文字**不设** field.placeholderAttributedString：NSSearchFieldCell
+        // 会把它画在贴顶的位置，且设 nil 也拦不住（回退到内部 placeholderString）。
+        // 交给 cell 自己保存、自己居中画。
+        cell.myPlaceholder = Self.placeholderAttributed(for: placeholder)
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
@@ -307,15 +316,57 @@ private final class SearchTextField: NSSearchField {
 /// AppKit 用来放置 field editor 的入口，把 frame 换成 `searchTextRect`
 /// 光标就和占位文字对齐了。不用私有 selector——那个覆盖了根本不被调用。
 private final class SearchFieldCell: NSSearchFieldCell {
+    /// 自己保存一份占位文字，供 `drawInterior` 居中绘制。
+    ///
+    /// 不直接用 cell 的 `placeholderAttributedString`：`NSSearchFieldCell` 画它
+    /// 时是贴顶的（实测文字中心 70，框中心 75），而且把属性设成 nil 也拦不住——
+    /// 它会回退到内部的 `placeholderString` 再画一份。所以位置完全由这里接管。
+    var myPlaceholder: NSAttributedString?
+
+    /// 编辑中不画占位；未编辑时按墨迹范围垂直居中画。
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        // super 会画一份贴顶的占位：光把 placeholderAttributedString 设 nil
+        // 拦不住，它会回退到 placeholderString 再画一份（实测多出的灰色文字
+        // 中心比正确位置高 9pt）。两个一起清掉，位置交给下面自己算。
+        let savedAttr = placeholderAttributedString
+        let savedString = placeholderString
+        placeholderAttributedString = nil
+        placeholderString = ""
+
+        super.drawInterior(withFrame: cellFrame, in: controlView)
+
+        placeholderAttributedString = savedAttr
+        placeholderString = savedString
+
+        guard (controlView as? NSTextField)?.currentEditor() == nil,
+              let placeholder = myPlaceholder,
+              let field = controlView as? NSTextField,
+              field.stringValue.isEmpty else { return }
+
+        let text = searchTextRect(forBounds: cellFrame)
+        // 墨迹范围：boundingRect 返回的高度和 origin.y 都是相对基线盒的，
+        // 直接用它的 height 居中，不要减 origin.y（那会把偏移抵消掉）。
+        let ink = placeholder.boundingRect(
+            with: NSSize(width: text.width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin])
+        let y = text.origin.y + (text.height - ink.height) / 2
+        placeholder.draw(at: NSPoint(x: text.origin.x, y: y))
+    }
+
     override func select(withFrame rect: NSRect, in view: NSView,
                          editor textObj: NSText, delegate: Any?,
                          start selStart: Int, length selLength: Int) {
-        // 只借 searchTextRect 的水平位置；高度仍用原 rect，保证编辑器
-        // 高度正常（被压扁的话光标不显示、也点不进去）。
         let text = searchTextRect(forBounds: rect)
-        let frame = NSRect(x: text.origin.x, y: rect.origin.y,
+
+        // 高度必须用**文字行高**并垂直居中，不能用整个 rect.height：
+        // field editor 从 frame 顶部开始排文字，给它 34pt 高就会把光标顶到
+        // 框的上边缘（实测光标 y 59..72，框是 57..93）。
+        let font = self.font ?? NSFont.systemFont(ofSize: 13.5)
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let frame = NSRect(x: text.origin.x,
+                           y: rect.origin.y + (rect.height - lineHeight) / 2,
                            width: max(0, rect.maxX - text.origin.x),
-                           height: rect.height)
+                           height: lineHeight)
         super.select(withFrame: frame, in: view, editor: textObj,
                      delegate: delegate, start: selStart, length: selLength)
     }

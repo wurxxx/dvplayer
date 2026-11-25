@@ -785,6 +785,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSLog("[Probe] field frame=\(field.frame) bounds=\(bounds)")
         NSLog("[Probe] searchTextRect=\(String(describing: textRect))")
+        if let font = field.font {
+            NSLog("[Probe] font lineHeight=\(ceil(font.ascender - font.descender + font.leading))")
+        }
 
         if let editor = field.currentEditor() as? NSTextView {
             // editor.frame 是相对它自己的 superview，要转到 field 的坐标系才能
