@@ -386,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 对齐。截图会撞上光标闪烁的隐藏相，直接量数字更可靠。
             if env["DVPLAYER_PROBE_SEARCH"] == "1" {
                 Self.probeSearchField()
-                if env["DVPLAYER_TYPE_SEARCH"] != nil {
+                if env["DVPLAYER_TYPE_SEARCH"] != nil || env["DVPLAYER_COMPOSE_SEARCH"] != nil {
                     // 让投递的按键被事件循环处理，再截。
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     NSApp.activate(ignoringOtherApps: true)
@@ -832,6 +832,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             NSLog("[Probe] 已投递 \(typed.count) 个按键")
+        }
+
+        // `DVPLAYER_COMPOSE_SEARCH=拼音`：模拟输入法组字（marked text），
+        // 验证组字期间占位文字会不会和拼音叠在一起。
+        if let composing = ProcessInfo.processInfo.environment["DVPLAYER_COMPOSE_SEARCH"],
+           !composing.isEmpty,
+           let editor = field.currentEditor() as? NSTextView {
+            editor.setMarkedText(
+                composing,
+                selectedRange: NSRange(location: (composing as NSString).length, length: 0),
+                replacementRange: NSRange(location: 0, length: 0))
+            NSLog("[Probe] 组字 \"\(composing)\" marked=\(editor.hasMarkedText()) stringValue=\"\(field.stringValue)\" editor.string=\"\(editor.string)\"")
         }
     }
 

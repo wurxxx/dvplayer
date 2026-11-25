@@ -102,6 +102,7 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_PROBE_SEARCH` | `1` = 打印搜索框的几何（占位文字矩形、光标位置、两者差值），验证光标对齐；比截图可靠，不撞闪烁相位 |
 | `DVPLAYER_TYPE_SEARCH` | 配合 `DVPLAYER_PROBE_SEARCH`：投递这几个字符的真实键盘事件，验证控件可编辑、绑定能同步 |
 | `DVPLAYER_CLICK_CLEAR` | `1` = 点搜索框右侧的清除按钮，日志看点击前后文字，验证按钮没被编辑区盖住 |
+| `DVPLAYER_COMPOSE_SEARCH` | 模拟输入法组字（marked text），验证组字期间占位文字会隐藏、不和拼音重叠 |
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

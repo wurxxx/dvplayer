@@ -338,9 +338,13 @@ private final class SearchFieldCell: NSSearchFieldCell {
         placeholderAttributedString = savedAttr
         placeholderString = savedString
 
+        // 内容为空才画占位。除了 stringValue，还要看 field editor 里的
+        // **marked text**（输入法组字中）：拼音打到一半时 stringValue 仍是
+        // 空串，但屏幕上已经有「dong」了，占位再画就会和它重叠。
         guard let placeholder = myPlaceholder,
               let field = controlView as? NSTextField,
-              field.stringValue.isEmpty else { return }
+              field.stringValue.isEmpty,
+              !Self.isComposing(field) else { return }
 
         let text = searchTextRect(forBounds: cellFrame)
         // 墨迹范围：boundingRect 返回的高度和 origin.y 都是相对基线盒的，
@@ -350,6 +354,15 @@ private final class SearchFieldCell: NSSearchFieldCell {
             options: [.usesLineFragmentOrigin])
         let y = text.origin.y + (text.height - ink.height) / 2
         placeholder.draw(at: NSPoint(x: text.origin.x, y: y))
+    }
+
+    /// 输入法是否正在组字（拼音 / 注音还没上屏）。
+    ///
+    /// 组字期间文字只存在于 field editor 的 marked text 里，`stringValue`
+    /// 还是空串。不看这个的话，占位文字会和拼音叠在一起。
+    private static func isComposing(_ field: NSTextField) -> Bool {
+        guard let editor = field.currentEditor() as? NSTextView else { return false }
+        return editor.hasMarkedText()
     }
 
     override func select(withFrame rect: NSRect, in view: NSView,
