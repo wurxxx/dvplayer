@@ -396,6 +396,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            // `DVPLAYER_CLICK_CLEAR=1`：点搜索框的清除按钮，验证它没被
+            // 编辑区盖住（编辑区宽度算错时会吃掉这个点击）。
+            if env["DVPLAYER_CLICK_CLEAR"] == "1" {
+                Self.clickCancelButton()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+
             Self.capture(to: shot)
 
             // 截图巡检：`DVPLAYER_SHOT_SHEET=1` 再截一张附着的 sheet
@@ -785,6 +792,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSLog("[Probe] field frame=\(field.frame) bounds=\(bounds)")
         NSLog("[Probe] searchTextRect=\(String(describing: textRect))")
+        if let cell {
+            NSLog("[Probe] cancelButtonRect=\(cell.cancelButtonRect(forBounds: bounds))")
+        }
         if let font = field.font {
             NSLog("[Probe] font lineHeight=\(ceil(font.ascender - font.descender + font.leading))")
         }
@@ -822,6 +832,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             NSLog("[Probe] 已投递 \(typed.count) 个按键")
+        }
+    }
+
+    /// 点搜索框右侧的清除按钮，验证它没被编辑区盖住。
+    /// 参数是按钮中心的窗口坐标（左上角原点），默认取 cancelButtonRect 的中心。
+    @MainActor
+    static func clickCancelButton() {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+              let root = window.contentView else {
+            NSLog("[Clear] 找不到窗口")
+            return
+        }
+
+        func findField(_ view: NSView) -> NSSearchField? {
+            if let field = view as? NSSearchField { return field }
+            for sub in view.subviews {
+                if let found = findField(sub) { return found }
+            }
+            return nil
+        }
+
+        guard let field = findField(root),
+              let cell = field.cell as? NSSearchFieldCell,
+              let editor = field.currentEditor() else {
+            NSLog("[Clear] 没有搜索框或没在编辑")
+            return
+        }
+
+        let buttonRect = cell.cancelButtonRect(forBounds: field.bounds)
+        // 转到窗口坐标：按钮矩形是相对 field 的，field 又嵌在 SwiftUI 的
+        // 容器里，逐层 convert 上去再翻 y。
+        let inWindow = field.convert(buttonRect, to: nil)
+        let center = NSPoint(x: inWindow.midX, y: inWindow.midY)
+        NSLog("[Clear] 清除按钮 field 内=\(buttonRect) 窗口内=\(inWindow) 中心=\(center) 点前文字=\"\(editor.string)\"")
+
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: center, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseDown ? 1 : 0) else { continue }
+            NSApp.postEvent(event, atStart: false)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            NSLog("[Clear] 点后文字=\"\(field.stringValue)\" 仍在编辑=\(field.currentEditor() != nil)")
         }
     }
 

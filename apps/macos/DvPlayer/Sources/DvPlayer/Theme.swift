@@ -338,8 +338,7 @@ private final class SearchFieldCell: NSSearchFieldCell {
         placeholderAttributedString = savedAttr
         placeholderString = savedString
 
-        guard (controlView as? NSTextField)?.currentEditor() == nil,
-              let placeholder = myPlaceholder,
+        guard let placeholder = myPlaceholder,
               let field = controlView as? NSTextField,
               field.stringValue.isEmpty else { return }
 
@@ -365,7 +364,10 @@ private final class SearchFieldCell: NSSearchFieldCell {
         let lineHeight = ceil(font.ascender - font.descender + font.leading)
         let frame = NSRect(x: text.origin.x,
                            y: rect.origin.y + (rect.height - lineHeight) / 2,
-                           width: max(0, rect.maxX - text.origin.x),
+                           // 宽度必须止于 searchTextRect 的右边界，不能用
+                           // rect.maxX：清除按钮在 398..420，编辑区伸到 424
+                           // 就会盖住它，点 x 变成点进编辑器，按钮收不到事件。
+                           width: max(0, text.width),
                            height: lineHeight)
         super.select(withFrame: frame, in: view, editor: textObj,
                      delegate: delegate, start: selStart, length: selLength)
