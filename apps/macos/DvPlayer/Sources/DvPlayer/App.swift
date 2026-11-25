@@ -377,7 +377,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 用来验证「点画面进详情 / 点底部条续播」这种命中区拆分。
             if let spec = env["DVPLAYER_TAP"] {
                 await Self.tap(in: spec)
-                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                // 光标会闪，等待时间可调，方便截到光标可见的那一相。
+                let wait = Double(env["DVPLAYER_TAP_WAIT"] ?? "") ?? 1.8
+                try? await Task.sleep(nanoseconds: UInt64(max(0.05, wait) * 1_000_000_000))
+            }
+
+            // `DVPLAYER_PROBE_SEARCH=1`：打印搜索框的几何，验证光标与占位文字是否
+            // 对齐。截图会撞上光标闪烁的隐藏相，直接量数字更可靠。
+            if env["DVPLAYER_PROBE_SEARCH"] == "1" {
+                Self.probeSearchField()
+                if env["DVPLAYER_TYPE_SEARCH"] != nil {
+                    // 让投递的按键被事件循环处理，再截。
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.windows.first(where: { $0.contentView != nil })?
+                        .makeKeyAndOrderFront(nil)
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                }
             }
 
             Self.capture(to: shot)
@@ -719,6 +735,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.sendEvent(move)
         }
 
+        // down / up 一起投进事件队列，不能直接 sendEvent：
+        // `NSSearchFieldCell` 处理 mouseDown 时会进入 `trackMouse:untilMouseUp:`
+        // 的同步循环，在里面等 mouseUp。如果这里同步发 down，主线程就被占住，
+        // 后面的 mouseUp 永远发不出去——自检会卡死。
+        // postEvent 让 AppKit 的事件循环按顺序取，track 循环能立刻拿到 mouseUp。
+        var events: [NSEvent] = []
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             guard let event = NSEvent.mouseEvent(
                 with: type, location: point, modifierFlags: [],
@@ -726,8 +748,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 windowNumber: window.windowNumber, context: nil,
                 eventNumber: 0, clickCount: 1,
                 pressure: type == .leftMouseUp ? 0 : 1) else { continue }
-            window.sendEvent(event)
-            try? await Task.sleep(nanoseconds: 120_000_000)
+            events.append(event)
+        }
+        for event in events {
+            NSApp.postEvent(event, atStart: false)
+        }
+    }
+
+    /// 打印搜索框的几何：占位文字用哪个矩形、光标（field editor）落在哪。
+    /// 两者 origin.x 相同才算对齐。若设了 `DVPLAYER_TYPE_SEARCH`，还会合成
+    /// 一次键盘输入，验证控件确实可编辑（换 cell 容易把 isEditable 弄丢）。
+    @MainActor
+    static func probeSearchField() {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+              let root = window.contentView else {
+            NSLog("[Probe] 找不到窗口")
+            return
+        }
+
+        func findField(_ view: NSView) -> NSSearchField? {
+            if let field = view as? NSSearchField { return field }
+            for sub in view.subviews {
+                if let found = findField(sub) { return found }
+            }
+            return nil
+        }
+
+        guard let field = findField(root) else {
+            NSLog("[Probe] 没找到 NSSearchField")
+            return
+        }
+
+        let bounds = field.bounds
+        let cell = field.cell as? NSSearchFieldCell
+        let textRect = cell?.searchTextRect(forBounds: bounds)
+
+        NSLog("[Probe] field frame=\(field.frame) bounds=\(bounds)")
+        NSLog("[Probe] searchTextRect=\(String(describing: textRect))")
+
+        if let editor = field.currentEditor() as? NSTextView {
+            // editor.frame 是相对它自己的 superview，要转到 field 的坐标系才能
+            // 和 searchTextRect（相对 field bounds）比较。
+            let inField = editor.superview.map { field.convert(editor.frame, from: $0) } ?? editor.frame
+            NSLog("[Probe] editor frame=\(editor.frame) 转到 field 内=\(inField)")
+            NSLog("[Probe] editor selectedRange=\(editor.selectedRange())")
+            if let textRect {
+                NSLog("[Probe] 对齐：textRect.x=\(textRect.origin.x) editor.x=\(inField.origin.x) 差=\(inField.origin.x - textRect.origin.x)")
+            }
+        } else {
+            NSLog("[Probe] 没有 field editor（焦点没进输入框）")
+        }
+
+        // 真的输入几个字，验证控件可编辑。换 cell 时最容易丢掉的就是这个。
+        if let typed = ProcessInfo.processInfo.environment["DVPLAYER_TYPE_SEARCH"],
+           !typed.isEmpty,
+           let editor = field.currentEditor() as? NSTextView {
+            NSLog("[Probe] 输入前 editor.string=\"\(editor.string)\" textColor=\(String(describing: editor.textColor)) font=\(String(describing: editor.font))")
+            // 用真实键盘事件走完整输入链路（postEvent 不阻塞主线程），
+            // 比直接 insertText 更接近用户实际打字——insertText 绕过了
+            // 输入法管线，插进去的字不一定被重绘。
+            if let window = field.window {
+                for ch in typed {
+                    guard let down = NSEvent.keyEvent(
+                        with: .keyDown, location: .zero, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil,
+                        characters: String(ch), charactersIgnoringModifiers: String(ch),
+                        isARepeat: false, keyCode: 0) else { continue }
+                    NSApp.postEvent(down, atStart: false)
+                }
+            }
+            NSLog("[Probe] 已投递 \(typed.count) 个按键")
         }
     }
 

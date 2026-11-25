@@ -98,6 +98,9 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 | `DVPLAYER_WINDOWTEST` | `1` = 依次点三个窗口按钮（最小化 / 缩放 / 关闭），结果打到日志，验证完自动退出 |
 | `DVPLAYER_CLICKTEST` | `x,y`（窗口左上角原点）= 合成一次点击并敲 `abc`，日志里看 `firstResponder` / 输入框内容，排查「点不进去」用 |
 | `DVPLAYER_TAP` | `x,y`（窗口左上角原点）= 先滚到 `DVPLAYER_SCROLL_Y` 再合成一次点击，不退出；验证卡片命中区（点画面进详情 / 点底部条续播） |
+| `DVPLAYER_TAP_WAIT` | 合成点击后等几秒再截图，默认 1.8。光标会闪，调它来截到光标可见的那一相 |
+| `DVPLAYER_PROBE_SEARCH` | `1` = 打印搜索框的几何（占位文字矩形、光标位置、两者差值），验证光标对齐；比截图可靠，不撞闪烁相位 |
+| `DVPLAYER_TYPE_SEARCH` | 配合 `DVPLAYER_PROBE_SEARCH`：投递这几个字符的真实键盘事件，验证控件可编辑、绑定能同步 |
 
 配置在 `~/Library/Application Support/DvPlayer/settings.json`（和 Windows 同名字段）。
 `scripts/seed-source.py` 是开发用的：从环境变量读账号密码写一份配置，

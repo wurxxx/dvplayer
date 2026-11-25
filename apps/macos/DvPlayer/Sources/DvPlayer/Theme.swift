@@ -238,6 +238,14 @@ private struct SearchFieldControl: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSSearchField {
         let field = SearchTextField()
+        // 换成自定义 cell：让光标和占位文字用同一块矩形。
+        // 必须在设 font / placeholder 之前换，否则这些属性会留在旧 cell 上。
+        field.cell = SearchFieldCell()
+        // 换 cell 会把 NSControl 转发给 cell 的状态一起换掉：新 cell 的
+        // isEditable / isSelectable 默认是 false，不显式打开的话输入框
+        // 就变成只读、点不进去。
+        field.isEditable = true
+        field.isSelectable = true
         field.font = .systemFont(ofSize: 13.5)
         field.textColor = NSColor(Theme.text)
         field.placeholderAttributedString = NSAttributedString(
@@ -260,6 +268,16 @@ private struct SearchFieldControl: NSViewRepresentable {
         if field.stringValue != text { field.stringValue = text }
     }
 
+    /// 让输入框撑满外层给的 34pt，而不是缩到 intrinsic 的 16pt。
+    /// 否则视觉上是 34pt 的框，实际可点的只有中间一条 16pt，
+    /// 点上下边缘没反应，看起来就是「点不进去」。
+    func sizeThatFits(_ proposal: ProposedViewSize,
+                      nsView: NSSearchField,
+                      context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? nsView.intrinsicContentSize.width,
+               height: proposal.height ?? 34)
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, NSSearchFieldDelegate {
@@ -277,4 +295,28 @@ private struct SearchFieldControl: NSViewRepresentable {
 /// 窗口不在前台时，第一次点击就直接进输入框（否则那一下只会激活窗口）。
 private final class SearchTextField: NSSearchField {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// 让**光标**和占位文字落在同一块矩形里。
+///
+/// `NSSearchFieldCell` 在无边框时把占位文字画在 `searchTextRect`（已经给
+/// 放大镜留出位置），但开始编辑时用的是整个 bounds，于是光标贴在左边框、
+/// 文字却向右缩进约 26pt。
+///
+/// 覆盖公开的 `select(withFrame:in:editor:delegate:start:length:)`：它正是
+/// AppKit 用来放置 field editor 的入口，把 frame 换成 `searchTextRect`
+/// 光标就和占位文字对齐了。不用私有 selector——那个覆盖了根本不被调用。
+private final class SearchFieldCell: NSSearchFieldCell {
+    override func select(withFrame rect: NSRect, in view: NSView,
+                         editor textObj: NSText, delegate: Any?,
+                         start selStart: Int, length selLength: Int) {
+        // 只借 searchTextRect 的水平位置；高度仍用原 rect，保证编辑器
+        // 高度正常（被压扁的话光标不显示、也点不进去）。
+        let text = searchTextRect(forBounds: rect)
+        let frame = NSRect(x: text.origin.x, y: rect.origin.y,
+                           width: max(0, rect.maxX - text.origin.x),
+                           height: rect.height)
+        super.select(withFrame: frame, in: view, editor: textObj,
+                     delegate: delegate, start: selStart, length: selLength)
+    }
 }
