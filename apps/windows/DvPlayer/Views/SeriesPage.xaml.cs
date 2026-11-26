@@ -443,7 +443,8 @@ public partial class SeriesPage : Page
         EpisodeList.Visibility = _episodeTiles.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         // 有看到一半的集就接着看，否则从第 1 集开始。
-        var resume = _episodeTiles.FirstOrDefault(t => t.Progress is > 0.01 and < 0.99);
+        // 阈值和 macOS 一致：≥99.5% 算看完，既不续播也不画进度条。
+        var resume = _episodeTiles.FirstOrDefault(t => t.Progress is > 0.01 and < 0.995);
 
         // 换季 / 重渲染：自动定位重新来一次。
         _didAutoScrollResume = false;
@@ -550,7 +551,10 @@ public partial class SeriesPage : Page
                 Progress = item.Progress,
                 // 进度条左右各缩进 4px，可用宽度要跟着减。
                 ProgressWidth = Math.Max(0, (TileWidth - 8) * Math.Clamp(item.Progress, 0, 1)),
-                ProgressVisibility = item.Progress > 0.01 ? Visibility.Visible : Visibility.Collapsed,
+                // 看完的集不再画进度条：整条满格看着像一直没看完。
+                ProgressVisibility = item.Progress is > 0.01 and < 0.995
+                    ? Visibility.Visible
+                    : Visibility.Collapsed,
             };
             tile.UseGradient(tile.Id + tile.Title);
 
@@ -578,7 +582,7 @@ public partial class SeriesPage : Page
         Trace.Write($"episodes append n={fresh.Count} rows={_episodeTiles.Count}/{_episodeTotal}");
 
         // 续播点可能正好落在后面这页里。
-        var resume = _episodeTiles.FirstOrDefault(t => t.Progress is > 0.01 and < 0.99);
+        var resume = _episodeTiles.FirstOrDefault(t => t.Progress is > 0.01 and < 0.995);
         if (resume is not null)
         {
             _playTargetId = resume.Id;
