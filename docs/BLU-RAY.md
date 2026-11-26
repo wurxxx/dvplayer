@@ -2,9 +2,10 @@
 
 > 2026-11-19。目标：直接播 `*.iso` 原盘，能列出并选择正片/花絮（mpls 播放列表）。
 >
-> 2026-11-22 起入口统一：打开 ISO 不再弹标题选择框，直接播**默认标题**
-> （最长的正片；没有正片就取最长的一条），其它标题放进播放器右侧的
-> 「标题」面板，和「选集」是同一套 UI。播完一段直接关窗，不自动接花絮。
+> 2026-11-22 起入口统一：打开 ISO 走同一套播放器。
+> 2026-11-27 起改成**先停在原盘菜单**（自绘，见 §5.4）：盘名 + 正片/花絮标题 +
+> 章节，点标题或章节再起播；菜单里选完，其它标题仍可在播放器右侧的「标题」
+> 面板切换。播完一段直接关窗，不自动接花絮。
 > Windows 用 `bd://mpls/<n>` 切标题；macOS 重新生成 EDL 再重启 mpv，盘不卸载。
 
 ## 1. 结论
@@ -94,6 +95,20 @@ PlayListMark 段:
 实测 Hush 2in1 的两个正片各 13 章，与 libbluray 的 `chapter-list/count` 一致；
 `00000.mpls` 有 1 个 mark。解析结果在 `iso-titles.ps1` 里按 `mark_type == 1` 计数。
 
+**`mark_time_stamp` 是源流时间，不是 playlist 时间**（2026-11-27 实测确认）。
+它相对当前 PlayItem 的 `IN_time`：
+
+```text
+playlist 时间 = 该 PlayItem 之前各段时长之和 + (mark_time_stamp - PlayItem.IN_time)
+```
+
+真实盘 `00001.mpls` 的 `IN_time` 是 600 s、第一条 mark 也是 600 s，而
+libbluray / mpv 报的第一章是 0：不减去 `IN_time` 的话，菜单里点第一章会跳到 10 分钟。
+换算后和 mpv 的 `chapter-list` 逐条对上（`0, 438.772, 834.0, … 4906.944`）。
+
+最后一条 mark 常落在片尾（时间等于时长），点它就是直接结束，菜单里按
+`time < 时长 − 1` 滤掉。
+
 ## 4. 实测（2026-11-19，Hush 2016 2in1）
 
 样本：`HUSH_2IN1_PURE.ISO`，35,972,448,256 字节（33.5 GiB），卷标
@@ -172,7 +187,7 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
 | --- | --- | --- | --- |
 | 1 | ~~壳没有 ISO 入口与选集 UI~~ | 两端已做：ISO 放进「本地文件夹源」后就是媒体库条目（见 `LOCAL-SOURCE.md`） | Windows 走 libbluray（§5.1），macOS 挂载 + EDL（§5.2） |
 | 2 | `Mount-DiskImage` 只支持本地 ISO | NAS 上的原盘要先下载 | 产品里应支持"边读边播"或缓存到本地；mpv 的 `bd://` 配 UNC 路径需要 Windows 先能读该路径 |
-| 3 | BD-J 菜单不支持 | 不能点原盘菜单 | mpv/libbluray 不带 Java 运行时；只能直接选 title，产品 UI 用选集列表替代 |
+| 3 | 原盘自带菜单（HDMV / BD-J）不跑 | 点不了盘里画的那套菜单 | mpv / libbluray 没有菜单引擎，BD-J 还要 JVM；改用自绘菜单页（§5.4），标题 / 章节都能点 |
 | 4 | 无缝分支（seamless branching） | 多版本剪辑的衔接可能不完美 | 依赖 libbluray，暂不承诺 |
 | 5 | ~~音轨/字幕轨切换未接 IPC~~ | 播放页的 `track-list` / `set_property aid/sid` 已在正式壳里 | 原盘和网络片共用同一套 |
 | 6 | 4K UHD 蓝光 ISO 未测 | 当前样本都是 1080p AVC | 需要 UHD BD 原盘（HEVC + HDR10/DV） |
@@ -182,21 +197,26 @@ NAS 的 SSH 用户名是 `admin`，ISO 在 `/vol1/1000/`（中文目录建了 AS
 ## 5.1 正式壳（Windows）
 
 入口在媒体库里：把一个目录（里面有 `*.iso`）加成「本地文件夹源」
-（见 `LOCAL-SOURCE.md`），点 ISO 条目 → 弹标题列表（正片 / 花絮 + 时长）→ 播放。
-自检仍可直接指定 ISO，不必先建源。
+（见 `LOCAL-SOURCE.md`），点 ISO 条目 → 弹原盘菜单（§5.4，标题 + 章节）
+→ 选标题或章节起播。自检仍可直接指定 ISO，不必先建源。
 
 - **列 title 不自己解析 UDF**：用 `mpv.com --frames=1 --bluray-device=<iso> bd://`
   读 libbluray 打在日志里的 `--edition=N 'title: N (时长) (xxxxx.mpls)'`。
   title 号和 mpls 编号不一定对应（真实原盘常见 title 1 → 00800.mpls），
   读这行最准，也不用挂载。
+- **读章节**：`mpv.com --bluray-device=<iso> bd://mpls/<n> --pause --vo=null`
+  加一段 Lua，在 `file-loaded` 后打印 `chapter-list` 再 `quit`。libbluray
+  已经换算好时间，直接用；按标题懒加载（选中哪个读哪个），一次 1～2 秒。
 - **播放**：`--bluray-device=<iso>` + `bd://mpls/<n>`；音频/字幕/章节/seek
   全部复用播放页现有 IPC。
 - **打包注意**：随包的 mpv 要同时带 `mpv.com`。GUI 版 `mpv.exe` 没有 stdout，
   列不出 title（`MpvProcess` 仍回落到 `mpv.exe`，但只用于播放）。
 - **进度**：从媒体库点开的 ISO，进度回写核心（本地源）；自检直接开 ISO 时
   续播点写 `local-progress.json`，播完自动清掉。原盘都不拉媒体信息。
-- **自检**：`--play-iso <iso> --play-iso-title 1 --play-check <目录>
-  --play-features overlay --play-start 0`；只截标题框用
+- **自检**：菜单 `--disc-menu <iso> --disc-shot <目录>`；
+  菜单里点章节的整条路径 `--disc-menu-play <秒>`（不是绕过菜单直接开标题）；
+  直接播某个标题 `--play-iso <iso> --play-iso-title 1 --play-check <目录>
+  --play-features overlay --play-start 0`；只截播放器的「标题」面板用
   `--disc-list <iso> --disc-shot <目录>`。
 
 ## 5.2 正式壳入口（macOS）
@@ -210,9 +230,13 @@ macOS 随包的 mpv 没有 libbluray（`--list-options` 里没有 `--bluray-devi
 - 选标题后把每一段写成 mpv EDL：
   `edl://!no_chapters;<m2ts>,<起始秒>,<时长>;...`（落成临时 `.edl` 文件，
   避免路径转义），这样多段播放列表也能连起来播；
-- 关播放窗时 `hdiutil detach` 并删掉临时 EDL / 挂载点；
+- 打开 ISO 先弹原盘菜单（§5.4）；关播放窗时 `hdiutil detach` 并删掉临时
+  EDL / 挂载点（菜单没起播就关窗也直接卸盘）；
 - 原盘进度同样存本地 JSON（`~/Library/Application Support/DvPlayer/local-progress.json`）。
-- 自检：`DVPLAYER_DISC=<iso> DVPLAYER_DISC_TITLE=N DVPLAYER_PLAY_SHOT=<png>`。
+- 自检：菜单 `DVPLAYER_DISC=<iso> DVPLAYER_DISC_MENU_SHOT=<png>`；
+  菜单里点章节的整条路径 `DVPLAYER_DISC_MENU_PLAY=<秒>`；
+  直接播某个标题 `DVPLAYER_DISC=<iso> DVPLAYER_DISC_TITLE=N
+  DVPLAYER_DISC_START=<秒> DVPLAYER_PLAY_SHOT=<png>`。
 
 ## 5.3 Android / TV
 
@@ -226,6 +250,42 @@ macOS 随包的 mpv 没有 libbluray（`--list-options` 里没有 `--bluray-devi
   用标题列表代替；3D MVC 不做。
 - Media3 不参与原盘（没有 UDF / MPLS 这一层），见
   [ADR-0014](adr/0014-android-dual-engine.md)。
+
+## 5.4 菜单页（两端一致）
+
+打开 ISO 不再直接播正片，先停在一张自绘的菜单页：盘名 + 标题列表
+（正片 / 花絮，带时长、章节数、看到哪）+ 右侧章节网格。点标题的
+「从头播放 / 继续」或点某一章，就从那里起播；关掉菜单等于不放，盘卸掉。
+
+**为什么自绘**：mpv / libbluray 没有 HDMV 菜单引擎，BD-J 菜单还要 JVM，
+盘里画的那套菜单跑不起来。菜单页只做「选标题 + 选章节」两件事。
+
+**不做音轨 / 字幕选择**：起播前拿不到可靠的语言 / 标题（要解析 mpls 的
+STN 表，壳里没接），播放页本来就有这两项菜单，放在那里选更稳。
+
+两端实现：
+
+| | Windows | macOS |
+| --- | --- | --- |
+| 窗口 | `Views/DiscMenuWindow`（980×640，夹进工作区） | `Player/DiscMenuWindow.swift`（960×620，夹进 `visibleFrame`） |
+| 章节来源 | `mpv.com` + Lua 打印 `chapter-list`，按标题懒加载 | 自己解析 mpls 的 `PlayListMark`，换算成 playlist 时间（§3） |
+| 起播 | 菜单返回标题 + 起点，走 `bd://mpls/<n>` + seek | 重新生成 EDL 再起 mpv，盘不卸载 |
+| 关菜单 | 什么都没挂载，直接关 | `hdiutil detach` + 删临时 EDL |
+| 拖动 / 关闭 | 空白处拖动窗口，✕ 关闭 | 整窗背景可拖，✕ / Esc 关闭 |
+
+两端都滤掉片尾那条 mark（时间等于时长），真实盘 13 条 mark 在菜单里显示 12 章。
+
+实测（2026-11-27）：
+
+- Windows，真实盘 33.5 GiB：菜单读出 2 个标题各 12 章，时间
+  `0:00 / 7:19 / 13:54 / … / 1:09:38`，与 mpv `chapter-list` 逐条一致；
+  从菜单点第 2 章，日志 `disc menu pick title=1 mpls=1 start=439` →
+  `opening finish pos=438.8`，之后 445 / 447 / 459 正常往前走。
+- macOS，合成测试盘（2 标题各 13 章）：菜单截图正常；从菜单点 13 s，
+  日志 `menu play title=1 at=13.0` → `local load from=13.0` → 6 秒后
+  `pos=19`。
+
+还差：章节名（libbluray 1.5 才有）、花絮缩略图、BD-J 的弹窗 / 交互。
 
 ## 6. 与 4K/8K/HDR 的关系
 

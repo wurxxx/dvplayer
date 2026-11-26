@@ -7,6 +7,23 @@ struct BluRayClip: Hashable {
     let duration: Double
 }
 
+/// 原盘里的一个章节：`time` 是从这个标题开头算的秒数（相对整条 playlist，
+/// 不是单个 m2ts 片段），点章节就用它当起播点。
+struct BluRayChapter: Identifiable, Hashable {
+    /// 从 1 起，给用户看。
+    let id: Int
+    let time: Double
+
+    var timeLabel: String {
+        let total = max(0, Int(time.rounded()))
+        let hours = total / 3600
+        let minutes = total % 3600 / 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, total % 60)
+            : String(format: "%d:%02d", minutes, total % 60)
+    }
+}
+
 /// 原盘里的一个标题（一个 mpls）。
 struct BluRayTitle: Identifiable, Hashable {
     /// mpls 编号（00001 → 1），也当播放时识别用。
@@ -15,6 +32,8 @@ struct BluRayTitle: Identifiable, Hashable {
     let number: Int
     let duration: Double
     let clips: [BluRayClip]
+    /// mpls 的 PlayListMark（mark_type = 1），按时间排序；空表示这张盘没标章节。
+    var chapters: [BluRayChapter] = []
 
     var durationLabel: String {
         let total = Int(duration.rounded())
@@ -150,7 +169,8 @@ enum BluRayDisc {
 
                 let mpls = Int(file.deletingPathExtension().lastPathComponent) ?? (index + 1)
                 titles.append(BluRayTitle(id: mpls, number: index + 1,
-                                          duration: duration, clips: clips))
+                                          duration: duration, clips: clips,
+                                          chapters: parseChapters(data, clips: clips)))
             }
 
             guard !titles.isEmpty else {
@@ -310,6 +330,50 @@ enum BluRayDisc {
         }
 
         return clips
+    }
+
+    /// mpls 的 PlayListMark 段：每条 mark 定长 14 字节，`mark_type == 1` 是章节。
+    ///
+    /// `mark_time_stamp` 是**源流时间**（相对 PlayItem 的 IN_time，45 kHz），
+    /// 不是 playlist 相对时间：真实盘 `00001.mpls` 的 IN 是 600 s、第一条 mark
+    /// 也是 600 s，而 libbluray / mpv 报的第一章是 0。换算成 playlist 时间要
+    /// 减去该 PlayItem 的 IN、再加上前面各段的时长，这样菜单里的章节时间才能
+    /// 直接拿去 seek。
+    private static func parseChapters(_ data: Data, clips: [BluRayClip]) -> [BluRayChapter] {
+        guard !clips.isEmpty, data.count > 18,
+              let markStart = data.be32(12),
+              markStart > 0, markStart + 6 <= data.count,
+              let count = data.be16(markStart + 4), count > 0 else {
+            return []
+        }
+
+        // 每个 PlayItem 在 playlist 里的起点。
+        var offsets: [Double] = []
+        var total = 0.0
+        for clip in clips {
+            offsets.append(total)
+            total += clip.duration
+        }
+
+        var times: [Double] = []
+        for index in 0..<count {
+            let base = markStart + 6 + index * 14
+            guard base + 14 <= data.count else { break }
+            guard data[base + 1] == 1 else { continue }      // 1 = 章节，2 = link point
+            guard let item = data.be16(base + 2), item < clips.count,
+                  let stamp = data.be32(base + 4) else { continue }
+
+            let sourceTime = Double(stamp) / 45_000.0
+            let time = offsets[item] + (sourceTime - clips[item].start)
+            // 片尾那条 mark 就等于时长，放进菜单只会是「点一下就结束」。
+            if time > 0.5, time < total - 1 {
+                times.append(time)
+            }
+        }
+
+        return times.sorted().enumerated().map { offset, time in
+            BluRayChapter(id: offset + 1, time: time)
+        }
     }
 }
 

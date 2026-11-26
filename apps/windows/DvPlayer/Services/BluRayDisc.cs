@@ -28,6 +28,12 @@ public sealed record BluRayTitle(int Edition, int TitleNumber, int Mpls, double 
     }
 }
 
+/// <summary>原盘一个标题的章节：`Time` 是从标题开头算的秒数（可直接当起播点）。</summary>
+public sealed record BluRayChapter(int Index, double Time)
+{
+    public string TimeLabel => BluRayTitle.Format(Time);
+}
+
 /// <summary>探到的整个原盘：盘名 + 标题列表。</summary>
 public sealed record BluRayProbe(string? DiscName, IReadOnlyList<BluRayTitle> Titles)
 {
@@ -186,6 +192,139 @@ public static partial class BluRayDisc
             string.IsNullOrWhiteSpace(discName) ? null : discName,
             ordered), null);
     }
+
+    /// <summary>
+    /// 读一个标题（mpls）的章节列表。
+    ///
+    /// 章节只在 `BDMV/PLAYLIST/*.mpls` 的 PlayListMark 段里，libbluray 不提供
+    /// 机器可读接口；所以借 mpv 自己打开这条 mpls，用一小段 Lua 在 file-loaded
+    /// 后打印 `chapter-list` 再退出（`--pause` 保证来得及读）。libbluray 给的
+    /// 时间已经换算成 playlist 相对时间，可以直接当起播点。
+    /// </summary>
+    public static async Task<List<BluRayChapter>> ProbeChaptersAsync(
+        string isoPath, int mpls, CancellationToken cancellationToken = default)
+    {
+        var chapters = new List<BluRayChapter>();
+        var mpv = FindConsoleMpv();
+        if (mpv is null)
+        {
+            return chapters;
+        }
+
+        string luaPath;
+        try
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "dvplayer");
+            Directory.CreateDirectory(folder);
+            luaPath = Path.Combine(folder, "disc-chapters.lua");
+            await File.WriteAllTextAsync(luaPath, ChapterProbeLua, new UTF8Encoding(false),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("disc chapters lua failed: " + ex.Message);
+            return chapters;
+        }
+
+        var psi = new ProcessStartInfo(mpv)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            WorkingDirectory = AppContext.BaseDirectory,
+        };
+
+        foreach (var arg in new[]
+                 {
+                     "--no-config",
+                     "--terminal=yes",
+                     "--vo=null",
+                     "--ao=null",
+                     "--osc=no",
+                     "--no-input-default-bindings",
+                     "--pause",
+                     "--msg-level=all=info",
+                     $"--bluray-device={isoPath}",
+                     $"bd://mpls/{mpls}",
+                     $"--script={luaPath}",
+                 })
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using var process = new Process { StartInfo = psi };
+        var output = new StringBuilder();
+        try
+        {
+            process.Start();
+            var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(25));
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                TryKill(process);
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            output.Append(await stdout.ConfigureAwait(false));
+            output.Append(await stderr.ConfigureAwait(false));
+        }
+        catch (Exception ex)
+        {
+            TryKill(process);
+            Trace.Write($"disc chapters probe failed mpls={mpls}: {ex.Message}");
+            return chapters;
+        }
+
+        foreach (var line in output.ToString().Split('\n'))
+        {
+            var match = ChapterLine().Match(line);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var index = int.Parse(match.Groups["index"].Value, CultureInfo.InvariantCulture);
+            var time = double.Parse(match.Groups["time"].Value, CultureInfo.InvariantCulture);
+            chapters.Add(new BluRayChapter(index, time));
+        }
+
+        chapters.Sort((left, right) => left.Time.CompareTo(right.Time));
+        Trace.Write($"disc chapters mpls={mpls} count={chapters.Count}");
+        return chapters;
+    }
+
+    /// <summary>
+    /// 打开 mpls 后打印 chapter-list 并退出。`--pause` 让 mpv 停在第一帧，
+    /// 否则 `--frames=1` 会在脚本拿到属性前就退出。
+    /// </summary>
+    private const string ChapterProbeLua = """
+        local function dump()
+            local chapters = mp.get_property_native("chapter-list") or {}
+            print(string.format("PROBE chapters=%d", #chapters))
+            for i, c in ipairs(chapters) do
+                print(string.format("PROBE chap %d %.3f", i, c.time))
+            end
+            mp.commandv("quit")
+        end
+        mp.register_event("file-loaded", dump)
+        mp.add_timeout(15, function()
+            print("PROBE timeout")
+            mp.commandv("quit")
+        end)
+        """;
+
+    [GeneratedRegex(@"PROBE chap (?<index>\d+) (?<time>[\d.]+)", RegexOptions.CultureInvariant)]
+    private static partial Regex ChapterLine();
 
     private static void TryKill(Process process)
     {

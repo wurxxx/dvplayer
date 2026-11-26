@@ -190,7 +190,14 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
 - **蓝光原盘**：ISO 条目的标题列表来自 `mpv.com` 打开盘时 libbluray 打的
   `title: N (时长) (xxxxx.mpls)`，不自己挂 ISO；播放用
   `--bluray-device=<iso>` + `bd://mpls/<n>`。进度回写核心（本地源）。
-  自检：`--play-iso` / `--play-iso-title` / `--disc-list` / `--disc-shot`。
+  打开 ISO 先弹原盘菜单（`Views/DiscMenuWindow`）：盘名 + 正片/花絮标题 +
+  章节网格，点标题「从头播放 / 继续」或点章节起播；章节按标题懒加载
+  （`mpv.com` + Lua 打印 `chapter-list`，`--pause` 保证来得及读），
+  片尾那条 mark 滤掉。菜单里不选音轨/字幕，播放页已有。
+  菜单窗口 980×640 先夹进工作区再居中。
+  自检：菜单 `--disc-menu <iso> --disc-shot <目录>`，菜单里点章节的整条路径
+  `--disc-menu-play <秒>`；直接播某个标题 `--play-iso` / `--play-iso-title` /
+  `--play-start`；只截「标题」面板用 `--disc-list` / `--disc-shot`。
 - **记录页「通用」的收藏行**：继续观看下面接一行「视频收藏」（168×252 竖卡 +
   左右箭头，空时给一句提示），和 macOS 的通用页一致。三个分段面板的显隐统一走
   `ApplyTabVisibility()`：收藏是异步拉的，晚到时之前会直接把「收藏」整块设成可见，

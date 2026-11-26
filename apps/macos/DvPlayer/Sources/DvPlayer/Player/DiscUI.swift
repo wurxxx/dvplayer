@@ -35,25 +35,29 @@ enum DiscUI {
                           + session.titles.map { title in
                               "\(session.isFeature(title) ? "正片" : "花絮")"
                               + " \(title.number):\(Int(title.duration))s"
+                              + "/\(title.chapters.count)章"
                           }.joined(separator: " "))
-
-                    // 直接播默认标题，不再弹选择框；
-                    // `DVPLAYER_DISC_TITLE=N` 只是自检时指定第 N 个标题。
-                    let title = autoTitle.flatMap { wanted in
-                        session.titles.first { $0.number == wanted }
-                    } ?? defaultTitle(session)
-
-                    guard let title else {
-                        session.detach()
-                        return
-                    }
 
                     let disc = DiscPlayback(disc: session,
                                             hintTitle: hintTitle,
-                                            coreItemId: coreItemId)
-                    NSLog("[Disc] default title=\(title.number) mpls=\(title.id) " +
-                          "dur=\(Int(title.duration)) of \(session.titles.count)")
-                    PlayerLauncher.shared.playDisc(disc, title: title, start: start)
+                                            coreItemId: coreItemId,
+                                            suggestedStart: start)
+
+                    // 自检 / `DVPLAYER_DISC_TITLE`：指定了标题就直接播，
+                    // 回归脚本不用点菜单。
+                    if let autoTitle,
+                       let title = session.titles.first(where: { $0.number == autoTitle }) {
+                        NSLog("[Disc] direct title=\(title.number) mpls=\(title.id) " +
+                              "dur=\(Int(title.duration)) of \(session.titles.count)")
+                        PlayerLauncher.shared.playDisc(disc, title: title, start: start)
+                        return
+                    }
+
+                    // 默认停在菜单：选标题 / 章节再起播。
+                    NSLog("[Disc] menu titles=\(session.titles.count) "
+                          + session.titles.map { "\($0.id):\($0.chapters.count)" }
+                            .joined(separator: ","))
+                    DiscMenuLauncher.present(disc: disc)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -66,17 +70,5 @@ enum DiscUI {
                 }
             }
         }
-    }
-
-    /// 没指定标题时播哪个：最长的正片；没有正片就最长的标题。
-    static func defaultTitle(_ session: BluRaySession) -> BluRayTitle? {
-        let features = session.titles.filter(session.isFeature)
-        let pool = features.isEmpty ? session.titles : features
-        return pool.sorted { first, second in
-            if abs(first.duration - second.duration) > 0.5 {
-                return first.duration > second.duration
-            }
-            return first.number < second.number
-        }.first
     }
 }

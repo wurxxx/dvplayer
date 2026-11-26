@@ -521,8 +521,23 @@ public partial class PlayWindow : Window
             ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted)
             : null;
 
-        // 直接播默认标题（最长的正片），不再弹选择框；
-        // 其它标题在播放器右侧的「标题」面板里切，和选集是同一套交互。
+        // 从媒体库点开的原盘：先停在菜单选标题 / 章节。
+        // 自检（silent）和 `--play-iso-title` 指定了标题时仍直接播，回归脚本不用点菜单。
+        if (title is null && !silent)
+        {
+            var picked = DiscMenuWindow.ShowMenu(owner, probe, isoPath, startOverride);
+            if (picked is null)
+            {
+                Trace.Write($"disc menu cancelled iso={Path.GetFileName(isoPath)}");
+                return null;
+            }
+
+            title = picked.Value.Title;
+            startOverride = picked.Value.Start;
+            Trace.Write($"disc menu picked title={title.TitleNumber} mpls={title.Mpls} " +
+                        $"start={startOverride:0}");
+        }
+
         title ??= DefaultDiscTitle(probe);
         if (title is null)
         {

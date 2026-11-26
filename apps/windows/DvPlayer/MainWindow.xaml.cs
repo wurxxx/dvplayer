@@ -303,6 +303,14 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // --disc-menu <iso> --disc-shot <目录>：截原盘菜单（标题 + 章节）。
+        if (ArgumentAfter("--disc-menu") is { Length: > 0 } discMenuIso &&
+            ArgumentAfter("--disc-shot") is { Length: > 0 } discMenuDir)
+        {
+            await CaptureDiscMenuAsync(discMenuIso, discMenuDir);
+            return;
+        }
+
         // --disc-list <iso> --disc-shot <目录>：只截原盘标题选择框。
         if (ArgumentAfter("--disc-list") is { Length: > 0 } discListIso &&
             ArgumentAfter("--disc-shot") is { Length: > 0 } discListDir)
@@ -633,6 +641,57 @@ public partial class MainWindow : FluentWindow
     private Task<PlayWindow?> OpenDiscAsync(string isoPath, int? titleNumber = null,
         double? startOverride = null, bool silent = false)
         => PlayWindow.OpenDiscAsync(this, isoPath, titleNumber, startOverride, null, silent);
+
+    /// <summary>自检：截原盘菜单，确认标题 / 章节都读出来了。</summary>
+    private async Task CaptureDiscMenuAsync(string isoPath, string dir)
+    {
+        Directory.CreateDirectory(dir);
+
+        var (probe, error) = await BluRayDisc.ProbeAsync(isoPath);
+        Trace.Write($"disc menu iso={Path.GetFileName(isoPath)} " +
+                    $"titles={probe?.Titles.Count ?? 0} err={error ?? "-"}");
+        if (probe is null)
+        {
+            Application.Current.Shutdown();
+            return;
+        }
+
+        var window = DiscMenuWindow.ForShot(this, probe, isoPath);
+        window.Show();
+        // 章节是懒加载的：等第一个标题读完再截。
+        await Task.Delay(5000);
+        Trace.Write("disc menu " + window.DescribeForShot());
+        // 截窗口本体：截 Content 会带上 Margin 的偏移，右边和下边各切掉 24px。
+        UiCapture.Save(window, Path.Combine(dir, "disc-menu.png"));
+
+        // `--disc-menu-play <秒>`：走一遍「菜单点章节 → 播放」，
+        // 不是绕过菜单直接开标题。
+        if (double.TryParse(ArgumentAfter("--disc-menu-play"), out var pickedAt))
+        {
+            var picked = window.SimulatePick(pickedAt);
+            Trace.Write(picked is null
+                ? "disc menu pick none"
+                : $"disc menu pick title={picked.Value.Title.TitleNumber} " +
+                  $"mpls={picked.Value.Title.Mpls} start={picked.Value.Start:0}");
+
+            if (picked is not null)
+            {
+                var player = await OpenDiscAsync(isoPath, picked.Value.Title.TitleNumber,
+                    picked.Value.Start, silent: true);
+                if (player is not null)
+                {
+                    await RunPlayCheckAsync(null, dir, player);
+                    player.Close();
+                }
+            }
+
+            Application.Current.Shutdown();
+            return;
+        }
+
+        window.Close();
+        Application.Current.Shutdown();
+    }
 
     /// <summary>自检：读标题列表，打开播放器右侧的「标题」面板截一张。</summary>
     private async Task CaptureDiscListAsync(string isoPath, string dir)
