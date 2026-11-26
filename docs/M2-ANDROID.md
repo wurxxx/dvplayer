@@ -177,7 +177,7 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
 | A0 | 构建链（JDK 17 / SDK 36 / NDK r28、libmpv、16KB） | 完成 |
 | A1 | 可行性 spike（设备能力六项） | 手机侧完成；TV / 盒子 / DV 显示项缺（门禁未关） |
 | A2 | 骨架（两个 app、约定插件、`:design` / `:core`） | 完成 |
-| A3 | 数据层（`core/media-jni`、hub 生命周期、库 / 详情 / 记录） | 完成 |
+| A3 | 数据层（`core/media-jni`、hub 生命周期、库 / 详情 / 记录） | **Rust 侧完成**；Android JNI 仍只有 `version()`，`core/media` 的 41 个 `dv_*` 没转发（见 §9.1） |
 | A4 | 引擎契约 + mpv（EGL、属性桥、会话、章节、续播、ASS） | 完成 |
 | A5 | HDR 输出（dataspace、静态元数据、帧率匹配） | 完成 |
 | A6 | Media3（HDR10+、音频、PGS / Sup、契约对齐） | 完成 |
@@ -853,7 +853,8 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 ### 9.1 未完成项（2026-11-26 盘点）
 
-手机侧的 A0–A10 已闭环（§7），下面按「为什么还没完」分三类。
+手机侧的 A0–A10 底层能力已闭环（§7），但数据层 JNI 与面向用户的界面还空着。
+下面按「为什么还没完」分三类。
 
 **缺外部条件**（代码就绪，等设备 / 素材）：
 
@@ -869,7 +870,9 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 项 | 现状 |
 | --- | --- |
-| TV 大屏 UI（B1 / B2） | `:ui-tv` 只有 `TvApp()` 50 行、`:app-tv` 只有 `MainActivity`，没有播放 Activity / 验证页；TV 上现在跑不了播放回归 |
+| Android 数据层 JNI（最卡） | `core/media/src/ffi.rs` 有 41 个 `dv_*`，但 `core/media-jni/src/lib.rs` 只导出了 `version()`，`Native.kt` 也只有它 → 手机 / TV 都拿不到库列表、详情、记录，UI 无从下手。CI 也不编 Rust（`jniLibs` 被 gitignore），所以 CI 出的 APK 里根本没有 `libdvplayer_media_jni.so`；x86_64 也没编，模拟器上跑不了任何依赖核心的页面 |
+| 手机 UI（`ui-phone`） | 只有 75 行能力自检页，没有库 / 详情 / 搜索 / 设置 / 播放页；底层 `:player`（路由、续播、切内核）已就绪，缺的是屏幕 |
+| TV 大屏 UI（B1 / B2） | `:ui-tv` 只有 `TvApp()` 50 行、`:app-tv` 只有 `MainActivity`，而且 `app-tv` 连 `:player` / `:core` 依赖都没有；TV 上现在跑不了播放回归 |
 | TV 兼容矩阵（B3） | TV 默认内核、tunneling 取舍、HDMI 直通策略未定（§10） |
 | 原盘边读边播（B5，可选） | SMB / NFS 上的 BDMV 不能直接播：桥接只服务单文件，libbluray 要本地路径或可列目录的流（§7.8） |
 | SMB 共享名枚举 | App 内没有，得用户知道共享名（桌面用 `tests/android/smb-enum.py` 代查） |
