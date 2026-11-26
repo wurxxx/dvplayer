@@ -588,9 +588,55 @@ VFS 第一刀：WebDAV 浏览（A9 第一步，2026-11-27）：`:core` 新增
   `Media3 HTTP 认证已设置` → `video format ... 1280×720 30.0` →
   `first frame rendered`，`--es seek_to 4000` 后 `pos 5152ms`，drops 0。
 
-还没做：SMB（smbj）与 NFS（libnfs JNI，AUTH_SYS）两个实现，以及把
-`VfsEntry` 接到核心的虚拟源（`dv_hub_replace`）。这两项缺真实 NAS 环境，
-先记为阻塞。
+VFS 第二刀：SMB + 本地 HTTP 桥接（A9 第二步，2026-11-27）：
+
+- `Vfs` 增加随机读契约 `VfsFile`（`size` + `read(offset, buffer, count)`），
+  WebDAV / SMB 都实现它。播放器不能把 4K 原盘读进内存，浏览和播放共用一套
+  目录抽象。
+- `SmbVfs` 用 smbj 0.13.0（SMB2/3，**不支持 SMB1**）：一个连接 + 一个会话，
+  按共享名复用 `DiskShare`。路径 `smb://host/share/a/b`。
+- 路径编码：`java.net.URI` 会拒绝带空格 / `[ ]` / `!` 的目录名，NAS 上这类
+  名字很常见。改为手工拆 URL，每段 `Uri.encode`，解析时 `Uri.decode`；
+  实测 `Shippuu! Iron Leaguer Blu-ray BOX [BIXA-9069]`、
+  `[DVDISO]ポケットモンスター…`、`Sailor Moon` 都能正常进出。
+- 播放不走 SMB：mpv 与 Media3 都不认 `smb://`。`VfsHttpBridge` 把 `VfsFile`
+  通过 `127.0.0.1:<随机端口>` 的 HTTP 暴露出去，只做 GET / HEAD / `Range`。
+  必须支持 keep-alive——4K 每秒几十次读，一次一个 TCP 连接会直接卡死；读块
+  256KB，`Content-Length` 与 `Content-Range` 都回全。
+- 桥接线程里任何异常都只结束当前连接：最早版本让 `Broken pipe` 冒到线程外，
+  直接把进程打成 `FATAL EXCEPTION: vfs-bridge-conn`。
+- 验证页：`--es smb <目录> --es smb_deep N` 递归列目录（日志格式
+  `SMB|D或F|size|path`）；`--es smb_play <文件>` 先建桥接再建内核，避免先拿
+  `smb://` 去起播；凭据 `--es smb_user/smb_pass/smb_domain`。
+
+实测（NAS `10.0.0.134`，Samba「fn server」，共享 `影视` / `保种2` / `IPC$`）：
+
+- 浏览：`影视` 根 20 项；`Bomberman Jetters JP BDMV` 9 项；
+  `乐高幻影忍者合集.S01…` 280 项；`大风车…` 579 项；BDMV 目录
+  （`BDMV/BACKUP`、`CLIPINF`、`PLAYLIST`、`STREAM`）全部可进出，中文与空格
+  文件名正常。深 3 层列举时不再出现 `URISyntaxException`。
+- mpv + 桥接：`Lovesick 2026 S01E01`（9.36GB，2160p DV H.265 MKV）→
+  `open … size=9356490290`、`桥接启动 http://127.0.0.1:42065/…`，
+  `--el seek_to 15000` 后 `pos 15140ms`，随后 1x 前进；
+  `cache` 从 1.5s 涨到 27.9s，读速约 4.5MB/s，无异常。
+- Media3 + 桥接：`乐高…S01E22`（3.28GB，2160p SDR HEVC MP4）→
+  `video format 3840×2160 24.99`、`first frame rendered`，
+  `--el seek_to 15000` 后 `pos 15000ms`，桥接收到
+  `bytes=33408756-` → `206`，`drops 0`。
+- 桥接的 `Range` 语义：mpv 先读尾部 moov（`bytes=<size-170K>-`），再按
+  seek 位置要 `bytes=<offset>-`；Media3 seek 时同样发 `bytes=`。两者都靠
+  这条路径，没有额外 DataSource。
+- 踩到的坑（都已在脚本里规避）：`seek_to` 是 long extra，`am` 要用 `--el`；
+  `adb shell` 对含空格的参数转义不可靠，空格之后的内容会被截断，脚本先把
+  空格换成 `%20`（客户端解码）；带空格的参数之后再加 `--es` 也会丢，所以
+  凭据放前面、路径放最后。
+
+还没做：NFS（libnfs JNI，AUTH_SYS）、共享名枚举、把 `VfsEntry` 接到核心的
+虚拟源（`dv_hub_replace`）。另外 SMB 上的原盘目录（BDMV）还不能直接播：
+桥接只服务单个文件，libbluray 需要本地路径或可列目录的流；当前要播原盘，
+先下载或用 ISO。共享名枚举也没有进 App——SMB2 没有公开的列共享接口，这次
+是用 `tests/android/smb-enum.py`（impacket `srvsvc.NetShareEnumAll`）在桌面
+问出来的；App 里暂时要求用户知道共享名。
 
 自动重试（A7 第四步，2026-11-27）：`PlayerEngine.Listener` 的 `Error` 事件现在
 接到验证页：Media3 起播失败时把当前 `positionMs` 放进新 Intent，换 mpv 重开

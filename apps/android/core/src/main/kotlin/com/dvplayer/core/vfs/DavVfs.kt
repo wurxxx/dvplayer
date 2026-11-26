@@ -62,6 +62,61 @@ class DavVfs(
         }
     }
 
+    /**
+     * WebDAV 随机读：每次 `Range: bytes=offset-(offset+count-1)`。
+     * 播放器的 DataSource 会把 read 拆成 64KB / 1MB 的块，够用。
+     */
+    override fun open(path: String): VfsFile {
+        val url = path.toHttpUrl()
+        val size = sizeOf(url)
+        return object : VfsFile {
+            override val size: Long = size
+            private var closed = false
+
+            override fun read(offset: Long, buffer: ByteArray, count: Int): Int {
+                if (closed || count <= 0 || offset >= size) return 0
+                val end = minOf(offset + count, size) - 1
+                val builder = Request.Builder()
+                    .url(url)
+                    .get()
+                    .header("Range", "bytes=$offset-$end")
+                if (user != null) {
+                    builder.header("Authorization", Credentials.basic(user, password.orEmpty()))
+                }
+                client.newCall(builder.build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw IllegalStateException("GET $url -> HTTP ${response.code}")
+                    }
+                    val body = response.body ?: return 0
+                    var read = 0
+                    body.byteStream().use { input ->
+                        while (read < count) {
+                            val n = input.read(buffer, read, count - read)
+                            if (n < 0) break
+                            read += n
+                        }
+                    }
+                    return read
+                }
+            }
+
+            override fun close() {
+                closed = true
+            }
+        }
+    }
+
+    private fun sizeOf(url: HttpUrl): Long {
+        val builder = Request.Builder().url(url).head()
+        if (user != null) {
+            builder.header("Authorization", Credentials.basic(user, password.orEmpty()))
+        }
+        client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) return -1
+            return response.header("Content-Length")?.toLongOrNull() ?: -1
+        }
+    }
+
     /** 解析 `207 Multi-Status`，跳过请求地址自身对应的那一条。 */
     private fun parse(input: InputStream, requestUrl: HttpUrl): List<VfsEntry> {
         val parser = Xml.newPullParser()

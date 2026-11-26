@@ -12,6 +12,18 @@ interface Vfs {
 
     /** 列出 [dir] 下的直接子项；失败抛异常由调用方兜底。 */
     fun list(dir: String): List<VfsEntry>
+
+    /** 打开一个文件做随机读（SMB / WebDAV 都可以）。 */
+    fun open(path: String): VfsFile
+}
+
+/**
+ * 随机读的文件句柄。播放器不能把整个原盘 / 4K 文件读进内存，所以按 offset
+ * 读。[read] 返回实际读到的字节数，0 表示 EOF。
+ */
+interface VfsFile : java.io.Closeable {
+    val size: Long
+    fun read(offset: Long, buffer: ByteArray, count: Int): Int
 }
 
 /**

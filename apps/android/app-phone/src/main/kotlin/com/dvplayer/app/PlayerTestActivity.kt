@@ -36,6 +36,8 @@ import com.dvplayer.player.PlayerEvent
 import com.dvplayer.player.TrackKind
 import com.dvplayer.core.download.MediaDownloader
 import com.dvplayer.core.vfs.DavVfs
+import com.dvplayer.core.vfs.SmbVfs
+import com.dvplayer.core.vfs.VfsHttpBridge
 import com.dvplayer.player.Hdr10PlusProbe
 import com.dvplayer.player.media3.Media3Player
 import com.dvplayer.player.mpv.MpvPlayer
@@ -85,9 +87,18 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private val url: String
         get() = intent.getStringExtra("url") ?: DEFAULT_URL
 
-    /** 原盘（ISO / BDMV 目录）换成 mpv 的 bluray:// 地址，其余原样。 */
+    /** SMB 文件经本地 HTTP 桥接后的地址（A9）。 */
+    private var bridgedUrl: String? = null
+    private var smbVfs: SmbVfs? = null
+    private var bridge: VfsHttpBridge? = null
+
+    /** 续播 / 记录用的片源标识：SMB 用 smb:// 地址，其余用 intent 里的 url。 */
+    private val contentKey: String
+        get() = intent.getStringExtra("smb_play") ?: url
+
+    /** 原盘换成普通路径、SMB 换成桥接地址，其余原样。 */
     private val playUrl: String
-        get() = disc?.playUrl ?: url
+        get() = bridgedUrl ?: disc?.playUrl ?: url
 
     private val disc: DiscSource.Disc? by lazy { DiscSource.detect(url) }
 
@@ -118,7 +129,23 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 session?.update(MediaSessionController.snapshot(player.state()))
             }
             maybeResume()
-            if (++tickCount % 3 == 0) maybeSave()
+            if (++tickCount % 3 == 0) {
+                maybeSave()
+                enginePlayer?.let { p ->
+                    val st = p.state()
+                    // SMB / 桥接要看吞吐：mpv 的 demuxer 缓存时长与读速最能说明问题。
+                    val cache = if (p is MpvPlayer) {
+                        " cache=${p.getProperty("demuxer-cache-duration")}" +
+                            " bw=${p.getProperty("cache-speed")}"
+                    } else {
+                        ""
+                    }
+                    Log.i(
+                        TAG,
+                        "state $engine pos=${st.positionMs}ms dur=${st.durationMs}ms paused=${st.paused}$cache",
+                    )
+                }
+            }
             handler.postDelayed(this, 1000)
         }
     }
@@ -126,6 +153,35 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         memory = PlaybackMemory(this)
+        // SMB 播放必须先拿到桥接地址，再创建内核 / 媒体会话，否则会先拿 smb:// 地址去起播。
+        // 验证页在这里同步等一次（正式实现应在浏览页就完成握手，播放页直接拿 URL）。
+        intent.getStringExtra("smb_play")?.let { smbUrl ->
+            val ready = java.util.concurrent.CountDownLatch(1)
+            Thread({
+                try {
+                    val vfs = SmbVfs(
+                        smbUrl,
+                        intent.getStringExtra("smb_user").orEmpty(),
+                        intent.getStringExtra("smb_pass").orEmpty(),
+                        intent.getStringExtra("smb_domain").orEmpty(),
+                    )
+                    smbVfs = vfs
+                    val file = vfs.open(smbUrl)
+                    val b = VfsHttpBridge(file, smbUrl.substringAfterLast('/'))
+                    b.start()
+                    bridge = b
+                    bridgedUrl = b.url
+                    Log.i(TAG, "SMB 桥接：$smbUrl -> ${b.url}")
+                } catch (t: Throwable) {
+                    Log.e(TAG, "SMB 桥接失败", t)
+                } finally {
+                    ready.countDown()
+                }
+            }, "smb-bridge").start()
+            if (!ready.await(20, java.util.concurrent.TimeUnit.SECONDS)) {
+                Log.e(TAG, "SMB 桥接超时")
+            }
+        }
         runCatching {
             val mode = currentDisplay.mode
             originalModeId = mode.modeId
@@ -234,12 +290,40 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         }
 
         enginePlayer?.let {
-            val controller = MediaSessionController(this, it, url.substringAfterLast('/'))
+            val controller = MediaSessionController(this, it, playUrl.substringAfterLast('/'))
             session = controller
             runCatching {
                 PlaybackForegroundService.start(this, controller.notification())
             }.onFailure { e -> Log.w(TAG, "前台服务启动失败", e) }
             Log.i(TAG, "媒体会话就绪")
+        }
+
+        // A9 验证钩子：--es smb <目录> 列目录（--es smb_deep N 递归 N 层）。
+        // 日志格式固定为 SMB|D或F|size|path，方便 shell 侧解析。
+        intent.getStringExtra("smb")?.let { smbUrl ->
+            val depth = intent.getStringExtra("smb_deep")?.toIntOrNull() ?: 0
+            Thread({
+                runCatching {
+                    val vfs = smbVfs ?: SmbVfs(
+                        smbUrl,
+                        intent.getStringExtra("smb_user").orEmpty(),
+                        intent.getStringExtra("smb_pass").orEmpty(),
+                        intent.getStringExtra("smb_domain").orEmpty(),
+                    ).also { smbVfs = it }
+                    fun walk(dir: String, level: Int) {
+                        val entries = vfs.list(dir)
+                        Log.i(TAG, "SMB|L$level|${entries.size}|$dir")
+                        entries.forEach {
+                            Log.i(TAG, "SMB|${if (it.isDirectory) "D" else "F"}|${it.size}|${it.path}")
+                            if (it.isDirectory && level < depth) {
+                                runCatching { walk(it.path, level + 1) }
+                                    .onFailure { e -> Log.w(TAG, "SMB 子目录失败 ${it.path}", e) }
+                            }
+                        }
+                    }
+                    walk(smbUrl, 0)
+                }.onFailure { Log.e(TAG, "SMB 列表失败", it) }
+            }, "smb-list").start()
         }
 
         // A9 验证钩子：--es vfs <WebDAV 目录 URL> 列一次目录并打日志，
@@ -492,7 +576,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             return
         }
 
-        val saved = memory.position(url)
+        val saved = memory.position(contentKey)
         if (saved > 3_000 && saved < state.durationMs - 5_000) {
             player.seekTo(saved)
             Log.i(TAG, "续播：$saved ms")
@@ -529,7 +613,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private fun maybeSave() {
         val player = enginePlayer ?: return
         val state = player.state()
-        if (state.durationMs > 0) memory.save(url, state.positionMs, state.durationMs)
+        if (state.durationMs > 0) memory.save(contentKey, state.positionMs, state.durationMs)
     }
 
     private fun nextChapter() {
@@ -606,12 +690,18 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         // 放在后台线程，别把主线程（和新 activity）一起堵死。
         val mpv = player
         val m3 = media3
+        val b = bridge
+        val smb = smbVfs
         player = null
         media3 = null
-        if (mpv != null || m3 != null) {
+        bridge = null
+        smbVfs = null
+        if (mpv != null || m3 != null || b != null || smb != null) {
             Thread({
                 runCatching { m3?.close() }
                 runCatching { mpv?.close() }
+                runCatching { b?.close() }
+                runCatching { smb?.close() }
                 Log.i(TAG, "播放内核已释放")
             }, "engine-close").start()
         }
@@ -681,7 +771,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             appendLine(player.debugCue)
             append(playbackLine())
             disc?.let { appendLine("原盘 ${it.kind.label}：${it.playUrl}") }
-            append(url)
+            append(contentKey)
         }
     }
 
@@ -701,7 +791,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             appendLine("fps ${p("estimated-vf-fps")} · drops ${p("frame-drop-count")} · mode ${mode.modeId}@${"%.2f".format(mode.refreshRate)}Hz")
             append(playbackLine())
             disc?.let { appendLine("原盘 ${it.kind.label}：${it.playUrl}") }
-            append(url)
+            append(contentKey)
         }
     }
 
