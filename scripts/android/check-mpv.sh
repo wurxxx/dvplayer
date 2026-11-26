@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 把 libmpv.so 推到已连接的设备/模拟器，跑最小加载探针。
 #
-#   scripts/android/check-mpv.sh            # 默认 x86_64（模拟器）
+#   scripts/android/check-mpv.sh                    # 默认 x86_64（模拟器）
+#   ADB_SERIAL=QS48... scripts/android/check-mpv.sh # 指定设备（多台连着时必须）
 #   ARCH=arm64 scripts/android/check-mpv.sh
 set -euo pipefail
 
@@ -15,6 +16,12 @@ case "$ARCH" in
     arm64) TRIPLE=aarch64-linux-android ;;
     *) echo "不支持的 ARCH：$ARCH" >&2; exit 2 ;;
 esac
+
+# 多台设备连着时 adb 会拒绝执行，用 ADB_SERIAL 选一台。
+ADB=(adb)
+if [ -n "${ADB_SERIAL:-}" ]; then
+    ADB=(adb -s "$ADB_SERIAL")
+fi
 
 PREFIX=$ROOT/build/android-mpv/$ARCH/prefix
 SO=$PREFIX/lib/libmpv.so
@@ -44,8 +51,8 @@ fi
 OUT=$ROOT/build/android-mpv/$ARCH/probe
 "$CC" -O2 -o "$OUT" "$ROOT/scripts/android/mpv-probe.c" -ldl
 
-adb push "$SO" /data/local/tmp/libmpv.so >/dev/null
-adb push "$OUT" /data/local/tmp/mpv-probe >/dev/null
+"${ADB[@]}" push "$SO" /data/local/tmp/libmpv.so >/dev/null
+"${ADB[@]}" push "$OUT" /data/local/tmp/mpv-probe >/dev/null
 
-echo "==> $(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
-adb shell "chmod 755 /data/local/tmp/mpv-probe && LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/mpv-probe"
+echo "==> $("${ADB[@]}" shell getprop ro.product.cpu.abi | tr -d '\r')"
+"${ADB[@]}" shell "chmod 755 /data/local/tmp/mpv-probe && LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/mpv-probe"

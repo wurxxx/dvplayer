@@ -3,8 +3,8 @@
 > 状态：方案定稿（2026-11-25）；A0 环境与 A2 骨架已落地（2026-11-26），
 > 两个 APK 可构建、native 自检库通过 16KB 校验，并在 Android 33 x86_64
 > 模拟器上装起、显示 native 版本；libmpv（LGPL）+ FFmpeg + libplacebo +
-> libass + libbluray 的 NDK 构建链已跑通，`libmpv.so` 在模拟器上能加载、
-> `mpv_create` 成功。
+> libass + libbluray 的 NDK 构建链已跑通，`libmpv.so` 在模拟器与真机上都能加载、
+> `mpv_create` 成功；A1 的设备能力采集（`DeviceProfile`）已落地。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）。
@@ -200,9 +200,16 @@ libmpv 构建链（A0 的另一半，2026-11-26）：
   `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`（不额外带 `libc++_shared.so`）；
 - `strip` 后 x86_64 约 28MB，LOAD 对齐 `0x4000`（16KB）；
 - `scripts/android/{mpv-probe.c,check-mpv.sh}`：推到设备上 `dlopen` + 读 client API
-  版本 + `mpv_create`。Android 33 x86_64 模拟器实测 `libmpv client API: 2.6`、
-  `mpv_create ok`。
+  版本 + `mpv_create`。Android 33 x86_64 模拟器与真机（HBY 5502 / Android 9 /
+  arm64）实测均为 `libmpv client API: 2.6`、`mpv_create ok`；从装好的 APK 里
+  抽出的 `libmpv.so` 再测一次同样通过。
 - 出画（Surface + EGL）还没做，属于 A4。
+
+A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
+`MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +
+摘要），手机壳首页直接显示，日志 tag 是 `DvCaps`。六项结论里只有「后台 / PiP」
+能在 HBY 5502 上验；HDR10 掉帧、DV P8 / P5、直通、24p 都需要一台支持
+HDR + HDMI 输出的设备，仍挂在 A1 门禁上。
 
 ### M2-B TV
 
@@ -219,9 +226,27 @@ libmpv 构建链（A0 的另一半，2026-11-26）：
 | 设备 | 用途 | 必测 |
 | --- | --- | --- |
 | x86_64 模拟器 | 逻辑与 UI 回归 | JNI / JSON、导航、ViewModel |
+| HBY 5502（Android 9 / MT6765） | 低端降级路径 | SDR 输出、软/硬解回退、无直通时的 PCM 下混 |
 | Android 12+ 真机 | 手机 Alpha 主验 | 两个引擎、DV P5、ASS、PiP、VFS |
 | 低端 Android 9 盒子（Amlogic） | TV 冒烟 | 起播、焦点、4K 掉帧、直通 |
 | DV 电视 / 支持 DV 的盒子 | DV / HDR / 直通 | P5 / P8、HDR10、HDR10+、TrueHD 直通 |
+
+HBY 5502 的实测能力（2026-11-27，完整 JSON 见
+[devices/hby-5502.json](devices/hby-5502.json)，由 `:core` 的
+`Capabilities.collect()` 采集）：
+
+| 项 | 结果 |
+| --- | --- |
+| 屏幕 | 720×1280，只有一个模式 57.5Hz，`wideColorGamut=false` |
+| HDR | `supportedHdrTypes` 为空——这台机器连 HDR10 都不支持，A5 的降级路径在这里验 |
+| 解码 | AVC / HEVC / VP8 / VP9 / MPEG2 / MPEG4 / H263 / VC1(WMV) / DivX；**无 AV1** |
+| DV | 没有 DV 解码器，P5 / P8 在这台上只能走 mpv 整形到 SDR |
+| 音频输出 | 只有 earpiece / speaker / telephony，编码只有 `pcm_16` / `pcm_float`——**没有任何直通** |
+| PiP | 有 |
+| GLES | 3.2 |
+
+它适合验「按设备能力兜底」这条主线：没有 HDR、没有直通、没有 AV1，路由应该全部
+落到 SDR + PCM + mpv/软解。
 
 ```bash
 ./gradlew :app-phone:assembleDebug
