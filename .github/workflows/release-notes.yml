@@ -1,0 +1,59 @@
+name: Release 说明
+
+# 只重写某个 tag 的 Release 正文，不重新打包。
+#
+# 发版时正文由 macos.yml 的 notes job 写（.github/release-notes.md +
+# 自动变更列表）。已经发出去的版本如果正文写错了（漏了主要修复、或者
+# 像 v0.1.5 那样叠了几份 changelog），用这个工作流补，不用为了改一段
+# 文字再重编 40 分钟的 macOS 依赖栈。
+#
+# 两种触发方式：
+#   - 手动：Actions → Release 说明 → Run workflow，填 tag
+#   - push 一个 notes-<tag> 标签（例如 notes-v0.1.5），用完删掉即可；
+#     它不匹配 macos.yml / windows.yml 的 'v*'，不会触发打包
+run-name: 写 Release 说明 ${{ inputs.tag || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要写正文的 tag（例如 v0.1.5）'
+        required: true
+        default: ''
+  push:
+    tags:
+      - 'notes-v*'
+
+# softprops/action-gh-release 要改 Release。
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    name: 写 Release 说明
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 归一化 tag
+        env:
+          RAW_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG="${RAW_TAG#notes-}"
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            echo "::error::不是版本 tag：$RAW_TAG"
+            exit 1
+          fi
+          echo "TARGET_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "本次要写的 Release：$TAG"
+
+      - name: 写入正文（手写主要修复 + 自动变更列表）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TARGET_TAG }}
+          body_path: .github/release-notes.md
+          # 只在这里和 macos.yml 的 notes job 里出现，其他 job 一律不写正文，
+          # 否则正文里会叠出好几份 Full Changelog。
+          generate_release_notes: true
