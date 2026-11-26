@@ -234,6 +234,19 @@ libmpv 构建链（A0 的另一半，2026-11-26）：
   `MediaMetadata` 没有章节字段，`Mp4Extractor` 也不解析 `chpl`。
   会话 / 通知 / 续播还没接，属于 A4 末尾。
 
+章节 / 续播 / ASS（A4 收尾，2026-11-27）：
+
+- **章节**：mpv 读 `chapter-list`；Media3 的 `Mp4Extractor` 不解析 `chpl`，
+  新增 `Mp4Chapters` 直接读 `moov/udta/chpl`（`version/flags + reserved + count +
+  [start(100ns) len title]`）。同一份样片两边都得到「第一章 / 第二章 / 第三章」，
+  验证页「下一章」把位置从 4.7s 跳到 20s、再跳到 40s。
+- **续播**：`:player` 的 `PlaybackMemory` 按片源地址存位置（`SharedPreferences`），
+  片尾 5 秒内清记录。实测播到 51.4s 退出，重启后日志
+  `续播：51377 ms`，从原位置继续。
+- **ASS**：mpv 走 libass，`sub-add <path>` 加载 `.ass` 后渲染正常
+  （`{\pos}`、`\c`、`\fscx/\fscy` 都生效，截图为证）。Media3 侧 ASS 还没接，
+  属于 A6 的 FFmpeg/字幕扩展。
+
 HDR 输出（A5，2026-11-27）：在 OnePlus 10 Pro（Android 16）上，mpv 把 BT.2020 +
 PQ 的 HEVC Main10 片源识别为 `prim=bt.2020`、`gamma=pq`、`max-luma=10000`，
 把 BT.2020 + HLG 的片源识别为 `gamma=hlg`、`light=hlg`、`max-luma=1000`。

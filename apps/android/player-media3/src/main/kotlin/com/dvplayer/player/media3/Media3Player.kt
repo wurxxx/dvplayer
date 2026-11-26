@@ -132,6 +132,7 @@ class Media3Player(context: Context) : PlayerEngine {
     override fun load(url: String) {
         currentUrl = url
         subtitles.clear()
+        chapters = if (url.contains("://")) emptyList() else Mp4Chapters.parse(File(url))
         player.setMediaItem(buildItem(url))
         player.prepare()
         player.playWhenReady = true
@@ -221,10 +222,13 @@ class Media3Player(context: Context) : PlayerEngine {
     }
 
     /**
-     * ExoPlayer 1.11 的 `MediaMetadata` 没有章节字段，Mp4Extractor 也不解析
-     * `chpl` / `chap`。章节先由 mpv 内核提供；Media3 侧等 A6 自己解析章节轨。
+     * ExoPlayer 1.11 不解析 MP4 章节，这里自己读 `moov/udta/chpl`（见 [Mp4Chapters]）。
+     * 网络 URL 暂不解析。
      */
-    override fun chapters(): List<ChapterInfo> = emptyList()
+    override fun chapters(): List<ChapterInfo> = chapters
+
+    /** 本地文件的章节缓存；`load` 时刷新。 */
+    private var chapters: List<ChapterInfo> = emptyList()
 
     override fun setListener(listener: PlayerEngine.Listener?) {
         this.listener = listener

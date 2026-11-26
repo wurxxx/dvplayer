@@ -19,6 +19,7 @@ import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import com.dvplayer.player.EngineId
+import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
 import com.dvplayer.player.TrackKind
 import com.dvplayer.player.media3.Hdr10PlusProbe
@@ -50,6 +51,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var matchedFps = 0.0
     private var probeResult: String? = null
     private var speedIndex = 0
+    private var tickCount = 0
+    private var resumeApplied = false
+    private lateinit var memory: PlaybackMemory
     private val handler = Handler(Looper.getMainLooper())
 
     private val enginePlayer: PlayerEngine?
@@ -57,6 +61,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     private val url: String
         get() = intent.getStringExtra("url") ?: DEFAULT_URL
+
+    /** 外部字幕路径：`--es sub /path/to.ass`，默认是内置测试 srt。 */
+    private val subtitleUrl: String
+        get() = intent.getStringExtra("sub") ?: SUBTITLE_URL
 
     private val engine: String
         get() = intent.getStringExtra("engine") ?: "mpv"
@@ -71,12 +79,15 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     statusLine()
                 }
             }
+            maybeResume()
+            if (++tickCount % 3 == 0) maybeSave()
             handler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        memory = PlaybackMemory(this)
         when (engine) {
             "media3" -> {
                 media3 = Media3Player(this)
@@ -143,6 +154,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onPause() {
         handler.removeCallbacks(refresh)
+        maybeSave()
         super.onPause()
     }
 
@@ -208,8 +220,42 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         add("倍速") { cycleSpeed() }
         add("音轨") { cycleTrack(TrackKind.AUDIO) }
         add("字幕") { cycleTrack(TrackKind.SUB) }
-        add("载入字幕") { enginePlayer?.addSubtitle(SUBTITLE_URL) }
+        add("载入字幕") { enginePlayer?.addSubtitle(subtitleUrl) }
+        add("下一章") { nextChapter() }
         return box
+    }
+
+    /** 首次拿到片长后跳到上次的位置。 */
+    private fun maybeResume() {
+        if (resumeApplied) return
+        val player = enginePlayer ?: return
+        val state = player.state()
+        if (state.durationMs <= 0) return
+        resumeApplied = true
+        val saved = memory.position(url)
+        if (saved > 3_000 && saved < state.durationMs - 5_000) {
+            player.seekTo(saved)
+            Log.i(TAG, "续播：$saved ms")
+        }
+    }
+
+    private fun maybeSave() {
+        val player = enginePlayer ?: return
+        val state = player.state()
+        if (state.durationMs > 0) memory.save(url, state.positionMs, state.durationMs)
+    }
+
+    private fun nextChapter() {
+        val player = enginePlayer ?: return
+        val chapters = player.chapters()
+        if (chapters.isEmpty()) {
+            Log.i(TAG, "没有章节信息")
+            return
+        }
+        val position = player.state().positionMs
+        val next = chapters.firstOrNull { it.startMs > position + 500 } ?: chapters.first()
+        player.seekTo(next.startMs)
+        Log.i(TAG, "章节 -> ${next.title}（${next.startMs}ms）")
     }
 
     private fun seekBy(deltaMs: Long) {
