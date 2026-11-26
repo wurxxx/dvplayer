@@ -40,6 +40,7 @@
   和 Windows 的 `MediaText.Runtime` 一致；播放页进度 / 剩余时间仍然用时间码
 - 详情页：整块横版图铺满、渐变淡到页面底色、动作按钮（播放 / 重头看 / 收藏 /
   标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条）、
+  续播集高亮（见下）、
   演职人员（96 宽头像卡，点开看作品，可继续往下钻详情）、链接（豆瓣，源里有
   TMDB / IMDb id 时再加这两个）、
   媒体信息（视频、每条音轨、每条字幕各一张卡，横向排开）、
@@ -161,6 +162,12 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   也不被黑底挡住；单击黑底只把窗口选中，不切暂停。黑底上双击走**最大化 /
   还原**（`actions.zoom()`），和 Windows 一致；进假全屏会把三个圆点收掉，
   打开阶段不能这么干。
+- 详情页带续播（某一集进度 1%–99.5%）时：「播放」按钮写成 `播放 第 20 集 01:47`，
+  那一集的卡片用强调色描边、集号变色，进页面后选集行自动滚到它（`resumeEpisode`
+  + `jumpEpisodeID`，只做一次：之后用户自己滚到别处不会被补页拽回来）。续播集
+  落在后面的分页时，集数变多（`onChange(of: episodes.count)`）再试一次，补到那页
+  才定位。回归：`DVPLAYER_DETAIL=<剧集 id> DVPLAYER_SHOT=…`，日志有
+  `[Detail] auto jump resume E20`，截图第一张集卡是描边的 E20、按钮带「第 20 集」。
 - 选集超过 30 集时标题下有 `1-30 / 31-60 …` 段按钮（复用 `FlowChips`，放不下自动
   换行、行间距 8 pt，不用横向滚动）：点一下先补页、再把横向选集行滚到那一段第 1 集。滚动用 `Components.swift` 的
   `RowJumpBridge` 直接设行内 `NSScrollView` 的横向偏移——SwiftUI 的 `scrollTo`
