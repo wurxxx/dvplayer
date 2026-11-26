@@ -107,6 +107,15 @@ SMB_USER=... SMB_PASS=... tests/android/verify-credentials.sh
 
 脚本会先带密码列一次目录、检查 SharedPreferences 里没有明文，再不传密码列一次。
 
+SMB 登录本身出问题（`Authentication failed` / 方言 / 签名）时，先在 Mac 的
+JVM 上跑门控测试，区分「密码错」和「smbj 与这台 Samba 不兼容」：
+
+```bash
+cd apps/android
+SMB_LIVE=1 SMB_USER=... SMB_PASS=... \
+  ./gradlew :core:testDebugUnitTest --tests '*SmbLiveTest*'
+```
+
 ## 基线
 
 | 项 | 值 | 说明 |

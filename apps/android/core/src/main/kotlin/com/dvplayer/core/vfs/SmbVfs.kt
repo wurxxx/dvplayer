@@ -76,7 +76,18 @@ class SmbVfs(
         ).also { connection = it }
         val sess = session ?: run {
             val auth = AuthenticationContext(user, password.toCharArray(), domain)
-            conn.authenticate(auth).also { session = it }
+            try {
+                conn.authenticate(auth).also { session = it }
+            } catch (t: Throwable) {
+                // 认证失败时把协商结果一起打出来：区分密码错、方言 / 签名不兼容。
+                Log.e(
+                    tag,
+                    "SMB 认证失败 user=$user domain=${if (domain.isEmpty()) "空" else domain} " +
+                        "密码长度=${password.length}: ${t.javaClass.simpleName} ${t.message}",
+                    t,
+                )
+                throw t
+            }
         }
         val disk = sess.connectShare(name) as DiskShare
         shares[name] = disk

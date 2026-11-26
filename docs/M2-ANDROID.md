@@ -588,9 +588,21 @@ libmpv 缓存在 `build/android-mpv/arm64/prefix`，key 是
 
 **凭据实测**（`tests/android/verify-credentials.sh`）：带密码列一次目录后，
 SharedPreferences 里是 `cred:smb://10.0.0.134:445 → iv:Base64(密文)`，
-没有明文；第二次不传密码解出的密码长度与第一次一致。同一次测试里 SMB
-登录返回 `Authentication failed`，但同一个密码在 Mac 上登录成功，
-说明问题在设备侧 smbj 的 NTLM 会话（与存储链路无关），待查。
+没有明文；第二次不传密码解出同一密码、仍能列出 20 项。这同时端到端验了
+「输入 → Base64 传输 → 解密 → smbj 登录」整条链路。
+
+排查期间出现过设备侧 `Authentication failed`，最后确认是当时卡片里输入的
+密码本身少一位（Mac 上同长度也失败），不是 NTLM / Samba 签名问题。定位手段
+留在了 `SmbLiveTest`（门控，见下），以后再遇到认证问题先跑它区分
+「密码错」与「smbj 兼容性」：
+
+```bash
+SMB_LIVE=1 SMB_USER=... SMB_PASS=... \
+  ./gradlew :core:testDebugUnitTest --tests '*SmbLiveTest*'
+```
+
+`SmbVfs` 的认证失败日志会打印 user / domain / 密码长度 / 异常类型，
+不打印密码本身。
 
 ## 8. 设备与验证
 
@@ -641,9 +653,9 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 2. **TV / 盒子的 HDR 与 tunneling**：手机侧已验，盒子合成器只认 tunneled HDR 时
    要 Media3 补。
 3. **mpv 的音频直通**：`ao_audiotrack` 的 IEC61937 支持未验证；不支持就路由 Media3。
-4. **SMB 认证**：凭据加密存储已验证，但设备侧 smbj 登录返回
-   `Authentication failed`（同一个密码在 Mac 上成功），待查
-   NTLM 会话 / Samba 签名。
+4. **SMB 认证**：已解决，早先的 `Authentication failed` 是测试时密码输错
+   （长度都对不上），不是设备侧 NTLM / Samba 签名问题；带密码与只带加密凭据
+   两条路径都已实测通过（§7.10）。
 
 | 未决项 | 待定 |
 | --- | --- |
