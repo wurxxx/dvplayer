@@ -236,11 +236,27 @@ private struct SidebarView: View {
     }
 
     /// 左下角只留版本；连没连上看服务器列表前面的状态点。
+    /// 启动时查到新版本就在版本号下面加一行，点开「设置 → 关于」看详情。
     private var status: some View {
-        Text("版本 \(state.coreVersion)")
-            .font(.system(size: 11.5))
-            .foregroundStyle(Theme.faint)
-            .lineLimit(1)
+        VStack(alignment: .leading, spacing: 3) {
+            Text("版本 \(state.appVersion)")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.faint)
+                .lineLimit(1)
+
+            if let update = state.availableUpdate {
+                Button {
+                    state.page = .settings
+                } label: {
+                    Text("可更新 v\(update.version)")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help("发现新版本 v\(update.version)，点开「设置 → 关于」下载")
+            }
+        }
     }
 }
 

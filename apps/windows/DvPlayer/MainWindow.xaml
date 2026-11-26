@@ -37,10 +37,18 @@
           </StackPanel>
         </StackPanel>
 
-        <!-- 底部只留版本：连接状态看服务器列表前面的状态点 -->
-        <TextBlock x:Name="VersionText" DockPanel.Dock="Bottom" Text="版本"
-                   FontSize="11.5" Foreground="{StaticResource FaintBrush}"
-                   Margin="20,0,18,18" TextTrimming="CharacterEllipsis" />
+        <!-- 底部只留版本：连接状态看服务器列表前面的状态点；
+             有新版本时在版本号下面加一行可点的提示 -->
+        <StackPanel DockPanel.Dock="Bottom" Margin="20,0,18,18">
+          <TextBlock x:Name="VersionText" Text="版本"
+                     FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                     TextTrimming="CharacterEllipsis" />
+          <TextBlock x:Name="UpdateHintText" Text="" Visibility="Collapsed"
+                     FontSize="11.5" FontWeight="SemiBold"
+                     Foreground="{StaticResource AccentBrush}"
+                     Cursor="Hand" TextTrimming="CharacterEllipsis"
+                     MouseLeftButtonUp="OnVersionHintClick" />
+        </StackPanel>
 
         <!-- 源多了侧栏要能滚：之前是固定 StackPanel，超出窗口就点不到下面的源 -->
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

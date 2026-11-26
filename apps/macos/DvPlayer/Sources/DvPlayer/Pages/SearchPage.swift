@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import DvCore
 
 /// 「搜索」页：一次搜索覆盖所有已连接源，结果平铺成网格。
@@ -184,6 +185,10 @@ struct SearchPage: View {
 struct SettingsPage: View {
     @EnvironmentObject private var state: AppState
 
+    /// 更新检查结果；nil = 还没查过。
+    @State private var updateState: UpdateChecker.Result?
+    @State private var checkingUpdate = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "设置")
@@ -342,9 +347,61 @@ struct SettingsPage: View {
 
                             KeyValueRow(key: "共享核心", value: state.coreVersion)
                             KeyValueRow(key: "应用", value: "DV Player for macOS \(appVersion)")
+
+                            // 项目地址：点开默认浏览器，地址本身也完整显示。
+                            HStack(alignment: .top, spacing: 12) {
+                                Text("项目")
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(Theme.faint)
+                                    .frame(width: 72, alignment: .leading)
+
+                                Button {
+                                    NSWorkspace.shared.open(ProjectInfo.repoURL)
+                                } label: {
+                                    Text("github.com/\(ProjectInfo.repo)")
+                                        .font(.system(size: 12.5))
+                                        .foregroundStyle(Theme.accent)
+                                        .underline()
+                                }
+                                .buttonStyle(.plain)
+                                .help("在浏览器中打开项目主页")
+
+                                Spacer(minLength: 0)
+                            }
+
+                            HStack(alignment: .center, spacing: 12) {
+                                Text("更新")
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(Theme.faint)
+                                    .frame(width: 72, alignment: .leading)
+
+                                HStack(spacing: 7) {
+                                    if checkingUpdate {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .tint(Theme.accent)
+                                    }
+                                    Text(updateText)
+                                        .font(.system(size: 12.5))
+                                        .foregroundStyle(updateTextColor)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                Spacer(minLength: 0)
+
+                                Button(updateButtonTitle) {
+                                    if case .available(_, let url) = updateState {
+                                        NSWorkspace.shared.open(url)
+                                    } else {
+                                        Task { @MainActor in await checkUpdates(force: true) }
+                                    }
+                                }
+                                .buttonStyle(SecondaryButtonStyle())
+                                .disabled(checkingUpdate)
+                            }
+
                             KeyValueRow(key: "配置",
                                         value: AppSettings.fileURL.path)
-                            KeyValueRow(key: "已连接", value: state.isConnected ? "是" : "否")
                         }
                     }
 
@@ -362,6 +419,72 @@ struct SettingsPage: View {
         .onChange(of: state.settings.autoConnect) { _ in state.settings.save() }
         .onChange(of: state.settings.bufferSizeMb) { _ in state.settings.save() }
         .onChange(of: state.settings.hdrPeakNits) { _ in state.settings.save() }
+        // 进设置页自动查一次（有 10 分钟缓存，切页面不会反复打接口）。
+        .task {
+            if updateState == nil {
+                await checkUpdates(force: false)
+            }
+        }
+    }
+
+    // MARK: - 更新检查
+
+    private var updateText: String {
+        if checkingUpdate {
+            return "正在检查…"
+        }
+        guard let updateState else {
+            return "还没有检查过"
+        }
+        switch updateState {
+        case .upToDate(let current):
+            return "已是最新版本（v\(current)）"
+        case .available(let version, _):
+            return "发现新版本 v\(version)"
+        case .noRelease:
+            return "GitHub 上还没有发布版本"
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var updateTextColor: Color {
+        guard !checkingUpdate, let updateState else {
+            return Theme.faint
+        }
+        switch updateState {
+        case .upToDate:
+            return Theme.success
+        case .available:
+            return Theme.accent
+        case .noRelease:
+            return Theme.faint
+        case .failed:
+            return Theme.danger
+        }
+    }
+
+    private var updateButtonTitle: String {
+        if checkingUpdate {
+            return "检查中…"
+        }
+        if case .available = updateState {
+            return "下载更新"
+        }
+        return updateState == nil ? "检查更新" : "重新检查"
+    }
+
+    @MainActor
+    private func checkUpdates(force: Bool) async {
+        guard !checkingUpdate else { return }
+        checkingUpdate = true
+        defer { checkingUpdate = false }
+
+        let result = await UpdateChecker.shared.check(currentVersion: appVersion,
+                                                      force: force)
+        updateState = result
+        // 侧栏左下角跟着变：这里查到的新版本也要提示。
+        state.applyUpdateCheck(result)
     }
 
     // MARK: - HDR 亮度参考
@@ -399,12 +522,8 @@ struct SettingsPage: View {
 
     // MARK: - 弹幕 / 字幕凭据
 
-    /// .app 里读 Info.plist（发布时和安装包版本一起改）；
-    /// 直接 `swift build` 跑的二进制没有 bundle，退回共享核心版本。
-    private var appVersion: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
-            ?? state.coreVersion
-    }
+    /// 版本号统一由 `AppState` 提供（侧栏更新提示用的是同一个值）。
+    private var appVersion: String { state.appVersion }
 
     private var danmakuHint: String {
         DanmakuCredential.isConfigured

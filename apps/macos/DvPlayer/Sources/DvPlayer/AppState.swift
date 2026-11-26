@@ -16,6 +16,9 @@ final class AppState: ObservableObject {
     }
 
     @Published var settings = AppSettings.load()
+    /// 启动时查到的新版本；侧栏左下角据此提示，nil = 已是最新 / 还没查。
+    @Published var availableUpdate: AvailableUpdate?
+
     @Published var page: Page = .sources {
         // 侧栏换页时收起详情，避免「搜索 → 详情 → 点记录」还停在详情上。
         didSet {
@@ -50,6 +53,12 @@ final class AppState: ObservableObject {
 
     var coreVersion: String { Core.version }
 
+    /// 应用版本：.app 读 Info.plist，直接跑二进制时退回共享核心版本。
+    var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+            ?? coreVersion
+    }
+
     var isConnected: Bool { core != nil }
 
     var hasSources: Bool { !settings.sources.isEmpty }
@@ -80,6 +89,9 @@ final class AppState: ObservableObject {
     func start() async {
         guard !started else { return }
         started = true
+
+        // 启动顺手查一次更新，和连接并行；有结果才在左下角提示，不打扰启动流程。
+        Task { await refreshUpdateAvailability() }
 
         guard hasSources else {
             page = .sources
@@ -130,6 +142,26 @@ final class AppState: ObservableObject {
         // 放在切页之后——切页会把详情收起来。
         if let detail = debugDetail, !detail.isEmpty {
             detailItemId = detail
+        }
+    }
+
+    // MARK: - 更新
+
+    /// 启动时查一次；失败 / 没发布就当作没有更新（不弹错）。
+    private func refreshUpdateAvailability() async {
+        let result = await UpdateChecker.shared.check(currentVersion: appVersion)
+        applyUpdateCheck(result)
+    }
+
+    /// 把检查结果写回侧栏提示：有新版就显示，已是最新就收起。
+    func applyUpdateCheck(_ result: UpdateChecker.Result) {
+        switch result {
+        case .available(let version, let url):
+            availableUpdate = AvailableUpdate(version: version, url: url)
+        case .upToDate:
+            availableUpdate = nil
+        case .noRelease, .failed:
+            break
         }
     }
 
