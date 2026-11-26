@@ -1,5 +1,6 @@
 package com.dvplayer.player.mpv
 
+import android.util.Log
 import android.view.Surface
 import com.dvplayer.player.ChapterInfo
 import com.dvplayer.player.EngineId
@@ -18,11 +19,15 @@ import com.dvplayer.player.TrackKind
  * 状态推送用 200ms 的轮询线程读 mpv 属性（libmpv 的属性读取本身是线程安全的），
  * 比再往 native 里加一套事件回调简单，也足够驱动进度条。
  */
-class MpvPlayer : PlayerEngine {
+class MpvPlayer(private val verbose: Boolean = false) : PlayerEngine {
 
     override val id: EngineId = EngineId.MPV
 
-    private var handle: Long = MpvNative.create()
+    private companion object {
+        const val TAG = "DvMpv"
+    }
+
+    private var handle: Long = MpvNative.create(verbose)
 
     @Volatile
     private var listener: PlayerEngine.Listener? = null
@@ -64,8 +69,26 @@ class MpvPlayer : PlayerEngine {
     }
 
     /** GL 就绪前的调用会被 native 侧暂存，等 render context 建好再真正加载。 */
+    /** DV 配置（A7 路由探出来的）。P5 必须软解，见 [load]。 */
+    private var dvProfile: Int? = null
+
+    /**
+     * A5：P5 的像素是 IPTPQc2，要靠 RPU 才能还原颜色；mediacodec 硬解不吐
+     * `AV_FRAME_DATA_DOVI_METADATA`，libplacebo 拿不到 RPU 就会把画面渲染成绿紫。
+     * 所以 P5 强制软解。P8/P7 的 BL 本身就是 HDR10，硬解只是少一层动态元数据，
+     * 颜色不受影响。
+     */
+    fun setDolbyVisionProfile(profile: Int?) {
+        dvProfile = profile
+    }
+
     override fun load(url: String) {
-        if (handle != 0L) MpvNative.play(handle, url)
+        if (handle == 0L) return
+        if (dvProfile == 5 && getProperty("hwdec") != "no") {
+            val err = setProperty("hwdec", "no")
+            Log.i(TAG, "DV P5：切软解（硬解丢 RPU）-> ${err ?: "ok"}")
+        }
+        MpvNative.play(handle, url)
     }
 
     override fun play() {
@@ -221,7 +244,8 @@ internal object MpvNative {
         System.loadLibrary("dvplayer_mpv")
     }
 
-    external fun create(): Long
+    /** [verbose] 打开 libmpv 的 v 级日志（照进 logcat 的 `DvMpv`）。 */
+    external fun create(verbose: Boolean): Long
 
     external fun attach(handle: Long, surface: Surface, width: Int, height: Int)
 

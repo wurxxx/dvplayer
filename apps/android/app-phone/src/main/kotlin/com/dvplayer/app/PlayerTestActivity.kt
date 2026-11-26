@@ -26,6 +26,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.SubtitleView
 import com.dvplayer.player.DiscSource
 import com.dvplayer.player.EngineId
+import com.dvplayer.player.DolbyVisionProbe
 import com.dvplayer.player.EngineRouter
 import com.dvplayer.player.FrameRateMatcher
 import com.dvplayer.player.MediaSessionController
@@ -81,6 +82,11 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var memory: PlaybackMemory
     private val handler = Handler(Looper.getMainLooper())
 
+    /** `--es shot <png>`：到 [shotAtMs] 时让 mpv 自己截一帧（颜色回归用）。 */
+    private var shotPath: String? = null
+    private var shotAtMs = 12_000L
+    private var shotRetry = 0
+
     private val enginePlayer: PlayerEngine?
         get() = player ?: media3
 
@@ -91,6 +97,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var bridgedUrl: String? = null
     private var smbVfs: SmbVfs? = null
     private var bridge: VfsHttpBridge? = null
+
+    /** DV 配置（P5 要软解）；本地与桥接都探一次。 */
+    private var dvProfile: Int? = null
 
     /** 续播 / 记录用的片源标识：SMB 用 smb:// 地址，其余用 intent 里的 url。 */
     private val contentKey: String
@@ -129,6 +138,22 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 session?.update(MediaSessionController.snapshot(player.state()))
             }
             maybeResume()
+            shotPath?.let { path ->
+                val pos = enginePlayer?.state()?.positionMs ?: 0L
+                if (pos >= shotAtMs) {
+                    val err = player?.command("screenshot-to-file", path, "video")
+                    if (err == null) {
+                        Log.i(TAG, "截图 $path @${pos}ms -> ok")
+                        shotPath = null
+                    } else if (++shotRetry > 3) {
+                        Log.w(TAG, "截图 $path @${pos}ms 放弃：$err（用 adb screencap 兜底）")
+                        shotPath = null
+                    } else {
+                        // gpu-next + GLES 下 seek 刚结束时偶发失败，下一 tick 再试。
+                        Log.w(TAG, "截图 $path @${pos}ms 失败，重试 $shotRetry：$err")
+                    }
+                }
+            }
             if (++tickCount % 3 == 0) {
                 maybeSave()
                 enginePlayer?.let { p ->
@@ -136,7 +161,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     // SMB / 桥接要看吞吐：mpv 的 demuxer 缓存时长与读速最能说明问题。
                     val cache = if (p is MpvPlayer) {
                         " cache=${p.getProperty("demuxer-cache-duration")}" +
-                            " bw=${p.getProperty("cache-speed")}"
+                            " bw=${p.getProperty("cache-speed")}" +
+                            " drops=${p.getProperty("frame-drop-count")}" +
+                            " fps=${p.getProperty("estimated-vf-fps")}" +
+                            " hwdec=${p.getProperty("hwdec-current")}"
                     } else {
                         ""
                     }
@@ -167,6 +195,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     )
                     smbVfs = vfs
                     val file = vfs.open(smbUrl)
+                    // 桥接地址是 127.0.0.1，播放器没法按路径探 DV，这里先用 VfsFile 探。
+                    dvProfile = DolbyVisionProbe.probe(
+                        { offset, buffer, count -> file.read(offset, buffer, count) },
+                        file.size,
+                    )?.profile
+                    Log.i(TAG, "SMB 片源 DV profile=${dvProfile ?: "无"}")
                     val b = VfsHttpBridge(file, smbUrl.substringAfterLast('/'))
                     b.start()
                     bridge = b
@@ -200,7 +234,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             }
             "codec" -> Unit  // 只做 MediaCodec 探针
             else -> {
-                val mpv = MpvPlayer()
+                // --es log 1 打开 libmpv 的 v 级日志（DvMpv）。
+                val mpv = MpvPlayer(verbose = intent.hasExtra("log"))
                 if (!mpv.isValid) {
                     finish()
                     return
@@ -226,6 +261,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     routeReason = "SDR tone mapping（force_sdr）"
                     Log.i(TAG, "force_sdr -> mpv tone mapping")
                 }
+                // 本地文件直接探；P5 的硬解会丢 RPU（绿紫），交给 MpvPlayer 切软解。
+                if (dvProfile == null && !url.contains("://")) {
+                    dvProfile = DolbyVisionProbe.probe(url)?.profile
+                }
+                mpv.setDolbyVisionProfile(dvProfile)
+                Log.i(TAG, "片源 DV profile=${dvProfile ?: "无"}")
                 Log.i(TAG, "mpv version: ${mpv.getProperty("mpv-version")}")
             }
         }
@@ -297,6 +338,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             }.onFailure { e -> Log.w(TAG, "前台服务启动失败", e) }
             Log.i(TAG, "媒体会话就绪")
         }
+
+        // A5 颜色回归：--es shot <png> 播放到 --el shot_at（默认 12000ms）时让 mpv
+        // 自己截一帧（video = 渲染结果、不含 OSD、走 sRGB tone mapping），
+        // 绕开 adb screencap 对 HDR 的合成/色调映射。
+        shotPath = intent.getStringExtra("shot")
+        shotAtMs = intent.getLongExtra("shot_at", 12_000L)
 
         // A9 验证钩子：--es smb <目录> 列目录（--es smb_deep N 递归 N 层）。
         // 日志格式固定为 SMB|D或F|size|path，方便 shell 侧解析。

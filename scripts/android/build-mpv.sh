@@ -9,7 +9,8 @@
 #
 # 依赖：FFmpeg n9.0.2 / libplacebo v7.387.0 / libass 0.17.4 / freetype 2.15.0 /
 #       fribidi 1.0.18 / harfbuzz 15.2.0 / libunibreak 8.0.1 / fontconfig 2.18.4 /
-#       libxml2 2.15.4 / libbluray 1.5.0 / libudfread 1.2.0
+#       libxml2 2.15.4 / libbluray 1.5.0 / libudfread 1.2.0 /
+#       libdovi 3.4.0（Dolby Vision RPU 解析，libplacebo 的 DOVI 依赖）
 #
 # 用法：
 #   scripts/android/build-mpv.sh                  # arm64
@@ -112,8 +113,15 @@ ensure_tar ffmpeg n9.0.2.tar.gz \
     https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n9.0.2.tar.gz
 ensure_tar libass libass-0.17.4.tar.gz \
     https://github.com/libass/libass/releases/download/0.17.4/libass-0.17.4.tar.gz
-ensure_tar mpv v0.42.0.tar.gz \
-    https://github.com/mpv-player/mpv/archive/refs/tags/v0.42.0.tar.gz
+# mpv 必须 >= ad9d850（"libmpv: add a gpu-next render backend"）：v0.42.0 的
+# vo_libmpv.c 只挂了老 gpu / sw 两个后端，`vo=libmpv` 走老 gpu 渲染器，而老
+# gpu 在 `video/out/gpu/video.c` 里直接 `mp_image_params_restore_dovi_mapping()`
+# 把 DV 映射剥掉——P5 因此渲染成绿紫，HDR10+ 动态元数据也拿不到。
+# 这里钉在桌面端同一个 commit（scripts/build-deps-macos.sh 的 MPV_COMMIT），
+# 保证两端渲染路径一致。
+MPV_COMMIT=${MPV_COMMIT:-1eb941f}
+ensure_tar mpv "mpv-$MPV_COMMIT.tar.gz" \
+    "https://github.com/mpv-player/mpv/archive/$MPV_COMMIT.tar.gz"
 
 FFMPEG_SRC=${FFMPEG_SRC:-$SRC/ffmpeg}
 LIBASS_SRC=${LIBASS_SRC:-$SRC/libass}
@@ -133,7 +141,18 @@ if [ -z "${LIBPLACEBO_SRC:-}" ]; then
     fi
 fi
 
-for d in "$FFMPEG_SRC" "$LIBASS_SRC" "$MPV_SRC" "$LIBPLACEBO_SRC"; do
+# libdovi 是 Rust crate（MIT），crates.io 的 .crate 就是完整源码；GitHub Release
+# 只提供 Windows 预编译包。
+LIBDOVI_VERSION=${LIBDOVI_VERSION:-3.4.0}
+LIBDOVI_SRC=${LIBDOVI_SRC:-$SRC/dolby_vision}
+if [ ! -f "$LIBDOVI_SRC/Cargo.toml" ]; then
+    download "https://crates.io/api/v1/crates/dolby_vision/$LIBDOVI_VERSION/download" \
+        "$DL/dolby_vision-$LIBDOVI_VERSION.crate"
+    mkdir -p "$LIBDOVI_SRC"
+    tar -xf "$DL/dolby_vision-$LIBDOVI_VERSION.crate" -C "$LIBDOVI_SRC" --strip-components=1
+fi
+
+for d in "$FFMPEG_SRC" "$LIBASS_SRC" "$MPV_SRC" "$LIBPLACEBO_SRC" "$LIBDOVI_SRC"; do
     [ -d "$d" ] || die "缺少源码目录：$d"
 done
 
@@ -172,7 +191,7 @@ arch_setup() {
             FFMPEG_CPU=generic
             ;;
         *)
-            die "不支持的 arch：$ARCH（只做 arm64 / x86_64）"
+            die "不支持的 arch：${ARCH}（只做 arm64 / x86_64）"
             ;;
     esac
 
@@ -221,7 +240,8 @@ EOF
     done
     export CFLAGS="-O2 -fPIC -I$PREFIX/include"
     export CXXFLAGS="-O2 -fPIC -I$PREFIX/include"
-    export LDFLAGS="-L$PREFIX/lib -Wl,-z,max-page-size=16384"
+    # Rust 静态库（libdovi）里带着 std，--gc-sections 才会把没用到的裁掉。
+    export LDFLAGS="-L$PREFIX/lib -Wl,-z,max-page-size=16384 -Wl,--gc-sections"
     export PKG_CONFIG_PATH=
     # 只认我们自己的 prefix，防止把 /usr/local 的 host 库链进来。
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -274,6 +294,76 @@ autotools_dep() { # name src extra...
         make install
     )
     mark_done "$name"
+}
+
+build_libdovi() {
+    if is_done libdovi; then
+        log "[$ARCH] libdovi 已构建"
+        return 0
+    fi
+    log "[$ARCH] 构建 libdovi ${LIBDOVI_VERSION}（Rust，capi）"
+    command -v cargo >/dev/null 2>&1 || die "缺少 cargo（rustup）"
+    command -v cbindgen >/dev/null 2>&1 || die "缺少 cbindgen（cargo install cbindgen）"
+
+    local manifest=$LIBDOVI_SRC/Cargo.toml
+    # 默认 crate-type 只有 rlib；C API 要 staticlib。cargo-c 太重，直接改清单。
+    if ! grep -q '^crate-type' "$manifest"; then
+        python3 - "$manifest" <<'PYEOF'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines()
+out, in_lib = [], False
+for line in lines:
+    if line.strip() == "[lib]":
+        in_lib = True
+        out.append(line)
+        continue
+    if in_lib and line.startswith("[") and line.strip() != "[lib]":
+        in_lib = False
+    if in_lib and line.startswith("crate-type"):
+        continue
+    out.append(line)
+text = "\n".join(out)
+if "crate-type" not in text:
+    idx = text.index("[lib]")
+    end = text.find("\n", idx) + 1
+    text = text[:end] + 'crate-type = ["staticlib"]\n' + text[end:]
+p.write_text(text.rstrip("\n") + "\n")
+PYEOF
+    fi
+
+    ( cd "$LIBDOVI_SRC" && mkdir -p include/libdovi &&
+      cbindgen --config cbindgen.toml --crate dolby_vision --lang c \
+          --output include/libdovi/rpu_parser.h >/dev/null 2>&1 ) ||
+        die "cbindgen 生成 libdovi 头文件失败"
+
+    local env_triple=${ARCH_TRIPLE//-/_}
+    local env_upper
+    env_upper=$(printf '%s' "$env_triple" | tr 'a-z' 'A-Z')
+    (
+        cd "$LIBDOVI_SRC"
+        export "CC_$env_triple=$CC"
+        export "AR_$env_triple=$AR"
+        export "CARGO_TARGET_${env_upper}_LINKER=$CC"
+        cargo build --release --target "$ARCH_TRIPLE" --features capi
+    )
+
+    mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include/libdovi"
+    cp "$LIBDOVI_SRC/target/$ARCH_TRIPLE/release/libdolby_vision.a" "$PREFIX/lib/libdovi.a"
+    cp "$LIBDOVI_SRC/include/libdovi/rpu_parser.h" "$PREFIX/include/libdovi/rpu_parser.h"
+    cat >"$PREFIX/lib/pkgconfig/dovi.pc" <<EOF
+prefix=$PREFIX
+includedir=\${prefix}/include
+libdir=\${prefix}/lib
+
+Name: dovi
+Description: Dolby Vision metadata parsing and writing
+Version: $LIBDOVI_VERSION
+Libs: -L\${libdir} -ldovi
+Libs.private: -ldl -lm
+Cflags: -I\${includedir}
+EOF
+    mark_done libdovi
 }
 
 build_ffmpeg() {
@@ -438,9 +528,12 @@ for arch in $ARCHES; do
         -Dbdj_jar=disabled \
         -Dfreetype=enabled -Dfontconfig=enabled -Dlibxml2=enabled
 
+    build_libdovi
+
+    # DOVI 必须开：P5 是 IPTPQc2，关掉会直接渲染成绿紫（A5 实测踩过）。
     meson_dep libplacebo "$LIBPLACEBO_SRC" \
         -Dvulkan=disabled -Ddemos=false -Dtests=false -Dbench=false \
-        -Dfuzz=false -Dlcms=disabled -Ddovi=disabled -Dlibdovi=disabled
+        -Dfuzz=false -Dlcms=disabled -Ddovi=enabled -Dlibdovi=enabled
 
     build_ffmpeg
     build_mpv
@@ -454,6 +547,13 @@ for arch in $ARCHES; do
         mkdir -p "$DEST"
         cp "$PREFIX/lib/libmpv.so" "$DEST/libmpv.so"
         echo "  -> $DEST/libmpv.so"
+        # 头文件也一起同步：upstream 改过 render API 的枚举（比如
+        # MPV_RENDER_PARAM_RENDERER），陈旧的 vendored 头会编不过或者悄悄用错值。
+        INCDEST=$ROOT/apps/android/player-mpv/src/main/cpp/include/mpv
+        mkdir -p "$INCDEST"
+        cp "$PREFIX"/include/mpv/client.h "$PREFIX"/include/mpv/render.h \
+            "$PREFIX"/include/mpv/render_gl.h "$INCDEST"/
+        echo "  -> $INCDEST/*.h"
     fi
 done
 

@@ -205,16 +205,33 @@ bool create_render_context(Player *p) {
     }
     mpv_opengl_init_params init_params = {egl_proc_address, nullptr};
     int advanced = 1;
+    const char *backend = "gpu-next";
+    // 必须显式要 gpu-next：走默认探测时，gpu-next 初始化失败会被**静默**回退到
+    // 老的 gpu 渲染器，而老渲染器会把 DV 映射剥掉（P5 直接渲染成绿紫），
+    // HDR10+ / target-colorspace-hint 也不完整。失败时再用默认后端兜底，
+    // 但会把原因打进日志。
     mpv_render_param params[] = {
         {MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL)},
         {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &init_params},
         {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced},
+        {MPV_RENDER_PARAM_RENDERER, const_cast<char *>(backend)},
         {MPV_RENDER_PARAM_INVALID, nullptr},
     };
     int err = mpv_render_context_create(&p->render, p->mpv, params);
     if (err < 0) {
-        LOGE("mpv_render_context_create 失败: %s", mpv_error_string(err));
-        return false;
+        LOGE("mpv_render_context_create(gpu-next) 失败: %s", mpv_error_string(err));
+        mpv_render_param fallback[] = {
+            {MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL)},
+            {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &init_params},
+            {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced},
+            {MPV_RENDER_PARAM_INVALID, nullptr},
+        };
+        err = mpv_render_context_create(&p->render, p->mpv, fallback);
+        if (err < 0) {
+            LOGE("mpv_render_context_create 失败: %s", mpv_error_string(err));
+            return false;
+        }
+        LOGE("已回退默认渲染后端（DV / HDR10+ 会不完整）");
     }
     mpv_render_context_set_update_callback(p->render, on_render_update, p);
     return true;
@@ -593,7 +610,7 @@ void set_option(mpv_handle *mpv, const char *name, const char *value) {
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_dvplayer_player_mpv_MpvNative_create(JNIEnv *, jobject) {
+Java_com_dvplayer_player_mpv_MpvNative_create(JNIEnv *, jobject, jboolean verbose) {
     auto *p = new Player();
     p->mpv = mpv_create();
     if (!p->mpv) {
@@ -611,7 +628,11 @@ Java_com_dvplayer_player_mpv_MpvNative_create(JNIEnv *, jobject) {
     set_option(p->mpv, "hwdec", "auto-safe");
     // A5：把片源的色彩空间（PQ / BT.2020）交给显示端，不做 tone mapping。
     set_option(p->mpv, "target-colorspace-hint", "yes");
-    set_option(p->mpv, "msg-level", "all=warn");
+    set_option(p->mpv, "msg-level", verbose ? "all=v" : "all=warn");
+
+    // libmpv 默认不产生日志事件；默认只要 warn（错误与告警），排障时用 verbose。
+    // msg-level 是 pre-parse 选项，只能在 initialize 之前定，不能运行期改。
+    mpv_request_log_messages(p->mpv, verbose ? "v" : "warn");
 
     int err = mpv_initialize(p->mpv);
     if (err < 0) {

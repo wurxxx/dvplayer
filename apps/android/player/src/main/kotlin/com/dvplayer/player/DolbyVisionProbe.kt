@@ -37,8 +37,17 @@ object DolbyVisionProbe {
         if (!file.isFile) return null
         return try {
             RandomAccessFile(file, "r").use { raf ->
-                findIn(raf, 0, minOf(raf.length(), 1L shl 20))
-                    ?: findIn(raf, maxOf(0, raf.length() - (2L shl 20)), raf.length())
+                probe(
+                    { offset, buffer, count ->
+                        if (offset >= raf.length()) {
+                            0
+                        } else {
+                            raf.seek(offset)
+                            raf.read(buffer, 0, minOf(count.toLong(), raf.length() - offset).toInt())
+                        }
+                    },
+                    raf.length(),
+                )
             }
         } catch (t: Throwable) {
             Log.w(TAG, "探测失败：$path", t)
@@ -46,12 +55,29 @@ object DolbyVisionProbe {
         }
     }
 
-    private fun findIn(raf: RandomAccessFile, start: Long, end: Long): Info? {
+    /**
+     * 对任意随机读源探测（SMB / WebDAV 的 `VfsFile` 直接套进来）。播放器拿到的
+     * 往往只是 `http://127.0.0.1` 的桥接地址，不能按本地路径判断。
+     */
+    fun probe(readAt: (offset: Long, buffer: ByteArray, count: Int) -> Int, size: Long): Info? {
+        if (size <= 0) return null
+        return try {
+            findIn(readAt, 0, minOf(size, 1L shl 20))
+                ?: findIn(readAt, maxOf(0, size - (2L shl 20)), size)
+        } catch (t: Throwable) {
+            Log.w(TAG, "探测失败（size=$size）", t)
+            null
+        }
+    }
+
+    private fun findIn(
+        readAt: (offset: Long, buffer: ByteArray, count: Int) -> Int,
+        start: Long,
+        end: Long,
+    ): Info? {
         val length = (end - start).toInt()
         if (length < 8) return null
-        val buffer = ByteArray(length)
-        raf.seek(start)
-        raf.readFully(buffer)
+        val buffer = loadRange(readAt, start, length) ?: return null
         for (tag in TAGS) {
             val needle = tag.toByteArray(Charsets.US_ASCII)
             var i = 0
@@ -77,6 +103,24 @@ object DolbyVisionProbe {
             }
         }
         return null
+    }
+
+    private fun loadRange(
+        readAt: (offset: Long, buffer: ByteArray, count: Int) -> Int,
+        start: Long,
+        length: Int,
+    ): ByteArray? {
+        val out = ByteArray(length)
+        val chunk = ByteArray(minOf(length, 256 * 1024))
+        var done = 0
+        while (done < length) {
+            val want = minOf(chunk.size, length - done)
+            val n = readAt(start + done, chunk, want)
+            if (n <= 0) return if (done == 0) null else out.copyOf(done)
+            System.arraycopy(chunk, 0, out, done, n)
+            done += n
+        }
+        return out
     }
 
     private fun indexOf(haystack: ByteArray, needle: ByteArray, from: Int): Int {

@@ -27,9 +27,9 @@ Android 的差异要如实呈现，不假装支持：
 
 | 项 | Android 的边界 |
 | --- | --- |
-| 解码 | 取决于设备 `MediaCodec`，不做视频软解 |
+| 解码 | 取决于设备 `MediaCodec`，不做视频软解（DV P5 例外，见 A5） |
 | DV P7 | 公共 API 拿不到增强层，只播 BL |
-| DV P5 | 无 DV 解码器时走 mpv 整形（输出 SDR） |
+| DV P5 | 无 DV 解码器时由 libplacebo（含 libdovi）把 IPTPQc2 还原成 HDR10 输出；这条路径必须软解 |
 | 原盘 | 只支持未加密盘；AACS / AACS2 明确拒绝 |
 | 直通 | 按设备 `AudioDeviceInfo.getEncodings()`，TrueHD / DTS-HD 多数盒子没有 |
 | 蓝光菜单 | 不跑 BD-J，用标题列表代替（与桌面一致） |
@@ -474,8 +474,82 @@ Dolby Vision 路由（A7 第三步，2026-11-27）：新增 `DolbyVisionProbe`�
 实测（`samples/p5.mkv` / `p7-fel.mkv`）：
 
 - P7 FEL：`路由 Dolby Vision P7，交 mpv 整形`，mpv 正常播放（20.7s 样片）。
-- P5：`路由 Dolby Vision P5，交 mpv 整形`，mpv 把 P5 重塑成
-  `prim bt.2020 · trc bt.1886`（SDR 输出）——和 A1 的例外表一致。
+- P5：一开始画面**发紫**，查下来是三处问题叠加，见下面的 A5 DV 段。
+
+### A5 补：DV P5 发紫的根因与软解策略（2026-11-26）
+
+现象：P5 样片在 OnePlus 10 Pro 上播出来是绿紫，P7 / HDR10 正常。
+
+根因有三层，最后一层才是前面两次「修好」都没生效的原因：
+
+1. **Android 上的 mpv 没有 gpu-next 后端**（决定性）。之前 Android 用的是
+   v0.42.0 tarball，`vo_libmpv.c` 的 `render_backends[]` 只有 `gpu`/`sw`，
+   `MPV_RENDER_PARAM_RENDERER` 这个参数也还不存在。libmpv render API 于是落到
+   老 `gpu` 渲染器，而老 gpu 在 `video/out/gpu/video.c` 里一上来就
+   `mp_image_params_restore_dovi_mapping()`，把 DV 映射连同 RPU 一起剥掉——
+   P5 的 IPTPQc2 被当成普通 BT.2020 输出，必然绿紫。桌面端早就是 gpu-next，
+   所以同一个 `samples/p5.mkv` 在 macOS 上是正常肤色、在 Android 上是紫的。
+   修法：mpv 钉到 `1eb941f`（含 `ad9d850 libmpv: add a gpu-next render
+   backend`，与桌面端同一 commit），并在 `create_render_context()` 显式传
+   `MPV_RENDER_PARAM_RENDERER="gpu-next"`。不能靠默认探测：gpu-next 初始化
+   失败时会被**静默**回退到老 gpu，必须强制指定并在回退时打日志。
+   **构建坑**：`build-mpv.sh` 的 `ensure_tar` 发现 `build/android-mpv/src/mpv`
+   已存在就直接返回，只改版本号不会换源码——换 mpv 时要同时删
+   `build/android-mpv/src/mpv`、`.../arm64/build/mpv` 和 `.done/mpv`。
+2. **libplacebo 编译时把 DOVI 关了**。`-Ddovi=disabled -Dlibdovi=disabled`
+   时即使 gpu-next 也拿不到 RPU（`pl_map_avdovi_metadata` 用不了），P5 依旧
+   绿紫。现在补了 libdovi 3.4.0：它是 Rust crate（MIT），GitHub Release 只有
+   Windows 预编译包，所以从 crates.io 取 `.crate` 源码，`cbindgen` 生成
+   `libdovi/rpu_parser.h`、`cargo build --features capi` 产 staticlib，再写
+   一个 `dovi.pc` 让 pkg-config 能解析；libplacebo 改成
+   `-Ddovi=enabled -Dlibdovi=enabled`。Rust 静态库带 std，链接时加
+   `-Wl,--gc-sections` 裁掉没用到的部分，`libmpv.so` 27.0MB → 28.4MB。
+3. **mediacodec 硬解不吐 DV 元数据**。`mediacodec-copy` 解出来的帧没有
+   `AV_FRAME_DATA_DOVI_METADATA`，libplacebo 还是拿不到 RPU，画面依旧绿紫
+   （实测 `pixfmt=nv12`、`trc bt.1886`、`sig-peak 0`）。所以 **P5 必须软解**：
+   `MpvPlayer.setDolbyVisionProfile()` 记住探到的 profile，`load()` 之前把
+   `hwdec` 设成 `no`。软解后 libplacebo 自己从码流里取 RPU，把 IPTPQc2 还原成
+   HDR10 交给显示端。
+
+P8 / P7 不切软解：它们的 BL 本身就是 HDR10，硬解只是少一层动态元数据，
+颜色不受影响，没必要付软解的代价。
+
+探测也扩成了随机读版本（`probe(readAt, size)`）：SMB / WebDAV 播放时播放器
+只拿到 `127.0.0.1` 的桥接地址，没法按路径判断，得先用 `VfsFile` 探。
+
+实测：
+
+| 片源 | 结果 |
+| --- | --- |
+| `samples/p5.mkv`（3840×2160 24p） | `yuv420p10 · hwdec no`、`prim bt.2020 · trc pq · sig-peak 4.929096`、`fps 24.000000`；起播 1 秒内 6–7 帧呈现丢弃（显示模式切 120Hz×5），之后 0，`decoder-frame-drop-count` 恒为 0 |
+| `samples/p7-fel.mkv` | `profile=7`，**不切软解**，`mediacodec-copy`、`trc pq`、23.976fps、0 丢帧 |
+| 4K HDR10（`dv-hdr10-4k-30s.mp4`） | `profile=无`，`mediacodec-copy`、`prim bt.2020 · trc pq` |
+| SMB `Lovesick S01E01`（9.36GB，2160p DV P5） | VFS 探到 `profile=5` → 自动软解；`prim bt.2020 · trc pq`；23.976fps；20s 窗口丢 19 帧全落在起播 seek 阶段，之后 12s 播放期 `drops` 不再增长；demuxer cache 涨到 14.1s，读速 ~4.8MB/s |
+
+**颜色证据（像素，不是只看元数据）**：取同一帧脸部中心区域的平均 RGB。
+
+| 渲染路径 | 平均 RGB | 通道顺序 | 结论 |
+| --- | --- | --- | --- |
+| Mac 产品播放器（gpu-next，参考） | (49,42,37) | R>G>B | 暖肤色 ✓ |
+| Android gpu-next（升级后） | (41,35,31) | R>G>B | 暖肤色 ✓，与参考同比例 |
+| Mac `--vf=format:dolbyvision=no`（剥 DV） | (107,88,96) | R>B>G | 品红 ✗ |
+| Android 老 gpu（升级前） | 整屏洋红/紫 | — | ✗ |
+
+两行正确的 R:G:B 比例分别是 1.32:1.13:1 与 1.32:1.14:1，色相一致；Android
+整体低约 16%，是手机走 PQ 直出、截图时再转 SDR 的亮度差，不是色偏。
+
+取证方式：`--es shot <png> --el shot_at <ms>` 让 mpv 播到该位置时自己
+`screenshot-to-file ... video`（绕开 adb 对 HDR 的合成）。gpu-next + GLES 下
+这个命令偶发失败（`Taking screenshot failed.`，seek 刚结束时最容易），失败就
+用 `adb exec-out screencap -p` 兜底——色相仍可判，只是多过一层系统色调映射。
+
+4K P5 软解在这台机器（骁龙 8 Gen 1）上能跑满 24p，没有持续掉帧，
+所以不需要「只降级不软解」的兜底；低端机以后要按 `dumpsys media.codec` 的
+DV 解码器能力再定分流。
+
+起播那几帧丢弃跟解码无关：是 `preferredDisplayModeId` 的切换落在解码开始之后，
+切换窗口里的帧没能呈现。要消掉得先钉模式再起播（或切换期间短暂暂停），
+当前留着，记在「未决」里。
 
 PiP（A10 第一步，2026-11-27）：验证页 `supportsPictureInPicture=true`，
 按钮「PIP」与按 Home 都能进画中画。实测
