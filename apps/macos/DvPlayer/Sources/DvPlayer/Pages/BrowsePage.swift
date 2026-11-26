@@ -8,6 +8,9 @@ struct BrowseView: View {
     var isLibrary: Bool = true
     let onBack: () -> Void
     let onOpen: (String) -> Void
+    /// 详情页关掉后 +1：重新拉一遍已加载的页（观看进度、收藏状态会变），
+    /// 但不重置分类 / 排序 / 分页和滚动位置。
+    var refreshToken: Int = 0
 
     @EnvironmentObject private var state: AppState
 
@@ -36,10 +39,12 @@ struct BrowseView: View {
     }
 
     init(scopeId: String, title: String, isLibrary: Bool,
+         refreshToken: Int = 0,
          onBack: @escaping () -> Void, onOpen: @escaping (String) -> Void) {
         self.scopeId = scopeId
         self.title = title
         self.isLibrary = isLibrary
+        self.refreshToken = refreshToken
         self.onBack = onBack
         self.onOpen = onOpen
     }
@@ -96,6 +101,9 @@ struct BrowseView: View {
             }
         }
         .task(id: reloadKey) { await load(reset: true) }
+        .onChange(of: refreshToken) { _ in
+            Task { await refreshLoadedPages() }
+        }
         // 截图巡检：`DVPLAYER_CAT=电影` 直接落到某个类别。
         .onAppear {
             if let cat = ProcessInfo.processInfo.environment["DVPLAYER_CAT"],
@@ -196,6 +204,44 @@ struct BrowseView: View {
         case "文件夹": return ["folder"]
         default: return []
         }
+    }
+
+    /// 从详情页回来：重拉已经加载过的那些页并原地替换。筛选条件、分页和滚动
+    /// 位置都不动；卡片 id 没变，ForEach 只更新进度这类字段，不会跳回顶部。
+    private func refreshLoadedPages() async {
+        guard let core = state.core, !items.isEmpty else { return }
+
+        loadVersion &+= 1
+        let version = loadVersion
+        let pages = max(1, page - 1)
+        let query = ListQuery(kinds: kinds, genre: genre, sort: sort, descending: descending)
+        loading = true
+        defer {
+            if version == loadVersion {
+                loading = false
+            }
+        }
+
+        var fresh: [MediaItem] = []
+        var freshTotal = total
+        for p in 1...pages {
+            do {
+                let result = isLibrary
+                    ? try await core.items(scopeId, page: p, pageSize: pageSize, query: query)
+                    : try await core.children(scopeId, page: p, pageSize: pageSize, query: query)
+                guard version == loadVersion else { return }
+                fresh += result.items
+                freshTotal = result.total
+            } catch {
+                // 后台刷新失败就保持原样：返回详情不该弹错。
+                return
+            }
+        }
+
+        guard version == loadVersion else { return }
+        items = fresh
+        total = freshTotal
+        page = pages + 1
     }
 
     private func load(reset: Bool) async {

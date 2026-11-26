@@ -375,11 +375,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // `DVPLAYER_TAP="x,y"`：滚动之后在窗口里合成一次点击（左上角原点），
             // 用来验证「点画面进详情 / 点底部条续播」这种命中区拆分。
+            // 多个坐标用分号隔开（`x,y;x2,y2`）：依次点击，中间留出页面切换时间，
+            // 可以走完「进详情 → 返回」这种两步路径再截图。
             if let spec = env["DVPLAYER_TAP"] {
-                await Self.tap(in: spec)
-                // 光标会闪，等待时间可调，方便截到光标可见的那一相。
-                let wait = Double(env["DVPLAYER_TAP_WAIT"] ?? "") ?? 1.8
-                try? await Task.sleep(nanoseconds: UInt64(max(0.05, wait) * 1_000_000_000))
+                for part in spec.split(separator: ";") {
+                    await Self.tap(in: String(part))
+                    let wait = Double(env["DVPLAYER_TAP_WAIT"] ?? "") ?? 1.8
+                    try? await Task.sleep(nanoseconds: UInt64(max(0.05, wait) * 1_000_000_000))
+                }
             }
 
             // `DVPLAYER_PROBE_SEARCH=1`：打印搜索框的几何，验证光标与占位文字是否

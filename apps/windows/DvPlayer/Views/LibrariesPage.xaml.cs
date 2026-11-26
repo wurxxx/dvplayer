@@ -111,6 +111,9 @@ public partial class LibrariesPage : Page
 
     public LibrariesPage()
     {
+        // 页面实例留在 journal 里：从详情页 GoBack 回来时沿用同一个实例，
+        // 库网格的分类 / 排序 / 风格 / 分页和滚动位置都还在，不用重新选一遍。
+        KeepAlive = true;
         InitializeComponent();
         ContinueRow.ItemsSource = _continueCards;
         SortBox.SelectedIndex = 0;
@@ -159,6 +162,13 @@ public partial class LibrariesPage : Page
         if (_loaded && signature == _loadedSignature)
         {
             Services.Trace.Write($"home onload skip sig={signature}");
+            // 从详情页返回：网格留在原处，只把已加载的页重拉一遍。
+            // 不重置分类 / 排序 / 分页，也不跳回顶部（进度、收藏状态会变）。
+            if (BrowseRoot.Visibility == Visibility.Visible)
+            {
+                _ = RefreshBrowseAsync();
+            }
+
             return;
         }
 
@@ -1857,6 +1867,85 @@ public partial class LibrariesPage : Page
         ItemGrid.ItemsSource = _visible;
 
         await LoadPageAsync(version).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 从详情返回时重拉已经加载过的页并原地替换。筛选条件、分页和滚动位置
+    /// 都不动；刷新的页数按当前 <see cref="_page"/> 推回去。
+    /// </summary>
+    private async Task RefreshBrowseAsync()
+    {
+        if (_parentId is null || _page <= 0 || AppServices.Instance.Core is not { } core)
+        {
+            return;
+        }
+
+        var version = ++_browseVersion;
+        var pages = Math.Max(1, _page - 1);
+        var parentId = _parentId;
+        var children = _childrenMode;
+        var query = BuildQuery();
+        var offset = BrowseScroll.VerticalOffset;
+        var fresh = new List<ItemCard>();
+        var total = 0;
+
+        // 清空 / 重建列表时 ScrollViewer 的 extent 会短暂变小，看起来像「滚到了底」。
+        // 用 _loadingPage 挡住 OnBrowseScroll 的自动续页，别多拉一页。
+        _loadingPage = true;
+        try
+        {
+            for (var page = 1; page <= pages; page++)
+            {
+                var result = await Task.Run(() => children
+                    ? core.Children(parentId, page, PageSize, query)
+                    : core.Items(parentId, page, PageSize, query)).ConfigureAwait(true);
+
+                if (version != _browseVersion)
+                {
+                    return;
+                }
+
+                if (!result.Ok || result.Data is null)
+                {
+                    // 刷新失败就保持原来的列表，返回详情不该弹错 / 清空。
+                    return;
+                }
+
+                fresh.AddRange(result.Data.Items.Select(ToCard));
+                total = result.Data.Total;
+            }
+
+            if (version != _browseVersion)
+            {
+                return;
+            }
+
+            _allCards = fresh;
+            _total = total;
+            _page = pages + 1;
+            _hasMore = fresh.Count < total && fresh.Count < MaxBrowseCards;
+            _visible.Clear();
+            AppendVisible(fresh);
+            UpdateBrowseStatus();
+            BrowseFooter.Text = _hasMore ? "" : "已全部加载";
+
+            // 列表重建后先让 ScrollViewer 量出新高度，再把位置放回去。
+            await Dispatcher.InvokeAsync(() =>
+            {
+                BrowseScroll.UpdateLayout();
+                BrowseScroll.ScrollToVerticalOffset(offset);
+            }, DispatcherPriority.Loaded);
+
+            // 换了一批 ItemCard，海报得重新挂上（有缓存的直接命中）。
+            await FillMissingPostersAsync(fresh).ConfigureAwait(true);
+        }
+        finally
+        {
+            if (version == _browseVersion)
+            {
+                _loadingPage = false;
+            }
+        }
     }
 
     /// <summary>拉下一页并追加到列表末尾；滚到底由 OnBrowseScroll 触发。</summary>

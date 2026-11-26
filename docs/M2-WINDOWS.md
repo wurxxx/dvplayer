@@ -101,6 +101,10 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   `DateCreated` 降序），和点进库里的默认排序一致。以前不传排序，各家服务器用
   自己的默认值（飞牛的默认是入库倒序，别的版本 / 别的源不一定），
   nas 的库看起来就和飞牛不一样。
+- **从详情页返回保留列表状态**：`LibrariesPage.KeepAlive = true`，GoBack 回来时沿用
+  同一个页面实例，网格的类别 / 排序 / 风格 / 分页和滚动位置都还在；`OnLoaded`
+  发现是同一份连接数据时只调 `RefreshBrowseAsync()` 重拉已加载的页（不重置筛选、
+  不跳回顶部），别整页重建。
 - **详情页链接**：链接区固定先「豆瓣」（按片名搜索），`MediaDetailDto.TmdbId` /
   `ImdbId` 有值时再加「TMDB」（`themoviedb.org/{movie|tv}/{id}`）和「IMDb」
   （`imdb.com/title/{id}/`）；飞牛这类详情没有 id 的源只显示豆瓣。
