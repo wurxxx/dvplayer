@@ -68,14 +68,32 @@ danmaku_value() {
 }
 DANMAKU_APP_ID="${DVPLAYER_DANMAKU_APP_ID:-$(danmaku_value DANMAKU_APP_ID)}"
 DANMAKU_APP_SECRET="${DVPLAYER_DANMAKU_APP_SECRET:-$(danmaku_value DANMAKU_APP_SECRET)}"
-python3 - "$APP/Contents/Info.plist" "$DANMAKU_APP_ID" "$DANMAKU_APP_SECRET" <<'PLIST'
+
+# Trakt：同样的注入方式，文件格式
+#   TRAKT_CLIENT_ID=xxx
+#   TRAKT_CLIENT_SECRET=yyy
+# 设置页里填的值优先于这里的默认值。
+TRAKT_ENV="${DVPLAYER_TRAKT_ENV:-$HOME/.config/dvplayer/trakt.env}"
+trakt_value() {
+    local key="$1"
+    [[ -f "$TRAKT_ENV" ]] || { echo ""; return 0; }
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$TRAKT_ENV" \
+        | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//' || true
+}
+TRAKT_CLIENT_ID="${DVPLAYER_TRAKT_CLIENT_ID:-$(trakt_value TRAKT_CLIENT_ID)}"
+TRAKT_CLIENT_SECRET="${DVPLAYER_TRAKT_CLIENT_SECRET:-$(trakt_value TRAKT_CLIENT_SECRET)}"
+
+python3 - "$APP/Contents/Info.plist" "$DANMAKU_APP_ID" "$DANMAKU_APP_SECRET" \
+    "$TRAKT_CLIENT_ID" "$TRAKT_CLIENT_SECRET" <<'PLIST'
 import plistlib, sys
 
-path, app_id, secret = sys.argv[1:4]
+path, app_id, secret, trakt_id, trakt_secret = sys.argv[1:6]
 with open(path, "rb") as handle:
     info = plistlib.load(handle)
 info["DVDanmakuAppId"] = app_id
 info["DVDanmakuAppSecret"] = secret
+info["DVTraktClientId"] = trakt_id
+info["DVTraktClientSecret"] = trakt_secret
 with open(path, "wb") as handle:
     plistlib.dump(info, handle)
 PLIST
@@ -83,6 +101,11 @@ if [[ -n "$DANMAKU_APP_ID" ]]; then
     echo "-- 弹幕凭据：已注入（AppId ${DANMAKU_APP_ID:0:4}…）"
 else
     echo "-- 弹幕凭据：没有找到 ${DANMAKU_ENV}，这个包不带弹幕" >&2
+fi
+if [[ -n "$TRAKT_CLIENT_ID" ]]; then
+    echo "-- Trakt 凭据：已注入（Client ${TRAKT_CLIENT_ID:0:4}…）"
+else
+    echo "-- Trakt 凭据：没有找到 ${TRAKT_ENV}，设置页里可以自己填" >&2
 fi
 # 应用图标：Dock / Finder 读 Info.plist 的 CFBundleIconFile（AppIcon.icns），
 # 由 scripts/make-icon.py 生成。

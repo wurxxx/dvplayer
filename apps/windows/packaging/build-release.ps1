@@ -100,11 +100,50 @@ if ($danmakuAppId -and $danmakuAppSecret) {
     Write-Warning "-- 弹幕凭据：没有找到 $danmakuEnv，这个包不带弹幕"
 }
 
+# Trakt 应用凭据：和弹幕一样的注入方式，用户只需要点「连接 Trakt」。
+# 优先级：环境变量 > 本地密钥文件（默认 ~\.config\dvplayer\trakt.env，
+# 可用 DVPLAYER_TRAKT_ENV 换路径）。文件格式：
+#   TRAKT_CLIENT_ID=xxx
+#   TRAKT_CLIENT_SECRET=yyy      （PKCE 应用没有 secret，留空即可）
+$traktEnvPath = if ($env:DVPLAYER_TRAKT_ENV) {
+    $env:DVPLAYER_TRAKT_ENV
+} else {
+    Join-Path $env:USERPROFILE '.config\dvplayer\trakt.env'
+}
+$traktFile = @{}
+if (Test-Path $traktEnvPath) {
+    Get-Content $traktEnvPath -Encoding UTF8 |
+        Where-Object { $_ -match '^\s*[A-Za-z_]+\s*=' } |
+        ForEach-Object {
+            $name, $value = $_.Split('=', 2)
+            $traktFile[$name.Trim()] = $value.Trim()
+        }
+}
+$traktClientId = if ($env:DVPLAYER_TRAKT_CLIENT_ID) {
+    $env:DVPLAYER_TRAKT_CLIENT_ID
+} else {
+    $traktFile['TRAKT_CLIENT_ID']
+}
+$traktClientSecret = if ($env:DVPLAYER_TRAKT_CLIENT_SECRET) {
+    $env:DVPLAYER_TRAKT_CLIENT_SECRET
+} else {
+    $traktFile['TRAKT_CLIENT_SECRET']
+}
+$traktArgs = @()
+if ($traktClientId) {
+    Write-Host ("-- Trakt 凭据：已注入（Client {0}…）" -f `
+        $traktClientId.Substring(0, [Math]::Min(6, $traktClientId.Length)))
+    $traktArgs = @("-p:TraktClientId=$traktClientId")
+    if ($traktClientSecret) { $traktArgs += "-p:TraktClientSecret=$traktClientSecret" }
+} else {
+    Write-Warning "-- Trakt 凭据：没有找到本地 trakt.env，这个包不带 Trakt（设置页会要求填自己的应用）"
+}
+
 if (-not $SkipPublish) {
     if (Test-Path $payload) { Remove-WithRetry $payload }
     New-Item -ItemType Directory -Force $payload | Out-Null
     dotnet publish $proj -c $Configuration -r win-x64 --self-contained true `
-        -p:Version=$Version -p:DebugType=none -o $payload @danmakuArgs
+        -p:Version=$Version -p:DebugType=none -o $payload @danmakuArgs @traktArgs
     if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
 }
 if (-not (Test-Path (Join-Path $payload 'DvPlayer.exe'))) {

@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using DvPlayer.Player;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -965,6 +966,184 @@ public partial class SeriesPage : Page
         }
     }
 
+    /// <summary>
+    /// Trakt：评分 / 收藏 / 待看。选中状态要查一次 Trakt（评分 / 收藏 / 待看
+    /// 各拉一份全量缓存），所以菜单在点击之后异步拼出来。
+    /// </summary>
+    private async void OnTraktClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button)
+        {
+            await ShowTraktMenuAsync(button);
+        }
+    }
+
+    /// <summary>回归截图：和点 Trakt 按钮一样拼菜单并返回；没连接 / 没匹配到就是 null。</summary>
+    internal Task<ContextMenu?> OpenTraktMenuForShotAsync() => ShowTraktMenuAsync(TraktButton);
+
+    private async Task<ContextMenu?> ShowTraktMenuAsync(Button button)
+    {
+        var client = TraktClient.Shared;
+        if (!client.IsConfigured || !client.IsLoggedIn)
+        {
+            StatusText.Text = client.IsConfigured
+                ? "先在「设置 → Trakt」里连接账号"
+                : "这个构建没有 Trakt 凭据：在「设置 → Trakt」里填 Client ID / Secret";
+            return null;
+        }
+
+        if (_detail is not { } detail)
+        {
+            return null;
+        }
+
+        var title = MediaText.Clean(detail.Title);
+        int? year = null;
+        if (detail.ReleaseDate is { Length: >= 4 } date && int.TryParse(date[..4], out var parsed))
+        {
+            year = parsed;
+        }
+
+        var series = detail.Kind is "series" or "tv" or "season" or "episode";
+
+        StatusText.Text = "正在查询 Trakt…";
+        TraktMatch? found;
+        try
+        {
+            found = await client.MatchAsync(title, year, series).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Trakt：" + ex.Message;
+            return null;
+        }
+
+        if (found is null)
+        {
+            StatusText.Text = $"Trakt 上没有找到「{title}」";
+            return null;
+        }
+
+        var match = found;
+        int? rating = null;
+        var watch = false;
+        var collection = false;
+        try
+        {
+            rating = await client.RatingAsync(match.Kind, match.TraktId).ConfigureAwait(true);
+            watch = await client.IsInWatchlistAsync(match.Kind, match.TraktId).ConfigureAwait(true);
+            collection = await client.IsInCollectionAsync(match.Kind, match.TraktId).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Trakt：" + ex.Message;
+        }
+
+        StatusText.Text = match.Year is { } matchYear
+            ? $"{match.Title}（{matchYear}）"
+            : match.Title;
+
+        var menu = new ContextMenu { PlacementTarget = button };
+
+        var ratingItem = new MenuItem { Header = rating is null ? "评分" : $"评分：{rating} / 10" };
+        for (var value = 1; value <= 10; value++)
+        {
+            var score = value;
+            var item = new MenuItem
+            {
+                Header = $"{score} 分",
+                IsCheckable = true,
+                IsChecked = rating == score,
+            };
+            item.Click += async (_, _) => await SetTraktRatingAsync(match, score);
+            ratingItem.Items.Add(item);
+        }
+
+        if (rating is not null)
+        {
+            ratingItem.Items.Add(new Separator());
+            var clear = new MenuItem { Header = "清除评分" };
+            clear.Click += async (_, _) => await SetTraktRatingAsync(match, null);
+            ratingItem.Items.Add(clear);
+        }
+
+        menu.Items.Add(ratingItem);
+
+        var watchItem = new MenuItem { Header = watch ? "移出 Trakt 待看" : "加入 Trakt 待看" };
+        watchItem.Click += async (_, _) =>
+        {
+            try
+            {
+                await client.SetWatchlistAsync(!watch, match.Kind, match.TraktId);
+                StatusText.Text = watch ? "已从 Trakt 待看移除" : "已加入 Trakt 待看";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Trakt：" + ex.Message;
+            }
+        };
+        menu.Items.Add(watchItem);
+
+        var collectionItem = new MenuItem
+        {
+            Header = collection ? "移出 Trakt 收藏" : "加入 Trakt 收藏",
+        };
+        collectionItem.Click += async (_, _) =>
+        {
+            try
+            {
+                await client.SetCollectionAsync(!collection, match.Kind, match.TraktId);
+                StatusText.Text = collection ? "已从 Trakt 收藏移除" : "已加入 Trakt 收藏";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Trakt：" + ex.Message;
+            }
+        };
+        menu.Items.Add(collectionItem);
+
+        if (match.WebUrl is { } webUrl)
+        {
+            menu.Items.Add(new Separator());
+            var open = new MenuItem { Header = "在 Trakt 打开" };
+            open.Click += (_, _) =>
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(
+                        new System.Diagnostics.ProcessStartInfo(webUrl) { UseShellExecute = true });
+                }
+                catch (Exception)
+                {
+                    // 打不开浏览器不影响。
+                }
+            };
+            menu.Items.Add(open);
+        }
+
+        menu.IsOpen = true;
+        return menu;
+    }
+
+    private async Task SetTraktRatingAsync(TraktMatch match, int? value)
+    {
+        try
+        {
+            await TraktClient.Shared.SetRatingAsync(value, match.Kind, match.TraktId);
+            StatusText.Text = value is null ? "已清除 Trakt 评分" : $"Trakt 评分：{value} 分";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Trakt：" + ex.Message;
+        }
+    }
+
+    /// <summary>详情页条目的首播年份：Trakt 搜索用来避免重拍版挂错。</summary>
+    private int? DetailYear() =>
+        _detail?.ReleaseDate is { Length: >= 4 } date && int.TryParse(date[..4], out var year)
+            ? year
+            : null;
+
     private async void OnFavoriteClick(object sender, RoutedEventArgs e)
     {
         var next = !_favorite;
@@ -1144,7 +1323,7 @@ public partial class SeriesPage : Page
 
         var player = await PlayWindow.OpenAsync(
             Window.GetWindow(this), itemId, startSeconds, BuildPlaylist(),
-            MediaText.Clean(_detail?.Title)).ConfigureAwait(true);
+            MediaText.Clean(_detail?.Title), seriesYear: DetailYear()).ConfigureAwait(true);
 
         if (player is not null)
         {

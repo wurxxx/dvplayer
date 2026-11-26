@@ -296,6 +296,14 @@ final class PlayerSession: ObservableObject {
     private var danmakuTask: Task<Void, Never>?
     private var danmakuNoticeShown = false
 
+    // —— Trakt 观看记录 ——
+    /// 剧名对应的首播年份（详情页带下来），同名重拍版靠它区分。
+    private let seriesYear: Int?
+    private let traktEnabled: Bool
+    /// idle / playing / paused / stopped
+    private var traktState = "idle"
+    private var traktMatch: TraktMatch?
+
     // —— 在线字幕 ——
     @Published private(set) var subtitleResults: [SubtitleResult] = []
     @Published private(set) var subtitleSearching = false
@@ -349,6 +357,7 @@ final class PlayerSession: ObservableObject {
           startSeconds: Double?,
           playlist: [PlayerEpisode] = [],
           seriesTitle: String? = nil,
+          seriesYear: Int? = nil,
           hintTitle: String? = nil,
           frame: NSRect,
           local: LocalPlayback? = nil,
@@ -360,11 +369,13 @@ final class PlayerSession: ObservableObject {
         self.initialStart = startSeconds
         self.playlist = playlist
         self.seriesTitle = Self.cleanSeries(seriesTitle)
+        self.seriesYear = seriesYear
         self.hintTitle = hintTitle ?? ""
         self.title = local?.title ?? hintTitle ?? "正在播放"
         let settings = AppSettings.load()
         self.aspect = PlayerAspect(rawValue: settings.videoAspect ?? "") ?? .fit
         self.danmakuEnabled = settings.danmakuEnabled ?? false
+        self.traktEnabled = settings.traktEnabled ?? true
         self.audioPassthrough = settings.audioPassthrough ?? false
         self.hdrPassthrough = settings.hdrPassthrough ?? false
         self.hdrPeakNits = max(0, settings.hdrPeakNits ?? 0)
@@ -390,6 +401,12 @@ final class PlayerSession: ObservableObject {
         engine.onPause = { [weak self] paused in
             guard let self else { return }
             self.paused = paused
+            if paused {
+                self.traktPause()
+            } else {
+                self.traktResume()
+                self.traktStartIfNeeded()
+            }
             self.refreshSleepBlocker()
         }
         engine.onBuffering = { [weak self] value in
@@ -652,6 +669,9 @@ final class PlayerSession: ObservableObject {
     func switchTo(itemId: String) {
         guard itemId != self.itemId || error != nil else { return }
 
+        // 换集前先把这一集的 Trakt scrobble 收掉，新集从头计时。
+        traktResetForNextItem()
+
         // 媒体库源：切走前把当前集的进度记下并发 stopped，
         // 否则这一集的「看到哪」停在切集前最后一次周期上报的位置。
         if discSource == nil, !eof, position > 0 {
@@ -757,6 +777,9 @@ final class PlayerSession: ObservableObject {
         self.position = position
         seekPosition = position
 
+        // Trakt：真正出画一会儿才开始算「在看」。
+        if !paused { traktStartIfNeeded() }
+
         // 兜底：有些 VO 不报 video-frame-info（比如无头），就等播放位置真的往前走。
         // 慢网络下 mpv 会先报续播点（或者 0），但一帧都还没出来，这时不能收黑底。
         if loading, !Self.openingHold, position > loadingFloor + 0.5 {
@@ -838,6 +861,8 @@ final class PlayerSession: ObservableObject {
         }
 
         report(duration > 0 ? duration : Double(source?.durationSeconds ?? 0))
+        // 播完：progress 按 100 报，Trakt 才会把这一集记为已看。
+        traktStop(progressOverride: 100)
 
         if sleepEndOfEpisode {
             sleepEndOfEpisode = false
@@ -1616,6 +1641,102 @@ final class PlayerSession: ObservableObject {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
+    // MARK: - Trakt 观看记录
+
+    /// 真正出画 5 秒后才算开始看：加载慢、拖进度都不该报 scrobble。
+    private func traktStartIfNeeded() {
+        guard traktEnabled, traktState == "idle", !paused, !eof,
+              position > 5, duration > 1 else { return }
+        traktState = "playing"
+        traktScrobble("start")
+    }
+
+    private func traktPause() {
+        guard traktState == "playing" else { return }
+        traktState = "paused"
+        traktScrobble("pause")
+    }
+
+    private func traktResume() {
+        guard traktState == "paused" else { return }
+        traktState = "playing"
+        traktScrobble("start")
+    }
+
+    private func traktStop(progressOverride: Double? = nil) {
+        guard traktState == "playing" || traktState == "paused" else { return }
+        traktState = "stopped"
+        traktScrobble("stop", progressOverride: progressOverride)
+    }
+
+    /// 切集 / 停止后重新开始计时：同一部剧的匹配结果可以复用，不要重搜。
+    private func traktResetForNextItem() {
+        if traktState == "playing" || traktState == "paused" {
+            traktStop()
+        }
+        traktState = "idle"
+    }
+
+    private func traktScrobble(_ action: String, progressOverride: Double? = nil) {
+        // 详情页起播带的是剧名 / 片名；库页、继续观看直接起播时没有剧名，
+        // 电影退回条目自己的标题，否则进度永远不上报。
+        let series = seriesTitle ?? MediaText.clean(title)
+        guard traktEnabled, !series.isEmpty else { return }
+
+        let episode = episodeNumber
+        let season = seasonNumber
+        let isSeries = episode != nil
+        let year = seriesYear
+        let ratio = duration > 1 ? position / duration * 100 : 0
+        let progress = progressOverride ?? max(0.1, min(100, ratio))
+        let known = traktMatch
+
+        Task { [weak self] in
+            do {
+                guard await TraktClient.shared.isLoggedIn() else { return }
+
+                let match: TraktMatch?
+                if let known {
+                    match = known
+                } else {
+                    // 电影没带年份时补一次：中文片名在 Trakt 上显示成原名，
+                    // 只靠标题匹配不上（「千与千寻」→ Spirited Away）。
+                    var matchYear = year
+                    if !isSeries, matchYear == nil {
+                        matchYear = await self?.traktYear() ?? nil
+                    }
+                    match = try await TraktClient.shared.match(title: series, year: matchYear,
+                                                               series: isSeries)
+                    if let match {
+                        await MainActor.run { self?.traktMatch = match }
+                    }
+                }
+                guard let match else {
+                    NSLog("[Trakt] 没匹配到「\(series)」，跳过 \(action)")
+                    return
+                }
+
+                try await TraktClient.shared.scrobble(action, match: match,
+                                                      season: season, episode: episode,
+                                                      progress: progress)
+                NSLog("[Trakt] \(action) \(match.title) \(Int(progress))%")
+            } catch {
+                NSLog("[Trakt] \(action) 失败：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// 从库页 / 继续观看直接起播的电影没带年份：用条目详情补一次，
+    /// 否则中文片名在 Trakt 上没有年份可用，匹配不上。
+    private func traktYear() async -> Int? {
+        guard let core = AppState.shared.core else { return nil }
+        guard let detail = try? await core.detail(itemId),
+              let date = detail.releaseDate,
+              date.count >= 4,
+              let year = Int(date.prefix(4)) else { return nil }
+        return year
+    }
+
     // MARK: - 收尾
 
     func requestClose() {
@@ -1680,6 +1801,9 @@ final class PlayerSession: ObservableObject {
         } else {
             report(max(position, 0), stopped: true, wait: flush)
         }
+
+        // Trakt：关窗 / 退出前把当前这一集收尾（进度 ≥80% 会记为已看）。
+        traktStop()
 
         mpv.onPosition = nil
         mpv.onPause = nil

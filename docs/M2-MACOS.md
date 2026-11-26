@@ -371,6 +371,30 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
 - 面板是右侧 380 宽的 `字幕搜索`：语言 + 发行名 + 下载数；没配 key 时面板里
   直接写明缺什么，不弹窗。
 
+**Trakt（观看记录）**
+
+- 设备码登录：`POST /oauth/device/code` 拿 8 位码 → 轮询 `/oauth/device/token`
+  （400 = 还没确认，410 = 过期，418 = 拒绝）。token 存
+  `~/Library/Application Support/DvPlayer/trakt.json`（0600）。
+  refresh token 是单次的（一次换一个），所以 `TraktClient` 用 actor 串行刷新。
+- 应用凭据：`build.sh` 从 `~/.config/dvplayer/trakt.env`
+  （`TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`）注入 `Info.plist`
+  （`DVTraktClientId` / `DVTraktClientSecret`）；设置页里填的值优先，
+  没内置凭据的构建会显示两个输入框。
+- 匹配按「片名 + 年份」搜 `/search/movie|show`：标题完全一致优先；中文片名在
+  Trakt 上显示成原名（「千与千寻」→ Spirited Away），标题对不上时取年份差 ≤1 的
+  第一条；本地没有年份、搜索结果又只有一条才采用。结果缓存到 `trakt-matches.json`。
+  宁可没有也不挂错。
+- 播放页：出画 5 秒后 `scrobble/start`，暂停 / 继续发 `pause` / `start`，
+  关窗或播完发 `stop`（播完按 100% 报，Trakt 才会记成已看）；剧集带
+  `season` + `number`，电影只带 `movie`。
+- 从库页 / 继续观看直接起播时没有详情页带下来的剧名：电影退回条目自己的标题，
+  再查一次条目详情补年份（`traktYear()`），这种入口也会上报。
+- 详情页「Trakt」按钮：评分 1–10、加入收藏（collection）、加入待看（watchlist），
+  打开时先读一次当前状态。按钮只在包里有应用凭据时出现。
+- 发布包内置 Client ID，设置页只剩「连接 Trakt」/ 状态 / 自动同步开关；
+  直接 `swift build` 或没配 `trakt.env` 的构建才显示自建应用的输入框。
+
 ### 4.7 播放页的坑
 
 - **`--no-config` 之外还必须 `--idle=yes`**：壳是先起进程、再通过 IPC `loadfile`，

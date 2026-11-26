@@ -108,6 +108,7 @@ struct DetailPage: View {
     @State private var busy = false
     @State private var showingAudio = false
     @State private var showingSubtitle = false
+    @State private var showingTrakt = false
     /// 选了音轨 / 字幕之后戳一下，让按钮上的文字跟着变。
     @State private var trackRevision = 0
 
@@ -450,6 +451,24 @@ struct DetailPage: View {
                 }
             }
 
+            // Trakt 只在包里带了应用凭据时出现：没有凭据的构建不摆一个点了就报错的按钮。
+            if TraktSettings.isConfigured {
+                Button {
+                    showingTrakt.toggle()
+                } label: {
+                    Label("Trakt", systemImage: "play.tv")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .help("Trakt：评分 / 收藏 / 待看")
+                .popover(isPresented: $showingTrakt, arrowEdge: .bottom) {
+                    TraktPanel(title: MediaText.clean(detail?.title),
+                               year: detailYear,
+                               series: detailIsSeries)
+                        .environmentObject(state)
+                }
+            }
+
             if busy {
                 ProgressView().controlSize(.small)
             }
@@ -774,6 +793,7 @@ struct DetailPage: View {
             startSeconds: startSeconds,
             playlist: list,
             seriesTitle: detail.map { MediaText.clean($0.title) },
+            seriesYear: detailYear,
             hintTitle: detail.map { MediaText.clean($0.title) })
     }
 
@@ -940,6 +960,17 @@ struct DetailPage: View {
     }
 
     // MARK: - 数据
+
+    /// 详情页条目的年份：Trakt 搜索用来避免重拍版挂错。
+    private var detailYear: Int? {
+        guard let date = detail?.releaseDate, date.count >= 4 else { return nil }
+        return Int(date.prefix(4))
+    }
+
+    private var detailIsSeries: Bool {
+        guard let kind = detail?.kind.lowercased() else { return false }
+        return ["series", "tv", "season", "episode"].contains(kind)
+    }
 
     private func toggleFavorite() {
         guard let core = state.core, let detail else { return }

@@ -42,6 +42,14 @@ public struct AppSettings: Codable, Sendable {
     /// 弹幕默认开关。凭据不在这里：打包时写进 Info.plist（见 DanmakuCredential）。
     public var danmakuEnabled: Bool?
 
+    /// Trakt 观看记录同步：播放时自动 scrobble。token 不在这里，
+    /// 单独存 `trakt.json`（见 TraktTokenStore）。
+    public var traktEnabled: Bool?
+
+    /// Trakt 应用凭据。留空就用打包时注入 Info.plist 的默认值。
+    public var traktClientId: String?
+    public var traktClientSecret: String?
+
     /// 在线字幕（OpenSubtitles）。API Key 注册即得；用户名 / 密码可选，
     /// 配了才会去换下载用的 token。
     public var openSubtitlesApiKey: String?
@@ -71,6 +79,9 @@ public struct AppSettings: Codable, Sendable {
         hdrPeakNits = try c.decodeIfPresent(Int.self, forKey: .hdrPeakNits)
         alwaysOnTop = try c.decodeIfPresent(Bool.self, forKey: .alwaysOnTop)
         danmakuEnabled = try c.decodeIfPresent(Bool.self, forKey: .danmakuEnabled)
+        traktEnabled = try c.decodeIfPresent(Bool.self, forKey: .traktEnabled)
+        traktClientId = try c.decodeIfPresent(String.self, forKey: .traktClientId)
+        traktClientSecret = try c.decodeIfPresent(String.self, forKey: .traktClientSecret)
         openSubtitlesApiKey = try c.decodeIfPresent(String.self, forKey: .openSubtitlesApiKey)
         openSubtitlesUsername = try c.decodeIfPresent(String.self, forKey: .openSubtitlesUsername)
         openSubtitlesPassword = try c.decodeIfPresent(String.self, forKey: .openSubtitlesPassword)

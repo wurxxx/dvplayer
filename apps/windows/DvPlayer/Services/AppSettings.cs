@@ -71,6 +71,20 @@ public sealed class AppSettings
     /// （见 Services/DanmakuCredential.cs），用户不用填。</summary>
     public bool? DanmakuEnabled { get; set; }
 
+    /// <summary>Trakt 观看记录同步：播放时自动 scrobble。</summary>
+    public bool? TraktEnabled { get; set; }
+
+    /// <summary>Trakt 应用凭据；留空就用打包时注入的程序集元数据。</summary>
+    public string? TraktClientId { get; set; }
+    public string? TraktClientSecret { get; set; }
+
+    /// <summary>Trakt 账号 token（OAuth）。存盘时走 DPAPI 密封。</summary>
+    public string? TraktAccessToken { get; set; }
+    public string? TraktRefreshToken { get; set; }
+    /// <summary>access token 的过期时间（Unix 秒）。</summary>
+    public long? TraktExpiresAt { get; set; }
+    public string? TraktUsername { get; set; }
+
     /// <summary>在线字幕（OpenSubtitles）。API Key 注册即得；用户名 / 密码可选。</summary>
     public string? OpenSubtitlesApiKey { get; set; }
     public string? OpenSubtitlesUsername { get; set; }
@@ -156,6 +170,9 @@ public sealed class AppSettings
             .ToList();
         copy.OpenSubtitlesPassword = Seal(OpenSubtitlesPassword);
         copy.OpenSubtitlesApiKey = Seal(OpenSubtitlesApiKey);
+        copy.TraktClientSecret = Seal(TraktClientSecret);
+        copy.TraktAccessToken = Seal(TraktAccessToken);
+        copy.TraktRefreshToken = Seal(TraktRefreshToken);
         return copy;
     }
 
@@ -167,6 +184,9 @@ public sealed class AppSettings
             .ToList();
         OpenSubtitlesPassword = Unseal(OpenSubtitlesPassword);
         OpenSubtitlesApiKey = Unseal(OpenSubtitlesApiKey);
+        TraktClientSecret = Unseal(TraktClientSecret);
+        TraktAccessToken = Unseal(TraktAccessToken);
+        TraktRefreshToken = Unseal(TraktRefreshToken);
     }
 
     private static string Seal(string? value)
