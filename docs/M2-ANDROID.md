@@ -516,6 +516,20 @@ EGLSurface；之前新 surface 是黑的，因为 `mpv_render_context_update()` 
   released`。现在统一走 `setSurfaceFrameRate()`：先看 `surface.isValid`，
   再兜一层 `runCatching`，帧率提示失败只记日志。
 
+下载（A10，2026-11-27）：`:core` 新增 `MediaDownloader`，落
+`filesDir/downloads`（Android 11+ 的 external 专属目录在部分 ROM 上
+`adb` / 播放器读不到，内部目录最稳）。先写 `<name>.part`，用
+`Range: bytes=<已下载>-` 续传；服务器不回 206 就从头下；完成后改名。
+验证页 `--es download <url>`（配 `vfs_user/vfs_pass`）触发。
+
+实测（本地 WebDAV 服务）：
+
+- 全新下载 11.9MB：进度 0/20/…/100%，`下载完成 ... 11894722 字节`。
+- 续传：手工造一个 5,000,000 字节的 `.part` 再下 → 只补后面的部分，
+  完成后与整文件 `md5sum` 一致（`840edf0e…`）。
+- 离线播放：`--es url <files/downloads/dv-test.mp4>`（Media3）→
+  media session `position=3000 → 5000`，不依赖网络。
+
 蓝光原盘入口（A8 第一步，2026-11-27）：`:player` 新增 `DiscSource`，在加载前把
 原盘认出来，并让路由直接判给 mpv。
 

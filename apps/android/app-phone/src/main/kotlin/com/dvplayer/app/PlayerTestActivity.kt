@@ -34,6 +34,7 @@ import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
 import com.dvplayer.player.PlayerEvent
 import com.dvplayer.player.TrackKind
+import com.dvplayer.core.download.MediaDownloader
 import com.dvplayer.core.vfs.DavVfs
 import com.dvplayer.player.Hdr10PlusProbe
 import com.dvplayer.player.media3.Media3Player
@@ -256,6 +257,39 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     }
                 }.onFailure { Log.e(TAG, "VFS 列表失败", it) }
             }, "dav-list").start()
+        }
+
+        // A10 下载验证：--es download <url> 落 files/downloads/<文件名>，
+        // 认证沿用 vfs_user / vfs_pass。下载期间不阻塞播放。
+        intent.getStringExtra("download")?.let { downloadUrl ->
+            val name = intent.getStringExtra("download_name")
+                ?: downloadUrl.substringAfterLast('/')
+            val headers = intent.getStringExtra("vfs_user")?.let { user ->
+                val token = android.util.Base64.encodeToString(
+                    "$user:${intent.getStringExtra("vfs_pass").orEmpty()}"
+                        .toByteArray(Charsets.UTF_8),
+                    android.util.Base64.NO_WRAP,
+                )
+                mapOf("Authorization" to "Basic $token")
+            } ?: emptyMap()
+            Thread({
+                runCatching {
+                    var lastPct = -1
+                    MediaDownloader(filesDir.resolve("downloads")).download(
+                        url = downloadUrl,
+                        name = name,
+                        headers = headers,
+                        onProgress = { done, total ->
+                            val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                            if (pct != lastPct && pct % 20 == 0) {
+                                lastPct = pct
+                                Log.i(TAG, "下载进度 $done/$total（$pct%）")
+                            }
+                        },
+                    )
+                }.onSuccess { Log.i(TAG, "下载完成：${it.absolutePath} ${it.length()} 字节") }
+                    .onFailure { Log.e(TAG, "下载失败", it) }
+            }, "download").start()
         }
 
         Log.i(TAG, "engine=$engine url=$url")
