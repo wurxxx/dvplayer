@@ -10,7 +10,8 @@
 # 依赖：FFmpeg n9.0.2 / libplacebo v7.387.0 / libass 0.17.4 / freetype 2.15.0 /
 #       fribidi 1.0.18 / harfbuzz 15.2.0 / libunibreak 8.0.1 / fontconfig 2.18.4 /
 #       libxml2 2.15.4 / libbluray 1.5.0 / libudfread 1.2.0 /
-#       libdovi 3.4.0（Dolby Vision RPU 解析，libplacebo 的 DOVI 依赖）
+#       libdovi 3.4.0（Dolby Vision RPU 解析，libplacebo 的 DOVI 依赖）/
+#       mbedTLS 3.6.4（FFmpeg 的 https / TLS 后端，静态）
 #
 # 用法：
 #   scripts/android/build-mpv.sh                  # arm64
@@ -113,6 +114,10 @@ ensure_tar ffmpeg n9.0.2.tar.gz \
     https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n9.0.2.tar.gz
 ensure_tar libass libass-0.17.4.tar.gz \
     https://github.com/libass/libass/releases/download/0.17.4/libass-0.17.4.tar.gz
+# GitHub 的 archive 包不带 mbedtls-framework 子模块，CMake 会直接报错；
+# 必须用 release 页面的官方打包（含 framework/）。
+ensure_tar mbedtls mbedtls-3.6.4.tar.bz2 \
+    https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.4/mbedtls-3.6.4.tar.bz2
 # mpv 必须 >= ad9d850（"libmpv: add a gpu-next render backend"）：v0.42.0 的
 # vo_libmpv.c 只挂了老 gpu / sw 两个后端，`vo=libmpv` 走老 gpu 渲染器，而老
 # gpu 在 `video/out/gpu/video.c` 里直接 `mp_image_params_restore_dovi_mapping()`
@@ -125,6 +130,7 @@ ensure_tar mpv "mpv-$MPV_COMMIT.tar.gz" \
 
 FFMPEG_SRC=${FFMPEG_SRC:-$SRC/ffmpeg}
 LIBASS_SRC=${LIBASS_SRC:-$SRC/libass}
+MBEDTLS_SRC=${MBEDTLS_SRC:-$SRC/mbedtls}
 MPV_SRC=${MPV_SRC:-$SRC/mpv}
 # libplacebo 需要 submodule（glad / fast_float / jinja），GitHub 源码包不带，
 # 只能 git clone --recursive；桌面端已经拉过就直接用。
@@ -366,6 +372,42 @@ EOF
     mark_done libdovi
 }
 
+# FFmpeg 的 https 需要 TLS 后端。NDK 不导出 OpenSSL / BoringSSL 的头和库，
+# 所以单独编一份静态 mbedTLS（FFmpeg 自带 `libavformat/tls_mbedtls.c`）。
+# 证书校验策略见 docs/M2-ANDROID.md：局域网 NAS 多为自签，播放器侧先不强制。
+build_mbedtls() {
+    if is_done mbedtls; then
+        log "[$ARCH] mbedtls 已构建"
+        return 0
+    fi
+    command -v cmake >/dev/null || die "找不到 cmake（mbedTLS 用 CMake 构建）"
+    log "[$ARCH] 构建 mbedtls（静态，给 FFmpeg 的 https）"
+    local abi
+    case "$ARCH" in
+        arm64) abi=arm64-v8a ;;
+        x86_64) abi=x86_64 ;;
+        *) die "不支持的 arch：$ARCH" ;;
+    esac
+    rm -rf "$BUILD/mbedtls"
+    cmake -S "$MBEDTLS_SRC" -B "$BUILD/mbedtls" \
+        -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+        -DANDROID_ABI="$abi" \
+        -DANDROID_PLATFORM="android-$API" \
+        -DCMAKE_C_COMPILER="$CC" \
+        -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DENABLE_PROGRAMS=OFF \
+        -DENABLE_TESTING=OFF \
+        -DUSE_SHARED_MBEDTLS_LIBRARY=OFF \
+        -DUSE_STATIC_MBEDTLS_LIBRARY=ON \
+        -DMBEDTLS_FATAL_WARNINGS=OFF
+    cmake --build "$BUILD/mbedtls" -j"$JOBS"
+    cmake --install "$BUILD/mbedtls"
+    mark_done mbedtls
+}
+
 build_ffmpeg() {
     if is_done ffmpeg; then
         log "[$ARCH] ffmpeg 已构建"
@@ -379,6 +421,9 @@ build_ffmpeg() {
         # macOS 自带 bash 3.2：空数组展开会撞 set -u，用普通字符串。
         x86asm_flag=
         if [ "$ARCH" = "x86_64" ]; then x86asm_flag=--disable-x86asm; fi
+        # Android 的 https 依赖 mbedTLS（Apache-2.0）。FFmpeg 把它归为
+        # version3，所以这份构建按 LGPLv3 分发；桌面端用 securetransport /
+        # schannel，仍是 LGPLv2.1。
         "$FFMPEG_SRC/configure" \
             --prefix="$PREFIX" \
             --target-os=android \
@@ -398,11 +443,12 @@ build_ffmpeg() {
             --enable-pic \
             --disable-autodetect \
             --enable-zlib \
+            --enable-mbedtls \
             --enable-jni \
             --enable-mediacodec \
             --disable-vulkan \
             --disable-gpl \
-            --disable-version3 \
+            --enable-version3 \
             --disable-nonfree \
             --disable-doc \
             --disable-programs \
@@ -535,6 +581,7 @@ for arch in $ARCHES; do
         -Dvulkan=disabled -Ddemos=false -Dtests=false -Dbench=false \
         -Dfuzz=false -Dlcms=disabled -Ddovi=enabled -Dlibdovi=enabled
 
+    build_mbedtls
     build_ffmpeg
     build_mpv
     verify

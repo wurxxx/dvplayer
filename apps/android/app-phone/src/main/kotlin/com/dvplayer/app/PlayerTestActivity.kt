@@ -29,6 +29,7 @@ import com.dvplayer.player.EngineId
 import com.dvplayer.player.DolbyVisionProbe
 import com.dvplayer.player.EngineRouter
 import com.dvplayer.player.FrameRateMatcher
+import com.dvplayer.player.FrameRateProbe
 import com.dvplayer.player.MediaSessionController
 import com.dvplayer.player.PlaybackForegroundService
 import com.dvplayer.player.PlaybackMemory
@@ -241,6 +242,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     return
                 }
                 player = mpv
+                // mkv 的帧率只有 mpv 能读到：起播后立刻切显示模式。
+                mpv.onFrameRate = { fps -> handler.post { maybeMatchFrameRate(fps) } }
                 // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
                 intent.getStringExtra("hwdec")?.let {
                     Log.i(TAG, "hwdec -> $it ${mpv.setProperty("hwdec", it) ?: "ok"}")
@@ -541,8 +544,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 media3?.onCues = { cues -> subtitleView?.setCues(cues.cues) }
                 if (!started) {
                     started = true
-                    media3?.load(playUrl)
-                    if (intent.getStringExtra("sub") != null) media3?.addSubtitle(subtitleUrl)
+                    beginPlayback {
+                        media3?.load(playUrl)
+                        if (intent.getStringExtra("sub") != null) media3?.addSubtitle(subtitleUrl)
+                    }
                 }
             }
             "codec" -> {
@@ -558,10 +563,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 if (!started) {
                     started = true
                     // Surface 的 GL 初始化在渲染线程里异步做；mpv 会自己排队。
-                    mpv.load(playUrl)
-                    // mpv 的 sub-add 走命令队列，可以和 loadfile 同拍发。
-                    if (intent.getStringExtra("sub") != null) mpv.addSubtitle(subtitleUrl)
-                    handler.postDelayed({ Log.i(TAG, "章节：${mpv.chapters()}") }, 3000)
+                    beginPlayback {
+                        mpv.load(playUrl)
+                        // mpv 的 sub-add 走命令队列，可以和 loadfile 同拍发。
+                        if (intent.getStringExtra("sub") != null) mpv.addSubtitle(subtitleUrl)
+                        handler.postDelayed({ Log.i(TAG, "章节：${mpv.chapters()}") }, 3000)
+                    }
                 }
             }
         }
@@ -840,6 +847,34 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             disc?.let { appendLine("原盘 ${it.kind.label}：${it.playUrl}") }
             append(contentKey)
         }
+    }
+
+    /**
+     * 起播前先把显示模式钉住。mpv 的 `container-fps` 要等加载后才有，那时第一帧
+     * 已经在默认刷新率上丢了；本地普通文件先用 [FrameRateProbe] 读容器元数据，
+     * 切完模式等 400ms 再 load（显示模式切换是系统异步完成的）。
+     */
+    private fun beginPlayback(start: () -> Unit) {
+        if (preMatchFrameRate()) {
+            Log.i(TAG, "起播前已请求显示模式，等 400ms 生效")
+            handler.postDelayed(start, 400)
+        } else {
+            start()
+        }
+    }
+
+    /** 返回是否真的改了显示模式。 */
+    private fun preMatchFrameRate(): Boolean {
+        val path = playUrl
+        if (path.contains("://")) return false                 // 桥接 / HTTP 交给加载后的轮询
+        if (DiscSource.detect(path) != null) return false      // 原盘没有普通视频轨
+        val fps = FrameRateProbe.probe(path) ?: return false
+        if (fps <= 1.0) return false
+        if (matchedFps > 0 && abs(fps - matchedFps) < 0.01) return false
+        Log.i(TAG, "起播前帧率：${"%.3f".format(fps)}fps")
+        val before = matchedFps
+        maybeMatchFrameRate(fps)
+        return matchedFps != before
     }
 
     /**

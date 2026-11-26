@@ -210,6 +210,7 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
 | libplacebo | v7.387.0（`vulkan=disabled`，`-Ddovi=enabled -Dlibdovi=enabled`） |
 | libdovi | 3.4.0（Rust crate，cbindgen + `cargo build --features capi` 出 staticlib，手写 `dovi.pc`） |
 | libass / libbluray | 0.17.4 / 1.5.0 + libudfread 1.2.0 |
+| mbedTLS | 3.6.4（静态；FFmpeg 的 https / TLS 后端） |
 | 字体 | freetype / fontconfig / harfbuzz / fribidi / libunibreak |
 
 - 不产 `libavcodec.so.62` 这种版本化 soname；`NEEDED` 只剩
@@ -218,6 +219,16 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
   `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`，不额外带 `libc++_shared.so`。
 - strip 后 arm64 约 **28.4MB**（含 libdovi；x86_64 更大，平时不编），
   `LOAD` 对齐 `0x4000`。
+- **https**：FFmpeg 之前没编 TLS，libmpv 里直接报
+  `recompile FFmpeg with openssl...`——mpv 只能播 http。现在静态链 mbedTLS
+  3.6.4 + `--enable-mbedtls`。mbedTLS 是 Apache-2.0，FFmpeg 把它归为
+  version3，所以 **Android 这份 libmpv 按 LGPLv3 分发**（桌面端用
+  securetransport / schannel，仍是 2.1）。
+- **证书**：Android 的系统 CA 不在 mbedTLS 的默认路径里，开校验会让所有
+  https 直接失败，所以 mpv 侧默认 `tls-verify=no`；需要校验时用
+  `tls-ca-file`（源级「允许自签名」开关待接）。
+- **https 实测**：`tests/android/https_server.py`（自签 + Range）→ mpv
+  `Mime-type: video/mp4`、`mediacodec-copy`、Range `206`、`drops 0`、播到 EOF。
 - `--stage` 同步 `libmpv.so` 与 mpv 头文件（`client.h` / `render.h` /
   `render_gl.h`）到 `player-mpv/.../include/mpv/`。
 - **换 mpv 版本时必须删** `build/android-mpv/src/mpv`、`.../arm64/build/mpv`、
@@ -289,11 +300,17 @@ mpv 只有软解能读到（`AV_FRAME_DATA_DYNAMIC_HDR_PLUS`），`mediacodec-co
 `SurfaceControl::setHdrMetadata` 是 libgui 的 C++ ABI。所以 mpv 下 HDR10+ 片源按
 HDR10 静态元数据播；动态元数据归 Media3（见 7.5）。
 
-**帧率匹配**：每秒读 `container-fps`（退回 `estimated-vf-fps`），在「与当前
-分辨率相同」的模式里挑**刷新率是片源帧率整数倍且倍数最小**的，写
-`preferredDisplayModeId`（同时设 `preferredRefreshRate`）；API 30+ 再调
+**帧率匹配**：先钉模式再起播。mp4 用 `FrameRateProbe`（`MediaExtractor`）在
+load 前读容器帧率，切完模式等 400ms 再 load；mkv 的帧率在 EBML
+`DefaultDuration` 里（`MediaExtractor` 不填 `KEY_FRAME_RATE`），由 `MpvPlayer`
+起播后每 50ms 轮询 `container-fps`、拿到就回调。之后按「同分辨率、刷新率是
+片源帧率整数倍且倍数最小」选模式，写 `preferredDisplayModeId`（同时设
+`preferredRefreshRate`）；API 30+ 再调
 `Surface.setFrameRate(fps, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)`。`onStop` 把
 `preferredDisplayModeId` 交还系统（设 0）。
+
+起播丢帧实测：P5 mkv（24p 软解）从 6–7 帧降到 1；4K HDR10 mp4（24p 硬解）从
+3 帧降到 1，之后都不再增长。
 
 | 片源 | 选中模式 | 倍数 |
 | --- | --- | --- |
@@ -457,7 +474,8 @@ mpv `nv12 · mediacodec-copy`、`mode 6 @ 120Hz`，启动掉 3 帧后不再增�
 `http-header-fields=Authorization: Basic ...`；Manifest 的
 `network_security_config` 放开局域网明文，HTTPS 仍只信系统 CA。
 验证环境：`tests/android/dav_server.py` + `adb reverse tcp:8099`。实测中文目录、
-`seek_to 4000` 后 `position=5600 → 7600`、错误密码返回 401 不静默。
+`seek_to 4000` 后 `position=5600 → 7600`、错误密码返回 401 不静默。https 源的
+mpv 播放由 mbedTLS 提供（见 7.1），Media3 侧走 OkHttp 自己的 TLS。
 
 **SMB**：`SmbVfs` 用 smbj 0.13.0（SMB2/3，不支持 SMB1），一个连接 + 一个会话，
 按共享名复用 `DiskShare`。路径手工拆分 + 每段 `Uri.encode`（`java.net.URI` 拒绝
@@ -553,7 +571,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 未决项 | 待定 |
 | --- | --- |
-| TLS | vendored OpenSSL vs rustls + 平台校验 + 源级「允许自签名」开关 |
+| TLS | Android 已用 mbedTLS 打通 https，现在默认不校验；待做系统 CA bundle + 源级「允许自签名」开关 |
 | applicationId | `com.dvplayer.app` / `com.dvplayer.app.tv` 两个商店条目 |
 | 下载 | 手机 v1 是否必须；TV 明确不做 |
 | NAS 原盘 | v1「先下载到缓存」是否可接受；边读边播排 B5 |

@@ -32,6 +32,16 @@ class MpvPlayer(private val verbose: Boolean = false) : PlayerEngine {
     @Volatile
     private var listener: PlayerEngine.Listener? = null
 
+    /**
+     * 起播后尽快读到 `container-fps` 并回调一次。MediaExtractor 对 mkv 不填
+     * `KEY_FRAME_RATE`（帧率在 EBML 的 DefaultDuration 里），`FrameRateProbe`
+     * 读不到，所以用 50ms 轮询补这条路径；越早切显示模式，起播丢帧越少。
+     */
+    @Volatile
+    var onFrameRate: ((Double) -> Unit)? = null
+
+    private var fpsThread: Thread? = null
+
     @Volatile
     private var running = true
 
@@ -89,6 +99,29 @@ class MpvPlayer(private val verbose: Boolean = false) : PlayerEngine {
             Log.i(TAG, "DV P5：切软解（硬解丢 RPU）-> ${err ?: "ok"}")
         }
         MpvNative.play(handle, url)
+        startFrameRateProbe()
+    }
+
+    private fun startFrameRateProbe() {
+        if (fpsThread != null) return
+        fpsThread = Thread({
+            for (i in 0 until 60) {          // 最多约 3 秒
+                if (!running) break
+                val fps = getProperty("container-fps")?.toDoubleOrNull()
+                if (fps != null && fps > 1.0) {
+                    onFrameRate?.invoke(fps)
+                    break
+                }
+                try {
+                    Thread.sleep(50)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }, "mpv-fps").apply {
+            isDaemon = true
+            start()
+        }
     }
 
     override fun play() {

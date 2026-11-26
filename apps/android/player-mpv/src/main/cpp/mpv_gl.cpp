@@ -628,6 +628,10 @@ Java_com_dvplayer_player_mpv_MpvNative_create(JNIEnv *, jobject, jboolean verbos
     set_option(p->mpv, "hwdec", "auto-safe");
     // A5：把片源的色彩空间（PQ / BT.2020）交给显示端，不做 tone mapping。
     set_option(p->mpv, "target-colorspace-hint", "yes");
+    // ffmpeg 的 https 走静态 mbedTLS。Android 的系统 CA 不在 mbedTLS 的默认
+    // 路径里，开校验会让所有 https 直接失败；局域网 NAS 也多为自签证书。
+    // 所以默认不校验，需要时用 tls-ca-file（源级开关待接）。
+    set_option(p->mpv, "tls-verify", "no");
     set_option(p->mpv, "msg-level", verbose ? "all=v" : "all=warn");
 
     // libmpv 默认不产生日志事件；默认只要 warn（错误与告警），排障时用 verbose。

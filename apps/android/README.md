@@ -106,8 +106,12 @@ Android 侧是 `libdvplayer_media_jni.so`（crate `dvplayer-media-jni`），
 - `NEEDED` 只应该有 `libm / libc / libdl / libandroid / libmediandk /
   libOpenSLES / libEGL`。出现 `libc++_shared.so` 就说明 C++ 没静态链进去，
   `dlopen` 会报 `cannot locate symbol _ZNSt6__ndk1...`。
-- mpv 按 LGPL 编（`-Dgpl=false`，FFmpeg `--disable-gpl --disable-version3`），
-  不链 `libsmbclient`；见 [ADR-0014](../../docs/adr/0014-android-dual-engine.md)。
+- mpv 按 LGPL 编（`-Dgpl=false`，FFmpeg `--disable-gpl`），不链 `libsmbclient`；
+  见 [ADR-0014](../../docs/adr/0014-android-dual-engine.md)。Android 的 https
+  用静态 mbedTLS（Apache-2.0），FFmpeg 因此要 `--enable-version3`，这份
+  `libmpv.so` 按 **LGPLv3** 分发（桌面端用系统 TLS，仍是 2.1）。
+- mbedTLS 用 release 的 `mbedtls-3.6.4.tar.bz2`；GitHub 的 `archive/` 包缺
+  `framework/` 子模块，CMake 会直接报错。
 
 ## 播放器的 native 层
 
