@@ -1,8 +1,8 @@
 # DVPlayer 项目计划
 
-> 状态：M0 完成（仅 A6 Android 真机待设备）；M1（Windows Alpha）功能收尾，剩
-> Emby / Jellyfin 联调与打包；macOS 壳的浏览 + 播放 + 五项功能已完成（画面待目视验收）；
-> Android / TV 未开始。最后更新：2026-11-21，剩余工作见 §5。
+> 状态：M0 完成（仅 A6 Android 真机待设备）；M1（Windows Alpha）已发布 0.1.6，
+> 剩 Jellyfin 12.x 真机与 Plex；macOS 壳已发布 0.1.6（画面 / HDR 真屏待设备，
+> 签名公证未做）；Android / TV 未开始。最后更新：2026-11-26，剩余工作见 §5。
 
 ## 1. 目标
 
@@ -27,7 +27,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 源 | 协议 | 状态 | 备注 |
 | --- | --- | --- | --- |
 | 飞牛影视（fnOS Media） | 原生 `/v/api/v1` + authx 签名 | **已接入** | 见 [FNOS-API.md](FNOS-API.md) |
-| Emby | `/Users/*` + `X-Emby-Token` | **适配器已完成，待联调** | 见 [EMBY-API.md](EMBY-API.md) |
+| Emby | `/Users/*` + `X-Emby-Token` | **已接入**（4.9.3 实例全链路实测） | 见 [EMBY-API.md](EMBY-API.md) |
 | Jellyfin | `/Items?userId=` 等官方端点 + `Authorization` | **已接入**（10.8.12 全链路实测；12.x 按官方 OpenAPI 写，未跑真机） | 独立适配器 `sources/jellyfin.rs`，见 [JELLYFIN-API.md](JELLYFIN-API.md) |
 | Plex | `/library/*` + `X-Plex-Token` | 未开始 | 需要独立适配器 |
 | 本地文件夹 | 直接读路径 | **已接入** | 目录 / ISO 进媒体库，不刮削，按 `SxxExx` / `第 N 集` 认集号，见 [LOCAL-SOURCE.md](LOCAL-SOURCE.md) |
@@ -72,9 +72,9 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 里程碑 | 范围 | 状态 |
 | --- | --- | --- |
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
-| M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包 | **基本完成**：功能已落地，Emby 联调已通过，安装版 / 绿色版已打包，剩 Jellyfin 实测与自动更新发布地址；清单见 [M1.md](M1.md) |
+| M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包、更新检查 | **已发布 0.1.6**：功能已落地，Emby 联调已通过，安装版 / 绿色版由 CI 出包并附到 Release，启动检查更新已接；剩 Jellyfin 12.x 真机与 Plex；清单见 [M1.md](M1.md) |
 | M2 Android / TV | Media3 管线、格式矩阵（DV 探测与回退）、TV 焦点 | 未开始（只有 README 与选型） |
-| M3 macOS | 进程内 libmpv + render API 全链路、DV / HDR10 或 SDR 回退、公证与 Sparkle | **进行中**：浏览、播放、五项功能已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、公证 / Sparkle 待做 |
+| M3 macOS | 进程内 libmpv + render API 全链路、DV / HDR10 或 SDR 回退、签名公证 | **已发布 0.1.6**：浏览、播放、五项功能、Trakt、更新检查已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、签名 / 公证待做 |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | 未开始（共享核心已提前在 M1 落地） |
 
 ### 解码与呈现能力矩阵（横跨 M1–M3，不是独立里程碑）
@@ -106,7 +106,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 
 对应主线 2 与 3 的第一版：飞牛 + Emby / Jellyfin + 目录源、跨源合并搜索、
 合并播放记录与续播；播放/暂停/seek/轨道/字幕/音频设备与直通/HDR 开关/全屏/快捷键；
-Windows 绿色版 / Inno Setup 安装版打包；自动更新暂缓。Plex 排在最后。
+Windows 绿色版 / Inno Setup 安装版打包（CI 出包）；更新检查（查 Release + 打开下载页）。Plex 排在最后。
 
 共享层见 ADR-0008：媒体库逻辑在 `core/media`（Rust），三端只做界面。
 
@@ -117,7 +117,10 @@ Windows 绿色版 / Inno Setup 安装版打包；自动更新暂缓。Plex 排�
 - 已完成：Emby / Jellyfin 适配器、多源聚合与合并搜索（跨源去重 + 详情页「资源」选源）、
   音轨/字幕面板、本地与文件协议源（SMB / NFS / WebDAV）、蓝光原盘（ISO / BDMV）、
   音频输出设备 / 音频直通 / HDR 直通开关与 F11 全屏、进度条三层与缓冲大小；
-- 未完成：Jellyfin 真实服务器联调（Emby 已完成）、Windows 自动更新接入发布地址（安装版 / 绿色版已打包）。
+- 已完成：更新检查（0.1.6）：启动后查 GitHub Releases、侧栏版本号下提示、「关于」页
+  检查 / 打开发布页；CI 在 tag 上自动出 macOS + Windows 包并附到 Release；
+- 已完成：Jellyfin 10.8.12 在两端全链路实测（Emby 另在 4.9.3 实例实测）；
+- 未完成：Jellyfin 12.x 真机（新端点分支按官方 OpenAPI 写）、Plex 适配器。
 
 ### M2 — Android / TV Alpha
 
@@ -125,11 +128,12 @@ Media3 管线、DV 探测与回退、TV 焦点与 Leanback、下载与续播、l
 
 ### M3 — macOS
 
-进程内 libmpv + render API 全链路（ADR-0011）、DV / HDR10 或 SDR 回退、公证与 Sparkle。
+进程内 libmpv + render API 全链路（ADR-0011）、DV / HDR10 或 SDR 回退、签名 / 公证。
 
-现状：浏览、播放、五项功能（弹幕 / 片头片尾 / 定时关闭 / 画面比例 / 字幕搜索）
-与 Windows 对齐，见 [M2-MACOS.md](M2-MACOS.md)；未完成的是 **HDR 屏目视验收**、
-HDR 真屏与直通听感、公证与 Sparkle 自动更新。
+现状：浏览、播放、五项功能（弹幕 / 片头片尾 / 定时关闭 / 画面比例 / 字幕搜索）、
+Trakt、更新检查与 Windows 对齐，见 [M2-MACOS.md](M2-MACOS.md)；未完成的是
+**HDR 屏目视验收**、HDR 真屏与直通听感、签名 / 公证（更新只到「检查 + 打开下载页」，
+没有 Sparkle 静默安装）。
 
 ### M4 — 共性层
 
@@ -144,7 +148,7 @@ HDR 真屏与直通听感、公证与 Sparkle 自动更新。
 
 | 项 | 卡在哪 |
 | --- | --- |
-| Jellyfin 联调 | Emby 已在 Monta HD（4.9.3）实测通过，含播放直链与进度回写；Jellyfin 共用同一适配器，但还没有实例可测（[EMBY-API.md](EMBY-API.md) §5） |
+| Jellyfin 12.x | 10.8.12 已在 macOS / Windows 全链路实测（登录、库、详情、继续观看、收藏、直链、图片）；12.x 的新端点分支只按官方 OpenAPI 写过，缺实例跑真机（[JELLYFIN-API.md](JELLYFIN-API.md) §4） |
 | 弹幕（弹弹play） | 凭据内置（打包时注入，见 [SECRETS.md](SECRETS.md)），用户不用申请；签名、XML → ASS、`sub-add` + `secondary-sid` 同屏已用本地假服务器验过，真实接口待内置凭据后回归 |
 | 在线字幕（OpenSubtitles） | 需要 API Key。两端设置页已有 API Key / 可选账号的输入入口，搜索 / 下载 / `sub-add select` 已用本地假服务器验过 |
 | HDR 直通到 HDR 屏 | 缺 HDR 显示器。Windows 开关已接（`target-colorspace-hint`），只能证明元数据解析正确 |
@@ -157,8 +161,8 @@ HDR 真屏与直通听感、公证与 Sparkle 自动更新。
 
 | 项 | 说明 |
 | --- | --- |
-| Windows 自动更新 | 安装版（Inno Setup）与绿色版 zip 已出；自动更新需要发布地址（`.appinstaller` 或自建 feed），代码还没接（M1 B14） |
-| macOS 公证 + Sparkle | `.app` 未签名、未做自动更新（§4 M3） |
+| ~~Windows 自动更新~~ | **已完成**（0.1.6）：启动 / 「关于」页查 GitHub Releases，有新版在侧栏提示；按钮打开下载页。静默安装（`.appinstaller` 或自建 feed）仍未做 |
+| macOS 签名 / 公证 | `.app` 未签名、未公证，首次打开要手动放行；更新只到「检查 + 打开下载页」，不做 Sparkle 静默安装（§4 M3） |
 | Plex 适配器 | `/library/*` + `X-Plex-Token`，与 Emby 差异大，单独一个适配器（M1 B15） |
 | Android / TV | Media3 管线、TV 焦点、libass NDK，目前只有 README 与选型 |
 | M4 跨端同步 | 播放记录 / 收藏 / 续播点跨源、跨端合并；现在只回写播放的那个源 |

@@ -90,7 +90,7 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   `play open failed` / `play retry`，截图为窗内错误面板（不关窗）。
 - **Emby 进度上报走播放会话**：`Sessions/Playing`（注册会话）→ 每 10 秒
   `Sessions/Playing/Progress` → 关窗 / 播完 `Sessions/Playing/Stopped`。
-  Monta HD 的反代对 `/Users/{uid}/Items/{id}/UserData` 返回 404，而且只发
+  实测那台 Emby 的反代对 `/Users/{uid}/Items/{id}/UserData` 返回 404，而且只发
   `Progress` 不落盘；`Stopped` 之后 `UserData.PlaybackPositionTicks` 才会更新。
   关窗时等一下这次上报（`wait: true`），否则进程退出会把后台任务带走。
   回归：播放 80 秒后关窗，`player.log` 出现 `report ok ... stopped=True`，
@@ -207,7 +207,8 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 - `audioout` / `audiotoggle`：打开音频输出菜单、切一次直通 / HDR 并写日志（无桌面自检用）。
 - `frame`：让 mpv 把当前解码帧写到 `<目录>\video-frame.png`，锁屏 / 无桌面也能验真实画面。
 - `--screenshot <目录> settings --settings-tab play`：设置页直接停在「播放」分组，
-  核对缓冲大小这类项。
+  核对缓冲大小这类项；`--settings-tab about` 停在「关于」，核对版本 / 项目地址 /
+  更新状态（更新检查是异步的，切换后要等结果回来再截）。
 - `--play-cover-shot <目录>`：抓打开遮罩。设 `DVPLAYER_OPENING_HOLD=1`（假装首帧
   不来）时，1.5 / 12 / 31 秒三张都必须是纯黑 + 片名 +「正在打开…」+ 转圈，不能透出桌面。
 - `DVPLAYER_BUFFERING_HOLD=1`：出画后强制显示中间的「正在缓冲…」小胶囊（验证播放中
