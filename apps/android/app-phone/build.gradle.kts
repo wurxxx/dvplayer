@@ -21,6 +21,7 @@ android {
 
 dependencies {
     implementation(project(":ui-phone"))
+    implementation(project(":core"))
     implementation(project(":player-mpv"))
     implementation(project(":player-media3"))
     implementation(libs.androidx.media3.ui)

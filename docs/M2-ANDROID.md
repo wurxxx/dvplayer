@@ -540,6 +540,40 @@ EGLSurface；之前新 surface 是黑的，因为 `mpv_render_context_update()` 
 - **真实原盘播放仍未验**：需要至少一张未加密的 ISO / BDMV 目录样片，才可能
   看到 libbluray 选主播放列表、章节与 PGS。这一步记为阻塞项。
 
+VFS 第一刀：WebDAV 浏览（A9 第一步，2026-11-27）：`:core` 新增
+`com.dvplayer.core.vfs`。
+
+- `Vfs` / `VfsEntry`：UI 与播放器只认这两个类型。`VfsEntry.path` 是可以直接
+  交给内核算的地址（WebDAV 是 `http(s)://`），所以播放不需要再写一层
+  DataSource。
+- `DavVfs`：`PROPFIND` + `Depth: 1` + Basic 认证，解析 `207 Multi-Status`
+  （`resourcetype` / `getcontentlength` / `getlastmodified`），用
+  `HttpUrl.resolve` 处理绝对 / 相对 `href`，目录名 URL 解码（中文正常）。
+  **用 OkHttp 而不是 `HttpURLConnection`**：Android 的实现只允许
+  标准方法，`setRequestMethod("PROPFIND")` 会抛 `ProtocolException`。
+- 播放：mpv 的 HTTP 层不认 Android 的 cleartext 策略，但要自己带认证头，
+  验证页在 `--es vfs_user` 存在时设
+  `http-header-fields=Authorization: Basic ...`。Manifest 加
+  `network_security_config` 放开明文（局域网 NAS 的 WebDAV 常见是 http），
+  HTTPS 仍只信任系统 CA。
+- 验证环境：`tests/android/dav_server.py`（最小 PROPFIND + Range GET + Basic
+  认证），`adb reverse tcp:8099 tcp:8099` 让设备访问
+  `http://127.0.0.1:8099/dav/`。
+
+实测（日志，不依赖屏幕）：
+
+- 根目录：`VFS 列表 2 项` → `VFS D 剧集 .../%E5%89%A7%E9%9B%86/`、
+  `VFS F dv-test.mp4 size=11894722`。
+- 子目录：`VFS 列表 1 项` → `VFS F 测试.srt size=39`（中文文件名正常）。
+- 播放：同一个 URL 交给 mpv → `HTTP 认证头 -> ok`、
+  `file loaded ... hwdec=mediacodec-copy`；`--es seek_to 4000` 后 media
+  session `position=5600 → 7600`（HTTP 上 seek / 播放正常）。
+- 错误密码：`PROPFIND ... -> HTTP 401` 以异常抛出，不会静默当成空目录。
+
+还没做：SMB（smbj）与 NFS（libnfs JNI，AUTH_SYS）两个实现，以及把
+`VfsEntry` 接到核心的虚拟源（`dv_hub_replace`）。这两项缺真实 NAS 环境，
+先记为阻塞。
+
 自动重试（A7 第四步，2026-11-27）：`PlayerEngine.Listener` 的 `Error` 事件现在
 接到验证页：Media3 起播失败时把当前 `positionMs` 放进新 Intent，换 mpv 重开
 同一个片源（`fallback=1` 标记，两个内核最多互相换一次，避免来回踢皮球）。

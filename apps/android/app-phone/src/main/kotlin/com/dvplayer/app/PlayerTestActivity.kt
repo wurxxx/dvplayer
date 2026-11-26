@@ -34,6 +34,7 @@ import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
 import com.dvplayer.player.PlayerEvent
 import com.dvplayer.player.TrackKind
+import com.dvplayer.core.vfs.DavVfs
 import com.dvplayer.player.Hdr10PlusProbe
 import com.dvplayer.player.media3.Media3Player
 import com.dvplayer.player.mpv.MpvPlayer
@@ -146,6 +147,16 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 intent.getStringExtra("hwdec")?.let {
                     Log.i(TAG, "hwdec -> $it ${mpv.setProperty("hwdec", it) ?: "ok"}")
                 }
+                // A9：WebDAV 需要认证时，把 Basic 头交给 mpv 的 HTTP 层。
+                intent.getStringExtra("vfs_user")?.let { user ->
+                    val token = android.util.Base64.encodeToString(
+                        "$user:${intent.getStringExtra("vfs_pass").orEmpty()}"
+                            .toByteArray(Charsets.UTF_8),
+                        android.util.Base64.NO_WRAP,
+                    )
+                    val err = mpv.setProperty("http-header-fields", "Authorization: Basic $token")
+                    Log.i(TAG, "HTTP 认证头 -> ${err ?: "ok"}")
+                }
                 // A5 的 SDR 回退：--es force_sdr 1 让 mpv 做 tone mapping，surface 固定 sRGB。
                 if (intent.getStringExtra("force_sdr") == "1") {
                     mpv.setHdrPassthrough(false)
@@ -222,6 +233,23 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 PlaybackForegroundService.start(this, controller.notification())
             }.onFailure { e -> Log.w(TAG, "前台服务启动失败", e) }
             Log.i(TAG, "媒体会话就绪")
+        }
+
+        // A9 验证钩子：--es vfs <WebDAV 目录 URL> 列一次目录并打日志，
+        // 认证用 --es vfs_user / --es vfs_pass。播放仍走 --es url。
+        intent.getStringExtra("vfs")?.let { dav ->
+            val user = intent.getStringExtra("vfs_user")
+            val pass = intent.getStringExtra("vfs_pass")
+            Thread({
+                runCatching {
+                    DavVfs(dav, user, pass).list(dav)
+                }.onSuccess { entries ->
+                    Log.i(TAG, "VFS 列表 ${entries.size} 项")
+                    entries.forEach {
+                        Log.i(TAG, "VFS ${if (it.isDirectory) "D" else "F"} ${it.name} size=${it.size} ${it.path}")
+                    }
+                }.onFailure { Log.e(TAG, "VFS 列表失败", it) }
+            }, "dav-list").start()
         }
 
         Log.i(TAG, "engine=$engine url=$url")
