@@ -236,6 +236,8 @@ final class PlayerSession: ObservableObject {
     @Published private(set) var audioDevice: String = ""
     @Published private(set) var audioPassthrough = false
     @Published private(set) var hdrPassthrough = false
+    /// HDR → SDR 亮度参考（nits）；0 = 自动（100 nit）。
+    @Published private(set) var hdrPeakNits = 0
 
     // —— 轨道 ——
     @Published private(set) var audioTracks: [PlayerTrack] = []
@@ -365,6 +367,7 @@ final class PlayerSession: ObservableObject {
         self.danmakuEnabled = settings.danmakuEnabled ?? false
         self.audioPassthrough = settings.audioPassthrough ?? false
         self.hdrPassthrough = settings.hdrPassthrough ?? false
+        self.hdrPeakNits = max(0, settings.hdrPeakNits ?? 0)
         self.audioDevice = settings.audioDevice ?? ""
         // 置顶状态跨会话保留：上次开着，下次开播放窗还是置顶。
         self.isAlwaysOnTop = settings.alwaysOnTop ?? false
@@ -1057,6 +1060,20 @@ final class PlayerSession: ObservableObject {
         syncAudioConfig()
         toast(enabled ? "HDR 直通：开（系统要开 HDR）" : "HDR 直通：关")
         showChrome()
+    }
+
+    /// 「HDR 亮度参考」：0 = 自动（100 nit）。播放中改立即生效。
+    func setHdrPeakNits(_ nits: Int) {
+        mpv.setHdrPeakNits(nits)
+        hdrPeakNits = mpv.hdrPeakNits
+        toast(hdrPeakNits <= 0 ? "HDR 亮度参考：自动（100 nit）"
+                               : "HDR 亮度参考：\(hdrPeakNits) nit")
+        showChrome()
+    }
+
+    /// 菜单里的短标签。
+    var hdrPeakLabel: String {
+        hdrPeakNits <= 0 ? "自动" : "\(hdrPeakNits) nit"
     }
 
     /// 把 mpv 的值搬回这里（mpv 可能拒绝 / 归一化某个参数）。

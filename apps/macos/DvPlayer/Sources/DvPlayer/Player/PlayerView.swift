@@ -620,6 +620,30 @@ struct PlayerView: View {
                 }
             }
 
+            Menu("HDR 亮度参考（\(session.hdrPeakLabel)）") {
+                Button {
+                    session.setHdrPeakNits(0)
+                } label: {
+                    if session.hdrPeakNits == 0 {
+                        Label("自动（100 nit）", systemImage: "checkmark")
+                    } else {
+                        Text("自动（100 nit）")
+                    }
+                }
+                Divider()
+                ForEach([60, 80, 100, 120, 150, 180, 200], id: \.self) { nits in
+                    Button {
+                        session.setHdrPeakNits(nits)
+                    } label: {
+                        if session.hdrPeakNits == nits {
+                            Label("\(nits) nit", systemImage: "checkmark")
+                        } else {
+                            Text("\(nits) nit")
+                        }
+                    }
+                }
+            }
+
             Menu(session.sleepLabel.map { "定时关闭（\($0)）" } ?? "定时关闭") {
                 Button("不定时") { session.cancelSleep() }
                 Divider()

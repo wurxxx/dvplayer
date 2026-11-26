@@ -124,6 +124,10 @@ final class MpvEngine {
     private(set) var audioDevice: String = ""
     private(set) var audioPassthrough = false
     private(set) var hdrPassthrough = false
+    /// 用户覆盖的 HDR 亮度参考（nits）；0 = 自动（100 nit）。
+    private(set) var hdrPeakNits = 0
+    /// 当前窗口所在显示器的 tone map 目标（SDR 白点 + EDR 余量）。
+    private var displayTarget = DisplayTarget.current()
 
     private static let observed = [
         "time-pos", "duration", "pause", "eof-reached", "speed", "volume", "mute",
@@ -140,6 +144,12 @@ final class MpvEngine {
         // 单窗口：视频画布由这里建，PlayerWindow 把它塞到控件下面。
         let view = MpvVideoView(client: client)
         videoView = view
+
+        // 音频输出 / 直通 / HDR / 亮度参考跟着设置走：换集不重建 mpv，
+        // 也一直是用户选的。
+        let settings = AppSettings.load()
+        hdrPeakNits = max(0, settings.hdrPeakNits ?? 0)
+        displayTarget = DisplayTarget.current(overrideNits: hdrPeakNits)
 
         // 选项直接对应旧的命令行参数。和子进程时代相比去掉的：
         // `--input-ipc-server`（进程内了）、`--geometry` / `--screen` / `--ontop` /
@@ -159,6 +169,17 @@ final class MpvEngine {
             "msg-level": "all=info,vo/gpu-next=warn",
             // 出问题看这个文件：.app 里没有终端。
             "log-file": NSTemporaryDirectory() + "dvplayer-mpv.log",
+            // HDR → SDR 的目标：render API 没有 swapchain，gpu-next 拿不到
+            // 显示器信息（`libmpv_gpu_next.c` 传的是空 `display_csp`），会按
+            // 203 nit 的 SDR 参考白回退。Windows 走 DXGI swapchain，报的是
+            // 显示器实际 SDR 白点（约 100 nit），所以同一部 HDR 片在 macOS
+            // 上会明显偏暗（实测《奥德赛》01:50 那帧灰度均值 78.8 vs
+            // Windows/SenPlayer 的观感，峰值只有 123）。
+            // 这里用 `DisplayTarget` 算 SDR 白点（Apple/Windows 的约定是 100
+            // nit；用户可以在设置里覆盖），tone map 用 mobius（比默认 spline
+            // 更愿意抬暗部/中间调）。SDR 内容不受影响（实测灰阶 125 不变）。
+            "target-peak": String(Int(displayTarget.toneMapPeak)),
+            "tone-mapping": "mobius",
         ]
 
         // 自检 / A/B 用：注入任意 vf（`scripts/fel-ab.sh` 用它关掉增强层做对照）。
@@ -166,8 +187,15 @@ final class MpvEngine {
             options["vf"] = vf
         }
 
-        // 音频输出 / 直通 / HDR 跟着设置走：换集不重建 mpv，也一直是用户选的。
-        let settings = AppSettings.load()
+        // 自检 / A/B 用：注入任意 mpv 选项（`key=value;key=value`）。
+        if let extra = ProcessInfo.processInfo.environment["DVPLAYER_MPV_EXTRA"], !extra.isEmpty {
+            for pair in extra.split(separator: ";") {
+                let kv = pair.split(separator: "=", maxSplits: 1)
+                if kv.count == 2 { options[String(kv[0]).trimmingCharacters(in: .whitespaces)] = String(kv[1]) }
+            }
+        }
+
+        // 音频直通开关。
         if settings.audioPassthrough ?? false {
             options["audio-spdif"] = "ac3,eac3,dts,dts-hd,truehd"
         }
@@ -213,6 +241,9 @@ final class MpvEngine {
         }
 
         NSLog("[Play] libmpv 已启动")
+        NSLog("[Play] 显示器 \(displayTarget.screenName)：EDR \(displayTarget.edrHeadroom)× "
+              + "→ target-peak \(Int(displayTarget.toneMapPeak)) nit"
+              + (displayTarget.usesOverride ? "（手动）" : "（自动）"))
 
         // 渲染上下文由视图在第一次 draw 时建（必须在 GL 上下文 current 的线程上）。
         // mpv 要等它有渲染上下文才肯初始化视频链路，所以 `ready` 在之后才置位，
@@ -222,6 +253,14 @@ final class MpvEngine {
         }
         view.onFirstDraw = { [weak self] in
             self?.releaseFirstFrameWait()
+        }
+        // 多显示器：窗口拖到另一块屏时重新算 SDR 白点 / EDR 余量。
+        // 当前 SDR 输出下白点都是 100（或用户的覆盖值），这一步主要是给以后
+        // 的 EDR 直通留口子，以及把「这块屏有没有 EDR」写进日志。
+        view.onScreenChanged = { [weak self] screen in
+            guard let self else { return }
+            self.applyDisplayTarget(
+                DisplayTarget.current(for: screen, overrideNits: self.hdrPeakNits))
         }
     }
 
@@ -234,6 +273,10 @@ final class MpvEngine {
             client.observe(name)
         }
         client.command(["set_property", "secondary-sub-visibility", "yes"])
+        // 首次 onScreenChanged 可能早于 ready 到达（那时直接 return 了），
+        // 这里按已经算好的目标补一次，保证窗口所在屏幕 / 用户覆盖生效。
+        client.command(["set_property", "target-peak",
+                        String(Int(displayTarget.toneMapPeak))])
         ready = true
 
         if let pendingLoad {
@@ -278,9 +321,14 @@ final class MpvEngine {
         // 请求头：每集可能不一样（飞牛带 token）。mpv 的列表选项用 `,` 分隔、
         // `\` 转义；Jellyfin 的 `Authorization` 值里本身就带逗号
         // （`Token="…", Client="…"`），不转义会被拆成好几条头。
-        let fields = headers
+        var fields = headers
             .map { "\($0.key): \(Self.escapeListValue($0.value))" }
             .joined(separator: ",")
+        // 自检：`DVPLAYER_LOCAL` 播远程直链时要带鉴权头，覆盖空 headers。
+        if let forced = ProcessInfo.processInfo.environment["DVPLAYER_HTTP_HEADER"],
+           !forced.isEmpty {
+            fields = forced
+        }
         client.command(["set_property", "http-header-fields", fields])
 
         // 服务器的代理设置：设了就一直用，切集换成新源时会重新设。
@@ -423,6 +471,34 @@ final class MpvEngine {
         settings.hdrPassthrough = enabled
         settings.save()
         onAudioConfig?()
+    }
+
+    /// 窗口换了屏幕（或 EDR 状态变化、用户调了亮度参考）：更新 tone map 目标。
+    ///
+    /// SDR 输出下目标就是白点（自动 100，或用户的覆盖值）。等以后
+    /// `MpvVideoView` 支持 EDR 直通，这里会按 `target.peak` 更新。
+    func applyDisplayTarget(_ target: DisplayTarget) {
+        let changed = target.toneMapPeak != displayTarget.toneMapPeak
+        displayTarget = target
+        guard changed, ready else { return }
+        client.command(["set_property", "target-peak", String(Int(target.toneMapPeak))])
+        NSLog("[Play] 显示器 \(target.screenName)：EDR \(target.edrHeadroom)× "
+              + "→ target-peak \(Int(target.toneMapPeak)) nit"
+              + (target.usesOverride ? "（手动）" : "（自动）"))
+    }
+
+    /// 设置里的「HDR 亮度参考」：0 = 自动（100 nit），否则用用户给的值。
+    /// 播放中改立即生效；换集 / 换屏都沿用。
+    func setHdrPeakNits(_ nits: Int) {
+        let clamped = max(0, min(400, nits))
+        hdrPeakNits = clamped
+
+        var settings = AppSettings.load()
+        settings.hdrPeakNits = clamped
+        settings.save()
+
+        applyDisplayTarget(DisplayTarget.current(for: videoView?.window?.screen,
+                                                overrideNits: clamped))
     }
 
     func selectAudio(_ trackId: Int64) {

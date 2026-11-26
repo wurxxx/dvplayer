@@ -306,6 +306,14 @@ public sealed class MpvProcess : IMpvEngine
             yield return "--target-colorspace-hint=yes";
         }
 
+        // HDR 亮度参考：0 = 自动（让 mpv 用显示器 SDR 白点，Windows 实测 80 nit）。
+        // 个别显示器观感不同时用户可覆盖；SDR 内容不受影响。
+        if (settings.HdrPeakNits > 0)
+        {
+            yield return "--target-peak=" +
+                         settings.HdrPeakNits.ToString(CultureInfo.InvariantCulture);
+        }
+
         if (!string.IsNullOrWhiteSpace(settings.AudioDevice))
         {
             yield return "--audio-device=" + settings.AudioDevice;

@@ -30,6 +30,12 @@ public struct AppSettings: Codable, Sendable {
     /// HDR 直通（mpv 的 `target-colorspace-hint`，系统开了 HDR 才有效）。
     public var hdrPassthrough: Bool?
 
+    /// HDR → SDR 的亮度参考（nits）。0 / 缺省 = 自动（100 nit）。
+    ///
+    /// render API 拿不到显示器的 SDR 白点，按 Apple / Windows 的约定取 100。
+    /// 个别显示器观感偏暗或偏亮时，用户可以自己微调；SDR 内容不受影响。
+    public var hdrPeakNits: Int?
+
     /// 播放窗是否置顶（播放页的图钉按钮）。跨会话保留。
     public var alwaysOnTop: Bool?
 
@@ -62,6 +68,7 @@ public struct AppSettings: Codable, Sendable {
         audioDevice = try c.decodeIfPresent(String.self, forKey: .audioDevice)
         audioPassthrough = try c.decodeIfPresent(Bool.self, forKey: .audioPassthrough)
         hdrPassthrough = try c.decodeIfPresent(Bool.self, forKey: .hdrPassthrough)
+        hdrPeakNits = try c.decodeIfPresent(Int.self, forKey: .hdrPeakNits)
         alwaysOnTop = try c.decodeIfPresent(Bool.self, forKey: .alwaysOnTop)
         danmakuEnabled = try c.decodeIfPresent(Bool.self, forKey: .danmakuEnabled)
         openSubtitlesApiKey = try c.decodeIfPresent(String.self, forKey: .openSubtitlesApiKey)

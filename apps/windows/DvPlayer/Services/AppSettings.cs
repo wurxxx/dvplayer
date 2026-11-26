@@ -58,6 +58,12 @@ public sealed class AppSettings
     /// <summary>HDR 直通（mpv 的 target-colorspace-hint，系统开了 HDR 才有效）。</summary>
     public bool HdrPassthrough { get; set; }
 
+    /// <summary>
+    /// HDR → SDR 的亮度参考（nits）。0 = 自动（跟随系统 SDR 白点，
+    /// Windows 实测是 80 nit）。个别显示器观感不同时用户可以覆盖。
+    /// </summary>
+    public int HdrPeakNits { get; set; }
+
     /// <summary>音频输出设备（mpv audio-device 的名字）；空 = 系统默认。</summary>
     public string? AudioDevice { get; set; }
 
