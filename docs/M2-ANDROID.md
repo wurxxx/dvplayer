@@ -569,6 +569,10 @@ VFS 第一刀：WebDAV 浏览（A9 第一步，2026-11-27）：`:core` 新增
   `file loaded ... hwdec=mediacodec-copy`；`--es seek_to 4000` 后 media
   session `position=5600 → 7600`（HTTP 上 seek / 播放正常）。
 - 错误密码：`PROPFIND ... -> HTTP 401` 以异常抛出，不会静默当成空目录。
+- Media3 侧：`DefaultHttpDataSource.Factory().setDefaultRequestProperties`
+  挂 Basic 认证（验证页 `--es vfs_user/vfs_pass`）。实测
+  `Media3 HTTP 认证已设置` → `video format ... 1280×720 30.0` →
+  `first frame rendered`，`--es seek_to 4000` 后 `pos 5152ms`，drops 0。
 
 还没做：SMB（smbj）与 NFS（libnfs JNI，AUTH_SYS）两个实现，以及把
 `VfsEntry` 接到核心的虚拟源（`dv_hub_replace`）。这两项缺真实 NAS 环境，

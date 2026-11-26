@@ -20,6 +20,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.dvplayer.player.ChapterInfo
 import com.dvplayer.player.EngineId
@@ -45,10 +46,16 @@ class Media3Player(context: Context) : PlayerEngine {
 
     override val id: EngineId = EngineId.MEDIA3
 
+    /**
+     * HTTP(S) 数据源。WebDAV / 局域网 NAS 需要认证时把 Authorization 头挂在
+     * 这里；否则 Media3 只能播匿名可读的地址（mpv 走 `http-header-fields`）。
+     */
+    private val httpDataSource = DefaultHttpDataSource.Factory()
+
     private val player: ExoPlayer = ExoPlayer.Builder(context)
         // 裸 .sup 需要自己的解析器；其余格式仍交给 Media3 默认实现。
         .setMediaSourceFactory(
-            DefaultMediaSourceFactory(context)
+            DefaultMediaSourceFactory(httpDataSource)
                 .setSubtitleParserFactory(DvSubtitleParserFactory()),
         )
         .build()
@@ -172,6 +179,15 @@ class Media3Player(context: Context) : PlayerEngine {
                 Log.i(TAG, "dropped +$droppedFrames / ${elapsedMs}ms（累计 $droppedTotal）")
             }
         })
+    }
+
+    /** A9：给 HTTP 源加 Basic 认证（必须在 [load] 之前调用）。 */
+    fun setHttpCredentials(user: String, password: String) {
+        val token = android.util.Base64.encodeToString(
+            "$user:${password.orEmpty()}".toByteArray(Charsets.UTF_8),
+            android.util.Base64.NO_WRAP,
+        )
+        httpDataSource.setDefaultRequestProperties(mapOf("Authorization" to "Basic $token"))
     }
 
     override fun attach(surface: Surface, width: Int, height: Int) {

@@ -133,7 +133,13 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         engine = resolveEngine()
         when (engine) {
             "media3" -> {
-                media3 = Media3Player(this)
+                val m3 = Media3Player(this)
+                // A9：WebDAV / NAS 的认证头必须在使用前挂上。
+                intent.getStringExtra("vfs_user")?.let { user ->
+                    m3.setHttpCredentials(user, intent.getStringExtra("vfs_pass").orEmpty())
+                    Log.i(TAG, "Media3 HTTP 认证已设置")
+                }
+                media3 = m3
             }
             "codec" -> Unit  // 只做 MediaCodec 探针
             else -> {
