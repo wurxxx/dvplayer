@@ -26,6 +26,12 @@
             </intent-filter>
         </activity>
 
+        <!-- A10：播放前台服务，保住通知与后台进程。 -->
+        <service
+            android:name="com.dvplayer.player.PlaybackForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- A4 出画验证页，正式播放页之后从 :ui-phone 接进来。 -->
         <activity
             android:name=".PlayerTestActivity"

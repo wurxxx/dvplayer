@@ -469,6 +469,37 @@ EGLSurface；之前新 surface 是黑的，因为 `mpv_render_context_update()` 
 新帧时我们直接返回、不会重画。现在重建 surface 时置 `force_render`，
 即使没有新帧也把上一帧重画进新 buffer，PiP 窗口正常出画。
 
+前台服务与后台播放（A10 第二步，2026-11-27）：新增
+`:player` 的 `PlaybackForegroundService`。播放器对象仍在播放页，服务只负责把
+那条 MediaStyle 通知（`MediaSessionController.notification()`，id 1001）提升为
+前台通知，让系统在退到后台后不急着杀进程；通知内容继续由会话每秒更新同一个 id，
+前台状态不会掉。`AndroidManifest` 里声明 `foregroundServiceType="mediaPlayback"`。
+
+实测（`--es no_pip 1` 跳过 PiP，直接按 Home 退后台）：
+
+- `dumpsys activity services com.dvplayer.app`：
+  `isForeground=true foregroundId=1001 types=0x00000002`，通知带
+  `FOREGROUND_SERVICE|ONGOING_EVENT`。
+- 后台播放：`dv-multitrack.mp4` 按 Home 后 media session 的 position 继续增长
+  （2.0s → 4.9s → 8.0s → 11.2s → 14.1s），进程 60 秒后仍存活。
+- 后台控制：`cmd media_session dispatch pause` → `PAUSED(2)`，
+  `dispatch play` → 继续 `PLAYING(3)`，position 继续推进。
+
+已知边界：
+
+- **纯视频片源 + Surface 被释放后位置停住**：`gen-hdr-sample.py` 生成的 HDR
+  样片没有音轨，按 Home 后 SurfaceView 的 surface 被销毁、我们 detach 掉
+  EGLSurface，mpv 的 `video-sync` 以显示为时钟，没有输出时就不再推进（会话里
+  position 停在最后一帧的时间上）。带音轨的片源不受影响（音频时钟继续走）。
+  这在实际使用里可以接受：没有声音的片源退到后台本来也没有继续播的意义。
+- **播放器还没搬进服务**：正式播放页接入后台播放时，应该把 MediaSession 与
+  播放引擎一起搬进 `PlaybackForegroundService`，否则 Activity 被系统回收时
+  播放还是会停。这一步是正式页面的工作，验证页只验通道。
+- **修 `setFrameRate` 崩溃**：按 Home 退后台时 Surface 已经释放，
+  `Surface.setFrameRate` 会抛 `IllegalStateException: Surface has already been
+  released`。现在统一走 `setSurfaceFrameRate()`：先看 `surface.isValid`，
+  再兜一层 `runCatching`，帧率提示失败只记日志。
+
 契约对齐（A6 第二步）：`Media3Player` 实现同一份 `PlayerEngine`，验证页
 `--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
 都跑通；外部字幕用 `MediaItem.SubtitleConfiguration`（按扩展名给 MIME），

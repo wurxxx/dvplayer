@@ -32,6 +32,8 @@ class MediaSessionController(
     private val session = MediaSession(context, "DVPlayer")
     private var lastTitle: String = title
     private var lastPaused: Boolean? = null
+    @Volatile
+    private var cachedNotification: Notification? = null
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -106,6 +108,22 @@ class MediaSessionController(
 
     private fun notify(paused: Boolean) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val notification = buildNotification(paused)
+        cachedNotification = notification
+        manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * 前台服务用：拿到当前状态的 Notification（和通知栏里那条是同一个 id）。
+     * 服务先 startForeground(NOTIFICATION_ID, notification)，之后 notify() 更新同 id，
+     * 前台状态不会掉。
+     */
+    fun notification(): Notification =
+        cachedNotification ?: buildNotification(lastPaused ?: false).also {
+            cachedNotification = it
+        }
+
+    private fun buildNotification(paused: Boolean): Notification {
         val toggleIntent = PendingIntent.getBroadcast(
             context,
             1,
@@ -149,7 +167,7 @@ class MediaSessionController(
                     .setShowActionsInCompactView(0),
             )
             .build()
-        manager.notify(NOTIFICATION_ID, notification)
+        return notification
     }
 
     private fun ensureChannel() {
@@ -178,7 +196,7 @@ class MediaSessionController(
 
     companion object {
         private const val CHANNEL_ID = "dvplayer_playback"
-        private const val NOTIFICATION_ID = 1001
+        const val NOTIFICATION_ID = 1001
         private const val ACTION_TOGGLE = "com.dvplayer.player.TOGGLE"
         private const val ACTION_FORWARD = "com.dvplayer.player.FORWARD"
         private const val ACTION_REWIND = "com.dvplayer.player.REWIND"

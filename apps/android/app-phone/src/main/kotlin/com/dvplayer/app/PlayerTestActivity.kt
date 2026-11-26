@@ -28,6 +28,7 @@ import com.dvplayer.player.EngineId
 import com.dvplayer.player.EngineRouter
 import com.dvplayer.player.FrameRateMatcher
 import com.dvplayer.player.MediaSessionController
+import com.dvplayer.player.PlaybackForegroundService
 import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
 import com.dvplayer.player.TrackKind
@@ -195,7 +196,11 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         }
 
         enginePlayer?.let {
-            session = MediaSessionController(this, it, url.substringAfterLast('/'))
+            val controller = MediaSessionController(this, it, url.substringAfterLast('/'))
+            session = controller
+            runCatching {
+                PlaybackForegroundService.start(this, controller.notification())
+            }.onFailure { e -> Log.w(TAG, "前台服务启动失败", e) }
             Log.i(TAG, "媒体会话就绪")
         }
 
@@ -251,6 +256,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     /** A10：PiP。验证页只做最小参数，正式播放页按片源宽高比给 aspectRatio。 */
     private fun enterPip() {
+        if (intent.getStringExtra("no_pip") == "1") return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
         val params = PictureInPictureParams.Builder().build()
@@ -480,6 +486,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         handler.removeCallbacks(refresh)
         session?.release()
         session = null
+        PlaybackForegroundService.stop(this)
         // mpv 的 destroy 要 join 渲染线程 + 等 mpv 退出，偶尔会卡住十几秒；
         // 放在后台线程，别把主线程（和新 activity）一起堵死。
         val mpv = player
@@ -507,11 +514,25 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             @Suppress("DEPRECATION")
             attrs.preferredRefreshRate = 0f
             window.attributes = attrs
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                surfaceView.holder.surface?.setFrameRate(0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-            }
+            setSurfaceFrameRate(0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
             Log.i(TAG, "恢复显示模式（交还系统，原 ${originalModeId} @ ${originalRefreshRate}Hz）")
         }
+    }
+
+    /**
+     * 改动 Surface 的期望帧率。退到后台 / 进 PiP / 销毁时 Surface 可能已经被系统
+     * 释放，`setFrameRate` 会抛 `IllegalStateException: Surface has already been
+     * released`，所以先看 `isValid` 再兜一层异常——帧率提示只是锦上添花，
+     * 不能因为它把进程带崩。
+     */
+    private fun setSurfaceFrameRate(fps: Float, compatibility: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        runCatching {
+            val surface = surfaceView.holder.surface
+            if (surface != null && surface.isValid) {
+                surface.setFrameRate(fps, compatibility)
+            }
+        }.onFailure { Log.w(TAG, "setFrameRate($fps) 失败：${it.message}") }
     }
 
     /** 直连 MediaCodec 的 HDR10+ 探针，顺带把帧送到 SurfaceView。 */
@@ -600,12 +621,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             attrs.preferredRefreshRate = best.refreshRate
             window.attributes = attrs
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            surfaceView.holder.surface?.setFrameRate(
-                fps.toFloat(),
-                Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
-            )
-        }
+        setSurfaceFrameRate(fps.toFloat(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
         Log.i(
             TAG,
             "帧率匹配：source=${fps}fps -> mode ${best.modeId} @ ${best.refreshRate}Hz" +
