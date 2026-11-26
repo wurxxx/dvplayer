@@ -193,7 +193,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           # 和 macos.yml 的 job 一起往同一个 Release 里加文件。
+          # 正文（含 changelog）只由 macos.yml 的 notes job 写，
+          # 这里不碰，否则每个 job 各写一份就重复了。
           files: |
             out/release/*.zip
             out/release/*setup.exe
-          generate_release_notes: true

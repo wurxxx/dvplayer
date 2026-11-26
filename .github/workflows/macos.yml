@@ -115,6 +115,33 @@ jobs:
           esac
           echo "本次要编：$WANT"
 
+  # Release 正文只在这个 job 里写一次。
+  #
+  # 以前三个打包 job（macOS 两种架构 + Windows）各自开了
+  # generate_release_notes，同一个 Release 被写三次，正文里就叠了三份
+  # changelog（v0.1.4 叠了四份）。现在打包 job 只传文件、不带正文，
+  # 正文 = .github/release-notes.md（手写的主要修复）+ 自动变更列表。
+  #
+  # 放在 macOS 工作流里是因为 push tag 时它一定会跑；Windows 工作流
+  # 只负责附文件。重试流程（macos-arm64-retry.yml）重跑时这里会把
+  # 同样的正文再写一遍，内容是覆盖而不是追加，不会重复。
+  notes:
+    name: 写 Release 说明
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 创建或更新 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
+          body_path: .github/release-notes.md
+          # 手写正文在前，GitHub 生成的「What's Changed」和唯一的
+          # Full Changelog 链接在后。
+          generate_release_notes: true
+
   build:
     name: macOS ${{ matrix.arch }}
     needs: prepare
@@ -331,4 +358,5 @@ jobs:
           files: |
             out/release/*.dmg
             out/release/*.zip
-          generate_release_notes: true
+          # 正文只能由 release-notes job 提供。这里再开 generate_release_notes
+          # 的话，正文里会多出一份 changelog（v0.1.5 就叠了三份）。
