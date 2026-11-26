@@ -15,7 +15,7 @@
 Authorization: MediaBrowser Client="DVPlayer", Device="Windows", DeviceId="<配置 id>", Version="0.1.0", Token="<AccessToken 或 API Key>"
 ```
 
-- 用户名 + 密码：`POST /Users/AuthenticateByName`，body `{Username, Pw}` → `AccessToken` + `User.Id`。
+- 用户名 + 密码：`POST /Users/{userId}`，body `{Username, Pw}` → `AccessToken` + `User.Id`。
   这个请求的 `Authorization` 只有客户端信息，不带 `Token`。
 - 仅 API Key：跳过登录，把 Key 放进 `Token`（设置页：用户名留空，密码框填 Key）。
 - `X-Emby-Token` / `X-Emby-Authorization` **不发**：Jellyfin 12 起已移除

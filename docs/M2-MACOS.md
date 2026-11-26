@@ -39,7 +39,8 @@
 - 卡片副标题的片长用中文可读格式：「电影 · 2 小时 12 分钟」/「45 分钟」，
   和 Windows 的 `MediaText.Runtime` 一致；播放页进度 / 剩余时间仍然用时间码
 - 详情页：整块横版图铺满、渐变淡到页面底色、动作按钮（播放 / 重头看 / 收藏 /
-  标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条）、
+  标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条；一季超过 30 集时
+  上方多一排「1-30 / 31-60 …」分段按钮，点一下滚到那一段）、
   续播集高亮（见下）、
   演职人员（96 宽头像卡，点开看作品，可继续往下钻详情）、链接（豆瓣，源里有
   TMDB / IMDb id 时再加这两个）、
@@ -66,12 +67,15 @@
   输入框保留上次关键词（`settings.searchKeyword`），切页 / 重启回来自动再搜一次；
   输入防抖会取消上一条待执行的搜索，不会每敲一个字并发一次请求。
 - 记录页：「观看」的播放按钮直接 `PlayerLauncher.play(record:)`，收藏卡片进详情
+- Trakt（观看记录）：「设置」里用设备码登录自己的 Trakt 账号，播放时上报进度、
+  详情页可评分 / 加入收藏 / 加入待看；匹配优先 TMDB / IMDb id，没有才按片名 +
+  年份；发布包内置 Client ID，用户不用申请（详见 §4.6）。
 - 设置页：续播、分辨率角标、自动连接、播放缓冲、核心版本与配置路径；「关于」显示
   应用 / 共享核心版本、项目地址（点开浏览器）和更新检查（GitHub Releases 的 latest，
   10 分钟缓存），发现新版本时按钮变成「下载更新」。应用启动时后台查一次，有新版就在
   侧栏左下角版本号下面加一行「可更新 vX」，点开「设置 → 关于」。侧栏显示应用版本
   （悬停提示里是共享核心版本）。
-- Emby 源播放实测（2026-11-21）：Monta HD（Emby 4.9.3、https + openresty 反代、
+- Emby 源播放实测（2026-11-21）：一台 Emby 4.9.3 实例（https + openresty 反代、
   HTTP 代理）直链 `Static=true` 在 mac 上正常出画，mpv 解出 4K HEVC + 2 条音轨；
   每 10 秒 `Progress`、关窗 `Stopped` 都能落盘（服务器 `PlaybackPositionTicks`
   跟着变）。这条链路原本被 FFmpeg 缺 TLS 挡住了，见 §4.7。
@@ -331,7 +335,7 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
   自检：`DVPLAYER_PLAY_UI=audioout` 打印设备列表，`audiotoggle` 切两个开关，
   `audiodevice:<序号>` 选设备。
 
-### 4.6 弹幕与在线字幕
+### 4.6 弹幕、在线字幕与 Trakt
 
 弹幕凭据是**内置**的：设置页只剩「打开播放页时默认开弹幕」一个开关，
 用户什么都不用填。`在线字幕（OpenSubtitles）` 仍是自己填的一张卡
@@ -460,22 +464,24 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
 - **Emby 的进度只在 `Stopped` 落盘**：`Sessions/Playing/Progress` 返回 204 但不改
   `UserData`，必须发 `Sessions/Playing/Stopped`（关窗 / 播完）。这套由 `core/media`
   统一处理，mac 和 Windows 走同一条路径。
-- **经代理 seek 到中段会长时间卡住**：Monta HD 的 https 源在反代后面，
+- **经代理 seek 到中段会长时间卡住**：实测那台 Emby 的 https 源在反代后面，
   `--start=90` 之类的中段请求会 504 / 长时间没有数据，自检里表现为
   `loading=true`、`pos` 不动。从头播（start=0）正常，起播本身也要 30～40 秒。
 
 ## 5. 下一步
 
-1. **DV 目视验收**：产品路径已经是 gpu-next + render API（ADR-0011），
+1. **DV 目视验收**（需要 HDR 屏）：产品路径已经是 gpu-next + render API（ADR-0011），
    `./scripts/fel-ab.sh samples/p7-fel.mkv 8` 同帧开关增强层的 PSNR 约 49、
    `>2` 像素约 1%，说明 EL 进了 shader；剩下的只是拿 HDR 屏做一次目视。
-2. **解锁后的播放页观感**：单窗口出画、控制层覆盖、拖动 / 缩放 / 假全屏的手感。
-3. **HDR 真屏验收**：这台机器是 SDR 屏，只能验 `video-params` 与渲染链路，
-   真正的 PQ 输出要在 HDR 显示器上看一次。
+2. **解锁后的播放页观感**（需要人眼）：单窗口出画、控制层覆盖、拖动 / 缩放 /
+   假全屏的手感。
+3. **HDR 真屏验收**（需要 HDR 显示器）：这台机器是 SDR 屏，只能验 `video-params`
+   与渲染链路，真正的 PQ 输出要在 HDR 显示器上看一次。
 4. ~~音频输出 / 直通 / HDR 开关~~ **已完成**（2026-11-21，与 Windows B13 对齐）：
    「更多 → 音频输出」列设备、两个开关切 `audio-spdif` / `target-colorspace-hint`，
    落 `settings.json`；真机听感与 HDR 真屏仍待设备（§5 第 3 项）。
-5. **公证与 Sparkle**：`.app` 未签名、未做自动更新。
+5. **签名、公证与自动更新**：`.app` 仍未签名 / 公证；更新只做到「查 GitHub
+   Releases + 打开下载页」，没有 Sparkle 那种静默下载安装。
 
 ## 6. 旧的下一步（已完成）
 

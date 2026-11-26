@@ -2,8 +2,8 @@
 
 > 2026-11-20。适配器在 `core/media/src/sources/emby.rs`。
 > Jellyfin 从 2026-11-25 起是独立适配器，见 [JELLYFIN-API.md](JELLYFIN-API.md)。
-> **状态：已在一个 Emby 4.10 的 https 实例上跑通**——登录、库列表、层级、
-> 详情、图片都验证过；播放直链与进度回写还差实测（换服务器后重跑）。
+> **状态：已跑通**——登录、库列表、层级、详情、图片在 Emby 4.10 的 https 实例上验证；
+> 播放直链与进度回写在一个 Emby 4.9.3 实例（https + openresty 反代）上实测通过（见 §5）。
 
 ## 1. 认证
 
@@ -11,7 +11,7 @@
 
 | 模式 | 请求 | 结果 |
 | --- | --- | --- |
-| 用户名 + 密码 | `POST /Users/AuthenticateByName`，body `{Username, Pw}` | `AccessToken` + `User.Id` |
+| 用户名 + 密码 | `POST /Users/{userId}`，body `{Username, Pw}` | `AccessToken` + `User.Id` |
 | 仅 API Key | 不发登录请求，把 Key 当 token | 再 `GET /Users/Me` 拿 `Id` |
 
 每个请求都带：
@@ -75,20 +75,20 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 - **错误信息**：HTTP 非 2xx 时优先取 `{"Error": …}`，Jellyfin 的 ProblemDetails
   也能落到 `error`/`Message`；再不行就截断原文。
 
-## 5. 还没验证 / 已知风险
+## 5. 验证状态与已知风险
 
 | 项 | 状态 |
 | --- | --- |
-| 登录 | **已验证**：`POST /Users/AuthenticateByName` 返回 200 + `AccessToken`，`/Users/Me` 拿到用户 id；API Key 方式要看服务器是否签发了有效 Key（无效会返回 401 `Access token is invalid or expired.`） |
+| 登录 | **已验证**：`POST /Users/{userId}` 返回 200 + `AccessToken`，`/Users/Me` 拿到用户 id；API Key 方式要看服务器是否签发了有效 Key（无效会返回 401 `Access token is invalid or expired.`） |
 | https / 反代 | **已验证**：公网域名 + `native-tls` 正常；`/System/Info/Public` 可直接用来探活 |
 | 库与层级 | **已验证**：`Views` 返回 3 个库；`ParentId` 能列 `Folder → Movie` 与 `Folder → Folder → Movie`，界面上按实际层级显示 |
 | 详情与图片 | **已验证**：海报、背景图、简介、时长、`RecursiveItemCount`（「N 集」）都正常；没有剧照的条目回退成渐变占位（服务器没生成图，不是 bug） |
-| 播放直链 | **已验证**：`PlaybackInfo` 只传 `{UserId}` 就够了；`Static=true&MediaSourceId=…&api_key=…` 直连原文件，Monta HD 上 mpv 解出 4K HEVC + eac3/aac 两轨 |
-| 进度回写 | **已验证**：走 `POST /Sessions/Playing` → `/Sessions/Playing/Progress` → `/Sessions/Playing/Stopped`，`Stopped` 之后服务端才写 `UserData.PlaybackPositionTicks`。`POST /Users/{uid}/Items/{id}/UserData` 在 Monta HD 的反代上直接 404，只作兜底 |
+| 播放直链 | **已验证**：`PlaybackInfo` 只传 `{UserId}` 就够了；`Static=true&MediaSourceId=…&api_key=…` 直连原文件，该实例上 mpv 解出 4K HEVC + eac3/aac 两轨 |
+| 进度回写 | **已验证**：走 `POST /Sessions/Playing` → `/Sessions/Playing/Progress` → `/Sessions/Playing/Stopped`，`Stopped` 之后服务端才写 `UserData.PlaybackPositionTicks`。`POST /Users/{uid}/Items/{id}/UserData` 在该实例的反代上直接 404，只作兜底 |
 | 外挂字幕 | 只给了轨道信息，没给 `DeliveryUrl`；字幕选择（B12）做的时候再拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` |
 | Jellyfin | 独立适配器（`jellyfin.rs`），端点与认证头不同，见 [JELLYFIN-API.md](JELLYFIN-API.md) |
 
-播放直链与进度回写已在 Monta HD（Emby 4.9.3，https + openresty 反代）实测通过。
+播放直链与进度回写已在 Emby 4.9.3 实例（https + openresty 反代）实测通过。
 Jellyfin 另走 `jellyfin.rs`，两套实现互不影响
 （[PLAN.md](PLAN.md) §5.1、[M1.md](M1.md) B10）。
 

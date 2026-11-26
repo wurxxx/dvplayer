@@ -390,7 +390,7 @@ GET /v/api/v1/play/list
 
 | 能力 | 实测结果 |
 | --- | --- |
-| `POST /emby/Users/AuthenticateByName` | ✅ 200，返回 `AccessToken` + `User.Id` |
+| `POST /emby/Users/{userId}` | ✅ 200，返回 `AccessToken` + `User.Id` |
 | `GET /emby/Users/{uid}/Views` | ✅ 200，能列出「影视」媒体库 |
 | `GET /emby/Users/{uid}/Items?...` | ⚠️ 只在同时带 `ParentId` + `Recursive` + `Fields` + `Limit` 时才 200；少一个就 400（空 body） |
 | `GET /emby/Users/{uid}/Items/Resume` | ❌ 400 |
