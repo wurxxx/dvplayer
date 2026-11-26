@@ -51,6 +51,14 @@ class MpvPlayer : PlayerEngine {
     fun getProperty(name: String): String? =
         if (handle == 0L) null else MpvNative.getProperty(handle, name)
 
+    /**
+     * HDR 直出开关（A5）。`false` 时 mpv 在 gpu VO 里做 HDR→SDR tone mapping，
+     * EGLSurface 固定 sRGB；`true`（默认）把 PQ / HLG 交给显示端。
+     */
+    fun setHdrPassthrough(enabled: Boolean) {
+        if (handle != 0L) MpvNative.setHdrPassthrough(handle, enabled)
+    }
+
     /** GL 就绪前的调用会被 native 侧暂存，等 render context 建好再真正加载。 */
     override fun load(url: String) {
         if (handle != 0L) MpvNative.play(handle, url)
@@ -208,6 +216,8 @@ internal object MpvNative {
     external fun setProperty(handle: Long, name: String, value: String): String?
 
     external fun getProperty(handle: Long, name: String): String?
+
+    external fun setHdrPassthrough(handle: Long, enabled: Boolean)
 
     external fun destroy(handle: Long)
 }

@@ -254,8 +254,10 @@ ColorOS 的状态栏媒体胶囊也识别了这条通知。帧率匹配的选模
   片尾 5 秒内清记录。实测播到 51.4s 退出，重启后日志
   `续播：51377 ms`，从原位置继续。
 - **ASS**：mpv 走 libass，`sub-add <path>` 加载 `.ass` 后渲染正常
-  （`{\pos}`、`\c`、`\fscx/\fscy` 都生效，截图为证）。Media3 侧 ASS 还没接，
-  属于 A6 的 FFmpeg/字幕扩展。
+  （`{\pos}`、`\c`、`\fscx/\fscy` 都生效，截图为证）。Media3 侧用自带的
+  `SsaParser` 也能出字（`sub:test.ass[text/x-ssa]*`，`cue 2 文本 2`），但只做
+  基础文本：`{\pos}` 被忽略、字号按 PlayRes 放大得很大。所以 **ASS 的参考内核
+  是 mpv**；Media3 的 ASS 只保证「能看」，真正的排版等 FFmpeg/字幕扩展。
 
 HDR 输出（A5，2026-11-27）：在 OnePlus 10 Pro（Android 16）上，mpv 把 BT.2020 +
 PQ 的 HEVC Main10 片源识别为 `prim=bt.2020`、`gamma=pq`、`max-luma=10000`，
@@ -368,8 +370,17 @@ Surface 不可见、mpv 不出帧，`screencap` 也是黑的。先
 - **HDR10+ 动态元数据只在 Media3 内核**：mpv 侧软解能读出 ST2094-40（`scene-max-*`），
   硬解 `mediacodec-copy` 拿不到，且平台没有公开的写入接口，动态元数据进不了显示端。
   mpv 下 HDR10+ 片源按 HDR10 静态元数据播放；Media3 路径已验通（见下）。
-- **HLG 静态元数据没写**：目前只对 PQ 写 SMPTE2086 / CTA861_3，HLG 只切 dataspace。
-- **SDR tone mapping 回退**：显示器不支持 HDR 时的 `tone-mapping` 选项还没接。
+- **HLG 静态元数据**：`apply_static_hdr` 现在对 PQ 与 HLG 都写 SMPTE2086 /
+  CTA861_3。HLG 片源实测
+  `dataspace=BT2020_HLG (168165376) hdr metadata types=1`，说明 EGL 扩展被
+  接收；CTA861_3 需要片源带 `max-cll/max-fall` 才会写（该样片没有）。
+- **SDR tone mapping 回退**：已接。`--es force_sdr 1` 时 native 侧把
+  `target-colorspace-hint=no`、`target-prim=bt.709`、`target-trc=bt.1886`、
+  `tone-mapping=auto`、`hdr-compute-peak=yes` 一起设上，并强制 dataspace 为
+  SRGB；实测 HDR10 片源在 SurfaceFlinger 上是 `V0_SRGB types=0`，截图与直出
+  对比是明显的 SDR 映射（不再过饱和）。反过来还能切回直出。
+- **正式接法还没做**：什么时候该回退（显示端 HDR 类型不支持 / 用户选 SDR）
+  由 A7 的路由层根据 `DeviceProfile` 判定，现在只是验证页的开关。
 - **帧率匹配目前只在验证页**：正式实现要挪到播放器控制器，并在暂停 / 切轨 /
   退出时恢复默认模式；可变帧率（VFR）片源还没处理。
 
@@ -395,6 +406,31 @@ CTA861_3=2、HDR10PLUS=4）。`codec` 探针的输出格式同时给出
 HDR10+ 且设备支持时自动切 Media3；否则默认 mpv」。mpv 内核继续负责原盘、
 DV P5/P8 与 EGL 渲染路径。
 
+4K HDR10 播放（A4/A5，2026-11-27）：`gen-hdr-sample.py` 生成 3840×2160 / 24p /
+Main10 / BT.2020 PQ 的 10 秒与 30 秒样片，两个内核都实测：
+
+- mpv：`3840×2160 · nv12 · hwdec mediacodec-copy`、`prim bt.2020 · trc pq`，
+  帧率匹配到 `mode 6 @ 120Hz`（24p ×5）。30 秒样片在 4.5s / 11.5s / 18.7s /
+  25.8s 四个时间点读到 `drops 3`，**启动阶段掉 3 帧后不再增长**（21 秒稳定态
+  0 掉帧）。10 秒样片是启动 `drops 6` 后保持，差异只来自起播时解码器预热的
+  时机，不是持续掉帧。
+- Media3：`hvc1.2.6.L153.B0 · 3840×2160`，
+  `ColorInfo(BT2020, Limited range, ST2084 PQ, false, 10bit Luma, 10bit Chroma)`，
+  SurfaceFlinger `dataspace=BT2020_ITU_PQ (298188800) hdr metadata types=1`。
+
+内核路由（A7 第一步）：`:player` 新增 `EngineRouter`，规则按上面定稿：
+
+1. 设备不支持 HDR10+（`Display.hdrCapabilities` 没有 `HDR_TYPE_HDR10_PLUS`）
+   → mpv，不去解 SEI；
+2. 非本地片源（含 `://`）→ mpv，跳过探测；
+3. 本地文件用 `Hdr10PlusProbe` 解 12 帧看输出格式有没有 `hdr10-plus-info`
+   → 有就选 Media3，没有回退 mpv。
+
+验证页加 `--es auto 1`，实测同一台机器上
+`dv-hdr10plus.mp4` 路由到 `engine media3`（理由「片源带 HDR10+（ST2094-40），
+动态元数据交 Media3」），`dv-multitrack.mp4` 路由到 mpv（理由「无 HDR10+，
+用默认 mpv」）。`--es engine mpv|media3` 仍然优先于自动路由。
+
 契约对齐（A6 第二步）：`Media3Player` 实现同一份 `PlayerEngine`，验证页
 `--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
 都跑通；外部字幕用 `MediaItem.SubtitleConfiguration`（按扩展名给 MIME），
@@ -415,10 +451,19 @@ OnePlus 的结果是：
   这项要等 TV / 盒子（B3 / A11）验，手机侧只用普通渲染路径。
 - PGS 字幕：内嵌 PGS 能显示——Media3 的 `PgsParser` 生成位图 cue，验证页用
   `SubtitleView` 渲染，截图里样片的「This text should be red, not blue」正常出现。
-  外部 `.sup` 还差一步：轨道能被识别（`sub:字幕 0`）、也能选中，但 cue 不出画面，
-  怀疑 `SubtitleExtractor` 对裸 `.sup` 的时间轴 / 位图输出和 `SubtitleView` 的
-  衔接有问题，先在文档里记为已知边界。mpv 侧 PGS 走 libavcodec 解码 + libass 叠加，
-  没有单独验。
+- **外部 `.sup` 已修好**：Media3 自带的 `PgsParser` 只认 Matroska 里的载荷
+  （从分段类型字节开始），裸 `.sup` 每段前面还有 `PG` + PTS/DTS + 类型 + 长度
+  共 13 字节，整文件喂进去第一段就越界，所以轨道在、cue 一个都没有。
+  新增 `SupSubtitleParser`：按 `.sup` 分段格式拆开，复用 PCS/ODS/PDS/END 的
+  解析，按显示集 PTS 输出带时长的 cue（最后一段 5 秒兜底），再通过
+  `DefaultMediaSourceFactory.setSubtitleParserFactory` 挂进 ExoPlayer。
+  无 `PG` 头的数据（内嵌 Matroska）原样交给 `PgsParser`，内嵌 PGS 行为不变
+  （回归实测仍出图）。裸 `.sup` 实测 `cue 1 位图 1`，画面出现红字；
+  位置按 PCS 的 `object_x/object_y`（`299/656`，1280×720 平面）正确落位。
+- 外挂字幕选中：内嵌 PGS 与外部 PGS 的 MIME 相同，ExoPlayer 的 `Format.id`
+  又不填，reload 后内嵌轨会抢回默认选中。现在给 `SubtitleConfiguration`
+  设 `label=文件名`，在 `onTracksChanged` 里按 label 找回外挂轨并强制选中，
+  同时把同类型的其它文本 group 置空。
 - 顺带修正：Media3 的 PGS MIME 是 `MimeTypes.APPLICATION_PGS`
   （`application/pgs`），不是 `application/x-pgs`；写错时外部字幕会被当成 SRT
   静默丢掉。

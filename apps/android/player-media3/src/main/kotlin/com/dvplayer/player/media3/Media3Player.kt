@@ -20,6 +20,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.dvplayer.player.ChapterInfo
 import com.dvplayer.player.EngineId
 import com.dvplayer.player.PlaybackState
@@ -44,7 +45,13 @@ class Media3Player(context: Context) : PlayerEngine {
 
     override val id: EngineId = EngineId.MEDIA3
 
-    private val player: ExoPlayer = ExoPlayer.Builder(context).build()
+    private val player: ExoPlayer = ExoPlayer.Builder(context)
+        // 裸 .sup 需要自己的解析器；其余格式仍交给 Media3 默认实现。
+        .setMediaSourceFactory(
+            DefaultMediaSourceFactory(context)
+                .setSubtitleParserFactory(DvSubtitleParserFactory()),
+        )
+        .build()
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var listener: PlayerEngine.Listener? = null
@@ -57,6 +64,9 @@ class Media3Player(context: Context) : PlayerEngine {
 
     /** reload 后等轨道就绪再恢复的音轨 id。 */
     private var pendingAudioRestore: String? = null
+    /** reload 后要选中的外部字幕（内嵌轨会抢默认选中）。用 label 精确定位。 */
+    private var pendingSubtitleLabel: String? = null
+    private var lastCueCount = 0
 
     /** 视频轨的 [Format]（含 colorInfo），用于验证页显示。 */
     var videoFormat: Format? = null
@@ -64,6 +74,10 @@ class Media3Player(context: Context) : PlayerEngine {
 
     /** 字幕 cue（含 PGS 位图），由 UI 交给 SubtitleView 渲染。 */
     var onCues: ((CueGroup) -> Unit)? = null
+
+    /** 调试页显示：最近一次 cue 的数量 / 位图数 / 文本。 */
+    var debugCue: String = "-"
+        private set
 
     private val tick = object : Runnable {
         override fun run() {
@@ -90,14 +104,28 @@ class Media3Player(context: Context) : PlayerEngine {
             }
 
             override fun onCues(cueGroup: CueGroup) {
+                if (cueGroup.cues.size != lastCueCount) {
+                    lastCueCount = cueGroup.cues.size
+                    val bitmaps = cueGroup.cues.count { it.bitmap != null }
+                    val texts = cueGroup.cues.count { !it.text.isNullOrEmpty() }
+                    debugCue = "cue ${cueGroup.cues.size} 位图 $bitmaps 文本 $texts"
+                    Log.i(TAG, "onCues $debugCue")
+                }
                 onCues?.invoke(cueGroup)
             }
 
             override fun onTracksChanged(tracks: Tracks) {
                 // reload 之后新轨道就绪，这时才能按新 group 恢复音轨选择。
-                val pending = pendingAudioRestore ?: return
-                pendingAudioRestore = null
-                selectTrack(TrackKind.AUDIO, pending)
+                pendingAudioRestore?.let {
+                    pendingAudioRestore = null
+                    selectTrack(TrackKind.AUDIO, it)
+                }
+                // 外部字幕也一样：reload 后内嵌轨会重新抢到默认选中，
+                // 这里按 MIME 找回刚加进来的外挂轨并强制选中它。
+                pendingSubtitleLabel?.let { label ->
+                    // 外挂轨可能比内嵌轨晚一次事件才出现，没找到就留着下次再试。
+                    if (selectSubtitleByLabel(tracks, label)) pendingSubtitleLabel = null
+                }
             }
         })
         player.addAnalyticsListener(object : AnalyticsListener {
@@ -169,11 +197,41 @@ class Media3Player(context: Context) : PlayerEngine {
     override fun addSubtitle(path: String) {
         val mime = subtitleMime(path)
         Log.i(TAG, "addSubtitle $path mime=$mime")
-        subtitles += MediaItem.SubtitleConfiguration.Builder(uriOf(path))
+        val uri = uriOf(path)
+        // 内嵌 PGS 与外部 PGS 的 MIME 相同，用 label 把外挂轨标记出来，
+        // reload 之后按 label 找回并强制选中。
+        val label = path.substringAfterLast('/')
+        subtitles += MediaItem.SubtitleConfiguration.Builder(uri)
             .setMimeType(mime)
+            .setLabel(label)
             .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
             .build()
+        pendingSubtitleLabel = label
         reloadKeepingPosition()
+    }
+
+    /**
+     * 选中刚加载的外部字幕轨，并把同类型的其它文本 group 置空，
+     * 避免内嵌字幕继续叠加渲染。
+     */
+    private fun selectSubtitleByLabel(tracks: Tracks, label: String): Boolean {
+        val target = tracks.groups.indexOfLast { group ->
+            group.type == C.TRACK_TYPE_TEXT &&
+                (0 until group.length).any { group.getTrackFormat(it).label == label }
+        }
+        if (target < 0) {
+            Log.i(TAG, "外部字幕轨还没出现 label=$label")
+            return false
+        }
+        val builder = player.trackSelectionParameters.buildUpon()
+        tracks.groups.forEachIndexed { index, group ->
+            if (group.type != C.TRACK_TYPE_TEXT) return@forEachIndexed
+            val indices = if (index == target) listOf(0) else emptyList()
+            builder.addOverride(TrackSelectionOverride(group.mediaTrackGroup, indices))
+        }
+        player.trackSelectionParameters = builder.build()
+        Log.i(TAG, "选中外部字幕 group=$target label=$label")
+        return true
     }
 
     override fun selectTrack(kind: TrackKind, trackId: String) {
@@ -222,7 +280,8 @@ class Media3Player(context: Context) : PlayerEngine {
                         ?: format.language
                         ?: "${kindLabel(kind)} $trackIndex",
                     language = format.language,
-                    codec = format.codecs,
+                    // 调试页用：字幕轨没有 codecs，退回显示 MIME，便于核对外部字幕类型。
+                    codec = format.codecs ?: format.id ?: format.sampleMimeType,
                     selected = group.isTrackSelected(trackIndex),
                     external = false,
                 )

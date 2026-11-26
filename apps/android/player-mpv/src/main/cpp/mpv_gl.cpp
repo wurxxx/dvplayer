@@ -104,6 +104,8 @@ struct Player {
 
     // 事件线程写、渲染线程读
     std::atomic<int32_t> desired_dataspace{kDataspaceSrgb};
+    // HDR 直出开关：false 时 mpv 做 HDR→SDR tone mapping，surface 固定 sRGB。
+    std::atomic<bool> hdr_passthrough{true};
     std::atomic<bool> surface_dirty{false};
     std::string primaries;
     std::string gamma;
@@ -284,7 +286,9 @@ bool rebuild_surface(Player *p, EGLint colorspace) {
  * 返回 true 表示已经写入；false 会在下一帧重试（属性可能还没就绪）。
  */
 bool apply_static_hdr(Player *p) {
-    if (p->surface_dataspace != kDataspaceBt2020Pq) {
+    // PQ 与 HLG 都试：EGL_EXT_surface_SMPTE2086_metadata 在多数实现上只对
+    // PQ surface 生效，HLG 写入会被忽略，但先写上去由显示端决定。
+    if (p->surface_dataspace == kDataspaceSrgb || !p->hdr_passthrough.load()) {
         return false;
     }
     if (p->surface == EGL_NO_SURFACE || !p->has_smpte2086_meta) {
@@ -400,7 +404,8 @@ void draw_frame(Player *p) {
     }
     // 静态元数据要在 swap 之前挂到 EGLSurface 上，才会随这一帧的 buffer 走。
     // 属性还没就绪（max_luma 为 0）时返回 false，下一帧再试。
-    if (!p->hdr_static_applied && p->surface_dataspace == kDataspaceBt2020Pq) {
+    if (!p->hdr_static_applied && p->surface_dataspace != kDataspaceSrgb &&
+        p->hdr_passthrough.load(std::memory_order_acquire)) {
         p->hdr_static_applied = apply_static_hdr(p);
     }
     eglSwapBuffers(p->display, p->surface);
@@ -498,11 +503,14 @@ void update_colorspace(Player *p) {
         prim = p->primaries;
         g = p->gamma;
     }
-    const int32_t ds = pick_dataspace(prim, g);
+    const int32_t ds = p->hdr_passthrough.load(std::memory_order_acquire)
+                           ? pick_dataspace(prim, g)
+                           : kDataspaceSrgb;
     if (ds != p->desired_dataspace.load(std::memory_order_acquire)) {
         p->desired_dataspace.store(ds, std::memory_order_release);
         p->surface_dirty.store(true, std::memory_order_release);
-        LOGI("色彩空间变化：prim=%s gamma=%s -> dataspace 0x%x", prim.c_str(), g.c_str(), ds);
+        LOGI("色彩空间变化：prim=%s gamma=%s hdr=%s -> dataspace 0x%x", prim.c_str(), g.c_str(),
+             p->hdr_passthrough.load() ? "on" : "sdr", ds);
         p->cv.notify_one();
     }
 }
@@ -747,6 +755,36 @@ Java_com_dvplayer_player_mpv_MpvNative_getProperty(JNIEnv *env, jobject, jlong h
     jstring result = env->NewStringUTF(value);
     mpv_free(value);
     return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_dvplayer_player_mpv_MpvNative_setHdrPassthrough(JNIEnv *, jobject, jlong handle,
+                                                         jboolean enabled) {
+    auto *p = reinterpret_cast<Player *>(handle);
+    if (!p) {
+        return;
+    }
+    const bool on = enabled == JNI_TRUE;
+    p->hdr_passthrough.store(on, std::memory_order_release);
+    int err = 0;
+    if (on) {
+        // 回到直出：把片源的 PQ / HLG 交给显示端，不做 tone mapping。
+        err |= mpv_set_property_string(p->mpv, "target-colorspace-hint", "yes");
+        err |= mpv_set_property_string(p->mpv, "target-prim", "auto");
+        err |= mpv_set_property_string(p->mpv, "target-trc", "auto");
+    } else {
+        // 回退 SDR：mpv 的 gpu VO 按 BT.709 / bt.1886 做 tone mapping。
+        err |= mpv_set_property_string(p->mpv, "target-colorspace-hint", "no");
+        err |= mpv_set_property_string(p->mpv, "target-prim", "bt.709");
+        err |= mpv_set_property_string(p->mpv, "target-trc", "bt.1886");
+        err |= mpv_set_property_string(p->mpv, "tone-mapping", "auto");
+        err |= mpv_set_property_string(p->mpv, "hdr-compute-peak", "yes");
+    }
+    // 属性本身没变，需要主动重算一次 dataspace 并重建 surface。
+    update_colorspace(p);
+    p->redraw.store(true, std::memory_order_release);
+    p->cv.notify_one();
+    LOGI("HDR 直出 -> %s（option err=%d）", on ? "on" : "SDR tone mapping", err);
 }
 
 JNIEXPORT void JNICALL

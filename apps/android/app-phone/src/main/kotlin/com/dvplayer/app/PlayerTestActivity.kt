@@ -20,12 +20,13 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.SubtitleView
 import com.dvplayer.player.EngineId
+import com.dvplayer.player.EngineRouter
 import com.dvplayer.player.FrameRateMatcher
 import com.dvplayer.player.MediaSessionController
 import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
 import com.dvplayer.player.TrackKind
-import com.dvplayer.player.media3.Hdr10PlusProbe
+import com.dvplayer.player.Hdr10PlusProbe
 import com.dvplayer.player.media3.Media3Player
 import com.dvplayer.player.mpv.MpvPlayer
 import kotlin.math.abs
@@ -72,8 +73,11 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private val subtitleUrl: String
         get() = intent.getStringExtra("sub") ?: SUBTITLE_URL
 
-    private val engine: String
-        get() = intent.getStringExtra("engine") ?: "mpv"
+    /** 实际使用的内核。手动 `--es engine` 优先；`--es auto 1` 时由 EngineRouter 决定。 */
+    private var engine: String = "mpv"
+
+    /** 自动路由的结论，显示在状态行上便于核对。 */
+    private var routeReason: String? = null
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -97,6 +101,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         memory = PlaybackMemory(this)
+        engine = resolveEngine()
         when (engine) {
             "media3" -> {
                 media3 = Media3Player(this)
@@ -112,6 +117,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
                 intent.getStringExtra("hwdec")?.let {
                     Log.i(TAG, "hwdec -> $it ${mpv.setProperty("hwdec", it) ?: "ok"}")
+                }
+                // A5 的 SDR 回退：--es force_sdr 1 让 mpv 做 tone mapping，surface 固定 sRGB。
+                if (intent.getStringExtra("force_sdr") == "1") {
+                    mpv.setHdrPassthrough(false)
+                    routeReason = "SDR tone mapping（force_sdr）"
+                    Log.i(TAG, "force_sdr -> mpv tone mapping")
                 }
                 Log.i(TAG, "mpv version: ${mpv.getProperty("mpv-version")}")
             }
@@ -173,6 +184,29 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         }
 
         Log.i(TAG, "engine=$engine url=$url")
+    }
+
+    /**
+     * 决定这次用哪个内核。`--es engine` 明确指定时照办；`--es auto 1` 交给
+     * [EngineRouter]（要解十几帧 SEI，放后台线程，4 秒超时回退 mpv）。
+     */
+    private fun resolveEngine(): String {
+        intent.getStringExtra("engine")?.let {
+            Log.i(TAG, "engine 由参数指定：$it")
+            return it
+        }
+        if (intent.getStringExtra("auto") != "1") return "mpv"
+
+        var decision: EngineRouter.Decision? = null
+        val thread = Thread {
+            decision = EngineRouter(this).choose(url)
+        }
+        thread.start()
+        thread.join(4_000)
+        val d = decision ?: EngineRouter.Decision(EngineId.MPV, "路由超时，回退 mpv")
+        routeReason = d.reason
+        Log.i(TAG, "路由 -> ${d.engine}：${d.reason}")
+        return if (d.engine == EngineId.MEDIA3) "media3" else "mpv"
     }
 
     override fun onResume() {
@@ -331,7 +365,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             )
             appendLine(
                 "轨道 " + tracks.joinToString(" · ") {
-                    "${it.kind.name.lowercase()}:${it.title}${if (it.selected) "*" else ""}"
+                    val mime = it.codec?.takeIf { c -> c.contains("/") }?.let { c -> "[$c]" } ?: ""
+                    "${it.kind.name.lowercase()}:${it.title}$mime${if (it.selected) "*" else ""}"
                 },
             )
         }
@@ -374,10 +409,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         val format = player.videoFormat
         return buildString {
             appendLine("engine media3")
+            routeReason?.let { appendLine("路由 $it") }
             if (format != null) {
                 appendLine("codec ${format.codecs} · ${format.width}×${format.height}")
                 appendLine("color ${format.colorInfo}")
             }
+            appendLine(player.debugCue)
             append(playbackLine())
             append(url)
         }
@@ -388,6 +425,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         fun p(name: String) = mpv.getProperty(name) ?: "-"
         val mode = currentDisplay.mode
         return buildString {
+            routeReason?.let { appendLine("路由 $it") }
             appendLine("${p("width")}×${p("height")} · ${p("video-params/pixelformat")} · hwdec ${p("hwdec-current")}")
             appendLine("prim ${p("video-params/primaries")} · trc ${p("video-params/gamma")} · light ${p("video-params/light")}")
             appendLine("sig-peak ${p("video-params/sig-peak")} · min-luma ${p("video-params/min-luma")} · max-luma ${p("video-params/max-luma")}")

@@ -1,4 +1,4 @@
-package com.dvplayer.player.media3
+package com.dvplayer.player
 
 import android.media.MediaCodec
 import android.media.MediaExtractor
