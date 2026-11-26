@@ -234,25 +234,31 @@ fun PlayerScreen(
                             modifier = Modifier.align(Alignment.Center),
                         )
                     }
+                    // 竖屏也把控制条放进画面里，淡出时只剩视频。
+                    if (!locked && chromeVisible) {
+                        PlayerBottomChrome(
+                            model = model,
+                            positionMs = positionMs,
+                            paused = paused,
+                            overlay = true,
+                            compact = true,
+                            onSeeking = { ratio -> positionMs = (ratio * model.durationMs).toLong() },
+                            onSeekStart = { scrubbing = true },
+                            onSeekEnd = { scrubbing = false },
+                            onRewind = { positionMs = (positionMs - 10_000).coerceAtLeast(0) },
+                            onToggle = { paused = !paused },
+                            onForward = {
+                                positionMs = (positionMs + 10_000).coerceAtMost(model.durationMs)
+                            },
+                            onNext = { toast = "下一集（等下版接内核）" },
+                            onSpeed = { toast = "倍速：等下版接内核" },
+                            onAudio = { panel = PlayerPanel.Audio },
+                            onSubtitle = { panel = PlayerPanel.Subtitle },
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        )
+                    }
                 }
-                PlayerBottomChrome(
-                    model = model,
-                    positionMs = positionMs,
-                    paused = paused,
-                    overlay = false,
-                    onSeeking = { ratio -> positionMs = (ratio * model.durationMs).toLong() },
-                    onSeekStart = { scrubbing = true },
-                    onSeekEnd = { scrubbing = false },
-                    onRewind = { positionMs = (positionMs - 10_000).coerceAtLeast(0) },
-                    onToggle = { paused = !paused },
-                    onForward = {
-                        positionMs = (positionMs + 10_000).coerceAtMost(model.durationMs)
-                    },
-                    onNext = { toast = "下一集（等下版接内核）" },
-                    onSpeed = { toast = "倍速：等下版接内核" },
-                    onAudio = { panel = PlayerPanel.Audio },
-                    onSubtitle = { panel = PlayerPanel.Subtitle },
-                )
+                PlayerChipsRow(model)
                 PlayerPortraitDetails(
                     model = model,
                     onPickEpisode = { panel = PlayerPanel.Episodes },

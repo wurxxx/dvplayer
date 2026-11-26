@@ -267,8 +267,10 @@ fun PlayerBottomChrome(
     model: PlayerUiModel,
     positionMs: Long,
     paused: Boolean,
-    /** true：横屏叠在视频上；false：竖屏紧贴视频下沿。 */
+    /** true：叠在视频画面内；false：视频下方（占布局）。 */
     overlay: Boolean,
+    /** 竖屏悬浮时只留进度 + 按钮，片名在顶栏、规格在视频下方。 */
+    compact: Boolean = false,
     onSeeking: (Float) -> Unit,
     onSeekStart: () -> Unit,
     onSeekEnd: () -> Unit,
@@ -284,28 +286,34 @@ fun PlayerBottomChrome(
     val titleSize = if (overlay) 12.sp else 14.sp
     val timeSize = if (overlay) 10.sp else 11.sp
 
-    // 透明：横屏直接压在画面上，竖屏露出页面底色。
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = PlayerDimens.Edge, end = PlayerDimens.Edge, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = model.title,
-                color = white90,
-                fontSize = titleSize,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.width(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                model.chips.forEach { SpecChip(it.text, it.accent) }
+    // 透明：叠在画面上，不铺底色。
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = if (compact) 6.dp else 0.dp),
+    ) {
+        if (!compact) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = PlayerDimens.Edge, end = PlayerDimens.Edge, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = model.title,
+                    color = white90,
+                    fontSize = titleSize,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    model.chips.forEach { SpecChip(it.text, it.accent) }
+                }
             }
+            Spacer(Modifier.height(4.dp))
         }
-        Spacer(Modifier.height(4.dp))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -345,6 +353,19 @@ fun PlayerBottomChrome(
             onAudio = onAudio,
             onSubtitle = onSubtitle,
         )
+    }
+}
+
+/** 竖屏视频下方的一行规格（片名在顶栏，不重复）。 */
+@Composable
+fun PlayerChipsRow(model: PlayerUiModel, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = PlayerDimens.Edge, end = PlayerDimens.Edge, top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        model.chips.forEach { SpecChip(it.text, it.accent) }
     }
 }
 
