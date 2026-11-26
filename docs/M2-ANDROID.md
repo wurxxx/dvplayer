@@ -177,7 +177,7 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
 | A0 | 构建链（JDK 17 / SDK 36 / NDK r28、libmpv、16KB） | 完成 |
 | A1 | 可行性 spike（设备能力六项） | 手机侧完成；TV / 盒子 / DV 显示项缺（门禁未关） |
 | A2 | 骨架（两个 app、约定插件、`:design` / `:core`） | 完成 |
-| A3 | 数据层（`core/media-jni`、hub 生命周期、库 / 详情 / 记录） | **Rust 侧完成**；Android JNI 仍只有 `version()`，`core/media` 的 41 个 `dv_*` 没转发（见 §9.1） |
+| A3 | 数据层（`core/media-jni`、hub 生命周期、库 / 详情 / 记录） | 完成（§7.1.1）：41 个 `dv_*` 全转发，`verify-core.sh` 19 步通过 |
 | A4 | 引擎契约 + mpv（EGL、属性桥、会话、章节、续播、ASS） | 完成 |
 | A5 | HDR 输出（dataspace、静态元数据、帧率匹配） | 完成 |
 | A6 | Media3（HDR10+、音频、PGS / Sup、契约对齐） | 完成 |
@@ -259,6 +259,41 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
 - 自检：`scripts/android/{mpv-probe.c,check-mpv.sh}` 推到设备上 `dlopen` + 读
   client API 版本 + `mpv_create`；模拟器、HBY 5502、APK 里抽出的 `.so` 都通过
   （`client API: 2.6`）。
+
+### 7.1.1 数据层 JNI（A3）
+
+`core/media` 的 41 个 `dv_*` 现在全部经 `core/media-jni` 转发到 Kotlin：
+`Native.kt`（external 声明）→ `Models.kt`（camelCase 模型）→ `MediaHub.kt`
+（`MediaHub` / `MediaSourceHandle` / `DvCore`）。界面不直接碰 JNI。
+
+| 约定 | 说明 |
+| --- | --- |
+| 句柄 | Kotlin `Long`，就是 Rust 的 `*mut SourceHandle` / `*mut HubHandle`；`close()` 调 `*_free` |
+| 返回 | 统一 JSON 外壳 `{"ok":true,"data":…}` / `{"ok":false,"error":…,"code":…}`，`CoreException` 承载失败 |
+| 流式回调 | `hubAddManyStream` 逐条 emit 的是**裸 `SourceConnect` 对象**，没有外壳；返回值才有 |
+| 线程 | 核心是阻塞的（内部同步 HTTP），调用方必须在工作线程；hub 内部有锁，多线程安全 |
+| `internal` | **external 方法不能标 `internal`**：Kotlin 会改名成 `coreVersion$core_debug`，JNI 找不到符号 |
+| 布尔 | `hubSetFavorite/hubSetWatched` 的 JNI 参数是 `jint`，Kotlin 侧用 `Int`（0/1） |
+| TLS | Android 没有 OpenSSL / SChannel，`reqwest` 按 target 切到 `rustls-tls-webpki-roots`；桌面仍是 `native-tls` |
+| 打包 | `cargo ndk` 会把 `libdvplayer_media.so` 也复制出来（`media` 是 cdylib），脚本删掉它——`_jni.so` 已静态链入 |
+
+`tests/android/verify-core.sh` 是这条链的回归：起 `CoreSmokeActivity`，
+跑「建连 → 库 → 条目 → 详情 → 播放源 → 进度 / 记录 → 搜索 → 流式建连 →
+DV 探测」，断言 19 步全过。2026-11-26 x86_64 模拟器（`p5.mkv`）：
+
+```
+✓ version 0.1.4        ✓ sourceKinds fnos,emby,jellyfin,local
+✓ hub.add / libraries / items (1 条) / detail / playSource (direct=true)
+✓ hubMediaInfo         ✓ reportProgress→records   ✓ setWatched / removeRecord
+✓ hub.search (1 命中)  ✓ children / people / genres / favorites
+✓ 错误路径 detail 不存在 → CoreException
+✓ hub.addManyStream 回调 2 条，返回 2 条
+✓ probeDovi P5 MEL disableResidual=true
+RESULT PASS (19 步)
+```
+
+CI 的 `apk` job 现在会装 Rust + `cargo-ndk 4.1.2`、编 `arm64-v8a` 核心，
+再打两个壳，`check-apk.sh` 会一并校验 `libdvplayer_media_jni.so` 的 16KB 对齐。
 
 ### 7.2 出画与播放控制（A4）
 
@@ -744,7 +779,7 @@ JVM 上用门控测试 `NfsLiveTest`（`NFS_LIVE=1 NFS_URL=...`）校准协议�
 | job | 内容 |
 | --- | --- |
 | `unit-test` | JDK 17 + SDK 36，跑上面三个模块的单测 |
-| `apk` | 装 NDK r28、还原/编译 libmpv、编 `:app-phone` + `:app-tv`、`check-apk.sh` 校验 APK |
+| `apk` | 装 NDK r28 + Rust + `cargo-ndk`、还原/编译 libmpv、编 `arm64-v8a` 核心、编 `:app-phone` + `:app-tv`、`check-apk.sh` 校验 APK |
 
 libmpv 缓存在 `build/android-mpv/arm64/prefix`，key 是
 `build-mpv.sh` + `env.sh` 的哈希——改脚本才重编，日常 PR 直接命中。
@@ -776,7 +811,7 @@ libmpv 缓存在 `build/android-mpv/arm64/prefix`，key 是
   4K DV P5 软解在模拟器上很慢（1 秒内容要十几秒），这是 CPU 软解的正常表现。
 - 单独验证过：x86_64 的 `libmpv.so` push 到 `/data/local/tmp`，NDK 探针
   `dlopen(..., RTLD_NOW)` + `dlsym("mpv_create")` → 成功（exit 0）。
-- APK 层由 `check-apk.sh` 静态校验：4 个 `.so` 全部 `Stored`、
+- APK 层由 `check-apk.sh` 静态校验：每个 `.so` 都 `Stored`、
   `zipalign -c -P 16` 通过、ELF 每个 `PT_LOAD` ≥ `0x4000`。
 - 模拟器本身不稳：swiftshader 渲染时会偶发 `bad color buffer handle`
   把整个模拟器带崩，和页大小无关。
@@ -853,8 +888,8 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 ### 9.1 未完成项（2026-11-26 盘点）
 
-手机侧的 A0–A10 底层能力已闭环（§7），但数据层 JNI 与面向用户的界面还空着。
-下面按「为什么还没完」分三类。
+手机侧的 A0–A10 底层能力已闭环（§7），数据层 JNI 也已接通（§7.1.1），
+现在缺的是面向用户的界面。下面按「为什么还没完」分三类。
 
 **缺外部条件**（代码就绪，等设备 / 素材）：
 
@@ -870,7 +905,6 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 项 | 现状 |
 | --- | --- |
-| Android 数据层 JNI（最卡） | `core/media/src/ffi.rs` 有 41 个 `dv_*`，但 `core/media-jni/src/lib.rs` 只导出了 `version()`，`Native.kt` 也只有它 → 手机 / TV 都拿不到库列表、详情、记录，UI 无从下手。CI 也不编 Rust（`jniLibs` 被 gitignore），所以 CI 出的 APK 里根本没有 `libdvplayer_media_jni.so`；x86_64 也没编，模拟器上跑不了任何依赖核心的页面 |
 | 手机 UI（`ui-phone`） | 只有 75 行能力自检页，没有库 / 详情 / 搜索 / 设置 / 播放页；底层 `:player`（路由、续播、切内核）已就绪，缺的是屏幕 |
 | TV 大屏 UI（B1 / B2） | `:ui-tv` 只有 `TvApp()` 50 行、`:app-tv` 只有 `MainActivity`，而且 `app-tv` 连 `:player` / `:core` 依赖都没有；TV 上现在跑不了播放回归 |
 | TV 兼容矩阵（B3） | TV 默认内核、tunneling 取舍、HDMI 直通策略未定（§10） |
@@ -887,6 +921,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 项 | 为什么现在验不了 |
 | --- | --- |
+| 网络源（fnos / Emby / Jellyfin）数据层 | JNI 链路只在 `local` 源上跑过 19 步；三家的登录、分页、搜索合并还需要可用的服务器（NAS 上没跑这些服务） |
 | Media3 全链路 | 模拟器 `h264_mediacodec` 没有 JVM、10-bit HEVC 报 `ERROR_CODE_DECODING_FAILED`，只能在真机回归 |
 | HDR10+ 自动切 Media3 | 路由单测过了，真机端到端（含切内核后续播）待验 |
 | HDR 直出 | 模拟器没有 `EGL_KHR_gl_colorspace`，只验了回退（§7.4.1）；真机 PQ surface + 系统 HDR 待验 |
