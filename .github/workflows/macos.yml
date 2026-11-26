@@ -123,8 +123,8 @@ jobs:
   # 正文 = .github/release-notes.md（手写的主要修复）+ 自动变更列表。
   #
   # 放在 macOS 工作流里是因为 push tag 时它一定会跑；Windows 工作流
-  # 只负责附文件。重试流程（macos-arm64-retry.yml）重跑时这里会把
-  # 同样的正文再写一遍，内容是覆盖而不是追加，不会重复。
+  # 只负责附文件。手工补产物（指定 release_tag）时这里会把同样的正文
+  # 再写一遍，内容是覆盖而不是追加，不会重复。
   notes:
     name: 写 Release 说明
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
