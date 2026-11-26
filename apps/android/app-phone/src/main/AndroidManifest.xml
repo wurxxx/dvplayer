@@ -29,6 +29,8 @@
         <!-- A4 出画验证页，正式播放页之后从 :ui-phone 接进来。 -->
         <activity
             android:name=".PlayerTestActivity"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true"
             android:theme="@style/Theme.DvPlayer" />

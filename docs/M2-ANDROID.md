@@ -431,6 +431,30 @@ Main10 / BT.2020 PQ 的 10 秒与 30 秒样片，两个内核都实测：
 动态元数据交 Media3」），`dv-multitrack.mp4` 路由到 mpv（理由「无 HDR10+，
 用默认 mpv」）。`--es engine mpv|media3` 仍然优先于自动路由。
 
+内核切换（A7 第二步，2026-11-27）：验证页加「切内核」，把当前 kernel 的
+位置 / 倍速 / 暂停态放进新 Intent 重开同一个片源。实测
+mpv → media3 时位置从 ~4s 切过去后继续到 `pos 7.4s`，轨道 / 章节 / 会话都按
+Media3 重建；再切回 mpv 同样接着播（`pos 27.5s`）。两个坑：
+
+- 原来的启动 Intent 带 `FLAG_ACTIVITY_NEW_TASK`，直接复制再
+  `startActivity + finish` 会把新 activity 也收掉；切换时要新建一份干净的
+  Intent（只带 url / engine / sub / hwdec / force_sdr / seek_to / speed / paused）。
+- mpv 的 `destroy` 会 join 渲染线程并等 mpv 退出，偶尔卡十几秒；它发生在
+  `onDestroy`，会堵住同进程的新 activity。现在把关闭放到后台线程，
+  主线程只做 `detach`。
+- 帧率匹配在 `onStop` 把 `preferredDisplayModeId` 交还系统（设 0）。注意
+  ColorOS 上 `dumpsys display` 的 `mActiveModeId` 不一定马上回默认值——
+  这台机器上钉钉（另一个应用）自己也请求了 120Hz，会盖住恢复结果；
+  以窗口属性 `preferredDisplayMode=6` 是否还在来判定。
+
+PiP（A10 第一步，2026-11-27）：验证页 `supportsPictureInPicture=true`，
+按钮「PIP」与按 Home 都能进画中画。实测
+`mLastReportedPictureInPictureMode=true`、任务 `mode=pinned`、
+`rootPinnedTask` 指向播放页。进 PiP 时 Surface 缩到 787×443，mpv 会重建
+EGLSurface；之前新 surface 是黑的，因为 `mpv_render_context_update()` 没有
+新帧时我们直接返回、不会重画。现在重建 surface 时置 `force_render`，
+即使没有新帧也把上一帧重画进新 buffer，PiP 窗口正常出画。
+
 契约对齐（A6 第二步）：`Media3Player` 实现同一份 `PlayerEngine`，验证页
 `--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
 都跑通；外部字幕用 `MediaItem.SubtitleConfiguration`（按扩展名给 MIME），

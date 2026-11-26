@@ -1,6 +1,10 @@
 package com.dvplayer.app
 
 import android.app.Activity
+import android.app.PictureInPictureParams
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -11,6 +15,7 @@ import android.view.Gravity
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.FrameLayout
@@ -59,6 +64,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var tickCount = 0
     private var resumeApplied = false
     private var askedNotification = false
+    /** 进入本页前的显示模式，退出时恢复（帧率匹配不能把系统一直锁在 120Hz）。 */
+    private var originalModeId = 0
+    private var originalRefreshRate = 0f
     private var session: MediaSessionController? = null
     private lateinit var memory: PlaybackMemory
     private val handler = Handler(Looper.getMainLooper())
@@ -82,7 +90,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private val refresh = object : Runnable {
         override fun run() {
             status.text = when (engine) {
-                "media3" -> media3Status()
+                "media3" -> {
+                    maybeMatchFrameRate(media3?.videoFormat?.frameRate?.toDouble())
+                    media3Status()
+                }
                 "codec" -> probeResult ?: "解码中…"
                 else -> {
                     maybeMatchFrameRate()
@@ -101,6 +112,11 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         memory = PlaybackMemory(this)
+        runCatching {
+            val mode = currentDisplay.mode
+            originalModeId = mode.modeId
+            originalRefreshRate = mode.refreshRate
+        }
         engine = resolveEngine()
         when (engine) {
             "media3" -> {
@@ -215,13 +231,52 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             askedNotification = true
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
         }
+        // 切换内核（startActivity + finish）时，新实例可能在旧实例退场期间
+        // 收到一次 onPause；如果在这里 removeCallbacks，状态刷新就永久停了。
+        // 验证页的轮询成本很低，暂停也不停，只在 onDestroy 里收。
+        handler.removeCallbacks(refresh)
         handler.post(refresh)
     }
 
     override fun onPause() {
-        handler.removeCallbacks(refresh)
         maybeSave()
         super.onPause()
+    }
+
+    override fun onStop() {
+        // 窗口还在的时候才能改显示模式；onDestroy 里改已经晚了。
+        restoreDisplayMode()
+        super.onStop()
+    }
+
+    /** A10：PiP。验证页只做最小参数，正式播放页按片源宽高比给 aspectRatio。 */
+    private fun enterPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        val params = PictureInPictureParams.Builder().build()
+        if (!enterPictureInPictureMode(params)) {
+            Log.w(TAG, "进入 PiP 失败")
+        } else {
+            Log.i(TAG, "进入 PiP")
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        status.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        if (engine != "codec") {
+            controlsBox.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        }
+        Log.i(TAG, "PiP 模式：$isInPictureInPictureMode")
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // 按 Home 时自动进 PiP，和正式播放页的行为一致。
+        if (started) enterPip()
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) = attach(holder)
@@ -290,21 +345,64 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         add("字幕") { cycleTrack(TrackKind.SUB) }
         add("载入字幕") { enginePlayer?.addSubtitle(subtitleUrl) }
         add("下一章") { nextChapter() }
+        if (engine == "mpv" || engine == "media3") add("切内核") { switchEngine() }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        ) {
+            add("PiP") { enterPip() }
+        }
         return box
     }
 
-    /** 首次拿到片长后跳到上次的位置。 */
+    /** 首次拿到片长后恢复位置：切内核用显式参数，正常进入用续播记录。 */
     private fun maybeResume() {
         if (resumeApplied) return
         val player = enginePlayer ?: return
         val state = player.state()
         if (state.durationMs <= 0) return
         resumeApplied = true
+
+        val explicit = intent.getLongExtra("seek_to", -1L)
+        if (explicit >= 0) {
+            player.seekTo(explicit)
+            intent.getFloatExtra("speed", 0f).takeIf { it > 0f }?.let { player.setSpeed(it) }
+            if (intent.getBooleanExtra("paused", false)) player.pause() else player.play()
+            Log.i(TAG, "切换后恢复：${explicit}ms speed=${player.state().speed} paused=${player.state().paused}")
+            return
+        }
+
         val saved = memory.position(url)
         if (saved > 3_000 && saved < state.durationMs - 5_000) {
             player.seekTo(saved)
             Log.i(TAG, "续播：$saved ms")
         }
+    }
+
+    /**
+     * A7「切换不丢位置」：记下当前位置/倍速/暂停态，换一个内核重新起同一个片源。
+     * 用 startActivity + finish 而不是手动拆装，验证页的 Surface / 字幕视图
+     * 都按目标内核重建，不会残留上一个内核的状态。
+     */
+    private fun switchEngine() {
+        val from = enginePlayer ?: return
+        val state = from.state()
+        val target = if (engine == "media3") "mpv" else "media3"
+        maybeSave()
+        // 不要复制原 intent：am start 带进来的 FLAG_ACTIVITY_NEW_TASK 会让新
+        // activity 走独立任务，紧接着 finish() 会把整个任务收掉。重建一份干净的。
+        val next = Intent(this, PlayerTestActivity::class.java).apply {
+            putExtra("url", url)
+            putExtra("engine", target)
+            intent.getStringExtra("sub")?.let { putExtra("sub", it) }
+            intent.getStringExtra("hwdec")?.let { putExtra("hwdec", it) }
+            intent.getStringExtra("force_sdr")?.let { putExtra("force_sdr", it) }
+            putExtra("seek_to", state.positionMs)
+            putExtra("speed", state.speed)
+            putExtra("paused", state.paused)
+        }
+        Log.i(TAG, "切换内核 $engine -> $target @ ${state.positionMs}ms")
+        startActivity(next)
+        finish()
     }
 
     private fun maybeSave() {
@@ -378,12 +476,42 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     }
 
     override fun onDestroy() {
+        restoreDisplayMode()
         handler.removeCallbacks(refresh)
         session?.release()
         session = null
-        player?.close()
-        media3?.close()
+        // mpv 的 destroy 要 join 渲染线程 + 等 mpv 退出，偶尔会卡住十几秒；
+        // 放在后台线程，别把主线程（和新 activity）一起堵死。
+        val mpv = player
+        val m3 = media3
+        player = null
+        media3 = null
+        if (mpv != null || m3 != null) {
+            Thread({
+                runCatching { m3?.close() }
+                runCatching { mpv?.close() }
+                Log.i(TAG, "播放内核已释放")
+            }, "engine-close").start()
+        }
         super.onDestroy()
+    }
+
+    /** 退出时把显示模式还给系统。 */
+    private fun restoreDisplayMode() {
+        if (matchedFps <= 0.0 || originalModeId == 0) return
+        matchedFps = 0.0
+        runCatching {
+            val attrs = window.attributes
+            // 0 = 交还给系统默认模式；设回「进入前的 mode」在 ColorOS 上不生效。
+            attrs.preferredDisplayModeId = 0
+            @Suppress("DEPRECATION")
+            attrs.preferredRefreshRate = 0f
+            window.attributes = attrs
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                surfaceView.holder.surface?.setFrameRate(0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+            }
+            Log.i(TAG, "恢复显示模式（交还系统，原 ${originalModeId} @ ${originalRefreshRate}Hz）")
+        }
     }
 
     /** 直连 MediaCodec 的 HDR10+ 探针，顺带把帧送到 SurfaceView。 */
@@ -448,7 +576,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         val mpv = player ?: return
         val fps = listOf("container-fps", "estimated-vf-fps")
             .mapNotNull { mpv.getProperty(it)?.toDoubleOrNull() }
-            .firstOrNull { it > 1.0 } ?: return
+            .firstOrNull { it > 1.0 }
+        maybeMatchFrameRate(fps)
+    }
+
+    private fun maybeMatchFrameRate(fps: Double?) {
+        if (fps == null || fps <= 1.0) return
         if (matchedFps > 0 && abs(fps - matchedFps) < 0.01) return
 
         val display = currentDisplay

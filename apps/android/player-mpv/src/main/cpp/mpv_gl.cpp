@@ -121,6 +121,9 @@ struct Player {
     int32_t surface_dataspace = kDataspaceSrgb;
     int width = 0;
     int height = 0;
+    // 换 surface / 换 colorspace 后即使没有新帧也要重画一次，否则 PiP 缩放
+    // 或 HDR 切换后画面会停在黑的缓冲区上。只在渲染线程读写。
+    bool force_render = false;
     std::atomic<bool> gl_ready{false};
     bool has_pq_colorspace = false;
     bool has_hlg_colorspace = false;
@@ -272,6 +275,7 @@ bool rebuild_surface(Player *p, EGLint colorspace) {
 
     p->applied_dataspace = -1;  // 强制重新设置 window dataspace
     p->hdr_static_applied = false;
+    p->force_render = true;
     p->gl_ready.store(create_render_context(p), std::memory_order_release);
     p->redraw.store(true, std::memory_order_release);
     LOGI("EGLSurface 重建：colorspace 0x%x · %dx%d", colorspace, p->width, p->height);
@@ -386,9 +390,11 @@ void draw_frame(Player *p) {
     }
 
     const uint64_t flags = mpv_render_context_update(p->render);
-    if (!(flags & MPV_RENDER_UPDATE_FRAME)) {
+    // 新 surface 是未初始化的缓冲区；没有新帧时手动重画上一帧。
+    if (!(flags & MPV_RENDER_UPDATE_FRAME) && !p->force_render) {
         return;
     }
+    p->force_render = false;
 
     mpv_opengl_fbo fbo{0, p->width, p->height, 0};
     int flip_y = 1;
@@ -803,9 +809,11 @@ Java_com_dvplayer_player_mpv_MpvNative_destroy(JNIEnv *, jobject, jlong handle) 
         }
     }
     p->cv.notify_all();
+    LOGI("destroy: 等渲染线程");
     if (p->render_thread.joinable()) {
         p->render_thread.join();
     }
+    LOGI("destroy: 渲染线程已退出");
 
     // render context 已经在渲染线程里释放掉了，这里只收 EGL 的尾。
     if (p->display != EGL_NO_DISPLAY) {
@@ -819,10 +827,13 @@ Java_com_dvplayer_player_mpv_MpvNative_destroy(JNIEnv *, jobject, jlong handle) 
         p->window = nullptr;
     }
 
+    LOGI("destroy: 释放 mpv");
     mpv_terminate_destroy(p->mpv);
+    LOGI("destroy: 等事件线程");
     if (p->event_thread.joinable()) {
         p->event_thread.join();
     }
+    LOGI("destroy: 完成");
     delete p;
 }
 
