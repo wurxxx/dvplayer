@@ -753,6 +753,67 @@ JVM 上用门控测试 `NfsLiveTest`（`NFS_LIVE=1 NFS_URL=...`）校准协议�
   `Surface.setFrameRate` 在 Surface 已释放时会抛 `IllegalStateException`，统一走
   `setSurfaceFrameRate()`（先查 `isValid` + `runCatching`）。
 
+### 7.9.1 手机播放页（静态布局 + 真实数据映射）
+
+播放页先在 `:ui-phone` 里做成可独立预览的静态稿，再接核心数据——这样间距、
+淡出、手势这些细节不依赖 NAS 和内核就能迭代。
+
+**布局**（`PlayerScreen`）：
+
+| 区域 | 手机横屏 | 手机竖屏 |
+| --- | --- | --- |
+| 顶栏 | 40dp，半透明渐变压在画面上 | 同左，保留状态栏 |
+| 视频 | 铺满全屏（接内核后换成 `SurfaceView`） | 宽度 × 16:9，在顶栏下 |
+| 底部控制层 | 片名 + 规格 + 时间进度 + 48dp 按钮行合成一个 `PlayerBottomChrome`，整块一层渐变从透明到黑 | 同一个控件，纯黑紧贴视频下沿 |
+| 视频下方 | — | 简介 + 选集横滑 |
+
+`PlayerBottomChrome` 把「片名 / 规格 / 时间进度 / 按钮」放在同一个 Column、
+只画一次背景。之前拆成「元信息」和「按钮」两个控件各自加渐变，交界处会露出
+色差，看起来像两块内容。
+
+- 3 秒无操作淡出；面板 / 菜单 / 拖动期间不淡出。
+- 手势：点击唤出 / 收起、双击暂停、长按 2×、左右滑 seek；锁屏后只剩画面，
+  长按解锁。
+- 面板：音轨 / 字幕 / 选集 / 媒体信息；齿轮菜单里是内核、媒体信息、画面比例、
+  选集、定时关闭。
+
+**数据映射**（`PlayerUiModelFactory`）：核心的 `MediaDetail` / `PlaySource` /
+`MediaInfo` 在 `:ui-phone` 里映射成 `PlayerUiModel`，UI 不碰核心类型。缺字段
+如实写「未提供」，不编：
+
+- 规格行：内核 / 动态范围 / 分辨率 / 帧率 / 码率，取自 `MediaInfo.video`；
+- 音轨：优先 `MediaInfo.audios`，为空时退回 `PlaySource.audioStreams`；
+- 字幕：第一项固定「关闭字幕」，语言码转中文（chi / eng / jpn…）；
+- 媒体信息面板：视频 / 音轨 / 字幕 / 源 / 续播点；色彩范围缺失时给出显式提示，
+  音轨为空时显示「源未提供音轨信息」。
+
+**进入方式**（`PlaybackActivity`）：
+
+```bash
+# 演示数据（布局验收）
+adb shell am start -n com.dvplayer.app/.PlaybackActivity --es mode landscape
+
+# 真实条目
+adb shell am start -n com.dvplayer.app/.PlaybackActivity \
+    --es item 'local-smoke:f/p5.mkv' \
+    --es config '{"id":"local-smoke","name":"本地冒烟","kind":"local","base":"..."}'
+```
+
+源配置落在 `:core` 的 `SourceStore`（SharedPreferences + JSON；密码仍走
+`CredentialStore` 的 Keystore）。`--es config` 只用于调试，不落盘。
+
+**实测**（Genymotion Android 12 / x86_64，`samples/p5.mkv`）：
+
+- `local` 源真实 itemId `local-smoke:f/p5.mkv`；播放页显示片名 `p5`、
+  引擎 `mpv`、源「本地冒烟（local）」、直连、请求头 0；
+- 媒体信息面板 7 个视频字段全为「未提供」，底部给出「源未提供色彩范围」的提示；
+- 竖屏 / 横屏 / 媒体信息 / 音轨 / 字幕 / 选集 / 齿轮菜单逐张截图，控制层在两种
+  方向下都不再出现「两块背景」的接缝。
+
+**还没接**：SurfaceView 与 `:player` 的内核 / 轨道 / 章节；`local` 源首播时
+`PlaySource.durationSeconds` 来自播放记录（首播为 0），接内核后要用引擎回填，
+并在退出时 `reportProgress`。
+
 ### 7.10 工程化（单测 / CI / 凭据 / 控制器）
 
 **单测**（纯 JVM，不依赖设备与 native）：
@@ -905,7 +966,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 项 | 现状 |
 | --- | --- |
-| 手机 UI（`ui-phone`） | 只有 75 行能力自检页，没有库 / 详情 / 搜索 / 设置 / 播放页；底层 `:player`（路由、续播、切内核）已就绪，缺的是屏幕 |
+| 手机 UI（`ui-phone`） | 播放页已完成（静态布局 + `PlayerUiModelFactory` 真实数据映射，§7.9.1）；还缺库 / 详情 / 搜索 / 设置，以及把播放页接到 `:player` 的内核 |
 | TV 大屏 UI（B1 / B2） | `:ui-tv` 只有 `TvApp()` 50 行、`:app-tv` 只有 `MainActivity`，而且 `app-tv` 连 `:player` / `:core` 依赖都没有；TV 上现在跑不了播放回归 |
 | TV 兼容矩阵（B3） | TV 默认内核、tunneling 取舍、HDMI 直通策略未定（§10） |
 | 原盘边读边播（B5，可选） | SMB / NFS 上的 BDMV 不能直接播：桥接只服务单文件，libbluray 要本地路径或可列目录的流（§7.8） |

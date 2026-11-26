@@ -78,7 +78,7 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | --- | --- | --- |
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
 | M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包、更新检查 | **已发布 0.1.6**：功能已落地，Emby 联调已通过，安装版 / 绿色版由 CI 出包并附到 Release，启动检查更新已接；剩 Jellyfin 12.x 真机与 Plex；清单见 [M1.md](M1.md) |
-| M2 Android / TV | 双壳、双内核（mpv 默认 + Media3 按能力路由）、原盘、VFS、TV 焦点 | **底层已落地**：双内核路由、原盘入口、VFS（SMB / NFS / WebDAV）、DV P5 颜色闭环、数据层 JNI（41 个 `dv_*`，`verify-core.sh` 19 步）；手机 / TV 界面未做，清单见 [M2-ANDROID.md](M2-ANDROID.md) §9.1 |
+| M2 Android / TV | 双壳、双内核（mpv 默认 + Media3 按能力路由）、原盘、VFS、TV 焦点 | **底层已落地**：双内核路由、原盘入口、VFS（SMB / NFS / WebDAV）、DV P5 颜色闭环、数据层 JNI（41 个 `dv_*`，`verify-core.sh` 19 步）；手机播放页已出（静态布局 + 真实数据映射，§7.9.1），库 / 详情 / 设置 / TV 界面未做，清单见 [M2-ANDROID.md](M2-ANDROID.md) §9.1 |
 | M3 macOS | 进程内 libmpv + render API 全链路、DV / HDR10 或 SDR 回退、签名公证 | **已发布 0.1.6**：浏览、播放、五项功能、Trakt、更新检查已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、签名 / 公证待做 |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | **部分**：本机跨源续播（电影取较长进度）与 Trakt playback 读取已完成；播放记录 / 收藏跨端合并未做 |
 
@@ -174,7 +174,7 @@ Trakt、更新检查与 Windows 对齐，见 [M2-MACOS.md](M2-MACOS.md)；未完
 | ~~Windows 自动更新~~ | **已完成**（0.1.6）：启动 / 「关于」页查 GitHub Releases，有新版在侧栏提示；按钮打开下载页。静默安装（`.appinstaller` 或自建 feed）仍未做 |
 | macOS 签名 / 公证 | `.app` 未签名、未公证，首次打开要手动放行；更新只到「检查 + 打开下载页」，不做 Sparkle 静默安装（§4 M3） |
 | Plex 适配器 | `/library/*` + `X-Plex-Token`，与 Emby 差异大，单独一个适配器（M1 B15） |
-| Android / TV | 底层与数据层已落地（双内核、原盘入口、VFS、DV P5 颜色闭环、41 个 `dv_*` 的 JNI），**现在缺手机 / TV 界面**；再往后是原盘边读边播（B5，可选）、SMB 共享名枚举、`VfsEntry` 接核心虚拟源、TLS 自签名开关、Android 16 局域网权限、播放器搬进前台服务，见 [M2-ANDROID.md](M2-ANDROID.md) §9.1 |
+| Android / TV | 底层与数据层已落地（双内核、原盘入口、VFS、DV P5 颜色闭环、41 个 `dv_*` 的 JNI），手机播放页已出（§7.9.1）；**还缺库 / 详情 / 设置 / TV 界面**；再往后是原盘边读边播（B5，可选）、SMB 共享名枚举、`VfsEntry` 接核心虚拟源、TLS 自签名开关、Android 16 局域网权限、播放器搬进前台服务，见 [M2-ANDROID.md](M2-ANDROID.md) §9.1 |
 | M4 跨端同步 | 播放记录 / 收藏 / 续播点跨源、跨端合并；现在只回写播放的那个源 |
 
 ## 6. 非目标（v1）

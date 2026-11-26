@@ -47,5 +47,15 @@
             android:name=".CoreSmokeActivity"
             android:exported="true"
             android:theme="@style/Theme.DvPlayer" />
+
+        <!-- 手机播放页（静态布局 → 接核心）。 -->
+        <activity
+            android:name=".PlaybackActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/Theme.DvPlayer" />
     </application>
 </manifest>

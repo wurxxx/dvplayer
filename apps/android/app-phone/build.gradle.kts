@@ -21,6 +21,8 @@ android {
 
 dependencies {
     implementation(project(":ui-phone"))
+    // 播放页 Activity 要自己套一层 DvTheme（ui-phone 的 design 是 implementation，不传递）。
+    implementation(project(":design"))
     implementation(project(":core"))
     implementation(project(":player-mpv"))
     implementation(project(":player-media3"))
