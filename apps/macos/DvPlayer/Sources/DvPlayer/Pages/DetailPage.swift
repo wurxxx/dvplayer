@@ -109,6 +109,9 @@ struct DetailPage: View {
     @State private var mergedStart: Int?
     /// Trakt 上记的播放进度（0–1）；电影换设备 / 换源时用来补续播点。
     @State private var traktProgress: Double?
+    /// 其它源「同一集」的最大进度（0–1）。剧集在「资源」里只有整剧进度，
+    /// 要按季 + 集号找到同一集再比。
+    @State private var crossEpisodeProgress: Double?
     /// 同一部片在各源的条目（详情页「资源」）。
     @State private var sources: [ItemSource] = []
     @State private var loading = true
@@ -1125,6 +1128,7 @@ struct DetailPage: View {
             Task { await loadMediaInfo() }
             Task { await loadSources() }
             Task { await loadTraktProgress() }
+            Task { await loadCrossSourceEpisodeProgress() }
             autoJumpToResumeIfNeeded()
             autoRangeShotIfNeeded()
             return
@@ -1151,6 +1155,7 @@ struct DetailPage: View {
         guard let kind = detail?.kind.lowercased(),
               ["series", "tv", "season", "folder"].contains(kind) else {
             await loadMediaInfo()
+            await loadCrossSourceEpisodeProgress()
             saveCache()
             return
         }
@@ -1177,6 +1182,7 @@ struct DetailPage: View {
         }
 
         await loadMediaInfo()
+        await loadCrossSourceEpisodeProgress()
         saveCache()
         autoJumpToResumeIfNeeded()
         autoRangeShotIfNeeded()
@@ -1261,6 +1267,7 @@ struct DetailPage: View {
         fillPending = nil
         await loadFirstEpisodes(season)
         await loadMediaInfo()
+        await loadCrossSourceEpisodeProgress()
         saveCache()
     }
 
@@ -1305,8 +1312,87 @@ struct DetailPage: View {
     private func loadSources() async {
         guard let core = state.core else { return }
         sources = (try? await core.itemSources(itemId)) ?? []
-        // 「资源」一到就能判断别的源有没有看得更多。
+        // 「资源」一到就能判断别的源有没有看得更多；剧集要再找同一集。
         applyMergedResume()
+        await loadCrossSourceEpisodeProgress()
+    }
+
+    /// 合并用的片长：播放源 → 当前集 → 详情。飞牛等源经常不给 duration。
+    private func mergedDuration() -> Int {
+        if resumeDuration > 0 { return resumeDuration }
+        if let resume = resumeEpisode, let runtime = resume.item.runtimeSeconds, runtime > 0 {
+            return runtime
+        }
+        return detail?.runtimeSeconds ?? 0
+    }
+
+    /// 剧集按「同一集」跨源合并：在别的源里找同季同集号的集，读它的位置。
+    private func loadCrossSourceEpisodeProgress() async {
+        guard let resume = resumeEpisode, sources.count > 1 else {
+            crossEpisodeProgress = nil
+            applyMergedResume()
+            return
+        }
+
+        let season = currentSeasonNumber
+        let number = resume.number
+        let target = playTargetId
+        var best: Double?
+
+        for source in sources
+        where source.itemId != itemId && source.itemId != target {
+            if let value = await episodeProgress(
+                in: source.itemId, season: season, number: number) {
+                best = max(best ?? 0, value)
+            }
+        }
+
+        crossEpisodeProgress = best
+        if let best {
+            NSLog("[Detail] 跨源同集 E%d 最大进度 %.0f%%", number, best * 100)
+        } else {
+            NSLog("[Detail] 跨源同集 E%d 没找到", number)
+        }
+        applyMergedResume()
+    }
+
+    /// 另一个源的同一部剧里找同季同集号的那一集，返回它的播放进度（0–1）。
+    /// 只认 1%–99.5%：另一源已看完的集不拿来覆盖，免得把这一集从 0 重播。
+    private func episodeProgress(in sourceItemId: String, season: Int?,
+                                 number: Int) async -> Double? {
+        guard let core = state.core else { return nil }
+
+        var episode: MediaItem?
+        let first = try? await core.children(sourceItemId, pageSize: 300)
+        let kids = first?.items ?? []
+        if kids.contains(where: \.isSeason) {
+            let seasonItem = kids.first { ($0.seasonNumber ?? 0) == (season ?? 1) }
+            if let seasonItem {
+                let paged = try? await core.children(seasonItem.id, pageSize: 600)
+                let items = paged?.items ?? []
+                // 集号优先；未刮削目录里常没有 episodeNumber，按顺序补第 N 集。
+                episode = items.first { ($0.episodeNumber ?? 0) == number }
+                if episode == nil, number >= 1, number <= items.count {
+                    episode = items[number - 1]
+                }
+            }
+        } else {
+            episode = kids.first { ($0.episodeNumber ?? 0) == number }
+            if episode == nil, number >= 1, number <= kids.count {
+                episode = kids[number - 1]
+            }
+        }
+
+        guard let episode, let play = try? await core.playSource(episode.id) else { return nil }
+
+        // 飞牛等源播放源不给 duration，退到条目的片长。
+        let duration = play.durationSeconds > 0
+            ? play.durationSeconds
+            : (episode.runtimeSeconds ?? 0)
+        guard duration > 0 else { return nil }
+
+        let progress = Double(play.positionSeconds) / Double(duration)
+        return progress > 0.01 && progress < 0.995 ? progress : nil
     }
 
     /// Trakt 的 playback：电影在别的设备 / 别的源看过更多时，用它补续播点。
@@ -1337,20 +1423,29 @@ struct DetailPage: View {
     /// 只在片长可用、且另一条明显更大（>1%）时覆盖；≥99.5% 视为看完，从头播。
     /// 换到另一个源播放时片长可能略有出入，这里用当前源的时长换算秒数。
     private func applyMergedResume() {
-        // 只对电影 / 视频合并：剧集在「资源」里的 progress 是整部剧最近一集的，
-        // 拿来换算当前这一集的位置会跳错集。
         let kind = detail?.kind.lowercased() ?? ""
-        // 飞牛的播放源不给片长（duration=0），退到详情里的片长。
-        let duration = resumeDuration > 0 ? resumeDuration : (detail?.runtimeSeconds ?? 0)
-        guard duration > 0, kind == "movie" || kind == "video" else {
+        let isMovie = kind == "movie" || kind == "video"
+        let isSeries = kind == "series" || kind == "tv" || kind == "season" || kind == "folder"
+
+        // 飞牛的播放源不给片长（duration=0），退到当前集 / 详情的片长。
+        let duration = mergedDuration()
+        guard duration > 0 else {
             mergedStart = nil
             resumeSeconds = ownResumeSeconds
             return
         }
 
         let own = Double(ownResumeSeconds) / Double(duration)
-        let sourceBest = sources.map(\.progress).max() ?? 0
-        let best = max(sourceBest, traktProgress ?? 0)
+        let best: Double
+        if isMovie {
+            // 同一部片在其它源 / Trakt 上看得更多。
+            best = max(sources.map(\.progress).max() ?? 0, traktProgress ?? 0)
+        } else if isSeries {
+            // 剧集只能比「同一集」：整剧 progress 是最近一集的比例，直接比会跳错。
+            best = crossEpisodeProgress ?? 0
+        } else {
+            best = 0
+        }
 
         if best >= 0.995 {
             mergedStart = 0
