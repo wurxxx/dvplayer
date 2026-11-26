@@ -32,6 +32,10 @@ class MpvPlayer : PlayerEngine {
 
     private var poller: Thread? = null
 
+    /** 起播前请求、等文件打开后再执行的字幕。 */
+    @Volatile
+    private var pendingSubtitle: String? = null
+
     val isValid: Boolean get() = handle != 0L
 
     override fun attach(surface: Surface, width: Int, height: Int) {
@@ -85,8 +89,16 @@ class MpvPlayer : PlayerEngine {
         setProperty("speed", speed.toString())
     }
 
+    /**
+     * 加载外部字幕。`loadfile` 之后立刻 `sub-add` 会赶在文件打开之前，mpv 会
+     * 拒绝（"no file"）；所以还没拿到时长时先挂起，等 [pollLoop] 看到片长再补。
+     */
     override fun addSubtitle(path: String) {
-        command("sub-add", path, "select")
+        if (state().durationMs <= 0) {
+            pendingSubtitle = path
+        } else {
+            command("sub-add", path, "select")
+        }
     }
 
     override fun selectTrack(kind: TrackKind, trackId: String) {
@@ -170,6 +182,12 @@ class MpvPlayer : PlayerEngine {
         var lastTracks: List<TrackInfo> = emptyList()
         while (running && handle != 0L) {
             val state = state()
+            // 文件打开后再补上起播前请求的外挂字幕。
+            val pending = pendingSubtitle
+            if (pending != null && state.durationMs > 0) {
+                pendingSubtitle = null
+                command("sub-add", pending, "select")
+            }
             if (state != lastState) {
                 lastState = state
                 listener?.onPlayerEvent(PlayerEvent.State(state))

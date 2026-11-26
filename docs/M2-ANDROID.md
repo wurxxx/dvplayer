@@ -624,6 +624,20 @@ OnePlus 的结果是：
 - 顺带修正：Media3 的 PGS MIME 是 `MimeTypes.APPLICATION_PGS`
   （`application/pgs`），不是 `application/x-pgs`；写错时外部字幕会被当成 SRT
   静默丢掉。
+- **mpv 侧字幕补齐验证**（2026-11-27，截图确认）：
+
+  | 场景 | 轨道 | 画面 |
+  | --- | --- | --- |
+  | 内嵌 PGS（`pgs-only.mkv`，去掉同名 `.sup`） | `sub:字幕 1*` | 红色「This text should be red, not blue」 |
+  | 外部 `.sup`（`--es sub .../pgs-sample.sup`） | `sub:sup*`（内嵌不再选中） | 同上，按 PCS 的 object 坐标落位 |
+  | 外部 `.ass`（`--es sub .../test.ass`） | `sub:test.ass*` | libass：`DVPlayer A4` 带 `\pos` / 颜色 / 字号，`ASS subtitle via libass` 正常 |
+
+- **修外挂字幕的时序**：`loadfile` 之后立刻 `sub-add` 会赶在文件打开之前，
+  mpv 拒绝（没有 file），验证页传 `--es sub` 时字幕就悄悄没了。`MpvPlayer`
+  现在在「还没拿到 duration」时把字幕挂起，`pollLoop` 看到片长再补
+  `sub-add ... select`；播放中再调用仍然立即生效。
+- mpv 的 `sub-auto` 默认会加载同名外挂字幕（`pgs-sample.mkv` 旁的
+  `pgs-sample.sup` 会被自动选中），验证内嵌轨时要么改名要么去掉同名文件。
 
 A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
 `MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +

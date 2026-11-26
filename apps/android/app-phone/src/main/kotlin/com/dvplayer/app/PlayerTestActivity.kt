@@ -394,6 +394,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     started = true
                     // Surface 的 GL 初始化在渲染线程里异步做；mpv 会自己排队。
                     mpv.load(playUrl)
+                    // mpv 的 sub-add 走命令队列，可以和 loadfile 同拍发。
+                    if (intent.getStringExtra("sub") != null) mpv.addSubtitle(subtitleUrl)
                     handler.postDelayed({ Log.i(TAG, "章节：${mpv.chapters()}") }, 3000)
                 }
             }
