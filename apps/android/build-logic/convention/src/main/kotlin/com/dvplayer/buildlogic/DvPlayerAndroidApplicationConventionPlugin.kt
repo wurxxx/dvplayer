@@ -21,9 +21,13 @@ class DvPlayerAndroidApplicationConventionPlugin : Plugin<Project> {
                     vectorDrawables.useSupportLibrary = true
 
                     ndk {
-                        // 只发 arm64-v8a。x86_64 只在本机用模拟器调试时才需要，
-                        // 产物会白占两份 .so 的体积（libmpv.so 一份就 25MB+）。
+                        // 只发 arm64-v8a。x86_64 只在本机 16KB 页模拟器调试时才
+                        // 需要，显式 -Pdvplayer.debugAbi=x86_64 才带上（产物会白占
+                        // 两份 .so 的体积，libmpv.so 一份就 28MB）。
                         abiFilters.add("arm64-v8a")
+                        if (target.providers.gradleProperty("dvplayer.debugAbi").orNull == "x86_64") {
+                            abiFilters.add("x86_64")
+                        }
                     }
                 }
 

@@ -92,6 +92,19 @@ class MpvPlayer(private val verbose: Boolean = false) : PlayerEngine {
         dvProfile = profile
     }
 
+    /**
+     * TLS 证书校验（可选）。默认在 native 层设成 `tls-verify=no`——Android
+     * 的系统 CA 不在 mbedTLS 的默认路径里，开校验会让所有 https 直接失败。
+     *
+     * 打开校验时把 CA bundle / 自签证书传给 mpv；必须在 [load] 之前调用
+     * （`tls-verify` / `tls-ca-file` 是流打开时读的选项）。
+     */
+    fun setTlsVerification(verify: Boolean, caFile: String? = null) {
+        setProperty("tls-verify", if (verify) "yes" else "no")
+        if (!caFile.isNullOrEmpty()) setProperty("tls-ca-file", caFile)
+        Log.i(TAG, "TLS 校验=${if (verify) "开" else "关"}${caFile?.let { " CA=$it" } ?: ""}")
+    }
+
     override fun load(url: String) {
         if (handle == 0L) return
         if (dvProfile == 5 && getProperty("hwdec") != "no") {

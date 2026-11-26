@@ -114,21 +114,22 @@ class VfsHttpBridge(
             var start = 0L
             var end = size - 1
             var status = "200 OK"
-            range?.let {
-                val m = RANGE.matchEntire(it)
-                if (m != null) {
-                    val first = m.groupValues[1]
-                    val second = m.groupValues[2]
-                    if (first.isEmpty() && second.isNotEmpty()) {
-                        val suffix = second.toLongOrNull() ?: 0
-                        start = (size - suffix).coerceAtLeast(0)
-                    } else if (first.isNotEmpty()) {
-                        start = first.toLongOrNull() ?: 0
-                        if (second.isNotEmpty()) end = second.toLongOrNull() ?: (size - 1)
-                    }
-                    end = end.coerceAtMost(size - 1)
-                    if (start in 0..end) status = "206 Partial Content" else start = 0
+            when (val parsed = parseByteRange(range, size)) {
+                is ByteRange.Partial -> {
+                    start = parsed.start
+                    end = parsed.end
+                    status = "206 Partial Content"
                 }
+                ByteRange.Unsatisfiable -> {
+                    output.write(
+                        ("HTTP/1.1 416 Range Not Satisfiable\r\n" +
+                            "Content-Range: bytes */$size\r\n" +
+                            "Content-Length: 0\r\nConnection: close\r\n\r\n").toByteArray(),
+                    )
+                    output.flush()
+                    return
+                }
+                ByteRange.Full -> Unit
             }
             val length = (end - start + 1).coerceAtLeast(0)
             val n = requests.incrementAndGet()
@@ -185,7 +186,6 @@ class VfsHttpBridge(
     }
 
     private companion object {
-        val RANGE = Regex("""bytes=(\d*)-(\d*)""")
         const val READ_CHUNK = 256 * 1024
     }
 }

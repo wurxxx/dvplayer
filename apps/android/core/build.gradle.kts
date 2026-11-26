@@ -11,4 +11,6 @@ dependencies {
     implementation(libs.okhttp)
     // SMB2/3 客户端（A9）。
     implementation(libs.smbj)
+
+    testImplementation(libs.junit)
 }

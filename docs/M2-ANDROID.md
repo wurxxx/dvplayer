@@ -217,8 +217,13 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
   `libm / libc / libdl / libandroid / libmediandk / libOpenSLES / libEGL`。
 - harfbuzz 是 C++ 静态库，mpv 用 C 链接器，所以 `libc++_static.a` /
   `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`，不额外带 `libc++_shared.so`。
-- strip 后 arm64 约 **28.4MB**（含 libdovi；x86_64 更大，平时不编），
-  `LOAD` 对齐 `0x4000`。
+- strip 后 arm64 约 **28.0 MiB**（29,310,920 字节；含 libdovi / mbedTLS；
+  x86_64 只给模拟器，平时不编），`LOAD` 对齐 `0x4000`。
+- **包体裁剪**：试过 FFmpeg `--enable-small`，产物 28.0 → 22.8 MiB
+  （−18.6%），但 4K HEVC 软解跑不动——P5 必须软解，17.5 秒掉 314 帧
+  （`-O3` 时是 1 帧），已回退。硬解片源不受影响，但 DV P5 是硬需求，
+  不能拿解码性能换体积。继续裁只能走「逐组件关 decoder/demuxer」，
+  会牺牲格式覆盖，暂不做。
 - **https**：FFmpeg 之前没编 TLS，libmpv 里直接报
   `recompile FFmpeg with openssl...`——mpv 只能播 http。现在静态链 mbedTLS
   3.6.4 + `--enable-mbedtls`。mbedTLS 是 Apache-2.0，FFmpeg 把它归为
@@ -521,6 +526,72 @@ DataSource。
   `Surface.setFrameRate` 在 Surface 已释放时会抛 `IllegalStateException`，统一走
   `setSurfaceFrameRate()`（先查 `isValid` + `runCatching`）。
 
+### 7.10 工程化（单测 / CI / 凭据 / 控制器）
+
+**单测**（纯 JVM，不依赖设备与 native）：
+
+| 模块 | 覆盖 |
+| --- | --- |
+| `:player` | 路由顺序（非本地 → 原盘 → DV → HDR10+）、帧率匹配（整数倍 / 25p / 23.976）、DV 配置记录解析、续播与回退、切内核 |
+| `:core` | HTTP Range 解析（后缀 / 越界 / 416）、凭据作用域与脱敏 |
+| `:player-media3` | `.sup` 分段切分（90kHz→us、截断段、垃圾字节） |
+
+```bash
+./gradlew :player:testDebugUnitTest :core:testDebugUnitTest \
+          :player-media3:testDebugUnitTest
+```
+
+为了让这些逻辑脱离平台跑，拆了四处：
+- `FrameRateMatcher.pickMode(List<ModeInfo>, fps)`：不再直接吃 `Display.Mode`。
+- `RoutingPolicy`：判定顺序与 `EngineRouter` 的平台探测分开。
+- `parseByteRange(header, size)`：桥接的 Range 解析独立成 `ByteRange`。
+- `SupSections.split`：`.sup` 只做字节切分，不构造 `Cue`。
+
+**CI**（`.github/workflows/android.yml`）：
+
+| job | 内容 |
+| --- | --- |
+| `unit-test` | JDK 17 + SDK 36，跑上面三个模块的单测 |
+| `apk` | 装 NDK r28、还原/编译 libmpv、编 `:app-phone` + `:app-tv`、`check-apk.sh` 校验 APK |
+
+libmpv 缓存在 `build/android-mpv/arm64/prefix`，key 是
+`build-mpv.sh` + `env.sh` 的哈希——改脚本才重编，日常 PR 直接命中。
+`build-mpv.sh` 的 NDK prebuilt 目录与 CPU 数已改为按宿主探测
+（darwin / linux、`sysctl` / `nproc`），否则 Linux runner 找不到 clang。
+
+**凭据**（`CredentialStore` / `CredentialScope`）：
+
+- SMB / WebDAV 密码用 Android Keystore 的 AES-256-GCM 加密后进
+  SharedPreferences，密钥不出 Keystore；解密失败直接删记录、让用户重输。
+- 作用域是 `scheme://host:port`，同一台 NAS 换共享不用重输。
+- 显式传密码时顺手加密保存，下次不传也能连；日志只打用户名，不打密码。
+
+**播放控制**（`PlaybackController`）：
+
+- 路由（含 4s 超时回退）、续播（显式优先；开头 3s、片尾 5s 内不续播）、
+  Media3 → mpv 只回退一次、切内核，全部从验证页搬进 `:player`。
+- 壳层只剩建 Surface、建 Activity、调 `load`；验证页改成调用它，
+  单测覆盖了上述分支。
+
+**16KB 页实测**（模拟器）：
+
+- 镜像 `system-images;android-36.1;google_apis_ps16k;x86_64`，
+  设备上 `getconf PAGE_SIZE` 返回 `16384`，Android 16。
+- x86_64 的 `libmpv.so` push 到 `/data/local/tmp`，用 NDK 编的小探针
+  `dlopen(..., RTLD_NOW)` + `dlsym("mpv_create")` → 成功（exit 0），
+  没有 `invalid ELF alignment`。
+- APK 层由 `check-apk.sh` 静态校验：4 个 `.so` 全部 `Stored`、
+  `zipalign -c -P 16` 通过、ELF 每个 `PT_LOAD` ≥ `0x4000`。
+- 这个 pre-release 16KB 镜像在本机（Intel Mac + swiftshader）上
+  `system_server` 会反复重启，装 APK 起 Activity 的端到端没跑完；
+  但「16KB 系统上 dlopen 这个 `.so`」已经直接验过。
+
+**凭据实测**（`tests/android/verify-credentials.sh`）：带密码列一次目录后，
+SharedPreferences 里是 `cred:smb://10.0.0.134:445 → iv:Base64(密文)`，
+没有明文；第二次不传密码解出的密码长度与第一次一致。同一次测试里 SMB
+登录返回 `Authentication failed`，但同一个密码在 Mac 上登录成功，
+说明问题在设备侧 smbj 的 NTLM 会话（与存储链路无关），待查。
+
 ## 8. 设备与验证
 
 | 设备 | 用途 | 必测 |
@@ -534,7 +605,8 @@ DataSource。
 **OnePlus NE2210**（JSON：[devices/oneplus-ne2210.json](devices/oneplus-ne2210.json)）：
 1440×3216，1080p/1440p × 60/90/120Hz；HDR `hdr10`/`hlg`/`hdr10_plus`，峰值 540nit，
 **没有 DV**；AVC/HEVC/VP9 有 `qcom` 硬解，AV1 只有 `c2.android.av1-dav1d` 软解；
-音频只有 `pcm_16`、无 HDMI 直通；页大小 4096（16KB 兼容靠静态校验）；有 PiP。
+音频只有 `pcm_16`、无 HDMI 直通；页大小 4096（16KB 兼容见 §7.10 的模拟器
+`dlopen` 实测）；有 PiP。
 
 **HBY 5502**（JSON：[devices/hby-5502.json](devices/hby-5502.json)）：720×1280 单模式
 57.5Hz；`supportedHdrTypes` 为空（连 HDR10 都不支持，用来验 SDR 降级）；无 AV1；
@@ -564,10 +636,14 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 风险登记在 [PLAN.md](PLAN.md) §7，与 Android 直接相关的：
 
-1. **libmpv 构建链**：本地已通，剩下把产物接进 CI 缓存，避免每次全量重编。
+1. **libmpv 构建链**：已接 CI 缓存（§7.10）；16KB 页在模拟器上直接
+   `dlopen` 验过，剩下真实 16KB 设备的端到端。
 2. **TV / 盒子的 HDR 与 tunneling**：手机侧已验，盒子合成器只认 tunneled HDR 时
    要 Media3 补。
 3. **mpv 的音频直通**：`ao_audiotrack` 的 IEC61937 支持未验证；不支持就路由 Media3。
+4. **SMB 认证**：凭据加密存储已验证，但设备侧 smbj 登录返回
+   `Authentication failed`（同一个密码在 Mac 上成功），待查
+   NTLM 会话 / Samba 签名。
 
 | 未决项 | 待定 |
 | --- | --- |

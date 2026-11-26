@@ -20,25 +20,31 @@ import android.view.Display
  *
  * 探测直接用 [Hdr10PlusProbe] 解十几帧，看解码器输出格式里有没有
  * `hdr10-plus-info`，代价约 0.2–0.5 秒。
+ *
+ * 判定顺序在 [RoutingPolicy] 里，可单独单测；这里只做平台探测。
  */
 class EngineRouter(private val context: Context) {
 
-    data class Decision(val engine: EngineId, val reason: String)
-
-    fun choose(url: String, probeFrames: Int = 12): Decision {
+    fun choose(url: String, probeFrames: Int = 12): RoutingPolicy.Decision {
         if (url.contains("://")) {
-            return Decision(EngineId.MPV, "非本地片源，跳过探测")
+            return RoutingPolicy.decide(RoutingPolicy.Inputs(isLocal = false))
         }
         // 原盘先判：ISO 与 BDMV 目录既没有可探测的普通视频轨，也不能交给 Media3。
         DiscSource.detect(url)?.let {
-            return Decision(EngineId.MPV, "蓝光原盘（${it.kind.label}），交 mpv/libbluray")
+            return RoutingPolicy.decide(
+                RoutingPolicy.Inputs(isLocal = true, discLabel = it.kind.label),
+            )
         }
-        // Dolby Vision：平台解码器不认 DV 元数据，只有 mpv 会整形。
+        // Dolby Vision 必须先于 HDR10+：P7 的 BL 兼容层 SEI 会被当成 HDR10+。
         DolbyVisionProbe.probe(url)?.let {
-            return Decision(EngineId.MPV, "Dolby Vision P${it.profile}，交 mpv 整形")
+            return RoutingPolicy.decide(
+                RoutingPolicy.Inputs(isLocal = true, dvProfile = it.profile),
+            )
         }
         if (!supportsHdr10Plus()) {
-            return Decision(EngineId.MPV, "设备不支持 HDR10+")
+            return RoutingPolicy.decide(
+                RoutingPolicy.Inputs(isLocal = true, deviceSupportsHdr10Plus = false),
+            )
         }
         val probe = Hdr10PlusProbe.probe(
             url = url,
@@ -46,12 +52,13 @@ class EngineRouter(private val context: Context) {
             maxFrames = probeFrames,
             timeoutMs = 5_000,
         )
-        return when {
-            probe == null -> Decision(EngineId.MPV, "探测失败，回退 mpv")
-            probe.hasHdr10Plus ->
-                Decision(EngineId.MEDIA3, "片源带 HDR10+（ST2094-40），动态元数据交 Media3")
-            else -> Decision(EngineId.MPV, "无 HDR10+，用默认 mpv")
-        }
+        return RoutingPolicy.decide(
+            RoutingPolicy.Inputs(
+                isLocal = true,
+                deviceSupportsHdr10Plus = true,
+                probeHasHdr10Plus = probe?.hasHdr10Plus,
+            ),
+        )
     }
 
     private fun supportsHdr10Plus(): Boolean {

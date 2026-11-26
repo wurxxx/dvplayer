@@ -32,11 +32,14 @@ import com.dvplayer.player.FrameRateMatcher
 import com.dvplayer.player.FrameRateProbe
 import com.dvplayer.player.MediaSessionController
 import com.dvplayer.player.PlaybackForegroundService
+import com.dvplayer.player.PlaybackController
 import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
 import com.dvplayer.player.PlayerEvent
 import com.dvplayer.player.TrackKind
 import com.dvplayer.core.download.MediaDownloader
+import com.dvplayer.core.credential.Credential
+import com.dvplayer.core.credential.CredentialStore
 import com.dvplayer.core.vfs.DavVfs
 import com.dvplayer.core.vfs.SmbVfs
 import com.dvplayer.core.vfs.VfsHttpBridge
@@ -81,6 +84,15 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var originalRefreshRate = 0f
     private var session: MediaSessionController? = null
     private lateinit var memory: PlaybackMemory
+    private lateinit var playback: PlaybackController
+
+    /** 凭据：显式 intent 优先，否则从 Keystore 加密存储里取。 */
+    private lateinit var credentials: CredentialStore
+    private var smbUser = ""
+    private var smbPass = ""
+    private var smbDomain = ""
+    private var vfsUser: String? = null
+    private var vfsPassword = ""
     private val handler = Handler(Looper.getMainLooper())
 
     /** `--es shot <png>`：到 [shotAtMs] 时让 mpv 自己截一帧（颜色回归用）。 */
@@ -181,7 +193,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        credentials = CredentialStore(this)
+        resolveCredentials()
         memory = PlaybackMemory(this)
+        playback = PlaybackController(memory) { target ->
+            EngineRouter(this@PlayerTestActivity).choose(target)
+        }
         // SMB 播放必须先拿到桥接地址，再创建内核 / 媒体会话，否则会先拿 smb:// 地址去起播。
         // 验证页在这里同步等一次（正式实现应在浏览页就完成握手，播放页直接拿 URL）。
         intent.getStringExtra("smb_play")?.let { smbUrl ->
@@ -190,9 +207,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 try {
                     val vfs = SmbVfs(
                         smbUrl,
-                        intent.getStringExtra("smb_user").orEmpty(),
-                        intent.getStringExtra("smb_pass").orEmpty(),
-                        intent.getStringExtra("smb_domain").orEmpty(),
+                        smbUser,
+                        smbPass,
+                        smbDomain,
                     )
                     smbVfs = vfs
                     val file = vfs.open(smbUrl)
@@ -227,8 +244,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             "media3" -> {
                 val m3 = Media3Player(this)
                 // A9：WebDAV / NAS 的认证头必须在使用前挂上。
-                intent.getStringExtra("vfs_user")?.let { user ->
-                    m3.setHttpCredentials(user, intent.getStringExtra("vfs_pass").orEmpty())
+                vfsUser?.let { user ->
+                    m3.setHttpCredentials(user, vfsPassword)
                     Log.i(TAG, "Media3 HTTP 认证已设置")
                 }
                 media3 = m3
@@ -244,15 +261,19 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 player = mpv
                 // mkv 的帧率只有 mpv 能读到：起播后立刻切显示模式。
                 mpv.onFrameRate = { fps -> handler.post { maybeMatchFrameRate(fps) } }
+                // 默认 tls-verify=no（系统 CA 不在 mbedTLS 默认路径）；要校验就
+                // 传 --es tls_verify 1，可选 --es tls_ca /path/to/ca.pem。
+                if (intent.getStringExtra("tls_verify") == "1") {
+                    mpv.setTlsVerification(true, intent.getStringExtra("tls_ca"))
+                }
                 // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
                 intent.getStringExtra("hwdec")?.let {
                     Log.i(TAG, "hwdec -> $it ${mpv.setProperty("hwdec", it) ?: "ok"}")
                 }
                 // A9：WebDAV 需要认证时，把 Basic 头交给 mpv 的 HTTP 层。
-                intent.getStringExtra("vfs_user")?.let { user ->
+                vfsUser?.let { user ->
                     val token = android.util.Base64.encodeToString(
-                        "$user:${intent.getStringExtra("vfs_pass").orEmpty()}"
-                            .toByteArray(Charsets.UTF_8),
+                        "$user:$vfsPassword".toByteArray(Charsets.UTF_8),
                         android.util.Base64.NO_WRAP,
                     )
                     val err = mpv.setProperty("http-header-fields", "Authorization: Basic $token")
@@ -356,9 +377,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 runCatching {
                     val vfs = smbVfs ?: SmbVfs(
                         smbUrl,
-                        intent.getStringExtra("smb_user").orEmpty(),
-                        intent.getStringExtra("smb_pass").orEmpty(),
-                        intent.getStringExtra("smb_domain").orEmpty(),
+                        smbUser,
+                        smbPass,
+                        smbDomain,
                     ).also { smbVfs = it }
                     fun walk(dir: String, level: Int) {
                         val entries = vfs.list(dir)
@@ -379,11 +400,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         // A9 验证钩子：--es vfs <WebDAV 目录 URL> 列一次目录并打日志，
         // 认证用 --es vfs_user / --es vfs_pass。播放仍走 --es url。
         intent.getStringExtra("vfs")?.let { dav ->
-            val user = intent.getStringExtra("vfs_user")
-            val pass = intent.getStringExtra("vfs_pass")
             Thread({
                 runCatching {
-                    DavVfs(dav, user, pass).list(dav)
+                    DavVfs(dav, vfsUser, vfsPassword).list(dav)
                 }.onSuccess { entries ->
                     Log.i(TAG, "VFS 列表 ${entries.size} 项")
                     entries.forEach {
@@ -398,10 +417,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         intent.getStringExtra("download")?.let { downloadUrl ->
             val name = intent.getStringExtra("download_name")
                 ?: downloadUrl.substringAfterLast('/')
-            val headers = intent.getStringExtra("vfs_user")?.let { user ->
+            val headers = vfsUser?.let { user ->
                 val token = android.util.Base64.encodeToString(
-                    "$user:${intent.getStringExtra("vfs_pass").orEmpty()}"
-                        .toByteArray(Charsets.UTF_8),
+                    "$user:$vfsPassword".toByteArray(Charsets.UTF_8),
                     android.util.Base64.NO_WRAP,
                 )
                 mapOf("Authorization" to "Basic $token")
@@ -435,11 +453,13 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
      * mpv 失败通常是真的打不开，再换回去没有意义。
      */
     private fun fallbackToMpv(reason: String) {
-        if (engine != "media3" || fallbackTried) return
-        if (intent.getStringExtra("fallback") == "1") return
-        fallbackTried = true
+        if (engine != "media3") return
+        val tried = fallbackTried || intent.getStringExtra("fallback") == "1"
         val position = runCatching { media3?.state()?.positionMs ?: 0L }.getOrDefault(0L)
-        Log.w(TAG, "Media3 失败（$reason），回退 mpv @ ${position}ms")
+        val recovery = playback.recovery(EngineId.MEDIA3, tried, position)
+        if (recovery !is PlaybackController.Recovery.FallbackToMpv) return
+        fallbackTried = true
+        Log.w(TAG, "Media3 失败（$reason），回退 mpv @ ${recovery.positionMs}ms")
         routeReason = "Media3 起播失败，回退 mpv：$reason"
         val next = Intent(this, PlayerTestActivity::class.java).apply {
             putExtra("url", url)
@@ -448,33 +468,85 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             intent.getStringExtra("sub")?.let { putExtra("sub", it) }
             intent.getStringExtra("hwdec")?.let { putExtra("hwdec", it) }
             intent.getStringExtra("force_sdr")?.let { putExtra("force_sdr", it) }
-            putExtra("seek_to", position)
+            putExtra("seek_to", recovery.positionMs)
         }
         startActivity(next)
         finish()
     }
 
     /**
+     * 解析本次的 SMB / WebDAV 凭据。
+     *
+     * 命令行显式传了密码就顺手加密保存（下次同主机不用再传）；没传就从
+     * Keystore 里取。密码只经过这里，不写日志、不进 `Log.i` 的拼接串。
+     */
+    /**
+     * 测试钩子读一个可能含特殊字符的敏感参数。
+     *
+     * `adb shell` 会在设备端再过一次 sh，密码里的 `$` / `!` / 引号会被吃掉；
+     * 所以支持 `--es <name>_b64 <Base64>`，只含字母数字与 `+/=`，不会被解释。
+     */
+    private fun secretExtra(name: String): String? {
+        intent.getStringExtra(name)?.takeIf { it.isNotEmpty() }?.let { return it }
+        val encoded = intent.getStringExtra("${name}_b64")?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching {
+            String(android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP), Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    private fun resolveCredentials() {
+        // `smb_play` 直接起播，`smb` 只列目录；两者都可能是 SMB 源。
+        val smbUrl = intent.getStringExtra("smb_play") ?: intent.getStringExtra("smb")
+        smbUrl?.let { url ->
+            val scope = scopeOf(url, 445)
+            val explicit = secretExtra("smb_pass")
+            val saved = credentials.load(scope)
+            smbUser = intent.getStringExtra("smb_user") ?: saved?.user.orEmpty()
+            smbPass = explicit ?: saved?.password.orEmpty()
+            smbDomain = intent.getStringExtra("smb_domain").orEmpty()
+            if (explicit != null) {
+                credentials.save(scope, Credential(smbUser, smbPass))
+            }
+            Log.i(TAG, "SMB 凭据：${if (smbUser.isEmpty()) "匿名" else smbUser}")
+        }
+
+        val scope = scopeOf(playUrl, 0)
+        val explicitUser = intent.getStringExtra("vfs_user")
+        val explicitPass = secretExtra("vfs_pass")
+        val saved = credentials.load(scope)
+        vfsUser = explicitUser ?: saved?.user
+        vfsPassword = explicitPass ?: saved?.password.orEmpty()
+        if (explicitUser != null && explicitPass != null) {
+            credentials.save(scope, Credential(explicitUser, explicitPass))
+        }
+        if (vfsUser != null) Log.i(TAG, "WebDAV 凭据：$vfsUser")
+    }
+
+    /** `scheme://host:port`，不带路径；解析失败原样返回。 */
+    private fun scopeOf(url: String, defaultPort: Int): String = runCatching {
+        val parsed = java.net.URI(url)
+        val scheme = parsed.scheme ?: return@runCatching url
+        val port = if (parsed.port > 0) parsed.port else defaultPort
+        if (port > 0) "$scheme://${parsed.host}:$port" else "$scheme://${parsed.host}"
+    }.getOrDefault(url)
+
+    /**
      * 决定这次用哪个内核。`--es engine` 明确指定时照办；`--es auto 1` 交给
-     * [EngineRouter]（要解十几帧 SEI，放后台线程，4 秒超时回退 mpv）。
+     * [PlaybackController]（路由在后台线程执行，超时回退 mpv）。
      */
     private fun resolveEngine(): String {
         intent.getStringExtra("engine")?.let {
             Log.i(TAG, "engine 由参数指定：$it")
             return it
         }
-        if (intent.getStringExtra("auto") != "1") return "mpv"
-
-        var decision: EngineRouter.Decision? = null
-        val thread = Thread {
-            decision = EngineRouter(this).choose(url)
-        }
-        thread.start()
-        thread.join(4_000)
-        val d = decision ?: EngineRouter.Decision(EngineId.MPV, "路由超时，回退 mpv")
-        routeReason = d.reason
-        Log.i(TAG, "路由 -> ${d.engine}：${d.reason}")
-        return if (d.engine == EngineId.MEDIA3) "media3" else "mpv"
+        val choice = playback.chooseEngine(
+            url = url,
+            manual = null,
+            auto = intent.getStringExtra("auto") == "1",
+        )
+        routeReason = choice.reason
+        Log.i(TAG, "路由 -> ${choice.engine}：${choice.reason ?: "默认"}")
+        return if (choice.engine == EngineId.MEDIA3) "media3" else "mpv"
     }
 
     override fun onResume() {
@@ -621,19 +693,28 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         if (state.durationMs <= 0) return
         resumeApplied = true
 
-        val explicit = intent.getLongExtra("seek_to", -1L)
-        if (explicit >= 0) {
-            player.seekTo(explicit)
-            intent.getFloatExtra("speed", 0f).takeIf { it > 0f }?.let { player.setSpeed(it) }
-            if (intent.getBooleanExtra("paused", false)) player.pause() else player.play()
-            Log.i(TAG, "切换后恢复：${explicit}ms speed=${player.state().speed} paused=${player.state().paused}")
-            return
-        }
-
-        val saved = memory.position(contentKey)
-        if (saved > 3_000 && saved < state.durationMs - 5_000) {
-            player.seekTo(saved)
-            Log.i(TAG, "续播：$saved ms")
+        when (
+            val resume = playback.resume(
+                url = contentKey,
+                explicitMs = intent.getLongExtra("seek_to", -1L),
+                durationMs = state.durationMs,
+            )
+        ) {
+            is PlaybackController.Resume.Explicit -> {
+                player.seekTo(resume.positionMs)
+                intent.getFloatExtra("speed", 0f).takeIf { it > 0f }?.let { player.setSpeed(it) }
+                if (intent.getBooleanExtra("paused", false)) player.pause() else player.play()
+                Log.i(
+                    TAG,
+                    "切换后恢复：${resume.positionMs}ms speed=${player.state().speed} " +
+                        "paused=${player.state().paused}",
+                )
+            }
+            is PlaybackController.Resume.Saved -> {
+                player.seekTo(resume.positionMs)
+                Log.i(TAG, "续播：${resume.positionMs} ms")
+            }
+            null -> Unit
         }
     }
 
@@ -644,14 +725,17 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
      */
     private fun switchEngine() {
         val from = enginePlayer ?: return
+        if (engine != "mpv" && engine != "media3") return
         val state = from.state()
-        val target = if (engine == "media3") "mpv" else "media3"
+        val current = if (engine == "media3") EngineId.MEDIA3 else EngineId.MPV
+        val target = playback.otherEngine(current)
+        val targetName = if (target == EngineId.MEDIA3) "media3" else "mpv"
         maybeSave()
         // 不要复制原 intent：am start 带进来的 FLAG_ACTIVITY_NEW_TASK 会让新
         // activity 走独立任务，紧接着 finish() 会把整个任务收掉。重建一份干净的。
         val next = Intent(this, PlayerTestActivity::class.java).apply {
             putExtra("url", url)
-            putExtra("engine", target)
+            putExtra("engine", targetName)
             intent.getStringExtra("sub")?.let { putExtra("sub", it) }
             intent.getStringExtra("hwdec")?.let { putExtra("hwdec", it) }
             intent.getStringExtra("force_sdr")?.let { putExtra("force_sdr", it) }
@@ -659,7 +743,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             putExtra("speed", state.speed)
             putExtra("paused", state.paused)
         }
-        Log.i(TAG, "切换内核 $engine -> $target @ ${state.positionMs}ms")
+        Log.i(TAG, "切换内核 $engine -> $targetName @ ${state.positionMs}ms")
         startActivity(next)
         finish()
     }
@@ -667,7 +751,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private fun maybeSave() {
         val player = enginePlayer ?: return
         val state = player.state()
-        if (state.durationMs > 0) memory.save(contentKey, state.positionMs, state.durationMs)
+        if (state.durationMs > 0) {
+            playback.save(contentKey, state.positionMs, state.durationMs)
+        }
     }
 
     private fun nextChapter() {

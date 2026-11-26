@@ -10,6 +10,10 @@ android {
     defaultConfig {
         ndk {
             abiFilters.add("arm64-v8a")
+            // 16KB 页模拟器（x86_64）调试用，和 application 的开关同一个属性。
+            if (project.providers.gradleProperty("dvplayer.debugAbi").orNull == "x86_64") {
+                abiFilters.add("x86_64")
+            }
         }
 
         externalNativeBuild {

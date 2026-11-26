@@ -7,14 +7,14 @@ import android.content.Context
  *
  * 只存本地状态，够验证「退出再进从原位置继续」；正式的记录同步走 A3 的库数据层。
  */
-class PlaybackMemory(context: Context) {
+class PlaybackMemory(context: Context) : ProgressStore {
 
     private val prefs =
         context.applicationContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
-    fun position(url: String): Long = prefs.getLong(key(url), 0L)
+    override fun position(url: String): Long = prefs.getLong(key(url), 0L)
 
-    fun save(url: String, positionMs: Long, durationMs: Long) {
+    override fun save(url: String, positionMs: Long, durationMs: Long) {
         if (durationMs <= 0) return
         // 播到片尾附近就把记录清掉，下次从头开始。
         if (positionMs >= durationMs - END_MARGIN_MS) {

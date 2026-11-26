@@ -29,6 +29,12 @@ class DvPlayerAndroidLibraryConventionPlugin : Plugin<Project> {
                         useLegacyPackaging = false
                     }
                 }
+
+                // local unit test 里 android.util.Log 之类平台调用返回默认值，
+                // 纯解析 / 决策逻辑才能直接在 JVM 上跑（:player 的测试）。
+                testOptions {
+                    unitTests.isReturnDefaultValues = true
+                }
             }
 
             configureKotlinJvmTarget()

@@ -8,25 +8,36 @@ Kotlin + Compose。手机（Material3）与 TV（tv-material）两个壳，共�
 - 双内核：[ADR-0014](../../docs/adr/0014-android-dual-engine.md)
 - 存储：[ADR-0015](../../docs/adr/0015-android-vfs.md)
 
-状态（2026-11-27）：**A0 环境、A2 骨架、A1 设备能力采集、A4 最小出画、A5 HDR
-输出与帧率匹配已落地**。两个 APK 能构建，`:core` 通过 `libdvplayer_media_jni.so`
-加载 JNI 自检；libmpv 由 `build-mpv.sh` 产出单一 `libmpv.so`；`:player-mpv` 用
-CMake 把 Surface 经 EGL + mpv render API 画出来——HBY 5502（Android 9）与
-OnePlus 10 Pro（Android 16）上都以 720p H.264 + `mediacodec-copy` 出画，时间码
-正常推进。HDR 片源会按 `primaries`/`gamma` 重建 `EGLSurface`（BT2020_PQ / HLG）
-并写 buffer dataspace，真 PQ / HLG 样片在 OnePlus 上 SurfaceFlinger 已按
-`BT2020_PQ` / `BT2020_HLG` 走 HWC 直出；24p 片源会自动切到 120Hz（每帧重复 5 次
-刷新）且稳定态不掉帧。PQ 的静态 HDR 元数据（SMPTE2086 / CTA861_3）通过 EGL
-surface 扩展挂到 buffer 上，SurfaceFlinger 层显示 `hdr metadata types=1`。
-HDR10+ 动态元数据只有 Media3 内核能做（mpv 软解能读、但平台没有公开的写入接口），
-`:player-media3` 用 ExoPlayer + `Hdr10PlusProbe` 验到解码器输出格式里的
-`hdr10-plus-info`，SurfaceFlinger 层 `hdr metadata types=4`（HDR10PLUS）。
+状态（2026-11-26）：**A0–A10 主体已落地并在真机实测**。两个 APK 能构建，
+`:core` 通过 `libdvplayer_media_jni.so` 加载 JNI 自检；libmpv 由
+`build-mpv.sh` 产出单一 `libmpv.so`；`:player-mpv` 用 CMake 把 Surface 经
+EGL + mpv render API 画出来——HBY 5502（Android 9）与 OnePlus 10 Pro
+（Android 16）上都以 720p H.264 + `mediacodec-copy` 出画。HDR 片源按
+`primaries`/`gamma` 重建 `EGLSurface`（BT2020_PQ / HLG）并写 buffer dataspace，
+24p 自动切 120Hz；PQ 静态元数据走 EGL surface 扩展，HDR10+ 交 Media3
+（`hdr10-plus-info`）。DV P5 用 gpu-next + libplacebo DOVI 整形，颜色与 Mac
+参考帧一致。
+
+这一轮补的工程化项：
+
+- **TLS**：FFmpeg 静态链 mbedTLS 3.6.4，https 可播；mpv 默认
+  `tls-verify=no`（系统 CA 不在 mbedTLS 默认路径），`--es tls_verify 1`
+  可开校验，配 `--es tls_ca` 指定 CA。
+- **起播帧率**：mp4 load 前用 `FrameRateProbe` 读容器帧率，mkv 由 mpv
+  起播后 50ms 轮询 `container-fps`；起播丢帧从 6–7 降到 1。
+- **单测 + CI**：路由顺序 / 帧率匹配 / DV 探测 / Range / `.sup` 切分 / 续播
+  与回退都有纯 JVM 测试；`.github/workflows/android.yml` 跑单测与两个 APK，
+  libmpv 按脚本哈希缓存。
+- **凭据**：SMB / WebDAV 密码进 Android Keystore（AES-256-GCM），日志不打印。
+- **播放控制**：路由 / 续播 / 切内核 / 回退收进 `:player` 的
+  `PlaybackController`。
+
 验证页可用 `--es engine mpv|media3|codec` 切换内核，
 见 [`docs/M2-ANDROID.md`](../../docs/M2-ANDROID.md)。样片生成器见
 [`scripts/android/gen-hdr-sample.py`](../../scripts/android/gen-hdr-sample.py)，
 HDR10+ SEI 注入见
 [`scripts/android/gen-hdr10plus-sample.sh`](../../scripts/android/gen-hdr10plus-sample.sh)。
-播放控制（暂停 / seek / 切轨 / 字幕）还没接，属于 A4 的后半段。
+正式播放页还没接，属于 M2-B / 后续。
 
 ## 模块
 
@@ -75,6 +86,26 @@ scripts/android/check-apk.sh apps/android/app-phone/build/outputs/apk/debug/app-
 `env.sh` 默认把 Gradle 依赖走阿里云镜像（`DVPLAYER_MAVEN_MIRROR`）；想完全走官方
 仓库就 `DVPLAYER_MAVEN_MIRROR= source scripts/android/env.sh`。`local.properties`
 里的 `sdk.dir` 不进仓库，换机器时自己建一份或依赖 `ANDROID_HOME`。
+
+## 测试
+
+```bash
+cd apps/android
+./gradlew :player:testDebugUnitTest :core:testDebugUnitTest \
+          :player-media3:testDebugUnitTest
+```
+
+纯 JVM，不需要设备与 native：路由顺序、帧率匹配、DV 配置记录、HTTP Range、
+`.sup` 分段、续播 / 回退 / 切内核都在这里。CI 见
+[`.github/workflows/android.yml`](../../.github/workflows/android.yml)。
+
+真机上的 SMB 凭据加密验证：
+
+```bash
+SMB_USER=... SMB_PASS=... tests/android/verify-credentials.sh
+```
+
+脚本会先带密码列一次目录、检查 SharedPreferences 里没有明文，再不传密码列一次。
 
 ## 基线
 

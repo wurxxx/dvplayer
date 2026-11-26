@@ -57,37 +57,22 @@ class SupSubtitleParser : SubtitleParser {
     }
 
     private fun isSup(data: ByteArray, offset: Int, length: Int): Boolean =
-        length >= 13 &&
-            data[offset] == 'P'.code.toByte() &&
-            data[offset + 1] == 'G'.code.toByte()
+        SupSections.isSup(data, offset, length)
 
     /** 返回 (起始时间 us, cue)，cue 为 null 表示清除。 */
     private fun parseDisplaySets(data: ByteArray, start: Int, end: Int): List<Pair<Long, Cue?>> {
         val out = ArrayList<Pair<Long, Cue?>>()
         val builder = CueBuilder()
-        var p = start
-        var ptsUs = 0L
-        while (p + 13 <= end) {
-            if (data[p] != 'P'.code.toByte() || data[p + 1] != 'G'.code.toByte()) {
-                // 不是分段头，跳过这一拍继续找；正常文件不会走到这里。
-                p++
-                continue
-            }
-            ptsUs = readU32(data, p + 2) * 100L / 9L  // 90kHz -> us
-            val type = data[p + 10].toInt() and 0xff
-            val size = readU16(data, p + 11)
-            val body = p + 13
-            if (body + size > end) break
-            when (type) {
-                SECTION_PALETTE -> builder.parsePalette(data, body, size)
-                SECTION_BITMAP -> builder.parseBitmap(data, body, size)
-                SECTION_COMPOSITION -> builder.parseComposition(data, body, size)
+        for (section in SupSections.split(data, start, end)) {
+            when (section.type) {
+                SECTION_PALETTE -> builder.parsePalette(data, section.body, section.size)
+                SECTION_BITMAP -> builder.parseBitmap(data, section.body, section.size)
+                SECTION_COMPOSITION -> builder.parseComposition(data, section.body, section.size)
                 SECTION_END -> {
-                    out += ptsUs to builder.build()
+                    out += section.ptsUs to builder.build()
                     builder.reset()
                 }
             }
-            p = body + size
         }
         return out
     }

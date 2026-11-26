@@ -31,8 +31,14 @@ SRC=$WORK/src
 DL=$WORK/dl
 API=${API:-26}
 ARCHES=${ARCHES:-arm64}
-JOBS=${JOBS:-$(sysctl -n hw.ncpu)}
-TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64"
+JOBS=${JOBS:-$( (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) )}
+# NDK 的 prebuilt 目录按宿主分：开发机是 darwin-x86_64，CI 是 linux-x86_64。
+case "$(uname -s)" in
+    Darwin) HOST_TAG=darwin-x86_64 ;;
+    Linux) HOST_TAG=linux-x86_64 ;;
+    *) echo "!! 不支持的宿主系统：$(uname -s)" >&2; exit 1 ;;
+esac
+TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG"
 SYSROOT="$TOOLCHAIN/sysroot"
 CLANG_VERSION=$(ls "$TOOLCHAIN/lib/clang" | sort -V | tail -1)
 
@@ -424,6 +430,9 @@ build_ffmpeg() {
         # Android 的 https 依赖 mbedTLS（Apache-2.0）。FFmpeg 把它归为
         # version3，所以这份构建按 LGPLv3 分发；桌面端用 securetransport /
         # schannel，仍是 LGPLv2.1。
+        #
+        # 不要加 --enable-small：包体从 28.0 降到 22.8 MiB，但 -Os 让 4K HEVC
+        # 软解跑不动——P5 必须软解，实测 17.5 秒掉 314 帧（-O3 是 1 帧）。
         "$FFMPEG_SRC/configure" \
             --prefix="$PREFIX" \
             --target-os=android \

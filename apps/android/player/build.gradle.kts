@@ -5,3 +5,7 @@ plugins {
 android {
     namespace = "com.dvplayer.player"
 }
+
+dependencies {
+    testImplementation(libs.junit)
+}
