@@ -90,6 +90,13 @@ public partial class PlayWindow : Window
     private bool _audioPrefsApplied;
     private bool _subtitlePrefsApplied;
 
+    /// <summary>当前文件同目录的外挂字幕；按路径给 mpv 轨道补语言 / 标题。</summary>
+    private List<SidecarSubtitle> _sidecars = new();
+    /// <summary>这一份文件的外挂字幕已经 sub-add 过。</summary>
+    private bool _sidecarsAdded;
+    /// <summary>上一次记进日志的外挂轨道签名，避免每次 track-list 都刷一行。</summary>
+    private string _loggedSidecars = "";
+
     private double _position;
     private double _duration;
     /// <summary>demuxer 缓存到的位置（秒）；没有缓存信息时等于当前位置。</summary>
@@ -1490,6 +1497,20 @@ public partial class PlayWindow : Window
                     : Array.Empty<string>(),
             };
         }
+        // 同目录外挂字幕：mpv 只认完全相同的文件名，片名是字幕名前缀时
+        // （`Movie.2024.srt` ↔ `Movie.2024.1080p.mkv`）要自己找。
+        _sidecars = _isLocalDisc
+            ? new List<SidecarSubtitle>()
+            : SidecarSubtitles.Find(source.Url);
+        _sidecarsAdded = false;
+        _loggedSidecars = "";
+        if (_sidecars.Count > 0)
+        {
+            Trace.Write("sidecar subs " + _sidecars.Count + ": " + string.Join(", ",
+                _sidecars.Select(item =>
+                    $"{item.Language ?? "-"}:{Path.GetFileName(item.Path)}")));
+        }
+
         _launchStart = launch.StartSeconds;
         _openingBase = launch.StartSeconds;
         _launchAt = DateTime.UtcNow;
@@ -1616,7 +1637,7 @@ public partial class PlayWindow : Window
 
         foreach (var name in new[]
                  {
-                     "time-pos", "duration", "pause", "volume", "mute", "eof-reached",
+                     "time-pos", "duration", "path", "pause", "volume", "mute", "eof-reached",
                      "track-list", "cache-speed", "speed", "hwdec",
                      "width", "height", "video-params/aspect", "demuxer-cache-time",
                      "audio-device-list", "audio-device", "audio-spdif",
@@ -1818,6 +1839,16 @@ public partial class PlayWindow : Window
                     ParseTracks(value);
                     break;
 
+                case "path":
+                    // 文件加载完才加同目录字幕：连上管道就加会被 mpv 丢掉。
+                    if (value.ValueKind == JsonValueKind.String &&
+                        !string.IsNullOrEmpty(value.GetString()))
+                    {
+                        AddSidecarSubtitlesOnce();
+                    }
+
+                    break;
+
                 case "eof-reached" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
                     _eof = value.GetBoolean();
                     RefreshSleepBlocker();
@@ -1906,6 +1937,24 @@ public partial class PlayWindow : Window
                 : element.TryGetDouble(out var approx) ? (int)Math.Round(approx) : null
             : null;
 
+    /// <summary>
+    /// 同目录外挂字幕交给 mpv：`sub-add` 必须在文件加载后发，
+    /// 太早（刚连上控制通道）会被静默丢掉。
+    /// </summary>
+    private void AddSidecarSubtitlesOnce()
+    {
+        if (_sidecarsAdded || _sidecars.Count == 0)
+        {
+            return;
+        }
+
+        _sidecarsAdded = true;
+        foreach (var sub in _sidecars)
+        {
+            _ipc?.Command("sub-add", sub.Path.Replace('\\', '/'), "auto");
+        }
+    }
+
     private void ParseTracks(JsonElement value)
     {
         if (value.ValueKind != JsonValueKind.Array)
@@ -1926,6 +1975,7 @@ public partial class PlayWindow : Window
                 continue;
             }
 
+            var external = Str(track, "external-filename");
             var item = new MpvTrack(
                 Int(track, "id") ?? 0,
                 type,
@@ -1935,7 +1985,22 @@ public partial class PlayWindow : Window
                 Int(track, "demux-channel-count"),
                 track.TryGetProperty("selected", out var selected) &&
                 selected.ValueKind == JsonValueKind.True,
-                Str(track, "external-filename"));
+                external);
+
+            // 外挂字幕的语言写在我们找到的那条记录里（mpv 只会从文件名猜，
+            // `Movie.chs.srt` 这种它认不出）。认不出语言时标题写「外挂」，
+            // 别把文件名里的 `eng.srt` 当成标题。
+            if (type == "sub" && external is { Length: > 0 })
+            {
+                var sidecar = _sidecars.FirstOrDefault(candidate =>
+                    SidecarSubtitles.SamePath(candidate.Path, external));
+                if (sidecar is not null)
+                {
+                    item = new MpvTrack(item.Id, item.Type, sidecar.Language,
+                        sidecar.Title ?? (sidecar.Language is null ? "外挂" : ""),
+                        item.Codec, item.Channels, item.Selected, item.ExternalFilename);
+                }
+            }
 
             if (type == "audio")
             {
@@ -1986,6 +2051,17 @@ public partial class PlayWindow : Window
             }
         }
 
+        // 外挂轨的语言 / 标题是壳补的：记一行方便回归（菜单标签由同一份数据得出）。
+        var sidecars = string.Join(";", _subtitleTracks
+            .Where(track => track.ExternalFilename is { Length: > 0 })
+            .Select(track =>
+                $"{track.Id}|{track.Language ?? "-"}|{track.Title ?? "-"}"));
+        if (sidecars.Length > 0 && sidecars != _loggedSidecars)
+        {
+            _loggedSidecars = sidecars;
+            Trace.Write("sidecar tracks " + sidecars);
+        }
+
         // 每次轨道清单更新都试一次，内部按音轨 / 字幕各自只套用一次。
         // 外挂字幕常比音轨晚到，字幕没出现时不能把「已套用」标记掉。
         ApplyTrackPrefs();
@@ -2024,6 +2100,14 @@ public partial class PlayWindow : Window
 
         // 字幕轨还没出现（外挂字幕 / 原盘字幕索引较慢）：等下一次轨道清单。
         if (_subtitleTracks.Count == 0)
+        {
+            return;
+        }
+
+        // 同目录外挂字幕还没加完：等它们进来再选，别先选到内嵌轨。
+        if (_sidecars.Count > 0 && _sidecars.Any(sub =>
+                !_subtitleTracks.Any(track =>
+                    SidecarSubtitles.SamePath(sub.Path, track.ExternalFilename))))
         {
             return;
         }

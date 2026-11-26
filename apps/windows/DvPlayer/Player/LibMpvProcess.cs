@@ -168,6 +168,8 @@ public sealed class LibMpvProcess : IMpvEngine
         Opt("wid", wid.ToInt64().ToString(CultureInfo.InvariantCulture));
         Opt("osc", "no");
         Opt("keep-open", "yes");
+        // 和子进程后端保持一致：同目录外挂字幕由壳自己加。
+        Opt("sub-auto", "no");
 
         if (Environment.GetEnvironmentVariable("DVPLAYER_MPV_HEADLESS") != "1")
         {

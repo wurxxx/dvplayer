@@ -137,6 +137,15 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   （`1`、`2`）当作没有标题；只有语言就只显示语言，两个都没有用「字幕 N」，
   重名再追加序号（`中文 1`）。mpv 只给容器标题时，按轨序从服务器的
   `MediaInfo.Subtitles` 补语言（原盘 / remux 的 `track-list` 常常 `lang` 为空）。
+- **同目录外挂字幕**：`Services/SidecarSubtitles.cs` 在视频目录（不递归）找
+  `srt/ass/ssa/vtt/sup/idx`，规则和 macOS 同一套（去分隔符互为前缀、多出部分
+  全是数字才拒绝、语言从多出的整词认）。`MpvProcess` / `LibMpvProcess` 都带
+  `sub-auto=no`，避免 mpv 再按同名加载一次。
+- **外挂字幕要等 `path` 事件**：控制通道刚连上时 `sub-add` 会被 mpv 丢掉，
+  所以观察 mpv 的 `path` 属性，文件加载后才 `AddSidecarSubtitlesOnce()`；
+  之后按 `external-filename` 给轨补语言 / 标题，认不出语言写「外挂」。
+  字幕偏好等外挂轨全部到齐再套用。回归日志：
+  `sidecar subs 5: zh-Hans:…` / `sidecar tracks 1|zh-Hans|简体;…`。
 - **弹幕轨按文件名认**：`sub-add` 在 JSON IPC 里不返回轨道 id，Windows 的
   `MpvIpc` 也没有命令回复，所以靠 `track-list` 推送，按
   `external-filename` 含 `DVPlayer-danmaku` 识别并排除出字幕菜单。
