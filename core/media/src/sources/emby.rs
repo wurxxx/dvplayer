@@ -36,7 +36,8 @@ ChildCount,RecursiveItemCount,CommunityRating,Status,PremiereDate";
 const DETAIL_FIELDS: &str = "Overview,ProductionYear,RunTimeTicks,UserData,ImageTags,\
 BackdropImageTags,ParentId,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,\
 ChildCount,RecursiveItemCount,CommunityRating,OfficialRating,Status,PremiereDate,\
-OriginalTitle,MediaStreams,MediaSources,Path,Container,PrimaryImageAspectRatio,People";
+OriginalTitle,MediaStreams,MediaSources,Path,Container,PrimaryImageAspectRatio,People,\
+ProviderIds";
 
 pub struct EmbySource {
     pub id: String,
@@ -353,6 +354,16 @@ impl EmbySource {
             single_child_id: item.single_child_id,
             is_favorite: d.user_data.as_ref().map(|u| u.is_favorite),
             is_watched: d.user_data.as_ref().map(|u| u.played),
+            tmdb_id: d
+                .provider_ids
+                .as_ref()
+                .and_then(|p| p.tmdb.clone())
+                .filter(|s| !s.is_empty()),
+            imdb_id: d
+                .provider_ids
+                .as_ref()
+                .and_then(|p| p.imdb.clone())
+                .filter(|s| !s.is_empty()),
         })
     }
 
@@ -1238,6 +1249,18 @@ struct ItemDto {
     media_streams: Option<Vec<StreamDto>>,
     #[serde(default)]
     people: Option<Vec<PersonDto>>,
+    #[serde(default)]
+    provider_ids: Option<ProviderIdsDto>,
+}
+
+/// 服务器刮削时记下的外部库 id（Emby / Jellyfin 都有）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ProviderIdsDto {
+    #[serde(default)]
+    tmdb: Option<String>,
+    #[serde(default)]
+    imdb: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

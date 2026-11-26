@@ -299,6 +299,9 @@ final class PlayerSession: ObservableObject {
     // —— Trakt 观看记录 ——
     /// 剧名对应的首播年份（详情页带下来），同名重拍版靠它区分。
     private let seriesYear: Int?
+    /// 整部片 / 整部剧的 TMDB、IMDb id：Trakt 用 id 精确匹配，不受译名影响。
+    private let seriesTmdbId: String?
+    private let seriesImdbId: String?
     private let traktEnabled: Bool
     /// idle / playing / paused / stopped
     private var traktState = "idle"
@@ -358,6 +361,8 @@ final class PlayerSession: ObservableObject {
           playlist: [PlayerEpisode] = [],
           seriesTitle: String? = nil,
           seriesYear: Int? = nil,
+          seriesTmdbId: String? = nil,
+          seriesImdbId: String? = nil,
           hintTitle: String? = nil,
           frame: NSRect,
           local: LocalPlayback? = nil,
@@ -370,6 +375,8 @@ final class PlayerSession: ObservableObject {
         self.playlist = playlist
         self.seriesTitle = Self.cleanSeries(seriesTitle)
         self.seriesYear = seriesYear
+        self.seriesTmdbId = Self.cleanId(seriesTmdbId)
+        self.seriesImdbId = Self.cleanId(seriesImdbId)
         self.hintTitle = hintTitle ?? ""
         self.title = local?.title ?? hintTitle ?? "正在播放"
         let settings = AppSettings.load()
@@ -1687,6 +1694,8 @@ final class PlayerSession: ObservableObject {
         let season = seasonNumber
         let isSeries = episode != nil
         let year = seriesYear
+        let knownTmdb = seriesTmdbId
+        let knownImdb = seriesImdbId
         let ratio = duration > 1 ? position / duration * 100 : 0
         let progress = progressOverride ?? max(0.1, min(100, ratio))
         let known = traktMatch
@@ -1699,14 +1708,21 @@ final class PlayerSession: ObservableObject {
                 if let known {
                     match = known
                 } else {
-                    // 电影没带年份时补一次：中文片名在 Trakt 上显示成原名，
-                    // 只靠标题匹配不上（「千与千寻」→ Spirited Away）。
+                    // 详情页带下来的 id 优先；没有（库页 / 继续观看直接起播）就
+                    // 用条目详情补一次 id 和年份。中文片名在 Trakt 上显示成
+                    // 原名，只靠标题匹配不上（「千与千寻」→ Spirited Away）。
+                    var tmdb = knownTmdb
+                    var imdb = knownImdb
                     var matchYear = year
-                    if !isSeries, matchYear == nil {
-                        matchYear = await self?.traktYear() ?? nil
+                    if !isSeries, tmdb == nil || imdb == nil || matchYear == nil {
+                        let meta = await self?.traktMeta()
+                        if matchYear == nil { matchYear = meta?.year }
+                        if tmdb == nil { tmdb = meta?.tmdb }
+                        if imdb == nil { imdb = meta?.imdb }
                     }
-                    match = try await TraktClient.shared.match(title: series, year: matchYear,
-                                                               series: isSeries)
+                    match = try await TraktClient.shared.match(
+                        title: series, year: matchYear, series: isSeries,
+                        tmdbId: tmdb, imdbId: imdb)
                     if let match {
                         await MainActor.run { self?.traktMatch = match }
                     }
@@ -1726,15 +1742,23 @@ final class PlayerSession: ObservableObject {
         }
     }
 
-    /// 从库页 / 继续观看直接起播的电影没带年份：用条目详情补一次，
+    /// 从库页 / 继续观看直接起播的电影没带年份 / id：用条目详情补一次，
     /// 否则中文片名在 Trakt 上没有年份可用，匹配不上。
-    private func traktYear() async -> Int? {
-        guard let core = AppState.shared.core else { return nil }
-        guard let detail = try? await core.detail(itemId),
-              let date = detail.releaseDate,
-              date.count >= 4,
-              let year = Int(date.prefix(4)) else { return nil }
-        return year
+    private func traktMeta() async -> (year: Int?, tmdb: String?, imdb: String?)? {
+        guard let core = AppState.shared.core,
+              let detail = try? await core.detail(itemId) else { return nil }
+        var year: Int?
+        if let date = detail.releaseDate, date.count >= 4 {
+            year = Int(date.prefix(4))
+        }
+        return (year, Self.cleanId(detail.tmdbId), Self.cleanId(detail.imdbId))
+    }
+
+    /// 服务器给的空串当没有。
+    private static func cleanId(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespaces),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     // MARK: - 收尾

@@ -14,7 +14,7 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 | 片头片尾 | `Services/SkipMarkers.cs` | `%LOCALAPPDATA%\dvplayer\skip-markers.json`，按剧名（电影按条目 id）存 `introEnd` / `outroStart`，和 macOS 同格式 |
 | 弹幕 | `Player/Danmaku.cs` | 弹弹play v2 签名（`Base64(SHA256(AppId+Timestamp+Path+AppSecret))`）→ JSON / XML 解析 → 写 ASS → `sub-add` + `secondary-sid`；电影没有集号时按片名找 `type == "movie"` 的条目 |
 | 在线字幕 | `Player/OpenSubtitles.cs` | OpenSubtitles REST v1：搜索 → `/downloads` 取临时链接 → 存缓存 → `sub-add select` |
-| Trakt | `Player/TraktClient.cs`、`Views/SettingsPage.xaml` | 设备码登录；token 存 `settings.json` 的 `traktAccessToken` / `traktRefreshToken` / `traktExpiresAt`（DPAPI 密封）；scrobble 挂在 `time-pos` / `pause` / EOF / 关窗上，按顺序串行发送；库页直接起播的电影用条目标题 + 详情年份兜底；详情页「Trakt」菜单做评分 / 收藏 / 待看。打包时内置 Client ID，设置页只剩连接 / 开关 |
+| Trakt | `Player/TraktClient.cs`、`Views/SettingsPage.xaml` | 设备码登录；token 存 `settings.json` 的 `traktAccessToken` / `traktRefreshToken` / `traktExpiresAt`（DPAPI 密封）；scrobble 挂在 `time-pos` / `pause` / EOF / 关窗上，按顺序串行发送；匹配优先用 `MediaDetailDto.TmdbId` / `ImdbId`（Emby / Jellyfin 的 `ProviderIds`），没有才回落标题 + 年份；库页直接起播的电影用条目标题 + 详情元数据兜底；详情页「Trakt」菜单做评分 / 收藏 / 待看。打包时内置 Client ID，设置页只剩连接 / 开关 |
 
 配置项都在 `Services/AppSettings.cs`：`videoAspect`、`danmakuEnabled`、
 `openSubtitlesApiKey` / `openSubtitlesUsername` / `openSubtitlesPassword`、
@@ -101,6 +101,9 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   `DateCreated` 降序），和点进库里的默认排序一致。以前不传排序，各家服务器用
   自己的默认值（飞牛的默认是入库倒序，别的版本 / 别的源不一定），
   nas 的库看起来就和飞牛不一样。
+- **详情页链接**：链接区固定先「豆瓣」（按片名搜索），`MediaDetailDto.TmdbId` /
+  `ImdbId` 有值时再加「TMDB」（`themoviedb.org/{movie|tv}/{id}`）和「IMDb」
+  （`imdb.com/title/{id}/`）；飞牛这类详情没有 id 的源只显示豆瓣。
 - **详情页「存储位置」**：`MediaInfo.Path` 放在媒体信息之后；电影 / 单集显示完整
   文件路径，剧集 / 季只显示目录。飞牛取 `/stream` 的 `file_stream.path`，Emby 取
   `PlaybackInfo` 的 `Path`（退回条目的 `Path`），本地源直接给文件路径。

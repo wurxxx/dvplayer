@@ -455,6 +455,29 @@
                          Margin="8,0,0,0" VerticalAlignment="Center" />
             </StackPanel>
           </Border>
+          <!-- 服务器刮削时记下了 id 才显示（Emby / Jellyfin）；飞牛这类没有就不摆。 -->
+          <Border x:Name="TmdbButton" CornerRadius="18" Padding="15,8" Cursor="Hand"
+                  Margin="8,0,0,0" Visibility="Collapsed"
+                  Background="{StaticResource SurfaceBrush}"
+                  MouseLeftButtonUp="OnTmdbClick">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE71B;" FontFamily="{StaticResource IconFont}" FontSize="12.5"
+                         Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+              <TextBlock Text="TMDB" FontSize="13" Foreground="{StaticResource TextBrush}"
+                         Margin="8,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+          <Border x:Name="ImdbButton" CornerRadius="18" Padding="15,8" Cursor="Hand"
+                  Margin="8,0,0,0" Visibility="Collapsed"
+                  Background="{StaticResource SurfaceBrush}"
+                  MouseLeftButtonUp="OnImdbClick">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE71B;" FontFamily="{StaticResource IconFont}" FontSize="12.5"
+                         Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+              <TextBlock Text="IMDb" FontSize="13" Foreground="{StaticResource TextBrush}"
+                         Margin="8,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
         </StackPanel>
       </StackPanel>
 

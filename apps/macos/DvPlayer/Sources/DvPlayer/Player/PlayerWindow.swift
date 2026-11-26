@@ -156,6 +156,8 @@ final class PlayerLauncher {
               playlist: [PlayerEpisode] = [],
               seriesTitle: String? = nil,
               seriesYear: Int? = nil,
+              seriesTmdbId: String? = nil,
+              seriesImdbId: String? = nil,
               hintTitle: String? = nil) {
         // 本地文件夹源里的 ISO：条目在媒体库里，但播放要先挂载原盘。
         if isLocalItem(itemId) {
@@ -163,7 +165,10 @@ final class PlayerLauncher {
                 guard let core = AppState.shared.core else {
                     self.startSession(itemId: itemId, startSeconds: startSeconds,
                                       playlist: playlist, seriesTitle: seriesTitle,
-                                      seriesYear: seriesYear, hintTitle: hintTitle)
+                                      seriesYear: seriesYear,
+                                      seriesTmdbId: seriesTmdbId,
+                                      seriesImdbId: seriesImdbId,
+                                      hintTitle: hintTitle)
                     return
                 }
                 let source = try? await core.playSource(itemId)
@@ -178,7 +183,10 @@ final class PlayerLauncher {
                 } else {
                     self.startSession(itemId: itemId, startSeconds: startSeconds,
                                       playlist: playlist, seriesTitle: seriesTitle,
-                                      seriesYear: seriesYear, hintTitle: hintTitle)
+                                      seriesYear: seriesYear,
+                                      seriesTmdbId: seriesTmdbId,
+                                      seriesImdbId: seriesImdbId,
+                                      hintTitle: hintTitle)
                 }
             }
             return
@@ -186,7 +194,10 @@ final class PlayerLauncher {
 
         startSession(itemId: itemId, startSeconds: startSeconds,
                      playlist: playlist, seriesTitle: seriesTitle,
-                     seriesYear: seriesYear, hintTitle: hintTitle)
+                     seriesYear: seriesYear,
+                     seriesTmdbId: seriesTmdbId,
+                     seriesImdbId: seriesImdbId,
+                     hintTitle: hintTitle)
     }
 
     /// 条目 id 的源是不是文件夹源（本地文件夹，或挂载成目录的 SMB / NFS / WebDAV）。
@@ -206,6 +217,8 @@ final class PlayerLauncher {
                               playlist: [PlayerEpisode],
                               seriesTitle: String?,
                               seriesYear: Int?,
+                              seriesTmdbId: String?,
+                              seriesImdbId: String?,
                               hintTitle: String?) {
         if let existing = controller {
             if existing.session.itemId == itemId, existing.session.error == nil {
@@ -224,6 +237,8 @@ final class PlayerLauncher {
                                           playlist: playlist,
                                           seriesTitle: seriesTitle,
                                           seriesYear: seriesYear,
+                                          seriesTmdbId: seriesTmdbId,
+                                          seriesImdbId: seriesImdbId,
                                           hintTitle: hintTitle,
                                           frame: frame) else {
             AppState.shared.showToast("播放器启动失败，检查 mpv 是否随包带上了")

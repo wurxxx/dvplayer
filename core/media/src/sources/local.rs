@@ -736,6 +736,8 @@ impl MediaSource for LocalSource {
                 single_child_id: None,
                 is_favorite: None,
                 is_watched: self.is_finished(&film.rel).then_some(true),
+                tmdb_id: None,
+                imdb_id: None,
             });
         }
 
@@ -768,6 +770,8 @@ impl MediaSource for LocalSource {
                 single_child_id: None,
                 is_favorite: None,
                 is_watched: self.is_finished(&episode.rel).then_some(true),
+                tmdb_id: None,
+                imdb_id: None,
             });
         }
 
@@ -805,6 +809,8 @@ impl MediaSource for LocalSource {
                 single_child_id: None,
                 is_favorite: None,
                 is_watched: None,
+                tmdb_id: None,
+                imdb_id: None,
             });
         }
 
@@ -842,6 +848,8 @@ impl MediaSource for LocalSource {
                     .then(|| format!("d/{}@{}", encode_id(&show.rel), show.seasons[0].number)),
                 is_favorite: None,
                 is_watched: None,
+                tmdb_id: None,
+                imdb_id: None,
             });
         }
 

@@ -464,7 +464,9 @@ struct DetailPage: View {
                 .popover(isPresented: $showingTrakt, arrowEdge: .bottom) {
                     TraktPanel(title: MediaText.clean(detail?.title),
                                year: detailYear,
-                               series: detailIsSeries)
+                               series: detailIsSeries,
+                               tmdbId: detail?.tmdbId,
+                               imdbId: detail?.imdbId)
                         .environmentObject(state)
                 }
             }
@@ -623,25 +625,53 @@ struct DetailPage: View {
         VStack(alignment: .leading, spacing: 11) {
             SectionTitle(text: "链接")
 
-            Button {
-                openDouban()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "link")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.muted)
-                    Text("豆瓣")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.text)
+            HStack(spacing: 8) {
+                linkButton("豆瓣", action: openDouban)
+                // Emby / Jellyfin 刮削时记下的 id 才显示，飞牛这类没有就不摆。
+                if let url = tmdbURL {
+                    linkButton("TMDB", url: url)
                 }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 8)
-                // 和次级按钮一致：半透明，详情页的模糊背景能透上来。
-                .background(Theme.surface.opacity(0.55), in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+                if let url = imdbURL {
+                    linkButton("IMDb", url: url)
+                }
             }
-            .buttonStyle(.plain)
         }
+    }
+
+    private func linkButton(_ label: String, url: URL? = nil,
+                            action: (() -> Void)? = nil) -> some View {
+        Button {
+            if let url {
+                NSWorkspace.shared.open(url)
+            } else {
+                action?()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.muted)
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.text)
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 8)
+            // 和次级按钮一致：半透明，详情页的模糊背景能透上来。
+            .background(Theme.surface.opacity(0.55), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var tmdbURL: URL? {
+        guard let id = detail?.tmdbId, !id.isEmpty else { return nil }
+        return URL(string: "https://www.themoviedb.org/\(detailIsSeries ? "tv" : "movie")/\(id)")
+    }
+
+    private var imdbURL: URL? {
+        guard let id = detail?.imdbId, !id.isEmpty else { return nil }
+        return URL(string: "https://www.imdb.com/title/\(id)/")
     }
 
     private func openDouban() {
@@ -794,6 +824,8 @@ struct DetailPage: View {
             playlist: list,
             seriesTitle: detail.map { MediaText.clean($0.title) },
             seriesYear: detailYear,
+            seriesTmdbId: detail?.tmdbId,
+            seriesImdbId: detail?.imdbId,
             hintTitle: detail.map { MediaText.clean($0.title) })
     }
 

@@ -183,15 +183,18 @@ public partial class PlayWindow : Window
     private readonly bool _traktEnabled;
     /// <summary>剧名对应的首播年份（详情页带下来），同名重拍版靠它区分。</summary>
     private readonly int? _seriesYear;
+    /// <summary>整部片 / 整部剧的 TMDB、IMDb id：Trakt 用 id 精确匹配，不受译名影响。</summary>
+    private readonly string? _seriesTmdbId;
+    private readonly string? _seriesImdbId;
     /// idle / playing / paused / stopped
     private string _traktState = "idle";
     private TraktMatch? _traktMatch;
     /// <summary>串行发送：start / pause / stop 必须按顺序到达 Trakt。</summary>
     private readonly object _traktLock = new();
     private Task _traktChain = Task.CompletedTask;
-    /// <summary>库页 / 继续观看直接起播时详情页没带年份，这里补一次并记住。</summary>
-    private readonly object _traktYearLock = new();
-    private Task<int?>? _traktYearTask;
+    /// <summary>库页 / 继续观看直接起播时详情页没带年份 / id，这里补一次并记住。</summary>
+    private readonly object _traktMetaLock = new();
+    private Task<TraktMeta?>? _traktMetaTask;
     private int _danmakuBoundTrack = -1;
     private int _danmakuTrackId = -1;
     private int _sidBeforeDanmaku;
@@ -248,13 +251,17 @@ public partial class PlayWindow : Window
         string? coreItemId = null,
         IReadOnlyList<BluRayTitle>? discTitles = null,
         string? discDisplayName = null,
-        int? seriesYear = null)
+        int? seriesYear = null,
+        string? seriesTmdbId = null,
+        string? seriesImdbId = null)
     {
         _current = source;
         _startSeconds = startSeconds;
         _playlist = playlist ?? new List<PlayEpisode>();
         _seriesTitle = seriesTitle;
         _seriesYear = seriesYear;
+        _seriesTmdbId = CleanId(seriesTmdbId);
+        _seriesImdbId = CleanId(seriesImdbId);
         _itemId = source.ItemId;
         _isLocalDisc = localDisc;
         _discIsoPath = discIsoPath;
@@ -338,7 +345,9 @@ public partial class PlayWindow : Window
         string? seriesTitle = null,
         int? seriesYear = null,
         string? hintTitle = null,
-        bool silentFailure = false)
+        bool silentFailure = false,
+        string? seriesTmdbId = null,
+        string? seriesImdbId = null)
     {
         // 连点保护：正在开的时候只接一次；刚开完的 800ms 也当连点。
         if (Interlocked.CompareExchange(ref _openGate, 1, 0) != 0 ||
@@ -356,7 +365,8 @@ public partial class PlayWindow : Window
         try
         {
             window = new PlayWindow(Placeholder(itemId), startSeconds, playlist, seriesTitle,
-                seriesYear: seriesYear);
+                seriesYear: seriesYear, seriesTmdbId: seriesTmdbId,
+                seriesImdbId: seriesImdbId);
             window._started = true; // 还是占位源，OnLoaded 先别启 mpv
 
             var hint = hintTitle ?? window.DisplayTitle(window._current);
@@ -3829,9 +3839,19 @@ public partial class PlayWindow : Window
                 return;
             }
 
-            // 电影没带年份时补一次：中文片名在 Trakt 上显示成原名，
-            // 只靠标题匹配不上（「千与千寻」→ Spirited Away）。
-            var matchYear = year ?? (isSeries ? null : await TraktYearAsync().ConfigureAwait(false));
+            // 详情页带下来的 id 优先；没有（库页 / 继续观看直接起播）就用条目
+            // 详情补一次 id 和年份。中文片名在 Trakt 上显示成原名，只靠标题
+            // 匹配不上（「千与千寻」→ Spirited Away）。
+            var matchYear = year;
+            var tmdb = _seriesTmdbId;
+            var imdb = _seriesImdbId;
+            if (!isSeries && (tmdb is null || imdb is null || matchYear is null))
+            {
+                var meta = await TraktMetaAsync().ConfigureAwait(false);
+                matchYear ??= meta?.Year;
+                tmdb ??= meta?.Tmdb;
+                imdb ??= meta?.Imdb;
+            }
 
             TraktMatch? match;
             if (known is not null)
@@ -3840,7 +3860,8 @@ public partial class PlayWindow : Window
             }
             else
             {
-                match = await client.MatchAsync(series, matchYear, isSeries).ConfigureAwait(false);
+                match = await client.MatchAsync(series, matchYear, isSeries, tmdb, imdb)
+                    .ConfigureAwait(false);
                 if (match is not null)
                 {
                     _traktMatch = match;
@@ -3863,19 +3884,22 @@ public partial class PlayWindow : Window
         }
     }
 
+    /// <summary>详情里能拿到的 Trakt 匹配信息：年份 + TMDB / IMDb id。</summary>
+    private sealed record TraktMeta(int? Year, string? Tmdb, string? Imdb);
+
     /// <summary>
-    /// 从库页 / 继续观看直接起播的电影没带年份：用条目详情补一次并缓存，
+    /// 从库页 / 继续观看直接起播的电影没带年份 / id：用条目详情补一次并缓存，
     /// 否则中文片名在 Trakt 上没有年份可用，匹配不上。
     /// </summary>
-    private Task<int?> TraktYearAsync()
+    private Task<TraktMeta?> TraktMetaAsync()
     {
-        lock (_traktYearLock)
+        lock (_traktMetaLock)
         {
-            return _traktYearTask ??= LookupTraktYearAsync();
+            return _traktMetaTask ??= LookupTraktMetaAsync();
         }
     }
 
-    private async Task<int?> LookupTraktYearAsync()
+    private async Task<TraktMeta?> LookupTraktMetaAsync()
     {
         if (AppServices.Instance.Core is not { } core || string.IsNullOrWhiteSpace(_itemId))
         {
@@ -3885,19 +3909,32 @@ public partial class PlayWindow : Window
         try
         {
             var detail = await Task.Run(() => core.ItemDetail(_itemId)).ConfigureAwait(false);
-            var date = detail.Ok ? detail.Data?.ReleaseDate : null;
-            if (!string.IsNullOrWhiteSpace(date) && date.Length >= 4 &&
-                int.TryParse(date[..4], out var parsed))
+            if (!detail.Ok || detail.Data is not { } data)
             {
-                return parsed;
+                return null;
             }
+
+            int? year = null;
+            if (!string.IsNullOrWhiteSpace(data.ReleaseDate) && data.ReleaseDate.Length >= 4 &&
+                int.TryParse(data.ReleaseDate[..4], out var parsed))
+            {
+                year = parsed;
+            }
+
+            return new TraktMeta(year, CleanId(data.TmdbId), CleanId(data.ImdbId));
         }
         catch (Exception)
         {
-            // 取不到年份就按「没有年份」匹配，不影响播放。
+            // 取不到就按「没有年份 / id」匹配，不影响播放。
         }
 
         return null;
+    }
+
+    private static string? CleanId(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
     /// <summary>

@@ -258,11 +258,28 @@ actor TraktClient {
 
     // MARK: 匹配
 
-    /// 按片名 + 年份在 Trakt 里找条目。宁可没有也不挂错：
-    /// 片名去掉空白标点后必须完全一致，年份都有时最多差 1 年（首映年 vs 文件年份）。
-    func match(title: String, year: Int?, series: Bool) async throws -> TraktMatch? {
-        let key = matchKey(title: title, year: year, series: series)
+    /// 在 Trakt 里找条目：先用库里的 TMDB / IMDb id 精确查，都没有（或查不到）
+    /// 再按片名 + 年份搜。宁可没有也不挂错：片名去掉空白标点后必须完全一致，
+    /// 年份都有时最多差 1 年（首映年 vs 文件年份）。
+    func match(title: String, year: Int?, series: Bool,
+               tmdbId: String? = nil, imdbId: String? = nil) async throws -> TraktMatch? {
+        let kind = series ? "show" : "movie"
         loadMatchesIfNeeded()
+
+        // id 优先：Emby / Jellyfin 刮削时记下的 id 不会和别的片子撞名。
+        for (type, raw) in [("tmdb", tmdbId), ("imdb", imdbId)] {
+            guard let value = raw?.trimmingCharacters(in: .whitespaces),
+                  !value.isEmpty else { continue }
+            let key = "\(kind)|\(type)|\(value)"
+            if let cached = matches?[key] { return cached }
+            if let found = try await findById(kind: kind, type: type, value: value) {
+                matches?[key] = found
+                saveMatches()
+                return found
+            }
+        }
+
+        let key = matchKey(title: title, year: year, series: series)
         if let cached = matches?[key] { return cached }
 
         let query = [
@@ -341,6 +358,25 @@ actor TraktClient {
         }
 
         return nil
+    }
+
+    /// `/search/tmdb/{id}?type=show` 这类 id 查询。返回结构和标题搜索一样，
+    /// 取第一条（id 是唯一的，不会有一堆候选）。
+    private func findById(kind: String, type: String, value: String) async throws -> TraktMatch? {
+        let data = try await send("GET", "/search/\(type)/\(value)",
+                                  query: [URLQueryItem(name: "type", value: kind)],
+                                  authorized: false)
+        guard let list = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let entry = list.first else { return nil }
+        let item = (entry[kind] as? [String: Any]) ?? entry
+        guard let ids = item["ids"] as? [String: Any],
+              let traktId = ids["trakt"] as? Int,
+              let name = item["title"] as? String else { return nil }
+        return TraktMatch(kind: kind,
+                          traktId: traktId,
+                          slug: ids["slug"] as? String,
+                          title: name,
+                          year: item["year"] as? Int)
     }
 
     // MARK: 评分 / 收藏 / 待看
