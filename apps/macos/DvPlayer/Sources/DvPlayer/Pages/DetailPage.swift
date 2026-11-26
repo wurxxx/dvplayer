@@ -1313,7 +1313,7 @@ struct DetailPage: View {
         guard let core = state.core else { return }
         sources = (try? await core.itemSources(itemId)) ?? []
         // 「资源」一到就能判断别的源有没有看得更多；剧集要再找同一集。
-        applyMergedResume()
+        // 合并在 loadCrossSourceEpisodeProgress 里统一做一次，免得日志重复。
         await loadCrossSourceEpisodeProgress()
     }
 
@@ -1461,8 +1461,9 @@ struct DetailPage: View {
             mergedStart = nil
             resumeSeconds = ownResumeSeconds
             if best > 0 || own > 0 {
-                NSLog("[Detail] 续播用源自己的 %ds（本源 %d%%，其它源 %d%%，差不足 1%%）",
-                      ownResumeSeconds, Int(own * 100), Int(best * 100))
+                let other = isSeries ? "同集" : "其它源"
+                NSLog("[Detail] 续播用源自己的 %ds（本源 %d%%，%@ %d%%，差不足 1%%）",
+                      ownResumeSeconds, Int(own * 100), other, Int(best * 100))
             }
         }
     }

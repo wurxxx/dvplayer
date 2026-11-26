@@ -992,7 +992,8 @@ public partial class SeriesPage : Page
             _resumeSeconds = ownSeconds;
             if (own > 0 || best > 0)
             {
-                Trace.Write($"resume keep own {ownSeconds}s (own {own:P0}, best {best:P0})");
+                var other = isSeries ? "same episode" : "best";
+                Trace.Write($"resume keep own {ownSeconds}s (own {own:P0}, {other} {best:P0})");
             }
         }
     }
@@ -1775,7 +1776,7 @@ public partial class SeriesPage : Page
         var bestId = rows[0].ItemId;
         _sourceRows = rows;
         _sourcesMaxProgress = rows.Count > 0 ? rows.Max(row => row.Progress) : 0;
-        ApplyMergedResume();
+        // 合并在 LoadCrossSourceEpisodeProgressAsync 里统一做一次，免得日志重复。
         await LoadCrossSourceEpisodeProgressAsync().ConfigureAwait(true);
 
         SourcesList.ItemsSource = rows.Select(row =>
