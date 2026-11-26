@@ -38,7 +38,8 @@
   和 Windows 的 `MediaText.Runtime` 一致；播放页进度 / 剩余时间仍然用时间码
 - 详情页：整块横版图铺满、渐变淡到页面底色、动作按钮（播放 / 重头看 / 收藏 /
   标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条）、
-  演职人员（96 宽头像卡，点开看作品，可继续往下钻详情）、豆瓣链接、
+  演职人员（96 宽头像卡，点开看作品，可继续往下钻详情）、链接（豆瓣，源里有
+  TMDB / IMDb id 时再加这两个）、
   媒体信息（视频、每条音轨、每条字幕各一张卡，横向排开）、
   存储位置（放在媒体信息之后；电影 / 单集给完整文件路径，剧集 / 季给所在目录，
   可选中复制）
@@ -381,17 +382,23 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
   （`TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`）注入 `Info.plist`
   （`DVTraktClientId` / `DVTraktClientSecret`）；设置页里填的值优先，
   没内置凭据的构建会显示两个输入框。
-- 匹配按「片名 + 年份」搜 `/search/movie|show`：标题完全一致优先；中文片名在
-  Trakt 上显示成原名（「千与千寻」→ Spirited Away），标题对不上时取年份差 ≤1 的
-  第一条；本地没有年份、搜索结果又只有一条才采用。结果缓存到 `trakt-matches.json`。
-  宁可没有也不挂错。
+- 匹配优先用库里的外部 id：`MediaDetail.tmdbId` / `imdbId`（Emby / Jellyfin
+  的 `ProviderIds`，列表和详情都取）→ `GET /search/tmdb/{id}?type=movie|show`
+  或 `/search/imdb/{id}?type=...`，缓存键 `movie|tmdb|253` 这种。没有 id、或 id
+  查不到时才回落「片名 + 年份」搜 `/search/movie|show`：标题完全一致优先；中文
+  片名在 Trakt 上显示成原名（「千与千寻」→ Spirited Away），标题对不上时取年份
+  差 ≤1 的第一条；本地没有年份、搜索结果又只有一条才采用。结果缓存到
+  `trakt-matches.json`。宁可没有也不挂错。飞牛详情接口不返回 id（列表的
+  `imdb_id` 也常为空），这类源只能走标题。
 - 播放页：出画 5 秒后 `scrobble/start`，暂停 / 继续发 `pause` / `start`，
   关窗或播完发 `stop`（播完按 100% 报，Trakt 才会记成已看）；剧集带
   `season` + `number`，电影只带 `movie`。
-- 从库页 / 继续观看直接起播时没有详情页带下来的剧名：电影退回条目自己的标题，
-  再查一次条目详情补年份（`traktYear()`），这种入口也会上报。
+- 从库页 / 继续观看直接起播时没有详情页带下来的剧名 / id：电影退回条目自己的
+  标题，再查一次条目详情补年份和 id（`traktMeta()`），这种入口也会上报。
 - 详情页「Trakt」按钮：评分 1–10、加入收藏（collection）、加入待看（watchlist），
-  打开时先读一次当前状态。按钮只在包里有应用凭据时出现。
+  打开时先读一次当前状态。按钮只在包里有应用凭据时出现。详情页的链接区在豆瓣
+  后面按 id 补「TMDB」（`themoviedb.org/{movie|tv}/{id}`）和「IMDb」
+  （`imdb.com/title/{id}/`），没有 id 的源不摆。
 - 发布包内置 Client ID，设置页只剩「连接 Trakt」/ 状态 / 自动同步开关；
   直接 `swift build` 或没配 `trakt.env` 的构建才显示自建应用的输入框。
 

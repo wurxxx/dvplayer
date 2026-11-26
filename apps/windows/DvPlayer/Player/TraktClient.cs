@@ -193,12 +193,32 @@ internal sealed class TraktClient
     // MARK: 匹配
 
     /// <summary>
-    /// 按片名 + 年份在 Trakt 里找条目。宁可没有也不挂错：片名去掉空白标点后
-    /// 必须完全一致，年份都有时最多差 1 年（首映年 vs 文件年份）。
+    /// 在 Trakt 里找条目：先用库里的 TMDB / IMDb id 精确查，都没有（或查不到）
+    /// 再按片名 + 年份搜。宁可没有也不挂错：片名去掉空白标点后必须完全一致，
+    /// 年份都有时最多差 1 年（首映年 vs 文件年份）。
     /// </summary>
     public async Task<TraktMatch?> MatchAsync(string title, int? year, bool series,
-        CancellationToken token = default)
+        string? tmdbId = null, string? imdbId = null, CancellationToken token = default)
     {
+        var kind = series ? "show" : "movie";
+
+        // id 优先：服务器刮削时记下的 id 不会和别的片子撞名。
+        foreach (var (type, raw) in new[] { ("tmdb", tmdbId), ("imdb", imdbId) })
+        {
+            var value = raw?.Trim();
+            if (string.IsNullOrEmpty(value)) continue;
+
+            var idKey = $"{kind}|{type}|{value}";
+            lock (_matchLock)
+            {
+                LoadMatchesIfNeeded();
+                if (_matches!.TryGetValue(idKey, out var cached)) return cached;
+            }
+
+            var found = await FindByIdAsync(kind, type, value, token).ConfigureAwait(false);
+            if (found is not null) return Accept(idKey, found);
+        }
+
         var key = MatchKey(title, year, series);
         lock (_matchLock)
         {
@@ -280,6 +300,33 @@ internal sealed class TraktClient
         }
 
         return null;
+    }
+
+    /// <summary>`/search/tmdb/{id}?type=show` 这类 id 查询，取第一条。</summary>
+    private async Task<TraktMatch?> FindByIdAsync(string kind, string type, string value,
+        CancellationToken token)
+    {
+        var text = await SendAsync(HttpMethod.Get, $"/search/{type}/{Uri.EscapeDataString(value)}",
+            "?type=" + kind, null, authorized: false, token: token).ConfigureAwait(false);
+
+        using var doc = JsonDocument.Parse(text);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array ||
+            doc.RootElement.GetArrayLength() == 0) return null;
+
+        var entry = doc.RootElement[0];
+        var item = entry.TryGetProperty(kind, out var nested) ? nested : entry;
+        if (!item.TryGetProperty("ids", out var ids) ||
+            !ids.TryGetProperty("trakt", out var idElement) ||
+            !idElement.TryGetInt32(out var traktId) ||
+            !item.TryGetProperty("title", out var titleElement) ||
+            titleElement.GetString() is not { } name) return null;
+
+        int? itemYear = item.TryGetProperty("year", out var yearElement) &&
+                        yearElement.TryGetInt32(out var year)
+            ? year
+            : null;
+        var slug = ids.TryGetProperty("slug", out var slugElement) ? slugElement.GetString() : null;
+        return new TraktMatch(kind, traktId, slug, name, itemYear);
     }
 
     private TraktMatch Accept(string key, TraktMatch match)

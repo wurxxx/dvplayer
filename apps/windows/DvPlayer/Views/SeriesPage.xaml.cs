@@ -484,6 +484,12 @@ public partial class SeriesPage : Page
         }
 
         LinksSection.Visibility = Visibility.Visible;
+        TmdbButton.Visibility = string.IsNullOrWhiteSpace(_detail?.TmdbId)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        ImdbButton.Visibility = string.IsNullOrWhiteSpace(_detail?.ImdbId)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
         await Task.WhenAll(fresh.Select(t => t.ApplyPosterAsync(t.PosterPath)));
         _ = LoadMediaInfoAsync();
@@ -1010,7 +1016,8 @@ public partial class SeriesPage : Page
         TraktMatch? found;
         try
         {
-            found = await client.MatchAsync(title, year, series).ConfigureAwait(true);
+            found = await client.MatchAsync(title, year, series,
+                detail.TmdbId, detail.ImdbId).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1323,7 +1330,9 @@ public partial class SeriesPage : Page
 
         var player = await PlayWindow.OpenAsync(
             Window.GetWindow(this), itemId, startSeconds, BuildPlaylist(),
-            MediaText.Clean(_detail?.Title), seriesYear: DetailYear()).ConfigureAwait(true);
+            MediaText.Clean(_detail?.Title), seriesYear: DetailYear(),
+            seriesTmdbId: _detail?.TmdbId,
+            seriesImdbId: _detail?.ImdbId).ConfigureAwait(true);
 
         if (player is not null)
         {
@@ -1558,6 +1567,35 @@ public partial class SeriesPage : Page
     }
 
     // —— 链接 ——
+
+    private void OnTmdbClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_detail is not { } detail || string.IsNullOrWhiteSpace(detail.TmdbId))
+        {
+            return;
+        }
+
+        var isSeries = detail.Kind is "series" or "tv" or "season" or "episode";
+        var url = $"https://www.themoviedb.org/{(isSeries ? "tv" : "movie")}/" +
+                  detail.TmdbId.Trim();
+        OpenExternal(url);
+    }
+
+    private void OnImdbClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_detail is not { } detail || string.IsNullOrWhiteSpace(detail.ImdbId))
+        {
+            return;
+        }
+
+        OpenExternal($"https://www.imdb.com/title/{detail.ImdbId.Trim()}/");
+    }
+
+    private static void OpenExternal(string url)
+    {
+        System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+    }
 
     private void OnDoubanClick(object sender, MouseButtonEventArgs e)
     {

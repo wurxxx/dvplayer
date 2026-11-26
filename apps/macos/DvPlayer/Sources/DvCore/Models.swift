@@ -209,6 +209,9 @@ public struct MediaDetail: Codable, Identifiable, Sendable {
     public let singleChildId: String?
     public let isFavorite: Bool?
     public let isWatched: Bool?
+    /// 外部库 id（Emby / Jellyfin 的 ProviderIds）：Trakt 精确匹配、详情页链接用。
+    public let tmdbId: String?
+    public let imdbId: String?
 }
 
 public struct PlaySource: Codable, Sendable {

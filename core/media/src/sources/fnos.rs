@@ -721,6 +721,8 @@ impl FnOsSource {
             single_child_id: empty_to_none(d.single_child_guid.unwrap_or_default()),
             is_favorite: d.is_favorite.map(|v| v > 0),
             is_watched: d.is_watched.map(|v| v > 0),
+            tmdb_id: None,
+            imdb_id: None,
         })
     }
 

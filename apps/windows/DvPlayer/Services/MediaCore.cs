@@ -693,7 +693,10 @@ public sealed record MediaDetailDto(
     string? PlayItemId,
     string? SingleChildId,
     bool? IsFavorite,
-    bool? IsWatched);
+    bool? IsWatched,
+    /// <summary>外部库 id（Emby / Jellyfin 的 ProviderIds）：Trakt 精确匹配、详情页链接用。</summary>
+    string? TmdbId,
+    string? ImdbId);
 
 public sealed record PersonDto(
     string Id,

@@ -10,6 +10,9 @@ struct TraktPanel: View {
     let title: String
     let year: Int?
     let series: Bool
+    /// 库里的 TMDB / IMDb id：有就按 id 精确匹配，不依赖译名。
+    let tmdbId: String?
+    let imdbId: String?
 
     @EnvironmentObject private var state: AppState
 
@@ -114,7 +117,9 @@ struct TraktPanel: View {
                 return
             }
             let found = try await TraktClient.shared.match(title: title, year: year,
-                                                           series: series)
+                                                           series: series,
+                                                           tmdbId: tmdbId,
+                                                           imdbId: imdbId)
             match = found
             guard let found else {
                 loading = false

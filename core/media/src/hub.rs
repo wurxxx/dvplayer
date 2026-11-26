@@ -1171,6 +1171,8 @@ mod tests {
                 single_child_id: None,
                 is_favorite: None,
                 is_watched: None,
+                tmdb_id: None,
+                imdb_id: None,
             })
         }
 

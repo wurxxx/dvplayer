@@ -336,6 +336,12 @@ pub struct MediaDetail {
     pub is_favorite: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_watched: Option<bool>,
+    /// 外部库 id（Emby/Jellyfin 的 ProviderIds）：Trakt 用它精确匹配，
+    /// 详情页也用它做「在 TMDB / IMDb 打开」。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmdb_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imdb_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
