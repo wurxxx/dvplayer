@@ -73,9 +73,16 @@ class Handler(BaseHTTPRequestHandler):
             return None, None
         return rel, full
 
+    def _drain_body(self):
+        # PROPFIND 允许带请求体；不读完会在 keep-alive 连接里被当成下一个请求行。
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 0:
+            self.rfile.read(length)
+
     def do_PROPFIND(self):
         if not self._authorized():
             return
+        self._drain_body()
         rel, full = self._resolve()
         if not full or not os.path.exists(full):
             self.send_error(404)
