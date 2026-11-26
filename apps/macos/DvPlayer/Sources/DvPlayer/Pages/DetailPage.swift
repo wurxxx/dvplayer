@@ -102,6 +102,13 @@ struct DetailPage: View {
     /// 当前播放目标的续播位置（秒）。和 Windows 一样靠它决定
     /// 「重头看」要不要出现、播放键上要不要带「上次看到 01:23」。
     @State private var resumeSeconds: Int = 0
+    /// 当前播放源自己的续播位置与片长；跨源合并时以它为基准。
+    @State private var ownResumeSeconds: Int = 0
+    @State private var resumeDuration: Int = 0
+    /// 合并后要覆盖的起播位置：nil = 用源自己的，0 = 别的源已看完（从头播）。
+    @State private var mergedStart: Int?
+    /// Trakt 上记的播放进度（0–1）；电影换设备 / 换源时用来补续播点。
+    @State private var traktProgress: Double?
     /// 同一部片在各源的条目（详情页「资源」）。
     @State private var sources: [ItemSource] = []
     @State private var loading = true
@@ -376,7 +383,8 @@ struct DetailPage: View {
         HStack(spacing: 10) {
             Button {
                 guard let detail else { return }
-                play(playTargetId ?? detail.id, startSeconds: nil)
+                play(playTargetId ?? detail.id,
+                     startSeconds: mergedStart.map(Double.init))
             } label: {
                 // 看过但没看完：剧集带上正在看的那一集，再加上次看到哪，
                 // 对齐 Windows 的 `播放 第 20 集 01:53`（SeriesPage.UpdatePlayButton）。
@@ -1116,6 +1124,7 @@ struct DetailPage: View {
 
             Task { await loadMediaInfo() }
             Task { await loadSources() }
+            Task { await loadTraktProgress() }
             autoJumpToResumeIfNeeded()
             autoRangeShotIfNeeded()
             return
@@ -1137,6 +1146,7 @@ struct DetailPage: View {
 
         // 「资源」要跨源再搜一遍，慢一点，别挡首屏。
         Task { await loadSources() }
+        Task { await loadTraktProgress() }
 
         guard let kind = detail?.kind.lowercased(),
               ["series", "tv", "season", "folder"].contains(kind) else {
@@ -1295,6 +1305,71 @@ struct DetailPage: View {
     private func loadSources() async {
         guard let core = state.core else { return }
         sources = (try? await core.itemSources(itemId)) ?? []
+        // 「资源」一到就能判断别的源有没有看得更多。
+        applyMergedResume()
+    }
+
+    /// Trakt 的 playback：电影在别的设备 / 别的源看过更多时，用它补续播点。
+    /// 匹配走 TMDB / IMDb id，没有才按片名 + 年份；拿不到就当作没有。
+    private func loadTraktProgress() async {
+        guard let detail, detail.kind.lowercased() == "movie" else { return }
+        guard await TraktClient.shared.isLoggedIn() else { return }
+
+        let year = detail.releaseDate.flatMap { Int($0.prefix(4)) }
+        guard let match = try? await TraktClient.shared.match(
+            title: MediaText.clean(detail.title), year: year, series: false,
+            tmdbId: detail.tmdbId, imdbId: detail.imdbId) else {
+            NSLog("[Trakt] playback 跳过：没匹配到《\(detail.title)》")
+            return
+        }
+
+        traktProgress = await TraktClient.shared.playbackProgress(
+            for: match, season: nil, episode: nil)
+        if let traktProgress {
+            NSLog("[Trakt] playback \(match.title) \(Int(traktProgress * 100))%")
+            applyMergedResume()
+        } else {
+            NSLog("[Trakt] playback \(match.title) 没有记录")
+        }
+    }
+
+    /// 同一部片在别的源看过更多时，按进度取较长的那条续播。
+    /// 只在片长可用、且另一条明显更大（>1%）时覆盖；≥99.5% 视为看完，从头播。
+    /// 换到另一个源播放时片长可能略有出入，这里用当前源的时长换算秒数。
+    private func applyMergedResume() {
+        // 只对电影 / 视频合并：剧集在「资源」里的 progress 是整部剧最近一集的，
+        // 拿来换算当前这一集的位置会跳错集。
+        let kind = detail?.kind.lowercased() ?? ""
+        // 飞牛的播放源不给片长（duration=0），退到详情里的片长。
+        let duration = resumeDuration > 0 ? resumeDuration : (detail?.runtimeSeconds ?? 0)
+        guard duration > 0, kind == "movie" || kind == "video" else {
+            mergedStart = nil
+            resumeSeconds = ownResumeSeconds
+            return
+        }
+
+        let own = Double(ownResumeSeconds) / Double(duration)
+        let sourceBest = sources.map(\.progress).max() ?? 0
+        let best = max(sourceBest, traktProgress ?? 0)
+
+        if best >= 0.995 {
+            mergedStart = 0
+            resumeSeconds = 0
+            NSLog("[Detail] 跨源进度 %d%% 已看完，从头播", Int(best * 100))
+        } else if best > own + 0.01 {
+            let seconds = min(duration, Int((Double(duration) * best).rounded()))
+            mergedStart = seconds
+            resumeSeconds = seconds
+            NSLog("[Detail] 跨源续播合并 %d%% -> %ds（本源 %d%%）",
+                  Int(best * 100), seconds, Int(own * 100))
+        } else {
+            mergedStart = nil
+            resumeSeconds = ownResumeSeconds
+            if best > 0 || own > 0 {
+                NSLog("[Detail] 续播用源自己的 %ds（本源 %d%%，其它源 %d%%，差不足 1%%）",
+                      ownResumeSeconds, Int(own * 100), Int(best * 100))
+            }
+        }
     }
 
     private func loadMediaInfo() async {
@@ -1307,8 +1382,10 @@ struct DetailPage: View {
         let (info, play) = await (infoTask, playTask)
 
         mediaInfo = info
-        resumeSeconds = max(0, play?.positionSeconds ?? 0)
-        NSLog("[Detail] \(target) resume=\(resumeSeconds) info=\(info != nil)")
+        ownResumeSeconds = max(0, play?.positionSeconds ?? 0)
+        resumeDuration = max(0, play?.durationSeconds ?? 0)
+        applyMergedResume()
+        NSLog("[Detail] \(target) resume=\(resumeSeconds) duration=\(resumeDuration) info=\(info != nil)")
 
         // 截图巡检：直接展开音轨 / 字幕菜单（等界面铺好再弹）。
         if let menu = ProcessInfo.processInfo.environment["DVPLAYER_MENU"] {

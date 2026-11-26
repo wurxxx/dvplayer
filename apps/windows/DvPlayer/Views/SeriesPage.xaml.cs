@@ -79,6 +79,18 @@ public partial class SeriesPage : Page
     /// <summary>续播点（秒），按条目缓存。详情页的播放按钮上要显示它。</summary>
     private readonly Dictionary<string, long> _resumeCache = new();
 
+    /// <summary>片长（秒），按条目缓存；跨源合并进度时换算位置用。</summary>
+    private readonly Dictionary<string, long> _durationCache = new();
+
+    /// <summary>同一部片在其它源里的最大进度（0–1）。</summary>
+    private double _sourcesMaxProgress;
+
+    /// <summary>Trakt 上记的播放进度（0–1）；电影换设备 / 换源时用来补续播点。</summary>
+    private double? _traktProgress;
+
+    /// <summary>合并后要覆盖的起播位置：null = 用源自己的，0 = 别的源已看完（从头播）。</summary>
+    private long? _mergedStart;
+
     private MediaInfoDto? _tracks;
     private long _resumeSeconds;
     private bool _watched;
@@ -175,6 +187,7 @@ public partial class SeriesPage : Page
             Trace.Write($"detail cache hit id={_itemId}");
             await ApplySnapshotAsync(cached).ConfigureAwait(true);
             _ = LoadSourcesAsync();
+            _ = LoadTraktProgressAsync();
             return;
         }
 
@@ -192,6 +205,7 @@ public partial class SeriesPage : Page
         RenderHeader();
         _ = LoadPeopleAsync();
         _ = LoadSourcesAsync();
+        _ = LoadTraktProgressAsync();
 
         clock.Restart();
         var children = await Task.Run(() => core.Children(_itemId, 1, EpisodePageSize))
@@ -914,6 +928,59 @@ public partial class SeriesPage : Page
         TagBar.Visibility = tags.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    /// <summary>
+    /// 同一部片在别的源看过更多时，按进度取较长的那条续播。
+    /// 只在片长可用、且另一条明显更大（>1%）时覆盖；≥99.5% 视为看完，从头播。
+    /// 只对电影 / 视频合并：剧集在「资源」里的进度是整部剧最近一集的，换算当前集会跳错。
+    /// </summary>
+    private void ApplyMergedResume()
+    {
+        var ownSeconds = _resumeCache.TryGetValue(_playTargetId ?? "", out var cached) ? cached : 0;
+        var duration = _durationCache.TryGetValue(_playTargetId ?? "", out var cachedDuration)
+            ? cachedDuration
+            : 0;
+        var kind = _detail?.Kind?.ToLowerInvariant() ?? "";
+
+        // 飞牛的播放源不给片长（duration=0），退到详情里的片长。
+        if (duration <= 0)
+        {
+            duration = _detail?.RuntimeSeconds ?? 0;
+        }
+
+        if (duration <= 0 || (kind != "movie" && kind != "video"))
+        {
+            _mergedStart = null;
+            _resumeSeconds = ownSeconds;
+            return;
+        }
+
+        var own = (double)ownSeconds / duration;
+        var best = Math.Max(_sourcesMaxProgress, _traktProgress ?? 0);
+
+        if (best >= 0.995)
+        {
+            _mergedStart = 0;
+            _resumeSeconds = 0;
+            Trace.Write($"resume merge done {best:P0} -> play from start");
+        }
+        else if (best > own + 0.01)
+        {
+            var seconds = (long)Math.Round(duration * best);
+            _mergedStart = seconds;
+            _resumeSeconds = seconds;
+            Trace.Write($"resume merge {best:P0} -> {seconds}s (own {own:P0})");
+        }
+        else
+        {
+            _mergedStart = null;
+            _resumeSeconds = ownSeconds;
+            if (own > 0 || best > 0)
+            {
+                Trace.Write($"resume keep own {ownSeconds}s (own {own:P0}, best {best:P0})");
+            }
+        }
+    }
+
     private void UpdatePlayButton()
     {
         PlayButton.IsEnabled = !string.IsNullOrEmpty(_playTargetId);
@@ -1356,7 +1423,8 @@ public partial class SeriesPage : Page
             return;
         }
 
-        await PlayAndWaitAsync(_playTargetId, null).ConfigureAwait(true);
+        await PlayAndWaitAsync(_playTargetId,
+            _mergedStart is { } merged ? merged : null).ConfigureAwait(true);
     }
 
     private async void OnEpisodeClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -1403,6 +1471,7 @@ public partial class SeriesPage : Page
         DetailCache.Drop(_itemId);
         _mediaInfoCache.Clear();
         _resumeCache.Clear();
+        _durationCache.Clear();
         await LoadDetailPageAsync(_currentSeasonId).ConfigureAwait(true);
     }
 
@@ -1522,6 +1591,51 @@ public partial class SeriesPage : Page
     // —— 资源（同一部片的多个来源）——
 
     /// <summary>
+    /// Trakt 的 playback：电影在别的设备 / 别的源看过更多时，用它补续播点。
+    /// 匹配走 TMDB / IMDb id，没有才按片名 + 年份；拿不到就当作没有。
+    /// </summary>
+    private async Task LoadTraktProgressAsync()
+    {
+        if (_detail is not { } detail || detail.Kind != "movie")
+        {
+            return;
+        }
+
+        var client = TraktClient.Shared;
+        if (!client.IsLoggedIn)
+        {
+            return;
+        }
+
+        try
+        {
+            int? year = detail.ReleaseDate is { Length: >= 4 } date &&
+                        int.TryParse(date[..4], out var parsed)
+                ? parsed
+                : null;
+
+            var match = await client.MatchAsync(MediaText.Clean(detail.Title), year, false,
+                detail.TmdbId, detail.ImdbId).ConfigureAwait(true);
+            if (match is null)
+            {
+                return;
+            }
+
+            _traktProgress = await client.PlaybackProgressAsync(match, null, null)
+                .ConfigureAwait(true);
+            if (_traktProgress is { } value)
+            {
+                Trace.Write($"trakt playback {match.Title} {value:P0}");
+                ApplyMergedResume();
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("trakt playback failed: " + ex.Message);
+        }
+    }
+
+    /// <summary>
     /// 详情页「资源」：核心用详情标题跨源找回同一部片，去重规则和搜索一样。
     /// 只有两源以上才显示；点一张切到那个源的条目。
     /// </summary>
@@ -1542,6 +1656,8 @@ public partial class SeriesPage : Page
 
         var rows = result.Data;
         var bestId = rows[0].ItemId;
+        _sourcesMaxProgress = rows.Count > 0 ? rows.Max(row => row.Progress) : 0;
+        ApplyMergedResume();
 
         SourcesList.ItemsSource = rows.Select(row =>
         {
@@ -1741,6 +1857,7 @@ public partial class SeriesPage : Page
                 info = infoResult.Ok ? infoResult.Data : null;
                 _mediaInfoCache[id] = info;
                 _resumeCache[id] = playResult.Ok ? playResult.Data?.PositionSeconds ?? 0 : 0;
+                _durationCache[id] = playResult.Ok ? playResult.Data?.DurationSeconds ?? 0 : 0;
 
                 Trace.Write($"media info id={id} ok={infoResult.Ok} err={infoResult.Error} " +
                             $"video={info?.Video is not null} audios={info?.Audios.Count} " +
@@ -1756,6 +1873,7 @@ public partial class SeriesPage : Page
         if (_playTargetId == id)
         {
             _resumeSeconds = _resumeCache.TryGetValue(id, out var resume) ? resume : 0;
+            ApplyMergedResume();
             UpdatePlayButton();
             UpdateTrackButtons(info);
             RenderMediaInfo(info);
