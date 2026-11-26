@@ -14,10 +14,11 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 | 片头片尾 | `Services/SkipMarkers.cs` | `%LOCALAPPDATA%\dvplayer\skip-markers.json`，按剧名（电影按条目 id）存 `introEnd` / `outroStart`，和 macOS 同格式 |
 | 弹幕 | `Player/Danmaku.cs` | 弹弹play v2 签名（`Base64(SHA256(AppId+Timestamp+Path+AppSecret))`）→ JSON / XML 解析 → 写 ASS → `sub-add` + `secondary-sid`；电影没有集号时按片名找 `type == "movie"` 的条目 |
 | 在线字幕 | `Player/OpenSubtitles.cs` | OpenSubtitles REST v1：搜索 → `/downloads` 取临时链接 → 存缓存 → `sub-add select` |
+| Trakt | `Player/TraktClient.cs`、`Views/SettingsPage.xaml` | 设备码登录；token 存 `settings.json` 的 `traktAccessToken` / `traktRefreshToken` / `traktExpiresAt`（DPAPI 密封）；scrobble 挂在 `time-pos` / `pause` / EOF / 关窗上，按顺序串行发送；库页直接起播的电影用条目标题 + 详情年份兜底；详情页「Trakt」菜单做评分 / 收藏 / 待看。打包时内置 Client ID，设置页只剩连接 / 开关 |
 
 配置项都在 `Services/AppSettings.cs`：`videoAspect`、`danmakuEnabled`、
 `openSubtitlesApiKey` / `openSubtitlesUsername` / `openSubtitlesPassword`、
-`subtitleLanguages`。弹幕凭据不在设置里：打包时由
+`subtitleLanguages`、`traktEnabled` / `traktClientId` / `traktClientSecret`。弹幕凭据不在设置里：打包时由
 `packaging/build-release.ps1` 从本地密钥文件读出来，以程序集元数据写进 exe
 （详见 [SECRETS.md](SECRETS.md)）。
 
@@ -41,7 +42,11 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
 
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
   「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
-  不是 macOS 那种悬停子菜单。
+  不是 macOS 那种悬停子菜单。Trakt 的评分也是这种两层菜单（先点「评分」再选分数）。
+- **Trakt 的 token 放在配置文件里**：macOS 单独存 `trakt.json`（0600），Windows
+  放进 `settings.json` 的 `traktAccessToken` / `traktRefreshToken` / `traktExpiresAt`，
+  和其它凭据一样在存盘时走 DPAPI 密封。设置页的「Trakt」分段用设备码登录，
+  不需要在 App 里输 Trakt 密码。
 - **打开 / 切集遮罩**：`PlayWindow` 的 `OpeningCover` 一直是不透明黑，首帧判定看
   「播放位置真的推进」（`time-pos > 起播点 + 0.5`，片头跳过后从跳到的位置算），
   慢网络下 `time-pos` 停在续播点不会误收黑底；期间文案一直是「正在打开…」+ 转圈。

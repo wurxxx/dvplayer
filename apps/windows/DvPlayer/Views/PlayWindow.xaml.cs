@@ -178,6 +178,20 @@ public partial class PlayWindow : Window
     private string? _danmakuFile;
     private int _danmakuCount;
     private bool _danmakuEnabled;
+
+    // —— Trakt 观看记录 ——
+    private readonly bool _traktEnabled;
+    /// <summary>剧名对应的首播年份（详情页带下来），同名重拍版靠它区分。</summary>
+    private readonly int? _seriesYear;
+    /// idle / playing / paused / stopped
+    private string _traktState = "idle";
+    private TraktMatch? _traktMatch;
+    /// <summary>串行发送：start / pause / stop 必须按顺序到达 Trakt。</summary>
+    private readonly object _traktLock = new();
+    private Task _traktChain = Task.CompletedTask;
+    /// <summary>库页 / 继续观看直接起播时详情页没带年份，这里补一次并记住。</summary>
+    private readonly object _traktYearLock = new();
+    private Task<int?>? _traktYearTask;
     private int _danmakuBoundTrack = -1;
     private int _danmakuTrackId = -1;
     private int _sidBeforeDanmaku;
@@ -233,12 +247,14 @@ public partial class PlayWindow : Window
         string? discIsoPath = null,
         string? coreItemId = null,
         IReadOnlyList<BluRayTitle>? discTitles = null,
-        string? discDisplayName = null)
+        string? discDisplayName = null,
+        int? seriesYear = null)
     {
         _current = source;
         _startSeconds = startSeconds;
         _playlist = playlist ?? new List<PlayEpisode>();
         _seriesTitle = seriesTitle;
+        _seriesYear = seriesYear;
         _itemId = source.ItemId;
         _isLocalDisc = localDisc;
         _discIsoPath = discIsoPath;
@@ -249,6 +265,7 @@ public partial class PlayWindow : Window
         var settings = AppServices.Instance.Settings;
         _aspect = PlayerAspectExtensions.Parse(settings.VideoAspect);
         _danmakuEnabled = settings.DanmakuEnabled ?? false;
+        _traktEnabled = settings.TraktEnabled ?? true;
         _audioPassthrough = settings.AudioPassthrough;
         _hdrPassthrough = settings.HdrPassthrough;
         _hdrPeakNits = settings.HdrPeakNits;
@@ -319,6 +336,7 @@ public partial class PlayWindow : Window
         double? startSeconds = null,
         List<PlayEpisode>? playlist = null,
         string? seriesTitle = null,
+        int? seriesYear = null,
         string? hintTitle = null,
         bool silentFailure = false)
     {
@@ -337,7 +355,8 @@ public partial class PlayWindow : Window
         var shown = false;
         try
         {
-            window = new PlayWindow(Placeholder(itemId), startSeconds, playlist, seriesTitle);
+            window = new PlayWindow(Placeholder(itemId), startSeconds, playlist, seriesTitle,
+                seriesYear: seriesYear);
             window._started = true; // 还是占位源，OnLoaded 先别启 mpv
 
             var hint = hintTitle ?? window.DisplayTitle(window._current);
@@ -1629,6 +1648,7 @@ public partial class PlayWindow : Window
                     {
                         FinishOpening("position");
                     }
+                    TraktStartIfNeeded();
                     UpdatePositionUi();
                     ApplyPendingIntroSkip();
                     UpdateOutroPrompt();
@@ -1728,6 +1748,7 @@ public partial class PlayWindow : Window
                 case "pause" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
                     _paused = value.GetBoolean();
                     PlayPauseGlyph.Text = _paused ? "\uE768" : "\uE769";
+                    TraktPauseOrResume(_paused);
                     RefreshSleepBlocker();
                     break;
 
@@ -1818,6 +1839,8 @@ public partial class PlayWindow : Window
 
         // 播完也要给服务端一个 Stopped，位置写片尾（Emby 会顺手标已看完）。
         ReportProgress(EffectiveDuration, EffectiveDuration, stopped: true);
+        // Trakt：播完按 100% 报，才会记成已看。
+        TraktStop(100);
 
         if (_sleepAtEof)
         {
@@ -3700,6 +3723,183 @@ public partial class PlayWindow : Window
         ShowChrome();
     }
 
+    // —— Trakt 观看记录 ——
+
+    /// <summary>真正出画 5 秒后才算开始看：加载慢、拖进度都不该报 scrobble。</summary>
+    private void TraktStartIfNeeded()
+    {
+        if (!_traktEnabled || _traktState != "idle" || _paused || _eof ||
+            _position <= 5 || EffectiveDuration <= 1)
+        {
+            return;
+        }
+
+        _traktState = "playing";
+        TraktScrobble("start");
+    }
+
+    private void TraktPauseOrResume(bool paused)
+    {
+        if (paused)
+        {
+            if (_traktState != "playing")
+            {
+                return;
+            }
+
+            _traktState = "paused";
+            TraktScrobble("pause");
+            return;
+        }
+
+        if (_traktState == "paused")
+        {
+            _traktState = "playing";
+            TraktScrobble("start");
+        }
+        else
+        {
+            TraktStartIfNeeded();
+        }
+    }
+
+    private void TraktStop(double? progressOverride = null)
+    {
+        if (_traktState != "playing" && _traktState != "paused")
+        {
+            return;
+        }
+
+        _traktState = "stopped";
+        TraktScrobble("stop", progressOverride);
+    }
+
+    /// <summary>切集 / 停止后重新开始计时；同一部剧的匹配结果可以复用，不重搜。</summary>
+    private void TraktResetForNextItem()
+    {
+        if (_traktState is "playing" or "paused")
+        {
+            TraktStop();
+        }
+
+        _traktState = "idle";
+    }
+
+    private void TraktScrobble(string action, double? progressOverride = null)
+    {
+        // 详情页起播带的是剧名 / 片名；库页、继续观看直接起播时没有剧名，
+        // 电影退回条目自己的标题，否则进度永远不上报。
+        var series = !string.IsNullOrWhiteSpace(_seriesTitle)
+            ? _seriesTitle!
+            : MediaText.Clean(_current.Title);
+        if (!_traktEnabled || string.IsNullOrWhiteSpace(series))
+        {
+            return;
+        }
+
+        var episode = EpisodeNumber();
+        var season = SeasonNumber();
+        var year = _seriesYear;
+        var isSeries = episode is not null;
+        var ratio = EffectiveDuration > 1 ? _position / EffectiveDuration * 100 : 0;
+        var progress = progressOverride ?? Math.Clamp(ratio, 0.1, 100);
+        var known = _traktMatch;
+
+        // 串行发送：start / pause / stop 必须按顺序到 Trakt。
+        // 并发时先发的 stop 可能比 start 先到，进度就被后到的 start 覆盖了。
+        lock (_traktLock)
+        {
+            _traktChain = _traktChain
+                .ContinueWith(_ => SendTraktAsync(action, series, isSeries, season, episode,
+                        year, progress, known),
+                    CancellationToken.None, TaskContinuationOptions.DenyChildAttach,
+                    TaskScheduler.Default)
+                .Unwrap();
+        }
+    }
+
+    private async Task SendTraktAsync(string action, string series, bool isSeries, int? season,
+        int? episode, int? year, double progress, TraktMatch? known)
+    {
+        try
+        {
+            var client = TraktClient.Shared;
+            if (!client.IsLoggedIn)
+            {
+                return;
+            }
+
+            // 电影没带年份时补一次：中文片名在 Trakt 上显示成原名，
+            // 只靠标题匹配不上（「千与千寻」→ Spirited Away）。
+            var matchYear = year ?? (isSeries ? null : await TraktYearAsync().ConfigureAwait(false));
+
+            TraktMatch? match;
+            if (known is not null)
+            {
+                match = known;
+            }
+            else
+            {
+                match = await client.MatchAsync(series, matchYear, isSeries).ConfigureAwait(false);
+                if (match is not null)
+                {
+                    _traktMatch = match;
+                }
+            }
+
+            if (match is null)
+            {
+                Trace.Write($"trakt skipped: 没匹配到 {series}");
+                return;
+            }
+
+            await client.ScrobbleAsync(action, match, season, episode, progress)
+                .ConfigureAwait(false);
+            Trace.Write($"trakt {action} {match.Title} {progress:0}%");
+        }
+        catch (Exception ex)
+        {
+            Trace.Write($"trakt {action} failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 从库页 / 继续观看直接起播的电影没带年份：用条目详情补一次并缓存，
+    /// 否则中文片名在 Trakt 上没有年份可用，匹配不上。
+    /// </summary>
+    private Task<int?> TraktYearAsync()
+    {
+        lock (_traktYearLock)
+        {
+            return _traktYearTask ??= LookupTraktYearAsync();
+        }
+    }
+
+    private async Task<int?> LookupTraktYearAsync()
+    {
+        if (AppServices.Instance.Core is not { } core || string.IsNullOrWhiteSpace(_itemId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var detail = await Task.Run(() => core.ItemDetail(_itemId)).ConfigureAwait(false);
+            var date = detail.Ok ? detail.Data?.ReleaseDate : null;
+            if (!string.IsNullOrWhiteSpace(date) && date.Length >= 4 &&
+                int.TryParse(date[..4], out var parsed))
+            {
+                return parsed;
+            }
+        }
+        catch (Exception)
+        {
+            // 取不到年份就按「没有年份」匹配，不影响播放。
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// 按「剧名 + 集号」去弹弹play 找弹幕，写成 ASS 交给 mpv 当第二字幕。
     /// 没配置 AppId / AppSecret 就安静跳过（日志里留一行），不打扰观看。
@@ -4080,6 +4280,9 @@ public partial class PlayWindow : Window
     /// <summary>切集：重新取播放源，在同一个窗口里重启 mpv，UI 状态跟着重置。</summary>
     private async Task SwitchToAsync(string itemId)
     {
+        // 换集前把这一集的 Trakt scrobble 收掉，新集从头计时。
+        TraktResetForNextItem();
+
         PlaySourceDto? source;
         string? error = null;
         // 这一集从哪里起播：网络集一律 0；侧栏直开的原盘切标题用它自己的本地进度。
@@ -4237,6 +4440,8 @@ public partial class PlayWindow : Window
                 // 上报失败/超时不能挡住后面的 Dispose，否则 mpv 和 IPC 会漏。
                 Trace.Write("close report failed: " + ex.Message);
             }
+
+            TraktStop();
         }
 
         _danmakuCts?.Cancel();

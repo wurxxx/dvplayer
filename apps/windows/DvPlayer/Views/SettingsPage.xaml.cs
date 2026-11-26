@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using DvPlayer.Player;
 using DvPlayer.Services;
 
 namespace DvPlayer.Views;
@@ -12,6 +13,7 @@ namespace DvPlayer.Views;
 public partial class SettingsPage : Page
 {
     private bool _ready;
+    private CancellationTokenSource? _traktLogin;
     private readonly System.Windows.Threading.DispatcherTimer _saveTimer = new()
     {
         Interval = TimeSpan.FromMilliseconds(500),
@@ -36,6 +38,7 @@ public partial class SettingsPage : Page
 
         LoadValues();
         RefreshSourceSummary();
+        RefreshTraktState();
 
         AppVersionText.Text = AppServices.AppVersion;
         CoreVersionText.Text = AppServices.Instance.CoreVersion ?? "未加载";
@@ -72,6 +75,9 @@ public partial class SettingsPage : Page
         SelectTag(HdrPeakBox, settings.HdrPeakNits.ToString());
 
         DanmakuSwitch.IsChecked = settings.DanmakuEnabled ?? false;
+        TraktEnabledSwitch.IsChecked = settings.TraktEnabled ?? true;
+        TraktIdBox.Text = settings.TraktClientId ?? "";
+        TraktSecretBox.Password = settings.TraktClientSecret ?? "";
         SubtitleKeyBox.Password = settings.OpenSubtitlesApiKey ?? "";
         SubtitleUserBox.Text = settings.OpenSubtitlesUsername ?? "";
         SubtitlePassBox.Password = settings.OpenSubtitlesPassword ?? "";
@@ -157,6 +163,7 @@ public partial class SettingsPage : Page
         ListPanel.Visibility = Visible(ListSegment);
         PlayPanel.Visibility = Visible(PlaySegment);
         ExtrasPanel.Visibility = Visible(ExtrasSegment);
+        TraktPanel.Visibility = Visible(TraktSegment);
         AboutPanel.Visibility = Visible(AboutSegment);
 
         static Visibility Visible(RadioButton button) =>
@@ -175,6 +182,7 @@ public partial class SettingsPage : Page
         settings.ShowResolution = ResolutionSwitch.IsChecked == true;
         settings.ResumePlayback = ResumeSwitch.IsChecked == true;
         settings.DanmakuEnabled = DanmakuSwitch.IsChecked == true;
+        settings.TraktEnabled = TraktEnabledSwitch.IsChecked == true;
         settings.StartPage = (StartPageBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "libraries";
 
         if (PageSizeBox.SelectedItem is ComboBoxItem { Content: string size } && int.TryParse(size, out var pageSize))
@@ -236,9 +244,12 @@ public partial class SettingsPage : Page
         settings.OpenSubtitlesUsername = NullIfEmpty(SubtitleUserBox.Text);
         settings.OpenSubtitlesPassword = NullIfEmpty(SubtitlePassBox.Password);
         settings.SubtitleLanguages = NullIfEmpty(SubtitleLangBox.Text);
+        settings.TraktClientId = NullIfEmpty(TraktIdBox.Text);
+        settings.TraktClientSecret = NullIfEmpty(TraktSecretBox.Password);
         settings.Save();
 
         RefreshExtrasHints();
+        RefreshTraktState();
         StatusText.Text = "已保存";
     }
 
@@ -258,6 +269,132 @@ public partial class SettingsPage : Page
         SubtitleHint.Text = hasSubtitle
             ? "已配置：播放页「更多 → 搜索字幕」会按当前剧集与语言去搜。"
             : "还没填 API Key：字幕搜索会提示缺什么，不会联网。";
+    }
+
+    // —— Trakt ——
+
+    private void RefreshTraktState()
+    {
+        if (TraktStatusText is null)
+        {
+            return;
+        }
+
+        var client = TraktClient.Shared;
+        var settings = AppServices.Instance.Settings;
+        var loggedIn = client.IsLoggedIn;
+
+        TraktCredentialPanel.Visibility = client.IsConfigured
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        TraktConnectButton.IsEnabled = client.IsConfigured;
+        TraktConnectButton.Visibility = loggedIn ? Visibility.Collapsed : Visibility.Visible;
+        TraktLogoutButton.Visibility = loggedIn ? Visibility.Visible : Visibility.Collapsed;
+
+        TraktStatusText.Text = loggedIn
+            ? (string.IsNullOrWhiteSpace(settings.TraktUsername)
+                ? "已连接"
+                : $"已连接：{settings.TraktUsername}")
+            : "未连接";
+
+        TraktStatusHint.Text = loggedIn
+            ? "播放时会按「剧名 + 集号」自动上报；电影按片名匹配。"
+            : client.IsConfigured
+                ? "点「连接 Trakt」，用设备码在网页上授权。"
+                : "这个构建没有内置凭据：填了上面的 Client ID / Secret 才能连接。";
+
+        TraktHint.Text = loggedIn
+            ? "评分 / 收藏 / 待看也在详情页的「Trakt」按钮里。"
+            : "";
+    }
+
+    private async void OnTraktConnectClick(object sender, RoutedEventArgs e)
+    {
+        var client = TraktClient.Shared;
+        if (!client.IsConfigured)
+        {
+            RefreshTraktState();
+            return;
+        }
+
+        _traktLogin?.Cancel();
+        _traktLogin = new CancellationTokenSource();
+        var token = _traktLogin.Token;
+
+        try
+        {
+            var device = await client.StartDeviceLoginAsync(token);
+            TraktDevicePanel.Visibility = Visibility.Visible;
+            TraktDeviceCode.Text = device.UserCode;
+            TraktStatusHint.Text = "等待在网页上确认…";
+            TraktConnectButton.Visibility = Visibility.Collapsed;
+            OpenUrl(device.VerificationUrl);
+
+            var deadline = DateTime.UtcNow.AddSeconds(device.ExpiresIn);
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(device.Interval), token);
+                try
+                {
+                    await client.PollDeviceTokenAsync(device, token);
+                    await client.FetchUsernameAsync(token);
+                    TraktDevicePanel.Visibility = Visibility.Collapsed;
+                    RefreshTraktState();
+                    StatusText.Text = "已连接 Trakt";
+                    return;
+                }
+                catch (TraktPendingException)
+                {
+                    // 还没确认，继续等。
+                }
+            }
+
+            TraktDevicePanel.Visibility = Visibility.Collapsed;
+            RefreshTraktState();
+            TraktStatusHint.Text = "设备码过期了，重新连接一次";
+        }
+        catch (OperationCanceledException)
+        {
+            // 用户取消或离开页面。
+        }
+        catch (Exception ex)
+        {
+            TraktDevicePanel.Visibility = Visibility.Collapsed;
+            RefreshTraktState();
+            TraktStatusHint.Text = ex.Message;
+        }
+    }
+
+    private async void OnTraktLogoutClick(object sender, RoutedEventArgs e)
+    {
+        _traktLogin?.Cancel();
+        await TraktClient.Shared.LogoutAsync();
+        TraktDevicePanel.Visibility = Visibility.Collapsed;
+        RefreshTraktState();
+        StatusText.Text = "已断开 Trakt";
+    }
+
+    private void OnTraktOpenActivateClick(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://trakt.tv/activate");
+
+    private void OnTraktCancelClick(object sender, RoutedEventArgs e)
+    {
+        _traktLogin?.Cancel();
+        TraktDevicePanel.Visibility = Visibility.Collapsed;
+        RefreshTraktState();
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+            // 打不开浏览器不影响流程：码还在界面上。
+        }
     }
 
     private static string? NullIfEmpty(string text)

@@ -39,6 +39,20 @@
     </AssemblyAttribute>
   </ItemGroup>
 
+  <!-- Trakt 应用凭据：和弹幕同样的注入方式（打包脚本从 trakt.env 读）。
+       留空时设置页会显示 Client ID / Secret 输入框，用户可以用自己的应用。 -->
+  <ItemGroup Condition="'$(TraktClientId)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>DvTraktClientId</_Parameter1>
+      <_Parameter2>$(TraktClientId)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute"
+                       Condition="'$(TraktClientSecret)' != ''">
+      <_Parameter1>DvTraktClientSecret</_Parameter1>
+      <_Parameter2>$(TraktClientSecret)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- 侧栏左上角的品牌图（和 ApplicationIcon 同一份设计，scripts/make-icon.py 生成）。 -->
   <ItemGroup>
     <Resource Include="Assets\DvPlayer-256.png" />

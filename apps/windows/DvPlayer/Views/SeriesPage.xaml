@@ -169,6 +169,16 @@
                              MaxWidth="120" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
               </Button>
+              <!-- Trakt：评分 / 收藏 / 待看（没连接时点开会提示去设置）。 -->
+              <Button x:Name="TraktButton" Style="{StaticResource HeroActionButton}"
+                      Click="OnTraktClick" ToolTip="Trakt：评分 / 收藏 / 待看">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE774;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                             VerticalAlignment="Center" />
+                  <TextBlock Text="Trakt" FontSize="13.5"
+                             Margin="8,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
             </WrapPanel>
           </StackPanel>
         </StackPanel>

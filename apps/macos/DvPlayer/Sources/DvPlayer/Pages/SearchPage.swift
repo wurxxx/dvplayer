@@ -293,6 +293,8 @@ struct SettingsPage: View {
                         }
                     }
 
+                    TraktSettingsCard()
+
                     SurfaceCard(padding: 18) {
                         VStack(alignment: .leading, spacing: 14) {
                             SectionTitle(text: "在线字幕（OpenSubtitles）")

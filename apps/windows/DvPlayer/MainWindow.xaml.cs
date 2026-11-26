@@ -1051,11 +1051,15 @@ public partial class MainWindow : FluentWindow
         if (seriesIds is not null)
         {
             var season = int.TryParse(ArgumentAfter("--series-season"), out var n) ? n - 1 : 0;
+            // 远程源的详情页可能要拉十几秒；回归截图默认等 6 秒，慢源用 --series-wait 调。
+            var seriesWait = int.TryParse(ArgumentAfter("--series-wait"), out var seconds) && seconds > 0
+                ? seconds
+                : 6;
 
             for (var i = 0; i < seriesIds.Length; i++)
             {
                 ContentFrame.Navigate(new SeriesPage(seriesIds[i], season));
-                await Task.Delay(6000);
+                await Task.Delay(seriesWait * 1000);
 
                 if (ContentFrame.Content is SeriesPage scrollShot &&
                     int.TryParse(ArgumentAfter("--series-scroll"), out var seriesOffset))
@@ -1085,6 +1089,24 @@ public partial class MainWindow : FluentWindow
                     await Task.Delay(700);
                     UiCapture.Save(seasonMenu, Path.Combine(dir, "series-season-menu.png"));
                     seasonMenu.IsOpen = false;
+                    await Task.Delay(300);
+                }
+
+                // --trakt-menu：和点详情页「Trakt」按钮一样拼菜单，截下来核对匹配结果和评分状态。
+                if (Environment.GetCommandLineArgs().Contains("--trakt-menu") &&
+                    ContentFrame.Content is SeriesPage traktShot &&
+                    await traktShot.OpenTraktMenuForShotAsync() is { } traktMenu)
+                {
+                    await Task.Delay(700);
+                    // ContextMenu 是独立弹层，RTB 捕获前要先给它一个足够大的布局尺寸，
+                    // 否则会按弹层默认的 140x140 截，菜单项被裁掉。
+                    traktMenu.Measure(new Size(600, 1200));
+                    traktMenu.Arrange(new Rect(new Point(0, 0), traktMenu.DesiredSize));
+                    traktMenu.UpdateLayout();
+                    UiCapture.Save(traktMenu, Path.Combine(dir, "series-trakt-menu.png"));
+                    // ContextMenu 在独立弹层里，RTB 只能截到弹层自身；再抓一张桌面看真实位置。
+                    UiCapture.SaveDesktop(Path.Combine(dir, "series-trakt-screen.png"));
+                    traktMenu.IsOpen = false;
                     await Task.Delay(300);
                 }
 
