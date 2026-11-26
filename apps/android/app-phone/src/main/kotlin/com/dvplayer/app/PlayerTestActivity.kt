@@ -12,10 +12,15 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowInsets
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
+import com.dvplayer.player.EngineId
+import com.dvplayer.player.PlayerEngine
+import com.dvplayer.player.TrackKind
 import com.dvplayer.player.media3.Hdr10PlusProbe
 import com.dvplayer.player.media3.Media3Player
 import com.dvplayer.player.mpv.MpvPlayer
@@ -40,10 +45,15 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var media3: Media3Player? = null
     private lateinit var surfaceView: SurfaceView
     private lateinit var status: TextView
+    private lateinit var controlsBox: LinearLayout
     private var started = false
     private var matchedFps = 0.0
     private var probeResult: String? = null
+    private var speedIndex = 0
     private val handler = Handler(Looper.getMainLooper())
+
+    private val enginePlayer: PlayerEngine?
+        get() = player ?: media3
 
     private val url: String
         get() = intent.getStringExtra("url") ?: DEFAULT_URL
@@ -106,6 +116,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             ),
         )
         root.addView(status, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
+        if (engine != "codec") {
+            controlsBox = controls()
+            root.addView(controlsBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END))
+        }
         setContentView(root)
 
         // Android 15+ 强制 edge-to-edge，状态栏会压在画面上，这里把文字让开。
@@ -114,6 +128,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             root.setOnApplyWindowInsetsListener { _, insets ->
                 val top = insets.getInsets(WindowInsets.Type.systemBars()).top
                 status.setPadding(24, 24 + top, 24, 24)
+                if (engine != "codec") controlsBox.setPadding(16, 16 + top, 16, 16)
                 insets
             }
         }
@@ -139,10 +154,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private fun attach(holder: SurfaceHolder) {
         when (engine) {
             "media3" -> {
-                media3?.attach(surfaceView)
+                media3?.attachView(surfaceView)
                 if (!started) {
                     started = true
-                    media3?.play(url)
+                    media3?.load(url)
                 }
             }
             "codec" -> {
@@ -158,14 +173,93 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 if (!started) {
                     started = true
                     // Surface 的 GL 初始化在渲染线程里异步做；mpv 会自己排队。
-                    mpv.play(url)
+                    mpv.load(url)
+                    handler.postDelayed({ Log.i(TAG, "章节：${mpv.chapters()}") }, 3000)
                 }
             }
         }
     }
 
+    /** 验证用的控制条：暂停 / seek / 倍速 / 切轨 / 外部字幕。 */
+    private fun controls(): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 16, 16, 16)
+        }
+        fun add(label: String, action: () -> Unit) {
+            box.addView(
+                Button(this).apply {
+                    text = label
+                    textSize = 12f
+                    minWidth = 0
+                    minimumWidth = 0
+                    setOnClickListener { action() }
+                },
+                LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = 6 },
+            )
+        }
+        add("⏯ 播放/暂停") {
+            val player = enginePlayer ?: return@add
+            Log.i(TAG, "togglePause，之前 pause=${player.state().paused}")
+            player.togglePause()
+        }
+        add("-10s") { seekBy(-10_000) }
+        add("+10s") { seekBy(10_000) }
+        add("倍速") { cycleSpeed() }
+        add("音轨") { cycleTrack(TrackKind.AUDIO) }
+        add("字幕") { cycleTrack(TrackKind.SUB) }
+        add("载入字幕") { enginePlayer?.addSubtitle(SUBTITLE_URL) }
+        return box
+    }
+
+    private fun seekBy(deltaMs: Long) {
+        val player = enginePlayer ?: return
+        val target = (player.state().positionMs + deltaMs).coerceAtLeast(0)
+        player.seekTo(target)
+        Log.i(TAG, "seek -> $target ms")
+    }
+
+    private fun cycleSpeed() {
+        speedIndex = (speedIndex + 1) % SPEEDS.size
+        val speed = SPEEDS[speedIndex]
+        enginePlayer?.setSpeed(speed)
+        Log.i(TAG, "speed -> $speed")
+    }
+
+    private fun cycleTrack(kind: TrackKind) {
+        val player = enginePlayer ?: return
+        val tracks = player.tracks().filter { it.kind == kind }
+        if (tracks.isEmpty()) {
+            Log.i(TAG, "没有可切换的 $kind 轨道")
+            return
+        }
+        val current = tracks.indexOfFirst { it.selected }
+        val next = tracks[(current + 1).mod(tracks.size)]
+        player.selectTrack(kind, next.id)
+        Log.i(TAG, "选择 $kind -> ${next.title}（${next.id}）")
+    }
+
+    /** 通用状态行：位置 / 时长 / 播放态 / 倍速 / 轨道。 */
+    private fun playbackLine(): String {
+        val player = enginePlayer ?: return ""
+        val state = player.state()
+        val tracks = player.tracks()
+        return buildString {
+            appendLine(
+                "pos ${state.positionMs / 1000.0}s / ${state.durationMs / 1000.0}s · " +
+                    "${if (state.paused) "暂停" else "播放"} · ${state.speed}x",
+            )
+            appendLine(
+                "轨道 " + tracks.joinToString(" · ") {
+                    "${it.kind.name.lowercase()}:${it.title}${if (it.selected) "*" else ""}"
+                },
+            )
+        }
+    }
+
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         player?.detach()
+        media3?.detach()
     }
 
     override fun onDestroy() {
@@ -194,15 +288,15 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun media3Status(): String {
-        val p = media3 ?: return "media3 未初始化"
-        val format = p.videoFormat
+        val player = media3 ?: return "media3 未初始化"
+        val format = player.videoFormat
         return buildString {
-            appendLine("engine media3 · ${p.videoSize()} · playing ${p.isPlaying()}")
+            appendLine("engine media3")
             if (format != null) {
                 appendLine("codec ${format.codecs} · ${format.width}×${format.height}")
                 appendLine("color ${format.colorInfo}")
             }
-            appendLine("pos ${p.currentPositionMs()}ms")
+            append(playbackLine())
             append(url)
         }
     }
@@ -220,6 +314,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 appendLine("HDR10+ maxRGB ${sceneMax}/${p("video-params/scene-max-g")}/${p("video-params/scene-max-b")} · avg ${p("video-params/scene-avg")}")
             }
             appendLine("fps ${p("estimated-vf-fps")} · drops ${p("frame-drop-count")} · mode ${mode.modeId}@${"%.2f".format(mode.refreshRate)}Hz")
+            append(playbackLine())
             append(url)
         }
     }
@@ -286,5 +381,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private companion object {
         const val TAG = "DvPlayerTest"
         const val DEFAULT_URL = "/data/user/0/com.dvplayer.app/files/dv-test.mp4"
+        const val SUBTITLE_URL = "/data/user/0/com.dvplayer.app/files/test.srt"
+        val SPEEDS = floatArrayOf(1f, 1.25f, 1.5f, 2f, 0.5f)
     }
 }

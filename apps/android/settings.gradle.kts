@@ -44,6 +44,7 @@ include(":ui-phone")
 include(":ui-tv")
 include(":design")
 include(":core")
+include(":player")
 include(":player-mpv")
 include(":player-media3")
 

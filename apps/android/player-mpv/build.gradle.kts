@@ -30,3 +30,7 @@ android {
         }
     }
 }
+
+dependencies {
+    api(project(":player"))
+}

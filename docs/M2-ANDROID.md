@@ -217,7 +217,22 @@ libmpv 构建链（A0 的另一半，2026-11-26）：
   （[ADR-0016](adr/0016-android-player-native.md)），渲染线程独占 EGL 与
   `mpv_render_context`。真机 HBY 5502（Android 9 / arm64）上 720p H.264 测试片
   走 `mediacodec-copy` 出画，时间码正常推进；`libdvplayer_mpv.so` 同样 16KB 对齐、
-  未压缩打包。播放控制、切轨、字幕、属性桥属于 A4 剩下的部分。
+  未压缩打包。
+- 引擎契约与播放控制（A4 后半段，2026-11-27）：新增 `:player` 模块，定义
+  `PlayerEngine`（attach / load / play / pause / seek / speed / 轨道 / 章节 /
+  外部字幕 / 状态快照 + 事件回调），mpv 与 Media3 都实现同一份契约，壳层只依赖
+  接口。`:player-mpv` 的属性桥全部走 libmpv：暂停 `set pause`、seek
+  `seek <秒> absolute`、倍速 `set speed`、轨道读 `track-list/N/{type,id,title,lang,
+  codec,selected,external}`、切轨 `set vid/aid/sid`、外部字幕
+  `sub-add <path> select`、章节读 `chapter-list/N/{title,time}`。状态用 200ms
+  轮询线程推送（读属性本身线程安全），Media3 用主线程 250ms 轮询，两边行为一致。
+  验证页加了控制条（播放/暂停、±10s、倍速、音轨、字幕、载入字幕），
+  用一份多轨样片（2 音轨 + 1 内嵌字幕 + 3 章节）在 OnePlus 上跑通：
+  mpv 侧 `pos 40.625s · 暂停` → `+10s → 50.625s` → `audio:音轨 2*` →
+  `sub:test.srt*`；Media3 侧同流程，载入外部字幕后位置与音轨都保持
+  （`audio:en*` 不回落默认音轨）。Media3 的章节暂时为空——ExoPlayer 1.11 的
+  `MediaMetadata` 没有章节字段，`Mp4Extractor` 也不解析 `chpl`。
+  会话 / 通知 / 续播还没接，属于 A4 末尾。
 
 HDR 输出（A5，2026-11-27）：在 OnePlus 10 Pro（Android 16）上，mpv 把 BT.2020 +
 PQ 的 HEVC Main10 片源识别为 `prim=bt.2020`、`gamma=pq`、`max-luma=10000`，
@@ -356,6 +371,15 @@ CTA861_3=2、HDR10PLUS=4）。`codec` 探针的输出格式同时给出
 结论：**HDR10+ 只能走 Media3 / MediaCodec**。A7 的路由规则据此定为「片源是
 HDR10+ 且设备支持时自动切 Media3；否则默认 mpv」。mpv 内核继续负责原盘、
 DV P5/P8 与 EGL 渲染路径。
+
+契约对齐（A6 第二步）：`Media3Player` 实现同一份 `PlayerEngine`，验证页
+`--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
+都跑通；外部字幕用 `MediaItem.SubtitleConfiguration`（按扩展名给 MIME），
+reload 时记住位置与当前音轨，`onTracksChanged` 之后再恢复（否则会回落默认
+音轨）。内嵌字幕（`mov_text`）能识别、能切。章节暂缺——ExoPlayer 1.11 的
+`MediaMetadata` 没有章节字段，`Mp4Extractor` 也不解析 `chpl`。
+PGS 字幕、FFmpeg 音频扩展（自定义 decoder / renderer）、tunneling 还没做，
+这三块是 A6 剩下的主要工作。
 
 A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
 `MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +
