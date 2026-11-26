@@ -214,6 +214,7 @@ public static class TrackPrefs
     private static readonly (string Code, string Name)[] LanguageNames =
     {
         ("zh", "中文"), ("chi", "中文"), ("zho", "中文"), ("cmn", "中文"), ("yue", "中文"),
+        ("chs", "中文"), ("cht", "中文"),
         ("zh-cn", "中文"), ("zh-sg", "中文"), ("zh-tw", "中文"), ("zh-hk", "中文"),
         ("zh-hans", "中文"), ("zh-hant", "中文"),
         ("en", "英语"), ("eng", "英语"),

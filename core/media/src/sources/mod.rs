@@ -22,6 +22,20 @@ use crate::models::{
     Person, PlayRecord, PlaySource,
 };
 
+/// 外挂字幕下载地址里的扩展名。文本字幕按编码给：`ass` / `ssa` 保留样式，
+/// 其余文本统一 `srt`（服务器会转码）；图形字幕区分 PGS 和 VobSub。
+pub(crate) fn subtitle_extension(codec: &str, is_bitmap: bool) -> &'static str {
+    let codec = codec.to_ascii_lowercase();
+    match codec.as_str() {
+        "hdmv_pgs_subtitle" | "pgssub" | "pgs" => "sup",
+        "dvd_subtitle" | "dvdsub" | "vobsub" => "sub",
+        "ass" | "ssa" => "ass",
+        "webvtt" | "vtt" => "vtt",
+        _ if is_bitmap => "sup",
+        _ => "srt",
+    }
+}
+
 /// 一个媒体源的连接参数。序列化后就是 `dv_source_create` 的入参。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

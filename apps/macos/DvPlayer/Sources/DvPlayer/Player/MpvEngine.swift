@@ -286,6 +286,17 @@ final class MpvEngine {
         }
     }
 
+    /// 服务端外挂字幕下载完后交给 mpv：先记进 `sidecars`（语言 / 标题靠它补），
+    /// 文件已经加载就直接加，否则等 `@file-loaded` 一起加。
+    func addSidecarSubtitle(path: String, language: String?, title: String?) {
+        if !sidecars.contains(where: { Self.samePath($0.path, path) }) {
+            sidecars.append(SidecarSubtitle(path: path, language: language, title: title))
+        }
+        if isLoaded {
+            client.command(["sub-add", path, "auto"])
+        }
+    }
+
     /// 渲染上下文就绪之后的收尾。
     private func finishConnect() {
         guard !shuttingDown else { return }

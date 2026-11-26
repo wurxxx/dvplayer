@@ -786,7 +786,9 @@ public sealed record SubtitleTrackDto(
     string? Codec,
     string? Format,
     bool IsExternal,
-    bool IsBitmap);
+    bool IsBitmap,
+    /// <summary>外挂字幕的下载地址；内嵌字幕为空。请求头用 PlaySourceDto.Headers。</summary>
+    string? Url = null);
 
 public sealed record PlaySourceDto(
     string ItemId,

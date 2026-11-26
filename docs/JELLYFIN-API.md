@@ -69,8 +69,10 @@ GET /UserViews?userId=<uid>
 ## 4. 还没验证
 
 - 12.x 实例（新端点分支只按官方 OpenAPI 写，没跑过真机）。
-- 外挂字幕：`MediaStreams` 里有轨道信息，但没给 `DeliveryUrl`；
-  字幕选择做的时候再拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}`。
+- 外挂字幕：已按 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}`
+  拼下载地址（`SubtitleTrack.url`），客户端下载后 `sub-add`；还没在 12.x 实例上
+  实测，但端点和 Emby 同源、macOS 端用同一个假服务器跑通过下载 + 挂轨。
+- 外挂字幕的 `language` 常见 `chs` / `cht`，两端语言映射已补这两个代码。
 - 服务端级 API Key 在 12.x 上是否也回 400：`/Users` 的回退逻辑与版本无关，等实例。
 
 ## 5. 相关

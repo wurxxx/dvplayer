@@ -165,6 +165,12 @@ HTTP 状态码；登录请求被反代重定向（http → https）时还会追�
   之后按 `external-filename` 给轨补语言 / 标题，认不出语言写「外挂」。
   字幕偏好等外挂轨全部到齐再套用。回归日志：
   `sidecar subs 5: zh-Hans:…` / `sidecar tracks 1|zh-Hans|简体;…`。
+- **服务端外挂字幕**：`PlaySourceDto.SubtitleStreams` 里 `IsExternal` 的轨带
+  `Url`（核心拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}`），
+  播放器带源自己的请求头 / 代理下载到 `%LOCALAPPDATA%\dvplayer\cache\subtitles`，
+  `path` 事件后 `sub-add`。`_pendingServerSubs > 0` 时不套用字幕偏好。
+  `chs` / `cht` 记为「简体 / 繁体」，菜单显示「中文 · 简体 / 中文 · 繁体」。
+  回归日志：`server subs 2: chs:ass:0, cht:ass:1` / `server subtitle …`。
 - **弹幕轨按文件名认**：`sub-add` 在 JSON IPC 里不返回轨道 id，Windows 的
   `MpvIpc` 也没有命令回复，所以靠 `track-list` 推送，按
   `external-filename` 含 `DVPlayer-danmaku` 识别并排除出字幕菜单。

@@ -327,6 +327,8 @@ final class PlayerSession: ObservableObject {
     /// 同目录外挂字幕是否都进 `track-list` 了：没到齐先不套用字幕
     /// 偏好，否则会把「第 2 张外挂」套到内嵌轨上。
     private var sidecarSubsReady = true
+    /// 服务端外挂字幕还有几张没下载完。
+    private var pendingServerSubtitles = 0
     /// 媒体信息请求已结束（成功与否），字幕自动选择不用再等它。
     private var mediaInfoLoaded = false
     private var isStopped = false
@@ -525,6 +527,7 @@ final class PlayerSession: ObservableObject {
         seekPosition = 0
         audioPrefsApplied = false
         subtitlePrefsApplied = false
+        pendingServerSubtitles = 0
         mediaInfoLoaded = false
         audioTracks = []
         subtitleTracks = []
@@ -595,6 +598,7 @@ final class PlayerSession: ObservableObject {
         seekPosition = 0
         audioPrefsApplied = false
         subtitlePrefsApplied = false
+        pendingServerSubtitles = 0
         mediaInfoLoaded = false
         audioTracks = []
         subtitleTracks = []
@@ -654,6 +658,7 @@ final class PlayerSession: ObservableObject {
             // 拿到地址、真正要 loadfile 了才盖上黑底。
             loading = true
             mpv.loadURL(source.url, headers: headers, start: start, proxy: source.proxy)
+            prepareServerSubtitles(source, token: token)
             startReporting()
             startLoadTimeout(token: token)
 
@@ -990,8 +995,105 @@ final class PlayerSession: ObservableObject {
         }
     }
 
+    /// 服务端外挂字幕：下载到缓存，文件加载后交给 mpv。
+    /// 失败只记一行日志，不拖慢起播（视频照常播，只是少一张字幕）。
+    private func prepareServerSubtitles(_ source: PlaySource, token: Int) {
+        let tracks = (source.subtitleStreams ?? []).filter {
+            $0.isExternal && !($0.url ?? "").isEmpty
+        }
+        guard !tracks.isEmpty else {
+            pendingServerSubtitles = 0
+            return
+        }
+
+        pendingServerSubtitles = tracks.count
+        for track in tracks {
+            Task { [weak self] in
+                let path = await Self.downloadSubtitle(track, source: source)
+                await MainActor.run {
+                    guard let self, token == self.loadToken, !self.isStopped else { return }
+                    self.pendingServerSubtitles = max(0, self.pendingServerSubtitles - 1)
+                    if let path {
+                        // 服务端只给 `chs` / `cht`，菜单上补一个能区分的简体 / 繁体。
+                        let label: String? = switch track.language?.lowercased() {
+                            case "chs": "简体"
+                            case "cht": "繁体"
+                            default: nil
+                        }
+                        self.mpv.addSidecarSubtitle(path: path, language: track.language,
+                                                    title: label)
+                        NSLog("[Play] server subtitle \((path as NSString).lastPathComponent) " +
+                              "lang=\(track.language ?? "-")")
+                    }
+                    // 新的 `track-list` 到了会再走一遍 readiness / 偏好。
+                    self.applyTrackPrefsIfNeeded()
+                }
+            }
+        }
+    }
+
+    private static func downloadSubtitle(_ track: SubtitleTrack,
+                                         source: PlaySource) async -> String? {
+        guard let text = track.url, let url = URL(string: text) else { return nil }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        for header in source.headers {
+            request.setValue(header.value, forHTTPHeaderField: header.name)
+        }
+
+        // 源设了 HTTP 代理：字幕下载也要走它，否则内网 / 需要代理的服务器拉不到。
+        let config = URLSessionConfiguration.ephemeral
+        if let proxy = source.proxy, !proxy.isEmpty,
+           let parts = URLComponents(string: proxy.contains("://") ? proxy : "http://" + proxy),
+           let host = parts.host {
+            config.connectionProxyDictionary = [
+                "HTTPEnable": 1,
+                "HTTPProxy": host,
+                "HTTPPort": parts.port ?? 0,
+                "HTTPSEnable": 1,
+                "HTTPSProxy": host,
+                "HTTPSPort": parts.port ?? 0,
+            ]
+        }
+        let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  !data.isEmpty else {
+                NSLog("[Play] server subtitle failed HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                return nil
+            }
+
+            let ext = url.pathExtension.isEmpty ? "srt" : url.pathExtension
+            let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+                .first?.appendingPathComponent("DvPlayer/subtitles", isDirectory: true)
+                ?? FileManager.default.temporaryDirectory
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let name = Self.sanitizeFileName("server-\(source.itemId)-\(track.guid)")
+            let path = folder.appendingPathComponent("\(name).\(ext)")
+            try data.write(to: path, options: .atomic)
+            return path.path
+        } catch {
+            NSLog("[Play] server subtitle error \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func sanitizeFileName(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_"))
+        return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" })
+    }
+
     /// 外挂字幕按路径匹配 `track-list`：全都到了才允许套用字幕偏好。
     private func updateSidecarReadiness(_ subtitles: [RawTrack]) {
+        guard pendingServerSubtitles == 0 else {
+            sidecarSubsReady = false
+            return
+        }
+
         let expected = mpv?.sidecarPaths ?? []
         guard !expected.isEmpty else {
             sidecarSubsReady = true
@@ -1046,6 +1148,37 @@ final class PlayerSession: ObservableObject {
         if let pref = saved {
             if subtitleTracks.indices.contains(pref) {
                 selectSubtitle(subtitleTracks[pref].id, remember: false)
+            }
+            return
+        }
+
+        // 外挂字幕是我们补的语言 / 标题；服务端字幕表的顺序和 mpv 轨可能不同
+        // （外挂常在最后），直接按下标会选错轨。轨上有语言时先按 mpv 轨选。
+        let hasLanguage = subtitleTracks.contains {
+            !($0.language ?? "").isEmpty || !($0.title ?? "").isEmpty
+        }
+        if hasLanguage {
+            var simplified: PlayerTrack?
+            var traditional: PlayerTrack?
+            var chinese: PlayerTrack?
+            var byDefault: PlayerTrack?
+            for track in subtitleTracks {
+                if byDefault == nil, track.isDefault { byDefault = track }
+                if chinese == nil, TrackPrefs.isChinese(track.language, track.title) {
+                    chinese = track
+                }
+                if simplified == nil, TrackPrefs.isSimplified(track.language, track.title) {
+                    simplified = track
+                }
+                if traditional == nil, TrackPrefs.isTraditional(track.language, track.title) {
+                    traditional = track
+                }
+            }
+
+            if let chosen = simplified ?? traditional ?? chinese ?? byDefault {
+                NSLog("[Play] subtitle resolve mpv id=\(chosen.id) "
+                      + "lang=\(chosen.language ?? "-") title=\(chosen.title ?? "-")")
+                selectSubtitle(chosen.id, remember: false)
             }
             return
         }
