@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
@@ -96,6 +97,14 @@ public partial class PlayWindow : Window
     private bool _sidecarsAdded;
     /// <summary>上一次记进日志的外挂轨道签名，避免每次 track-list 都刷一行。</summary>
     private string _loggedSidecars = "";
+    /// <summary>服务端（Emby / Jellyfin）给的外挂字幕：下载回本地再交给 mpv。</summary>
+    private List<SubtitleTrackDto> _serverSubs = new();
+    /// <summary>还有几张服务端字幕没下载完。</summary>
+    private int _pendingServerSubs;
+    /// <summary>换集 / 重试时丢掉上一轮的字幕下载回调。</summary>
+    private int _serverSubToken;
+    /// <summary>mpv 的 path 事件已经到过（文件已加载，可以 sub-add）。</summary>
+    private bool _pathSeen;
 
     private double _position;
     private double _duration;
@@ -1504,11 +1513,29 @@ public partial class PlayWindow : Window
             : SidecarSubtitles.Find(source.Url);
         _sidecarsAdded = false;
         _loggedSidecars = "";
+        _pathSeen = false;
         if (_sidecars.Count > 0)
         {
             Trace.Write("sidecar subs " + _sidecars.Count + ": " + string.Join(", ",
                 _sidecars.Select(item =>
                     $"{item.Language ?? "-"}:{Path.GetFileName(item.Path)}")));
+        }
+
+        // 服务端外挂字幕：视频在服务器上，客户端拿不到目录，只能按接口给的
+        // 地址下载回本地再 `sub-add`。内嵌字幕不需要（在视频流里）。
+        _serverSubs = _isLocalDisc
+            ? new List<SubtitleTrackDto>()
+            : (source.SubtitleStreams ?? new List<SubtitleTrackDto>())
+                .Where(item => item.IsExternal && !string.IsNullOrEmpty(item.Url))
+                .ToList();
+        _pendingServerSubs = _serverSubs.Count;
+        var serverToken = ++_serverSubToken;
+        if (_serverSubs.Count > 0)
+        {
+            Trace.Write("server subs " + _serverSubs.Count + ": " + string.Join(", ",
+                _serverSubs.Select(item =>
+                    $"{item.Language ?? "-"}:{item.Codec ?? "-"}:{item.Guid}")));
+            _ = DownloadServerSubtitlesAsync(source, _serverSubs.ToList(), serverToken);
         }
 
         _launchStart = launch.StartSeconds;
@@ -1844,6 +1871,7 @@ public partial class PlayWindow : Window
                     if (value.ValueKind == JsonValueKind.String &&
                         !string.IsNullOrEmpty(value.GetString()))
                     {
+                        _pathSeen = true;
                         AddSidecarSubtitlesOnce();
                     }
 
@@ -1936,6 +1964,112 @@ public partial class PlayWindow : Window
                 ? exact
                 : element.TryGetDouble(out var approx) ? (int)Math.Round(approx) : null
             : null;
+
+    /// <summary>
+    /// 服务端外挂字幕：按接口地址逐张下载到缓存，再交给 mpv。
+    /// 失败只记日志，不挡视频起播。
+    /// </summary>
+    private async Task DownloadServerSubtitlesAsync(PlaySourceDto source,
+        List<SubtitleTrackDto> tracks, int token)
+    {
+        foreach (var track in tracks)
+        {
+            var path = await DownloadServerSubtitleAsync(track, source);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (token != _serverSubToken || _closed)
+                {
+                    return;
+                }
+
+                _pendingServerSubs = Math.Max(0, _pendingServerSubs - 1);
+                if (!string.IsNullOrEmpty(path))
+                {
+                    // 服务端只给 `chs` / `cht`，菜单上补一个能区分的简体 / 繁体。
+                    var label = track.Language?.ToLowerInvariant() switch
+                    {
+                        "chs" => "简体",
+                        "cht" => "繁体",
+                        _ => null,
+                    };
+                    _sidecars.Add(new SidecarSubtitle(path, track.Language, label));
+                    if (_pathSeen)
+                    {
+                        _ipc?.Command("sub-add", path.Replace('\\', '/'), "auto");
+                    }
+
+                    Trace.Write($"server subtitle {Path.GetFileName(path)} " +
+                                $"lang={track.Language ?? "-"}");
+                }
+
+                ApplyTrackPrefs();
+            });
+        }
+    }
+
+    private static async Task<string?> DownloadServerSubtitleAsync(
+        SubtitleTrackDto track, PlaySourceDto source)
+    {
+        if (string.IsNullOrEmpty(track.Url))
+        {
+            return null;
+        }
+
+        using var handler = new HttpClientHandler();
+        if (!string.IsNullOrEmpty(source.Proxy))
+        {
+            handler.Proxy = new System.Net.WebProxy(
+                source.Proxy.Contains("://", StringComparison.Ordinal)
+                    ? source.Proxy
+                    : "http://" + source.Proxy);
+            handler.UseProxy = true;
+        }
+
+        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+        using var request = new HttpRequestMessage(HttpMethod.Get, track.Url);
+        foreach (var header in source.Headers)
+        {
+            request.Headers.TryAddWithoutValidation(header.Name, header.Value);
+        }
+
+        try
+        {
+            using var response = await http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                Trace.Write($"server subtitle failed {(int)response.StatusCode} " +
+                            $"guid={track.Guid}");
+                return null;
+            }
+
+            var data = await response.Content.ReadAsByteArrayAsync();
+            if (data.Length == 0)
+            {
+                return null;
+            }
+
+            var ext = Path.GetExtension(new Uri(track.Url).AbsolutePath).TrimStart('.');
+            if (string.IsNullOrEmpty(ext))
+            {
+                ext = "srt";
+            }
+
+            var folder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "dvplayer", "cache", "subtitles");
+            Directory.CreateDirectory(folder);
+            var name = string.Concat($"server-{source.ItemId}-{track.Guid}".Select(ch =>
+                char.IsLetterOrDigit(ch) || ch is '.' or '-' or '_' ? ch : '_'));
+            var path = Path.Combine(folder, $"{name}.{ext}");
+            await File.WriteAllBytesAsync(path, data);
+            return path;
+        }
+        catch (Exception error)
+        {
+            Trace.Write("server subtitle error " + error.Message);
+            return null;
+        }
+    }
 
     /// <summary>
     /// 同目录外挂字幕交给 mpv：`sub-add` 必须在文件加载后发，
@@ -2098,6 +2232,12 @@ public partial class PlayWindow : Window
             return;
         }
 
+        // 服务端外挂字幕还在下载：等它们进来再选，别先选到内嵌轨。
+        if (_pendingServerSubs > 0)
+        {
+            return;
+        }
+
         // 字幕轨还没出现（外挂字幕 / 原盘字幕索引较慢）：等下一次轨道清单。
         if (_subtitleTracks.Count == 0)
         {
@@ -2110,6 +2250,31 @@ public partial class PlayWindow : Window
                     SidecarSubtitles.SamePath(sub.Path, track.ExternalFilename))))
         {
             return;
+        }
+
+        // 服务端字幕表的下标和 mpv 轨顺序可能不同（外挂字幕常排在最后），
+        // 直接按下标会选错轨。轨上有语言时先按 mpv 轨选（外挂的简体 / 繁体
+        // 是壳按 `chs` / `cht` 补的），轨上没语言再回退服务器表。
+        if (_subtitleTracks.Any(t => !string.IsNullOrEmpty(t.Language) ||
+                                     !string.IsNullOrEmpty(t.Title)))
+        {
+            var mpvDefault = _subtitleTracks.FirstOrDefault(t => t.Selected);
+            var mpvSimplified = _subtitleTracks.FirstOrDefault(t =>
+                TrackPrefs.IsSimplified(t.Language, t.Title));
+            var mpvTraditional = _subtitleTracks.FirstOrDefault(t =>
+                TrackPrefs.IsTraditional(t.Language, t.Title));
+            var mpvChinese = _subtitleTracks.FirstOrDefault(t =>
+                TrackPrefs.IsChinese(t.Language, t.Title));
+            var mpvChosen = mpvSimplified ?? mpvTraditional ?? mpvChinese ?? mpvDefault;
+            if (mpvChosen is not null)
+            {
+                _subtitlePrefsApplied = true;
+                _ipc.Command("set_property", "sid", mpvChosen.Id);
+                Trace.Write($"subtitle resolve mpv id={mpvChosen.Id} " +
+                            $"lang={mpvChosen.Language ?? "-"} " +
+                            $"title={mpvChosen.Title ?? "-"}");
+                return;
+            }
         }
 
         // 没手动选时，自动选择要读服务器的字幕表；媒体信息还在路上就先等，

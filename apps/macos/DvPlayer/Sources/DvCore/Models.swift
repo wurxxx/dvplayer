@@ -214,6 +214,18 @@ public struct MediaDetail: Codable, Identifiable, Sendable {
     public let imdbId: String?
 }
 
+/// 播放源随带的轨道表（外挂字幕带下载地址）。
+public struct SubtitleTrack: Codable, Hashable, Sendable {
+    public let guid: String
+    public let language: String?
+    public let codec: String?
+    public let format: String?
+    public let isExternal: Bool
+    public let isBitmap: Bool
+    /// 外挂字幕的下载地址；内嵌字幕为 nil。请求头用 `PlaySource.headers`。
+    public let url: String?
+}
+
 public struct PlaySource: Codable, Sendable {
     public let itemId: String
     public let title: String
@@ -233,6 +245,8 @@ public struct PlaySource: Codable, Sendable {
     public let audioCodec: String?
     /// 服务器设的 HTTP 代理；空 = 直连。播放请求也走它。
     public let proxy: String?
+    /// 播放源的轨道表；外挂字幕的 `url` 用来下载。
+    public let subtitleStreams: [SubtitleTrack]?
 }
 
 public struct AudioInfo: Codable, Hashable, Sendable {

@@ -36,7 +36,7 @@ use crate::models::{
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
-use crate::sources::{job_label, language_label, MediaSource};
+use crate::sources::{job_label, language_label, subtitle_extension, MediaSource};
 
 const TICKS_PER_SECOND: i64 = 10_000_000;
 const CLIENT_VERSION: &str = "0.1.0";
@@ -673,16 +673,36 @@ impl JellyfinSource {
             })
             .collect();
 
+        // 外挂字幕要给播放器一个能直接下载的地址（带服务器自己的路径），
+        // 内嵌字幕在视频流里，不需要单独下载。
         let subtitle_streams: Vec<SubtitleTrack> = streams
             .iter()
             .filter(|s| s.kind == "Subtitle")
-            .map(|s| SubtitleTrack {
-                guid: s.index.to_string(),
-                language: s.language.clone().filter(|v| !v.is_empty()),
-                codec: s.codec.clone().filter(|v| !v.is_empty()),
-                format: s.codec.clone().filter(|v| !v.is_empty()),
-                is_external: s.is_external,
-                is_bitmap: !s.is_text_subtitle_stream.unwrap_or(s.is_external),
+            .map(|s| {
+                let is_bitmap = !s.is_text_subtitle_stream.unwrap_or(s.is_external);
+                let url = s.is_external.then(|| {
+                    let source = if media_id.is_empty() {
+                        "-"
+                    } else {
+                        media_id.as_str()
+                    };
+                    format!(
+                        "{}/Videos/{item_id}/{}/Subtitles/{}/Stream.{}",
+                        self.base,
+                        percent_encode(source),
+                        s.index,
+                        subtitle_extension(s.codec.as_deref().unwrap_or_default(), is_bitmap)
+                    )
+                });
+                SubtitleTrack {
+                    guid: s.index.to_string(),
+                    language: s.language.clone().filter(|v| !v.is_empty()),
+                    codec: s.codec.clone().filter(|v| !v.is_empty()),
+                    format: s.codec.clone().filter(|v| !v.is_empty()),
+                    is_external: s.is_external,
+                    is_bitmap,
+                    url,
+                }
             })
             .collect();
 

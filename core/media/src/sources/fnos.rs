@@ -918,6 +918,8 @@ impl FnOsSource {
                 format: empty_to_none(s.format),
                 is_external: s.is_external > 0,
                 is_bitmap: s.is_bitmap > 0,
+                // 飞牛还没有确认的视频外挂字幕下载端点，先不给地址。
+                url: None,
             })
             .collect();
 

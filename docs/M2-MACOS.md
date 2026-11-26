@@ -372,6 +372,18 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
 - `PlayerSession.sidecarSubsReady`：外挂轨没全进 `track-list` 前不套用字幕偏好，
   免得把「第 2 张外挂」套到内嵌轨。回归日志：`[Play] sidecar subs N: …`。
 
+**服务端外挂字幕（Emby / Jellyfin）**
+
+- 核心把 `SubtitleTrack.url` 填成服务器字幕下载地址，macOS 的
+  `prepareServerSubtitles` 带播放源自己的请求头（和代理）下载到
+  `~/Library/Caches/DvPlayer/subtitles/server-<item>-<index>.<ext>`，
+  再 `mpv.addSidecarSubtitle` 交给 `@file-loaded` 后的 `sub-add`。
+- 下载没完成前 `pendingServerSubtitles > 0`，不套用字幕偏好，也先不自动选轨。
+- 服务端字幕表的顺序和 mpv 的 `track-list` 可能不同（外挂字幕常排在最后），
+  自动选择先按 mpv 自己的轨（外挂的语言 / 简体标记是壳补的）；轨上完全没有
+  语言 / 标题时才回退服务器字幕表。回归日志：
+  `[Play] server subtitle …` / `[Play] subtitle resolve mpv id=…`。
+
 **弹幕（弹弹play）**
 
 - 按「剧名 + 集号」匹配：`/api/v2/search/episodes?anime=&episode=` → episodeId，

@@ -219,6 +219,9 @@ pub struct SubtitleTrack {
     pub is_external: bool,
     #[serde(default)]
     pub is_bitmap: bool,
+    /// 外挂字幕的下载地址（服务端拼好）；请求头用 `PlaySource.headers`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 /// 实际交给播放器的地址：URL + 必须带上的头。

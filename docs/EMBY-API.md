@@ -74,6 +74,11 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
   把 `http://host:8096/emby` 整个填进来，适配器按原样拼路径。
 - **错误信息**：HTTP 非 2xx 时优先取 `{"Error": …}`，Jellyfin 的 ProblemDetails
   也能落到 `error`/`Message`；再不行就截断原文。
+- **外挂字幕下载**：`PlaybackInfo` 的 `MediaStreams` 里 `IsExternal` 的字幕，
+  `playSource` 拼 `/Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}`
+  填进 `SubtitleTrack.url`，播放器下载到缓存再 `sub-add`（带播放源的
+  `X-Emby-Token`）。扩展名按编码给：文本 `srt` / `ass` / `vtt`，图形 `sup` / `sub`。
+  不用服务器返回的 `DeliveryUrl`：它带 `api_key`，写进 URL 会进日志 / 缓存名。
 
 ## 5. 验证状态与已知风险
 
@@ -85,7 +90,7 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 | 详情与图片 | **已验证**：海报、背景图、简介、时长、`RecursiveItemCount`（「N 集」）都正常；没有剧照的条目回退成渐变占位（服务器没生成图，不是 bug） |
 | 播放直链 | **已验证**：`PlaybackInfo` 只传 `{UserId}` 就够了；`Static=true&MediaSourceId=…&api_key=…` 直连原文件，该实例上 mpv 解出 4K HEVC + eac3/aac 两轨 |
 | 进度回写 | **已验证**：走 `POST /Sessions/Playing` → `/Sessions/Playing/Progress` → `/Sessions/Playing/Stopped`，`Stopped` 之后服务端才写 `UserData.PlaybackPositionTicks`。`POST /Users/{uid}/Items/{id}/UserData` 在该实例的反代上直接 404，只作兜底 |
-| 外挂字幕 | 只给了轨道信息，没给 `DeliveryUrl`；字幕选择（B12）做的时候再拼 `/Videos/{id}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` |
+| 外挂字幕 | **已验证**：`PlaybackInfo.MediaStreams` 里 `IsExternal` 的 ass / srt 由 `playSource` 拼下载地址，客户端落到缓存后 `sub-add`；菜单显示「中文 · 简体 / 中文 · 繁体」，自动选择也认这些轨 |
 | Jellyfin | 独立适配器（`jellyfin.rs`），端点与认证头不同，见 [JELLYFIN-API.md](JELLYFIN-API.md) |
 
 播放直链与进度回写已在 Emby 4.9.3 实例（https + openresty 反代）实测通过。
