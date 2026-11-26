@@ -1,17 +1,24 @@
-// libmpv + EGL/OpenGL ES 最小渲染层（A4 的第一步）。
+// libmpv + EGL/OpenGL ES 渲染层（A4 最小出画 + A5 HDR 输出）。
 //
 // 结构：
 //   - mpv 的 event 线程独立跑（mpv_wait_event 会阻塞）；
 //   - EGLDisplay / EGLContext / EGLSurface 与 mpv_render_context 全部归渲染线程所有，
 //     attach/detach 只是把 Surface 投递给渲染线程，避免跨线程 makeCurrent；
 //   - mpv_render_context 的 update 回调只置标志 + 唤醒，真正绘制在渲染线程里。
+//
+// HDR：事件线程监听 video-params/primaries 与 gamma，算出目标 dataspace；
+// 渲染线程据此重建 EGLSurface（EGL_GL_COLORSPACE_BT2020_PQ_EXT 等）并调用
+// ANativeWindow_setBuffersDataSpace。两者必须一起做，只改其中一个不会真的进 HDR。
 #include <jni.h>
 
+#include <android/data_space.h>
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 
+#include <dlfcn.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 
 #include <mpv/client.h>
@@ -32,9 +39,30 @@
 
 namespace {
 
+constexpr int32_t kDataspaceSrgb = ADATASPACE_SRGB;
+// ADATASPACE_* 在 API 28 才进 NDK 头，这里是同名的字面值，运行时由系统解释。
+constexpr int32_t kDataspaceBt2020Pq = ADATASPACE_BT2020_PQ;
+constexpr int32_t kDataspaceBt2020Hlg = ADATASPACE_BT2020_HLG;
+
 void *egl_proc_address(void *ctx, const char *name) {
     (void)ctx;
     return reinterpret_cast<void *>(eglGetProcAddress(name));
+}
+
+// ANativeWindow_setBuffersDataSpace 是 __INTRODUCED_IN(28)，minSdk 是 26，
+// 直接调用会链接失败，所以运行时 dlsym。
+using SetBuffersDataSpaceFn = int32_t (*)(ANativeWindow *, int32_t);
+
+SetBuffersDataSpaceFn set_buffers_dataspace() {
+    static SetBuffersDataSpaceFn fn = [] {
+        void *lib = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
+        if (!lib) {
+            return static_cast<SetBuffersDataSpaceFn>(nullptr);
+        }
+        return reinterpret_cast<SetBuffersDataSpaceFn>(
+            dlsym(lib, "ANativeWindow_setBuffersDataSpace"));
+    }();
+    return fn;
 }
 
 struct Player {
@@ -51,6 +79,7 @@ struct Player {
     bool detach_requested = false;
     bool quit = false;
     std::atomic<bool> redraw{false};
+
     // GL 就绪前 loadfile 会让 mpv 认为「没有视频输出」，只播音频；
     // 所以先把文件攒起来，等 render context 建好再真正加载。
     std::string pending_file;
@@ -58,14 +87,25 @@ struct Player {
     int pending_width = 0;
     int pending_height = 0;
 
+    // 事件线程写、渲染线程读
+    std::atomic<int32_t> desired_dataspace{kDataspaceSrgb};
+    std::atomic<bool> surface_dirty{false};
+    std::string primaries;
+    std::string gamma;
+
     // 以下只允许渲染线程访问
     EGLDisplay display = EGL_NO_DISPLAY;
     EGLContext context = EGL_NO_CONTEXT;
     EGLSurface surface = EGL_NO_SURFACE;
     EGLConfig config = nullptr;
+    ANativeWindow *window = nullptr;  // 持有引用，直到 detach
+    int32_t applied_dataspace = -1;
+    int32_t surface_dataspace = kDataspaceSrgb;
     int width = 0;
     int height = 0;
     std::atomic<bool> gl_ready{false};
+    bool has_pq_colorspace = false;
+    bool has_hlg_colorspace = false;
 };
 
 void on_render_update(void *ctx) {
@@ -90,6 +130,10 @@ bool init_egl(Player *p) {
         return false;
     }
 
+    const char *exts = eglQueryString(p->display, EGL_EXTENSIONS);
+    p->has_pq_colorspace = exts && strstr(exts, "EGL_EXT_gl_colorspace_bt2020_pq");
+    p->has_hlg_colorspace = exts && strstr(exts, "EGL_EXT_gl_colorspace_bt2020_hlg");
+
     const EGLint attribs[] = {
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -111,7 +155,9 @@ bool init_egl(Player *p) {
         LOGE("eglCreateContext 失败: 0x%x", eglGetError());
         return false;
     }
-    LOGI("EGL 就绪: %s", eglQueryString(p->display, EGL_VERSION));
+    LOGI("EGL 就绪: %s · PQ colorspace %s · HLG colorspace %s",
+         eglQueryString(p->display, EGL_VERSION), p->has_pq_colorspace ? "有" : "无",
+         p->has_hlg_colorspace ? "有" : "无");
     return true;
 }
 
@@ -146,10 +192,23 @@ bool create_render_context(Player *p) {
     return true;
 }
 
-// 换窗口：只重建 EGLSurface，display / context / render context 复用。
-bool install_window(Player *p, ANativeWindow *win, int w, int h) {
+/** dataspace → EGL surface 的 GL colorspace。设备不支持时回退 SRGB。 */
+EGLint egl_colorspace_for(Player *p, int32_t dataspace) {
+    if (dataspace == kDataspaceBt2020Pq && p->has_pq_colorspace) {
+        return EGL_GL_COLORSPACE_BT2020_PQ_EXT;
+    }
+    if (dataspace == kDataspaceBt2020Hlg && p->has_hlg_colorspace) {
+        return EGL_GL_COLORSPACE_BT2020_HLG_EXT;
+    }
+    return EGL_GL_COLORSPACE_SRGB_KHR;
+}
+
+/** 用指定 colorspace 重建 EGLSurface（换窗口、切 HDR 都走这里）。 */
+bool rebuild_surface(Player *p, EGLint colorspace) {
     if (!init_egl(p)) {
-        ANativeWindow_release(win);
+        return false;
+    }
+    if (!p->window) {
         return false;
     }
 
@@ -159,37 +218,49 @@ bool install_window(Player *p, ANativeWindow *win, int w, int h) {
         p->surface = EGL_NO_SURFACE;
     }
 
-    p->surface = eglCreateWindowSurface(p->display, p->config, win, nullptr);
-    ANativeWindow_release(win);
+    EGLint used_colorspace = colorspace;
+    const EGLint attribs[] = {EGL_GL_COLORSPACE_KHR, colorspace, EGL_NONE};
+    p->surface = eglCreateWindowSurface(p->display, p->config, p->window, attribs);
     if (p->surface == EGL_NO_SURFACE) {
-        LOGE("eglCreateWindowSurface 失败: 0x%x", eglGetError());
-        return false;
+        LOGE("eglCreateWindowSurface(colorspace 0x%x) 失败: 0x%x，回退 SRGB", colorspace,
+             eglGetError());
+        used_colorspace = EGL_GL_COLORSPACE_SRGB_KHR;
+        const EGLint fallback[] = {EGL_GL_COLORSPACE_KHR, used_colorspace, EGL_NONE};
+        p->surface = eglCreateWindowSurface(p->display, p->config, p->window, fallback);
+        if (p->surface == EGL_NO_SURFACE) {
+            LOGE("回退 SRGB 也失败: 0x%x", eglGetError());
+            return false;
+        }
+    }
+
+    if (used_colorspace == EGL_GL_COLORSPACE_BT2020_PQ_EXT) {
+        p->surface_dataspace = kDataspaceBt2020Pq;
+    } else if (used_colorspace == EGL_GL_COLORSPACE_BT2020_HLG_EXT) {
+        p->surface_dataspace = kDataspaceBt2020Hlg;
+    } else {
+        p->surface_dataspace = kDataspaceSrgb;
     }
     if (!eglMakeCurrent(p->display, p->surface, p->surface, p->context)) {
         LOGE("eglMakeCurrent 失败: 0x%x", eglGetError());
         return false;
     }
 
-    p->width = w;
-    p->height = h;
+    p->applied_dataspace = -1;  // 强制重新设置 window dataspace
     p->gl_ready.store(create_render_context(p), std::memory_order_release);
     p->redraw.store(true, std::memory_order_release);
-    LOGI("Surface %dx%d 就绪", w, h);
-
-    if (p->gl_ready.load(std::memory_order_acquire)) {
-        std::string pending;
-        {
-            std::lock_guard<std::mutex> lock(p->mu);
-            if (p->has_pending) {
-                pending.swap(p->pending_file);
-                p->has_pending = false;
-            }
-        }
-        if (!pending.empty()) {
-            load_file(p->mpv, pending);
-        }
-    }
+    LOGI("EGLSurface 重建：colorspace 0x%x · %dx%d", colorspace, p->width, p->height);
     return p->gl_ready.load(std::memory_order_acquire);
+}
+
+/** 第一次拿到 window：存引用并建面。 */
+bool install_window(Player *p, ANativeWindow *win, int w, int h) {
+    if (p->window) {
+        ANativeWindow_release(p->window);
+    }
+    p->window = win;
+    p->width = w;
+    p->height = h;
+    return rebuild_surface(p, egl_colorspace_for(p, p->desired_dataspace.load()));
 }
 
 void release_surface(Player *p) {
@@ -211,6 +282,21 @@ void draw_frame(Player *p) {
     if (!eglMakeCurrent(p->display, p->surface, p->surface, p->context)) {
         LOGE("渲染线程 makeCurrent 失败: 0x%x", eglGetError());
         return;
+    }
+
+    // dataspace 要在分配新 buffer 之前设好，新的一帧才会带 HDR 标记。
+    const int32_t ds = p->surface_dataspace;
+    if (p->window && ds != p->applied_dataspace) {
+        auto fn = set_buffers_dataspace();
+        if (fn) {
+            int32_t err = fn(p->window, ds);
+            if (err == 0) {
+                p->applied_dataspace = ds;
+                LOGI("window dataspace -> 0x%x", ds);
+            } else {
+                LOGW("setBuffersDataSpace(0x%x) 失败: %d", ds, err);
+            }
+        }
     }
 
     const uint64_t flags = mpv_render_context_update(p->render);
@@ -237,8 +323,8 @@ void draw_frame(Player *p) {
     static int frames = 0;
     if (frames < 3) {
         ++frames;
-        LOGI("渲染第 %d 帧 flags=0x%llx gl=%s", frames,
-             static_cast<unsigned long long>(flags), glGetString(GL_VERSION));
+        LOGI("渲染第 %d 帧 flags=0x%llx dataspace=0x%x", frames,
+             static_cast<unsigned long long>(flags), p->applied_dataspace);
     }
 }
 
@@ -247,6 +333,7 @@ void render_loop(Player *p) {
     while (!p->quit) {
         p->cv.wait(lock, [p] {
             return p->quit || p->pending_window != nullptr || p->detach_requested ||
+                   p->surface_dirty.load(std::memory_order_acquire) ||
                    p->redraw.load(std::memory_order_acquire);
         });
         if (p->quit) {
@@ -258,18 +345,38 @@ void render_loop(Player *p) {
         const int w = p->pending_width;
         const int h = p->pending_height;
         const bool detach = p->detach_requested;
+        const bool colorspace_change = p->surface_dirty.exchange(false);
         p->detach_requested = false;
         p->redraw.store(false, std::memory_order_release);
         lock.unlock();
 
-        if (win != nullptr) {
-            install_window(p, win, w, h);
-        }
         if (detach) {
+            if (win) {
+                ANativeWindow_release(win);
+            }
             release_surface(p);
+            if (p->window) {
+                ANativeWindow_release(p->window);
+                p->window = nullptr;
+            }
+        } else if (win != nullptr) {
+            install_window(p, win, w, h);
+            std::string pending;
+            {
+                std::lock_guard<std::mutex> guard(p->mu);
+                if (p->has_pending) {
+                    pending.swap(p->pending_file);
+                    p->has_pending = false;
+                }
+            }
+            if (!pending.empty()) {
+                load_file(p->mpv, pending);
+            }
+        } else if (colorspace_change && p->window) {
+            rebuild_surface(p, egl_colorspace_for(p, p->desired_dataspace.load()));
         }
-        draw_frame(p);
 
+        draw_frame(p);
         lock.lock();
     }
     lock.unlock();
@@ -282,6 +389,34 @@ void render_loop(Player *p) {
         }
         mpv_render_context_free(p->render);
         p->render = nullptr;
+    }
+}
+
+int32_t pick_dataspace(const std::string &primaries, const std::string &gamma) {
+    const bool bt2020 = primaries == "bt.2020" || primaries == "bt2020";
+    if (bt2020 && gamma == "pq") {
+        return kDataspaceBt2020Pq;
+    }
+    if (bt2020 && gamma == "hlg") {
+        return kDataspaceBt2020Hlg;
+    }
+    return kDataspaceSrgb;
+}
+
+void update_colorspace(Player *p) {
+    std::string prim;
+    std::string g;
+    {
+        std::lock_guard<std::mutex> lock(p->mu);
+        prim = p->primaries;
+        g = p->gamma;
+    }
+    const int32_t ds = pick_dataspace(prim, g);
+    if (ds != p->desired_dataspace.load(std::memory_order_acquire)) {
+        p->desired_dataspace.store(ds, std::memory_order_release);
+        p->surface_dirty.store(true, std::memory_order_release);
+        LOGI("色彩空间变化：prim=%s gamma=%s -> dataspace 0x%x", prim.c_str(), g.c_str(), ds);
+        p->cv.notify_one();
     }
 }
 
@@ -308,16 +443,35 @@ void event_loop(Player *p) {
         }
         case MPV_EVENT_FILE_LOADED: {
             char *vo = mpv_get_property_string(p->mpv, "current-vo");
-            char *configured = mpv_get_property_string(p->mpv, "vo-configured");
             char *hwdec = mpv_get_property_string(p->mpv, "hwdec-current");
             char *pixfmt = mpv_get_property_string(p->mpv, "video-params/pixelformat");
-            LOGI("file loaded: vo=%s configured=%s hwdec=%s pixfmt=%s", vo ? vo : "?",
-                 configured ? configured : "?", hwdec ? hwdec : "?",
-                 pixfmt ? pixfmt : "?");
+            char *prim = mpv_get_property_string(p->mpv, "video-params/primaries");
+            char *gamma = mpv_get_property_string(p->mpv, "video-params/gamma");
+            LOGI("file loaded: vo=%s hwdec=%s pixfmt=%s prim=%s gamma=%s", vo ? vo : "?",
+                 hwdec ? hwdec : "?", pixfmt ? pixfmt : "?", prim ? prim : "?",
+                 gamma ? gamma : "?");
             mpv_free(vo);
-            mpv_free(configured);
             mpv_free(hwdec);
             mpv_free(pixfmt);
+            mpv_free(prim);
+            mpv_free(gamma);
+            break;
+        }
+        case MPV_EVENT_PROPERTY_CHANGE: {
+            auto *prop = static_cast<mpv_event_property *>(ev->data);
+            if (prop->format != MPV_FORMAT_STRING || !prop->data) {
+                break;
+            }
+            const char *value = *static_cast<char **>(prop->data);
+            {
+                std::lock_guard<std::mutex> lock(p->mu);
+                if (strcmp(prop->name, "video-params/primaries") == 0) {
+                    p->primaries = value ? value : "";
+                } else if (strcmp(prop->name, "video-params/gamma") == 0) {
+                    p->gamma = value ? value : "";
+                }
+            }
+            update_colorspace(p);
             break;
         }
         default:
@@ -354,6 +508,8 @@ Java_com_dvplayer_player_mpv_MpvNative_create(JNIEnv *, jobject) {
     set_option(p->mpv, "vo", "libmpv");
     set_option(p->mpv, "gpu-api", "opengl");
     set_option(p->mpv, "hwdec", "auto-safe");
+    // A5：把片源的色彩空间（PQ / BT.2020）交给显示端，不做 tone mapping。
+    set_option(p->mpv, "target-colorspace-hint", "yes");
     set_option(p->mpv, "msg-level", "all=warn");
 
     int err = mpv_initialize(p->mpv);
@@ -363,6 +519,10 @@ Java_com_dvplayer_player_mpv_MpvNative_create(JNIEnv *, jobject) {
         delete p;
         return 0;
     }
+
+    // 色彩属性变化会驱动 EGLSurface / dataspace 切换。
+    mpv_observe_property(p->mpv, 1, "video-params/primaries", MPV_FORMAT_STRING);
+    mpv_observe_property(p->mpv, 2, "video-params/gamma", MPV_FORMAT_STRING);
 
     p->event_thread = std::thread(event_loop, p);
     p->render_thread = std::thread(render_loop, p);
@@ -421,12 +581,16 @@ Java_com_dvplayer_player_mpv_MpvNative_play(JNIEnv *env, jobject, jlong handle, 
     env->ReleaseStringUTFChars(jurl, url);
 
     // GL 还没就绪就先攒着；install_window 建好 render context 后会加载。
-    if (!p->gl_ready.load(std::memory_order_acquire)) {
+    // 判断和暂存都放在 p->mu 里：否则可能出现「渲染线程刚建好 context、
+    // 检查完 has_pending 之后，我们才写入 pending_file」的窗口，文件就不加载了。
+    {
         std::lock_guard<std::mutex> lock(p->mu);
-        p->pending_file = copy;
-        p->has_pending = true;
-        LOGI("GL 未就绪，暂存 %s", copy.c_str());
-        return;
+        if (!p->gl_ready.load(std::memory_order_acquire)) {
+            p->pending_file = copy;
+            p->has_pending = true;
+            LOGI("GL 未就绪，暂存 %s", copy.c_str());
+            return;
+        }
     }
     load_file(p->mpv, copy);
 }
@@ -524,6 +688,10 @@ Java_com_dvplayer_player_mpv_MpvNative_destroy(JNIEnv *, jobject, jlong handle) 
         eglDestroyContext(p->display, p->context);
         eglTerminate(p->display);
         p->display = EGL_NO_DISPLAY;
+    }
+    if (p->window) {
+        ANativeWindow_release(p->window);
+        p->window = nullptr;
     }
 
     mpv_terminate_destroy(p->mpv);
