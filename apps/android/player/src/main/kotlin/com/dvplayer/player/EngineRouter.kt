@@ -9,12 +9,14 @@ import android.view.Display
  *
  * 规则（M2 定稿）：
  * 1. 非本地文件 → mpv。
- * 2. Dolby Vision（dvcC/dvvC）→ mpv：平台解码器丢掉 DV 元数据，只有 mpv
+ * 2. 蓝光原盘（ISO / BDMV 目录）→ mpv：只有它链了 libbluray，能选播放列表、
+ *    章节与 PGS 字幕；Media3 不认识原盘结构。
+ * 3. Dolby Vision（dvcC/dvvC）→ mpv：平台解码器丢掉 DV 元数据，只有 mpv
  *    会按 DV 做整形（P5 输出 SDR / P8 保留 HDR10 兼容层）。
- * 3. 设备不支持 HDR10+ → mpv（不用解 SEI）。
- * 4. 片源带 ST2094-40（HDR10+）→ Media3：只有平台 MediaCodec 能把动态元数据
+ * 4. 设备不支持 HDR10+ → mpv（不用解 SEI）。
+ * 5. 片源带 ST2094-40（HDR10+）→ Media3：只有平台 MediaCodec 能把动态元数据
  *    交给显示端；mpv 的 EGL 路径没有公开写入接口。
- * 5. 其余 → mpv（默认内核，负责原盘 / ASS）。
+ * 6. 其余 → mpv（默认内核，负责 ASS）。
  *
  * 探测直接用 [Hdr10PlusProbe] 解十几帧，看解码器输出格式里有没有
  * `hdr10-plus-info`，代价约 0.2–0.5 秒。
@@ -26,6 +28,10 @@ class EngineRouter(private val context: Context) {
     fun choose(url: String, probeFrames: Int = 12): Decision {
         if (url.contains("://")) {
             return Decision(EngineId.MPV, "非本地片源，跳过探测")
+        }
+        // 原盘先判：ISO 与 BDMV 目录既没有可探测的普通视频轨，也不能交给 Media3。
+        DiscSource.detect(url)?.let {
+            return Decision(EngineId.MPV, "蓝光原盘（${it.kind.label}），交 mpv/libbluray")
         }
         // Dolby Vision：平台解码器不认 DV 元数据，只有 mpv 会整形。
         DolbyVisionProbe.probe(url)?.let {

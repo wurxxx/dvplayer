@@ -24,6 +24,7 @@ import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.SubtitleView
+import com.dvplayer.player.DiscSource
 import com.dvplayer.player.EngineId
 import com.dvplayer.player.EngineRouter
 import com.dvplayer.player.FrameRateMatcher
@@ -77,6 +78,12 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     private val url: String
         get() = intent.getStringExtra("url") ?: DEFAULT_URL
+
+    /** 原盘（ISO / BDMV 目录）换成 mpv 的 bluray:// 地址，其余原样。 */
+    private val playUrl: String
+        get() = disc?.playUrl ?: url
+
+    private val disc: DiscSource.Disc? by lazy { DiscSource.detect(url) }
 
     /** 外部字幕路径：`--es sub /path/to.ass`，默认是内置测试 srt。 */
     private val subtitleUrl: String
@@ -297,7 +304,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 media3?.onCues = { cues -> subtitleView?.setCues(cues.cues) }
                 if (!started) {
                     started = true
-                    media3?.load(url)
+                    media3?.load(playUrl)
                     if (intent.getStringExtra("sub") != null) media3?.addSubtitle(subtitleUrl)
                 }
             }
@@ -314,7 +321,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 if (!started) {
                     started = true
                     // Surface 的 GL 初始化在渲染线程里异步做；mpv 会自己排队。
-                    mpv.load(url)
+                    mpv.load(playUrl)
                     handler.postDelayed({ Log.i(TAG, "章节：${mpv.chapters()}") }, 3000)
                 }
             }
@@ -565,6 +572,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             }
             appendLine(player.debugCue)
             append(playbackLine())
+            disc?.let { appendLine("原盘 ${it.kind.label}：${it.playUrl}") }
             append(url)
         }
     }
@@ -584,6 +592,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             }
             appendLine("fps ${p("estimated-vf-fps")} · drops ${p("frame-drop-count")} · mode ${mode.modeId}@${"%.2f".format(mode.refreshRate)}Hz")
             append(playbackLine())
+            disc?.let { appendLine("原盘 ${it.kind.label}：${it.playUrl}") }
             append(url)
         }
     }

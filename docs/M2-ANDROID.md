@@ -140,7 +140,11 @@ interface PlaybackEngine {
 
 见 [BLU-RAY.md](BLU-RAY.md) §5.3。要点：
 
-- 本地 / SAF 的 ISO、BDMV 走 mpv `--bluray-device`；
+- 本地 ISO / BDMV 目录**直接用普通路径**交给 mpv；mpv 的 `bdmv_dir_stream_open`
+  会识别 `.iso` 与含 `BDMV/MovieObject.bdmv` 的目录，验证后内部转
+  `bluray://<title>/<device>`。不要自己拼 `bluray://`：这条协议的路径是
+  `bluray://title/device`，拼成 `bluray:///abs/path` 会被当成相对路径。
+- 光盘设备（`/dev/sr0`）才需要 `--bluray-device`，移动端用不上；
 - `:player-disc` 用 libbluray 1.5 列 title / 章节（含 HDR / DV 标记与章节名）；
 - NAS 原盘 v1 先下载到缓存，边读边播排 M2-B 之后；
 - Media3 不参与原盘。
@@ -499,6 +503,30 @@ EGLSurface；之前新 surface 是黑的，因为 `mpv_render_context_update()` 
   `Surface.setFrameRate` 会抛 `IllegalStateException: Surface has already been
   released`。现在统一走 `setSurfaceFrameRate()`：先看 `surface.isValid`，
   再兜一层 `runCatching`，帧率提示失败只记日志。
+
+蓝光原盘入口（A8 第一步，2026-11-27）：`:player` 新增 `DiscSource`，在加载前把
+原盘认出来，并让路由直接判给 mpv。
+
+- **目录**：`<root>/BDMV/index.bdmv` 存在 → `root`；用户直接给到 `BDMV`
+  目录时自动上跳一层。
+- **ISO**：文件 ≥ 1MB、32768 处有 UDF 卷识别序列（`BEA01` / `NSR02` / `NSR03`）、
+  且前 4MB 里出现 `BDMV` 目录名。两个条件都满足才算，避免把普通 UDF 镜像
+  误送进 libbluray。
+- `EngineRouter` 里原盘排在 DV / HDR10+ 之前（原盘没有普通视频轨可探）；
+  `PlayerTestActivity` 用 `DiscSource.playUrl` 加载，验证页状态行显示
+  「原盘 BDMV 目录 / ISO 镜像：<path>」。
+
+实测（设备上没有真实原盘样片，用合成结构验证入口链路）：
+
+- 合成 `movie-disc/BDMV/{index.bdmv,MovieObject.bdmv}`（`MovieObject.bdmv`
+  以 `MOBJ0200` 开头，满足 mpv 的 `check_bdmv`）→
+  `DvDisc: BDMV 目录：...`，路由 `蓝光原盘（BDMV 目录），交 mpv/libbluray`，
+  mpv 收到普通路径后尝试按 BDMV 打开，最终 `unrecognized file format`
+  （合成结构没有真实播放列表，符合预期）。
+- 合成 UDF 镜像 `fake-bd.iso`（`BEA01` + `BDMV`）→
+  `DvDisc: ISO 原盘：...`，路由 `蓝光原盘（ISO 镜像）`，mpv 以同一路径加载。
+- **真实原盘播放仍未验**：需要至少一张未加密的 ISO / BDMV 目录样片，才可能
+  看到 libbluray 选主播放列表、章节与 PGS。这一步记为阻塞项。
 
 契约对齐（A6 第二步）：`Media3Player` 实现同一份 `PlayerEngine`，验证页
 `--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
