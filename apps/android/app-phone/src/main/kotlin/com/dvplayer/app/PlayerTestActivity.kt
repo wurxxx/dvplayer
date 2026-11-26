@@ -6,13 +6,17 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Display
 import android.view.Gravity
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.TextView
 import com.dvplayer.player.mpv.MpvPlayer
+import kotlin.math.abs
+import kotlin.math.round
 
 /**
  * A4 / A5 的验证页：SurfaceView → [MpvPlayer] → mpv render API。
@@ -30,6 +34,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var surfaceView: SurfaceView
     private lateinit var status: TextView
     private var started = false
+    private var matchedFps = 0.0
     private val handler = Handler(Looper.getMainLooper())
 
     private val url: String
@@ -37,6 +42,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     private val refresh = object : Runnable {
         override fun run() {
+            maybeMatchFrameRate()
             status.text = statusLine()
             handler.postDelayed(this, 1000)
         }
@@ -121,14 +127,73 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     private fun statusLine(): String {
         fun p(name: String) = player.getProperty(name) ?: "-"
+        val mode = currentDisplay.mode
         return buildString {
             appendLine("${p("width")}×${p("height")} · ${p("video-params/pixelformat")} · hwdec ${p("hwdec-current")}")
             appendLine("prim ${p("video-params/primaries")} · trc ${p("video-params/gamma")} · light ${p("video-params/light")}")
             appendLine("sig-peak ${p("video-params/sig-peak")} · min-luma ${p("video-params/min-luma")} · max-luma ${p("video-params/max-luma")}")
-            appendLine("fps ${p("estimated-vf-fps")} · drops ${p("frame-drop-count")}")
+            appendLine("fps ${p("estimated-vf-fps")} · drops ${p("frame-drop-count")} · mode ${mode.modeId}@${"%.2f".format(mode.refreshRate)}Hz")
             append(url)
         }
     }
+
+    /**
+     * 按片源帧率切显示模式：优先选「刷新率是片源帧率整数倍」的模式，且倍数最小。
+     * 24p 在 120Hz 上是 5 倍——每帧重复 5 次刷新，属于最干净的整数倍 pulldown。
+     * 找不到整数倍时退回最高刷新率。
+     */
+    private fun maybeMatchFrameRate() {
+        val fps = listOf("container-fps", "estimated-vf-fps")
+            .mapNotNull { player.getProperty(it)?.toDoubleOrNull() }
+            .firstOrNull { it > 1.0 } ?: return
+        if (matchedFps > 0 && abs(fps - matchedFps) < 0.01) return
+
+        val display = currentDisplay
+        val current = display.mode
+        val sameSize = display.supportedModes.filter {
+            it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight
+        }
+        if (sameSize.isEmpty()) return
+
+        val best = sameSize
+            .map { it to it.refreshRate / fps }
+            .filter { (_, ratio) -> ratio >= 0.999 && abs(ratio - round(ratio)) < 0.01 }
+            .minByOrNull { (_, ratio) -> ratio }
+            ?.first
+            ?: sameSize.maxByOrNull { it.refreshRate }
+            ?: return
+
+        matchedFps = fps
+
+        val attrs = window.attributes
+        if (attrs.preferredDisplayModeId != best.modeId ||
+            attrs.preferredRefreshRate != best.refreshRate
+        ) {
+            attrs.preferredDisplayModeId = best.modeId
+            @Suppress("DEPRECATION")
+            attrs.preferredRefreshRate = best.refreshRate
+            window.attributes = attrs
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            surfaceView.holder.surface?.setFrameRate(
+                fps.toFloat(),
+                Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+            )
+        }
+        Log.i(
+            TAG,
+            "帧率匹配：source=${fps}fps -> mode ${best.modeId} @ ${best.refreshRate}Hz" +
+                "（×${"%.3f".format(best.refreshRate / fps)}）",
+        )
+    }
+
+    private val currentDisplay: Display
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        }
 
     private companion object {
         const val TAG = "DvPlayerTest"

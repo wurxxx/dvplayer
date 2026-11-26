@@ -9,13 +9,16 @@ Kotlin + Compose。手机（Material3）与 TV（tv-material）两个壳，共�
 - 存储：[ADR-0015](../../docs/adr/0015-android-vfs.md)
 
 状态（2026-11-27）：**A0 环境、A2 骨架、A1 设备能力采集、A4 最小出画、A5 HDR
-通路已落地**。两个 APK 能构建，`:core` 通过 `libdvplayer_media_jni.so` 加载 JNI
-自检；libmpv 由 `build-mpv.sh` 产出单一 `libmpv.so`；`:player-mpv` 用 CMake 把
-Surface 经 EGL + mpv render API 画出来——HBY 5502（Android 9）与 OnePlus 10 Pro
-（Android 16）上都以 720p H.264 + `mediacodec-copy` 出画，时间码正常推进。HDR 片源
-会按 `primaries`/`gamma` 重建 `EGLSurface`（BT2020_PQ / HLG）并写 buffer
-dataspace，OnePlus 上 SurfaceFlinger 已按 `BT2020_PQ` 走 HWC 直出。播放控制
-（暂停 / seek / 切轨 / 字幕）还没接，属于 A4 的后半段。
+输出与帧率匹配已落地**。两个 APK 能构建，`:core` 通过 `libdvplayer_media_jni.so`
+加载 JNI 自检；libmpv 由 `build-mpv.sh` 产出单一 `libmpv.so`；`:player-mpv` 用
+CMake 把 Surface 经 EGL + mpv render API 画出来——HBY 5502（Android 9）与
+OnePlus 10 Pro（Android 16）上都以 720p H.264 + `mediacodec-copy` 出画，时间码
+正常推进。HDR 片源会按 `primaries`/`gamma` 重建 `EGLSurface`（BT2020_PQ / HLG）
+并写 buffer dataspace，真 PQ / HLG 样片在 OnePlus 上 SurfaceFlinger 已按
+`BT2020_PQ` / `BT2020_HLG` 走 HWC 直出；24p 片源会自动切到 120Hz（每帧重复 5 次
+刷新）且稳定态不掉帧。样片生成器见
+[`scripts/android/gen-hdr-sample.py`](../../scripts/android/gen-hdr-sample.py)。
+播放控制（暂停 / seek / 切轨 / 字幕）还没接，属于 A4 的后半段。
 
 ## 模块
 

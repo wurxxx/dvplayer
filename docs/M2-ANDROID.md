@@ -6,8 +6,10 @@
 > libass + libbluray 的 NDK 构建链已跑通；A1 的设备能力采集（`DeviceProfile`）
 > 已落地；A4 的最小出画已在两台真机上跑通（Surface + EGL + mpv render API，
 > 720p H.264 走 `mediacodec-copy`；Android 9 的 MT6765 与 Android 16 的
-> 骁龙 8 Gen 1 都验过）；A5 的 HDR 通路已接通（BT.2020_PQ 的 EGL colorspace +
-> buffer dataspace，SurfaceFlinger 侧已是 `BT2020_PQ` 且 HWC 直出）。
+> 骁龙 8 Gen 1 都验过）；A5 的 HDR 通路已接通并用法生成的**真 PQ / HLG** 片源
+> 验过（BT.2020_PQ / BT2020_HLG 的 EGL colorspace + buffer dataspace，
+> SurfaceFlinger 侧已是 `BT2020_PQ` / `BT2020_HLG` 且 HWC 直出）；24p → 120Hz
+> 的整数倍帧率匹配也已验证。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）、
@@ -214,55 +216,91 @@ libmpv 构建链（A0 的另一半，2026-11-26）：
   走 `mediacodec-copy` 出画，时间码正常推进；`libdvplayer_mpv.so` 同样 16KB 对齐、
   未压缩打包。播放控制、切轨、字幕、属性桥属于 A4 剩下的部分。
 
-HDR 输出（A5 第一步，2026-11-27）：在 OnePlus 10 Pro（Android 16）上，mpv 把
-一段标记为 BT.2020 + PQ 的 HEVC Main10 片源识别为 `prim=bt.2020`、`gamma=pq`、
-`max-luma=10000`，渲染层据此把输出切到 HDR 通路。要点是**两件事必须一起做**，
-只改其中一个不会真的进 HDR：
+HDR 输出（A5，2026-11-27）：在 OnePlus 10 Pro（Android 16）上，mpv 把 BT.2020 +
+PQ 的 HEVC Main10 片源识别为 `prim=bt.2020`、`gamma=pq`、`max-luma=10000`，
+把 BT.2020 + HLG 的片源识别为 `gamma=hlg`、`light=hlg`、`max-luma=1000`。
+渲染层据此把输出切到 HDR 通路。要点是**两件事必须一起做**，只改其中一个不会
+真的进 HDR：
 
 1. **EGLSurface 的 GL colorspace**：用
    `EGL_GL_COLORSPACE_BT2020_PQ_EXT`（`0x3340`）重建 `EGLSurface`，
    `eglCreateWindowSurface` 时传入 `EGL_GL_COLORSPACE_KHR`；HLG 用
-   `EGL_GL_COLORSPACE_BT2020_HLG_EXT`；设备没有对应扩展时回退
+   `EGL_GL_COLORSPACE_BT2020_HLG_EXT`（`0x3540`）；设备没有对应扩展时回退
    `EGL_GL_COLORSPACE_SRGB_KHR`，并同步把 window dataspace 退回 SRGB。
 2. **Buffer dataspace**：`ANativeWindow_setBuffersDataSpace(window,
-   ADATASPACE_BT2020_PQ)`（`163971072` / `0x9C60000`，HLG 是
-   `168165376`）。这个 API 是 `__INTRODUCED_IN(28)`，minSdk 26 不能直接链接，
-   运行时用 `dlsym("libandroid.so", "ANativeWindow_setBuffersDataSpace")` 取，
-   取不到就只做 EGL colorspace（HDR 效果不完整）。
+   ADATASPACE_BT2020_PQ)`（`163971072` / `0x9C60000`；HLG 是
+   `168165376` / `0xA060000`）。这个 API 是 `__INTRODUCED_IN(28)`，minSdk 26
+   不能直接链接，运行时用
+   `dlsym("libandroid.so", "ANativeWindow_setBuffersDataSpace")` 取，取不到就只做
+   EGL colorspace（HDR 效果不完整）。
 
 渲染线程监听 mpv 的 `video-params/primaries` 与 `video-params/gamma`，变化时置
-`surface_dirty`，重建 `EGLSurface` 再在新 buffer 上写 dataspace。`target-colorspace-hint=yes`
-让 mpv 把片源色彩空间透传给显示端、不做 tone mapping。
+`surface_dirty`，重建 `EGLSurface` 再在新 buffer 上写 dataspace。
+`target-colorspace-hint=yes` 让 mpv 把片源色彩空间透传给显示端、不做 tone mapping。
 
-真机证据链（日志 tag `DvMpv`，同一份 `dv-hdr10.mp4`）：
+**真片源**：桌面 ffmpeg 没有 `zscale` / `x265`，所以
+[`scripts/android/gen-hdr-sample.py`](../scripts/android/gen-hdr-sample.py) 直接在
+numpy 里做传递函数——PQ 用 SMPTE ST 2084 的 OETF，HLG 用 ARIB STD-B67 的
+OETF——把编码后的 RGB 按 BT.2020 非恒定亮度矩阵转成 10-bit 有限范围 YUV，再交给
+`hevc_videotoolbox` 编成 Main10，最后用 `hevc_metadata` bsf 写入 VUI
+（PQ: `colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9`；
+HLG: `transfer_characteristics=18`）。这样画面本身是真正的 PQ / HLG 曲线，
+不是只打标签。片源内容是灰阶斜坡 + 8 条色条 + 8 级灰阶 + 底部移动白块。
 
+真机证据链（日志 tag `DvMpv`，OnePlus 10 Pro / Android 16）：
+
+PQ（`dv-hdr10-real.mp4`，BT.2020 / PQ / Main10 / 24p）：
 ```
-EGL 就绪: 1.5 Android META-EGL · PQ colorspace 有 · HLG colorspace 有
 file loaded: ... hwdec=mediacodec-copy pixfmt=nv12 prim=bt.2020 gamma=pq
 色彩空间变化：prim=bt.2020 gamma=pq -> dataspace 0x9c60000
 EGLSurface 重建：colorspace 0x3340 · 1440x3216
 window dataspace -> 0x9c60000
 ```
+SurfaceFlinger：`dataspace=BT2020_PQ (163971072)`，`composition type=DEVICE`。
 
-再到系统侧确认：`dumpsys SurfaceFlinger --layers` 里 SurfaceView 层的
-`dataspace=BT2020_PQ (163971072)`，且 `dumpsys SurfaceFlinger` 的合成列表里这层是
-`composition type=DEVICE`（HWC 直出，不经 GPU），HWC 当前色彩模式是
-`ColorMode::DISPLAY_P3`。
+HLG（`dv-hlg-real.mp4`，BT.2020 / HLG / Main10 / 24p）：
+```
+色彩空间变化：prim=bt.2020 gamma=hlg -> dataspace 0xa060000
+EGLSurface 重建：colorspace 0x3540 · 1440x3216
+window dataspace -> 0xa060000
+```
+SurfaceFlinger：`dataspace=BT2020_HLG (168165376)`。
+
+**帧率匹配**：`PlayerTestActivity` 每秒读一次 `container-fps`（退回
+`estimated-vf-fps`），在「与当前分辨率相同」的显示模式里挑**刷新率是片源帧率
+整数倍、且倍数最小**的那个，写
+`WindowManager.LayoutParams.preferredDisplayModeId`（同时设
+`preferredRefreshRate`），API 30+ 再调
+`Surface.setFrameRate(fps, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)`。
+
+- 24p → 120Hz：`120 / 24 = 5`，每个视频帧在 120Hz 面板上重复 5 次刷新。
+  日志 `帧率匹配：source=24.0fps -> mode 6 @ 120.00001Hz（×5.000）`，
+  `dumpsys display` 的 `mActiveModeId=6`，SurfaceFlinger 的
+  `vsyncRate=120.00 Hz`。
+- 30 秒 24p 片源在稳定态两次采样都是 `fps 24.000000 · drops 0 · mode 6@120.00Hz`；
+  切模式本身不重建 Surface（`EGLSurface` 日志只有 SRGB→PQ 两次）。
+- 60/90/120 都支持；25p 没有整数倍模式（120/25=4.8），退回最高刷新率。
+  23.976 时 120/23.976=5.005，1% 容差内仍按 5 倍处理。
+
+测试注意：`am start` 不会自动亮屏。设备息屏 / doze 时 activity 能起来，但
+Surface 不可见、mpv 不出帧，`screencap` 也是黑的。先
+`adb shell input keyevent KEYCODE_WAKEUP` + `wm dismiss-keyguard`，并
+`svc power stayon true`。
 
 已知边界：
 
 - **显示端状态**：OnePlus 的 `dumpsys display` 仍是 `mActiveColorMode=0`、
-  `hdrSdrRatio NaN`——ColorOS 不把 HDR 当作一种 color mode，所以不能靠这两个
-  字段判定；目前以 SurfaceFlinger 层的 `dataspace=BT2020_PQ` + `DEVICE` 合成为
-  准。真 HDR 亮度效果最终还得靠真实 HDR10 片源 + 人眼/仪器确认。
-- **片源不是真 PQ**：桌面 ffmpeg 没有 `zscale`，`dv-hdr10.mp4` 是 SDR 内容打上
-  PQ / BT.2020 标记，用来验「识别 + 通路切换」是够的，但画面本身不是 10000 nit
-  的 PQ 曲线。最终验收需要一段真正的 HDR10（最好再加 HDR10+）样片。
-- **还没覆盖**：HLG 只写了分支、没样片；HDR10+ 动态元数据（mpv 侧
-  `target-colorspace-hint` 是否带 ST2094-40）未验；显示器不支持 HDR 时的 SDR
-  tone mapping 回退（`tone-mapping` 选项）还没接。
-- **帧率匹配**：`preferredDisplayModeId` 与 24p → 120Hz 的 5:2 pulldown 还没做，
-  属于 A5 后半段。
+  `hdrSdrRatio NaN`——ColorOS 不把 HDR 当作一种 color mode，不能靠这两个字段
+  判定；目前以 SurfaceFlinger 层的 `dataspace=BT2020_PQ/HLG` + `DEVICE` 合成为准。
+  真 HDR 亮度效果最终还得靠仪器或人眼在真实片源上确认。
+- **HDR10+ 动态元数据（ST2094-40）还没做**：当前只走 VUI + 静态 dataspace，
+  `hevc_videotoolbox` 不产 ST2094-40 SEI，渲染层也没有通过
+  `ANativeWindow_setBuffersHdrMetadata(HDR10PLUS)` 透传动态元数据。要验 HDR10+
+  需要另做三件事：生成带 ST2094-40 SEI 的样片（如 x265 + `hdr10plus_tool`）、
+  mpv 侧读出每帧元数据、渲染层按 API 34+ 写入 window HDR metadata。
+- **SDR tone mapping 回退**：显示器不支持 HDR 时的 `tone-mapping` 选项还没接。
+- **帧率匹配目前只在验证页**：正式实现要挪到播放器控制器，并在暂停 / 切轨 /
+  退出时恢复默认模式；可变帧率（VFR）片源还没处理。
 
 A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
 `MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +
