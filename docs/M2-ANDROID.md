@@ -192,6 +192,11 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
 `AudioManager` 采 `DeviceProfile`，JSON + 摘要，首页显示，日志 tag `DvCaps`）；
 六项里只有「后台 / PiP」能在 HBY 5502 上验完，其余依赖 §8 的设备。
 
+> 2026-11-26 复测：开发机上只剩 x86_64 模拟器，A5 的直出、A6 的 Media3、
+> A11 的 tunneling 都没法重跑（`h264_mediacodec` 无 JVM、10-bit HEVC
+> `ERROR_CODE_DECODING_FAILED`）。这些项在 §9.1「待验」里单列，别拿模拟器结果
+> 当成真机结论。
+
 ### 7.1 构建链（A0）
 
 - `scripts/android/{env,build-native,check-apk}.sh`：JDK 17 / SDK 36 / NDK r28；
@@ -846,6 +851,48 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 ## 9. 风险与未决
 
+### 9.1 未完成项（2026-11-26 盘点）
+
+手机侧的 A0–A10 已闭环（§7），下面按「为什么还没完」分三类。
+
+**缺外部条件**（代码就绪，等设备 / 素材）：
+
+| 项 | 卡在哪 |
+| --- | --- |
+| 真机（OnePlus NE2210、HBY 5502） | 这次复测在开发机上只剩 x86_64 模拟器（SwiftShader 每跑几分钟就崩），§7.5 的 OnePlus 数据是之前的实测。HDR 直出、120Hz 帧率匹配、AV1 软解性能、PiP / 前台服务长跑仍需真机回归 |
+| DV 电视 / 支持 DV 的盒子 | P5 / P8 在真实 HDR 屏上的观感（直出 vs tone mapping）、DV 分级与徽标；模拟器只有 SDR + SwiftShader |
+| TV / 盒子 + AVR | A11 冒烟、tunneling、HDMI → AVR 直通、遥控器键位都没验 |
+| 未加密的蓝光原盘（ISO / BDMV） | A8 只验了合成结构的路由；真实播放列表、章节、无缝分支、多角度未验（§7.7） |
+| PGS / AV1 / VP9 样片 | 缺片源；mpv 侧 PGS、AV1 软解性能未测（PLAN §5.1） |
+
+**代码待实现**：
+
+| 项 | 现状 |
+| --- | --- |
+| TV 大屏 UI（B1 / B2） | `:ui-tv` 只有 `TvApp()` 50 行、`:app-tv` 只有 `MainActivity`，没有播放 Activity / 验证页；TV 上现在跑不了播放回归 |
+| TV 兼容矩阵（B3） | TV 默认内核、tunneling 取舍、HDMI 直通策略未定（§10） |
+| 原盘边读边播（B5，可选） | SMB / NFS 上的 BDMV 不能直接播：桥接只服务单文件，libbluray 要本地路径或可列目录的流（§7.8） |
+| SMB 共享名枚举 | App 内没有，得用户知道共享名（桌面用 `tests/android/smb-enum.py` 代查） |
+| `VfsEntry` 接核心虚拟源 | `dv_hub_replace` 未接（§7.8） |
+| TLS 源级「允许自签名」 | 校验已能开（`--es tls_verify 1`），开关还没进 UI |
+| Android 16 本地网络访问 | 权限声明待 SDK 文档确认 |
+| 播放器搬进前台服务 | 现在只有通知与 Surface 在前台服务；Activity 被回收时播放会停（§7.9 的边界） |
+| NFS 非匿名导出 | uid / gid 只能构造时传，源配置里没暴露（§7.8） |
+| 发布 | 两个 applicationId 的商店条目；手机侧下载是否 v1 必做 |
+
+**待验**：
+
+| 项 | 为什么现在验不了 |
+| --- | --- |
+| Media3 全链路 | 模拟器 `h264_mediacodec` 没有 JVM、10-bit HEVC 报 `ERROR_CODE_DECODING_FAILED`，只能在真机回归 |
+| HDR10+ 自动切 Media3 | 路由单测过了，真机端到端（含切内核后续播）待验 |
+| HDR 直出 | 模拟器没有 `EGL_KHR_gl_colorspace`，只验了回退（§7.4.1）；真机 PQ surface + 系统 HDR 待验 |
+| 音频直通 | `ao_audiotrack` 的 IEC61937 未验，缺 AVR |
+| 16KB 页真机 | 模拟器端到端过了（§7.10），真机待设备 |
+| DV P5 观感 | 颜色已在模拟器闭环（§7.4，`verify-dv.sh` 可一键回归），arm64 那份 libplacebo 一直是对的；真实 HDR 屏上的观感仍待设备 |
+
+### 9.2 风险登记
+
 风险登记在 [PLAN.md](PLAN.md) §7，与 Android 直接相关的：
 
 1. **libmpv 构建链**：已接 CI 缓存（§7.10）；16KB 页在 `android-35`
@@ -859,6 +906,8 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 5. **NFS**：已实测。协议层有回环上的真实 NFSv3 服务器测试，真机对 NAS
    的 `/fs/1000/nfs` 导出也跑通了浏览与 4K DV P5 起播（§7.8）。剩下的是
    极端情况：需要非匿名 uid 的导出、rpcbind 被墙只开 2049。
+
+### 9.3 未决项（等产品决定）
 
 | 未决项 | 待定 |
 | --- | --- |
