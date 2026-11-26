@@ -360,7 +360,7 @@ MKV 的 `dvcC` 是 `BlockAddIDType`、后面还有 EBML 长度，命中后在 +4
 `01 00` 开头。VFS 播放拿不到路径，所以扩了随机读版本
 `probe(readAt, size)`，先用 `VfsFile` 探再起播。
 
-**P5 发紫的三层根因**（最后一层才是前两次「修好」没生效的原因）：
+**P5 发紫的四层根因**（第 4 层是「修完又紫」的真正原因）：
 
 1. **Android 的 mpv 没有 gpu-next 后端**（决定性）。此前用 v0.42.0 tarball，
    `vo_libmpv.c` 的 `render_backends[]` 只有 `gpu` / `sw`，
@@ -378,6 +378,28 @@ MKV 的 `dvcC` 是 `BlockAddIDType`、后面还有 EBML 长度，命中后在 +4
    `AV_FRAME_DATA_DOVI_METADATA`（实测 `pixfmt=nv12`、`trc bt.1886`、
    `sig-peak 0`）。所以 **P5 必须软解**：`MpvPlayer.setDolbyVisionProfile()` 记住
    探到的 profile，`load()` 前把 `hwdec` 设 `no`，libplacebo 自己从码流取 RPU。
+4. **x86_64 的 libplacebo 一直停在 `-Ddovi=disabled`**，改参数没重建。第 2 层的
+   修复只对 arm64 生效（`arm64/prefix/.done/libplacebo` 是 14:49 重建的），
+   x86_64 那份还是 07:38 用 `-Ddovi=disabled` 配的；`.done` 标记只判断「文件存在」，
+   16:09 把脚本改成 `-Ddovi=enabled` 后它仍被当成已完成。于是 x86_64 的 mpv 在
+   编译时 `PL_HAVE_DOVI` 是 undef——libplacebo 的 `utils/libav.h` 用它门控
+   `PL_HAVE_LAV_DOLBY_VISION`，而 mpv 的 `video/mp_image.c` 又用后者门控整段
+   `AV_FRAME_DATA_DOVI_METADATA → params.repr.sys/color` 的映射。结果 DV 元数据
+   在 ffmpeg 侧是好的（`Multiple Dolby Vision RPUs` 的告警照打），但 mpv 一句都
+   没往渲染器传，P5 又按 BT.2020 解 → 发紫。
+
+   症状很好认：模拟器上 `[vd] Decoder format:` 是
+   `yuv420p10 **auto/auto/auto**/full/auto`，Mac 是
+   `yuv420p10 **dolbyvision/bt.2020/pq**/full/auto`。**这条日志是 DV 链路是否
+   通到渲染器的唯一开关**，比看截图快。
+
+   防复发（`scripts/android/build-mpv.sh`）：
+   - `.done` 标记改成写「配方」（源码目录 + configure/meson 参数），对不上就重建；
+     `FORCE=libplacebo,mpv` 可强制重建；
+   - `ensure_tar` 目录里记包名，换了 `MPV_COMMIT` 之类的包会重新解压，不会拿旧源码
+     编出新标记；
+   - `verify()` 硬查 `PL_HAVE_DOVI`，缺了直接 `die`（这种配置漂移不会报错，只会
+     静默发紫）。
 
 P7 / P8 不切软解：BL 本身就是 HDR10，硬解只少一层动态元数据，颜色不受影响。
 
@@ -402,9 +424,38 @@ P7 / P8 不切软解：BL 本身就是 HDR10，硬解只少一层动态元数据
 两条正确路径的 R:G:B 比例是 1.32:1.13:1 与 1.32:1.14:1，色相一致；Android 整体低
 约 16%，是手机走 PQ 直出、截图时再转 SDR 的亮度差，不是色偏。
 
+**同一帧、整幅画面的复测（2026-11-26，修 x86_64 的 DOVI 之后）**：
+
+| 时间点 | 渲染 | 画面均值 | 亮度前 5% 均值 | R/G | B/G |
+| --- | --- | --- | --- | --- | --- |
+| 14.8s | Mac 产品 app（gpu-next，参考） | (29.1, 36.7, 36.0) | (201, 212, 210) | 0.948 | 0.991 |
+| 14.8s | Android 修前（DOVI 被编掉） | (79, 51, 59) | (238, 216, 223) | 1.10 | 1.03 |
+| 14.917s | Android 修后 | (26.6, 30.3, 30.3) | (156, 161, 160) | 0.969 | 0.994 |
+| 5.0s | Mac 参考 | (160.2, 161.3, 150.0) | (226, 226, 219) | 1.001 | 0.971 |
+| 5.375s | Android 修后 | (135.1, 135.6, 127.5) | (181, 181, 176) | 1.000 | 0.976 |
+
+修前 `R/G 1.10 · B/G 1.03` 是典型的品红；修后两个时间点的 `R/G`、`B/G` 与 Mac
+差 ≤2%（5s 那帧 ≤0.5%），色偏没了。
+
+绝对值不要跨端硬比：Android 用的 `screenshot-to-file ... video` 是**未缩放**截图，
+gpu-next 在 `video/out/gpu_next/video.c: mppl_video_screenshot()` 里对
+`!args->scaled` 固定 `target.color = pl_color_space_srgb`，和窗口实际的
+`bt.709/bt.1886 + target-peak` 不是同一条输出管线；Mac 的 `DVPLAYER_PLAY_FRAME`
+读的是应用自己的 GL framebuffer（就是屏上那份）。所以跨端只比**色相 / 串色 / 白是否
+中性**，亮度差要等真机 HDR 屏看。
+
+顺带排除了「亮度差是 tone mapping 参数不同」：在 Mac 上把参数换成 Android 的回退
+组合（`tone-mapping=auto` + `hdr-compute-peak=yes` + `target-peak=100` +
+`bt.709/bt.1886`）重抓同一帧，均值反而从 160 升到 168，不是 Android 的 135。
+
 取证：`--es shot <png> --el shot_at <ms>` 让 mpv 播到该位置时自己
 `screenshot-to-file ... video`（绕开 adb 对 HDR 的合成）。gpu-next + GLES 下偶发
 `Taking screenshot failed.`（seek 刚结束时最容易），验证页会重试 3 次。
+
+一键回归：`tests/android/verify-dv.sh [<p5.mkv>] [-s <serial>]` —— 推片源、
+`hwdec no` 起播、断言 `Decoder format` 里有 `dolbyvision`（断了直接退出码 1），
+再打一张截图的色相统计（`R/G`、`B/G`）供人判读。上面第 4 层根因如果复发，
+这条脚本会在十几秒内报出来，不用再靠肉眼看紫不紫。
 
 截图格式不影响颜色：同一帧分别出 PNG 与 JPG，六条彩条逐像素差 ≤1（白
 `(221,221,221)` vs `(221,221,221)`、绿 `(0,214,126)` vs `(0,214,126)`），说明

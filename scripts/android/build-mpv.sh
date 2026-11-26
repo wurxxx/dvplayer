@@ -90,10 +90,17 @@ download() { # url dest
 
 ensure_tar() { # name tarball url
     local name=$1 tarball=$2 url=$3
-    [ -d "$SRC/$name" ] && return 0
+    if [ -d "$SRC/$name" ]; then
+        # 目录里记着当初解出来的包名。换了包（比如 MPV_COMMIT 钉了新版本）
+        # 就重解，否则会拿旧源码编出新标记，看不出问题。
+        [ "$(cat "$SRC/$name/.tarball" 2>/dev/null)" = "$tarball" ] && return 0
+        log "源码包变了（${tarball}），重新解压 $name"
+        rm -rf "$SRC/$name"
+    fi
     download "$url" "$DL/$tarball"
     mkdir -p "$SRC/$name"
     tar -xf "$DL/$tarball" -C "$SRC/$name" --strip-components=1
+    printf '%s' "$tarball" >"$SRC/$name/.tarball"
 }
 
 ensure_tar libxml2 libxml2-2.15.4.tar.xz \
@@ -261,16 +268,35 @@ EOF
     export PATH="$TOOLCHAIN/bin:$PATH"
 }
 
-is_done() { [ -f "$PREFIX/.done/$1" ]; }
-mark_done() {
+# 标记文件里记「配方」（源码 + configure/meson 参数），参数变了就重建。
+# 只 touch 空文件的老做法会把改了参数的旧产物当成已完成：libplacebo 从
+# `-Ddovi=disabled` 改成 `enabled` 后，x86_64 那份一直没重建，mpv 编出来
+# PL_HAVE_DOVI 是 undef（mp_image.c 的 DV 映射被整段编掉），P5 于是又按
+# BT.2020 解 → 发紫。老的空标记没有配方，仍按「已存在即完成」处理。
+# FORCE=libplacebo,mpv 可跳过校验强制重建。
+is_done() { # name [recipe...]
+    local name=$1 m=$PREFIX/.done/$1
+    case ",${FORCE:-}," in *",$name,"*) return 1 ;; esac
+    shift
+    [ -f "$m" ] || return 1
+    [ $# -eq 0 ] && return 0
+    [ "$(cat "$m")" = "$*" ]
+}
+mark_done() { # name [recipe...]
+    local m=$PREFIX/.done/$1
+    shift
     mkdir -p "$PREFIX/.done"
-    touch "$PREFIX/.done/$1"
+    if [ $# -eq 0 ]; then
+        : >"$m"
+    else
+        printf '%s' "$*" >"$m"
+    fi
 }
 
 meson_dep() { # name src extra...
     local name=$1 src=$2
     shift 2
-    if is_done "$name"; then
+    if is_done "$name" "$name $src $*"; then
         log "[$ARCH] $name 已构建"
         return 0
     fi
@@ -286,13 +312,13 @@ meson_dep() { # name src extra...
         "$@"
     ninja -C "$BUILD/$name" -j"$JOBS"
     ninja -C "$BUILD/$name" install
-    mark_done "$name"
+    mark_done "$name" "$name $src $*"
 }
 
 autotools_dep() { # name src extra...
     local name=$1 src=$2
     shift 2
-    if is_done "$name"; then
+    if is_done "$name" "$name $src $*"; then
         log "[$ARCH] $name 已构建"
         return 0
     fi
@@ -305,7 +331,7 @@ autotools_dep() { # name src extra...
         make -j"$JOBS"
         make install
     )
-    mark_done "$name"
+    mark_done "$name" "$name $src $*"
 }
 
 build_libdovi() {
@@ -478,7 +504,24 @@ build_ffmpeg() {
 }
 
 build_mpv() {
-    if is_done mpv; then
+    local -a opts=(
+        -Dcplayer=false
+        -Dlibmpv=true
+        -Dgpl=false
+        -Dlibbluray=enabled
+        -Dlibcurl=disabled
+        -Dlua=disabled
+        -Diconv=disabled
+        -Degl-android=enabled
+        -Dgl=enabled
+        -Dvulkan=disabled
+        -Dmanpage-build=disabled
+        -Dbuild-date=false
+        -Dtests=false
+    )
+    # 配方里带上 commit：换了 MPV_COMMIT 会重建（ensure_tar 同名包也会重解）。
+    local recipe="mpv $MPV_COMMIT ${opts[*]}"
+    if is_done mpv "$recipe"; then
         log "[$ARCH] mpv 已构建"
         return 0
     fi
@@ -505,27 +548,20 @@ build_mpv() {
         --default-library=shared \
         --prefer-static \
         --wrap-mode=nodownload \
-        -Dcplayer=false \
-        -Dlibmpv=true \
-        -Dgpl=false \
-        -Dlibbluray=enabled \
-        -Dlibcurl=disabled \
-        -Dlua=disabled \
-        -Diconv=disabled \
-        -Degl-android=enabled \
-        -Dgl=enabled \
-        -Dvulkan=disabled \
-        -Dmanpage-build=disabled \
-        -Dbuild-date=false \
-        -Dtests=false
+        "${opts[@]}"
     ninja -C "$BUILD/mpv" -j"$JOBS"
     ninja -C "$BUILD/mpv" install
-    mark_done mpv
+    mark_done mpv "$recipe"
 }
 
 verify() {
     local so=$PREFIX/lib/libmpv.so
     [ -f "$so" ] || die "[$ARCH] 没生成 libmpv.so"
+    # P5 的 DV 整形靠 libplacebo 的 DOVI：mpv 的 mp_image.c 用 PL_HAVE_DOVI
+    # 门控整段 DV 元数据映射，配置漂了不会报错，只是 P5 静默发紫。这里硬查。
+    grep -q '^#define PL_HAVE_DOVI 1' "$PREFIX/include/libplacebo/config.h" ||
+        die "[$ARCH] libplacebo 没开 DOVI（DV 映射会被编掉，P5 发紫）"
+    printf '  libplacebo DOVI 已开启\n'
     # FFmpeg 默认带 -g，静态链进来后 .so 有 29MB 调试信息；先剥掉再校验。
     "$STRIP" --strip-unneeded "$so"
     log "[$ARCH] 校验 $so"

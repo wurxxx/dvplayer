@@ -92,7 +92,7 @@ shot() {  # shot <设备内文件名> <seek_ms> <shot_ms> <输出>
     # 4K / 软解首帧慢，最多等 40 秒
     for _ in $(seq 1 40); do
         local sz
-        sz=$("${ADB[@]}" shell run-as "$PKG" stat -c %s "files/$name.png" 2>/dev/null | tr -d '\r')
+        sz=$("${ADB[@]}" shell run-as "$PKG" stat -c %s "files/$name.png" 2>/dev/null | tr -d '\r' || true)
         if [ "${sz:-0}" -gt 1000 ] 2>/dev/null; then
             "${ADB[@]}" exec-out run-as "$PKG" cat "files/$name.png" > "$out"
             return 0
