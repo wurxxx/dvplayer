@@ -324,6 +324,9 @@ final class PlayerSession: ObservableObject {
     /// 音轨 / 字幕各自套用一次：字幕轨常比音轨晚到，不能共用标记。
     private var audioPrefsApplied = false
     private var subtitlePrefsApplied = false
+    /// 同目录外挂字幕是否都进 `track-list` 了：没到齐先不套用字幕
+    /// 偏好，否则会把「第 2 张外挂」套到内嵌轨上。
+    private var sidecarSubsReady = true
     /// 媒体信息请求已结束（成功与否），字幕自动选择不用再等它。
     private var mediaInfoLoaded = false
     private var isStopped = false
@@ -946,6 +949,7 @@ final class PlayerSession: ObservableObject {
         if hadTracks {
             NSLog("[Play] tracks audio=\(audioTracks.count) subs=\(subtitleTracks.count) aid=\(aid) sid=\(sid)")
         }
+        updateSidecarReadiness(subtitles)
         applyTrackPrefsIfNeeded()
     }
 
@@ -986,6 +990,22 @@ final class PlayerSession: ObservableObject {
         }
     }
 
+    /// 外挂字幕按路径匹配 `track-list`：全都到了才允许套用字幕偏好。
+    private func updateSidecarReadiness(_ subtitles: [RawTrack]) {
+        let expected = mpv?.sidecarPaths ?? []
+        guard !expected.isEmpty else {
+            sidecarSubsReady = true
+            return
+        }
+
+        let loaded = Set(subtitles.compactMap { $0.externalFilename }.map {
+            URL(fileURLWithPath: $0).standardizedFileURL.path
+        })
+        sidecarSubsReady = expected.allSatisfy {
+            loaded.contains(URL(fileURLWithPath: $0).standardizedFileURL.path)
+        }
+    }
+
     /// 音轨 / 字幕各自只套用一次；每次轨道或媒体信息更新都试一下。
     /// 详情页没读媒体信息就起播（续播、切集）时，退到 mpv 轨上的中文判断。
     private func applyTrackPrefsIfNeeded() {
@@ -1010,6 +1030,9 @@ final class PlayerSession: ObservableObject {
 
         // 字幕轨还没出现（外挂字幕 / 原盘字幕索引慢）：等下一次轨道清单。
         guard !subtitleTracks.isEmpty else { return }
+
+        // 同目录外挂字幕还没加完：等它们进来再选，别先选到内嵌轨。
+        guard sidecarSubsReady else { return }
 
         // 没手动选时，自动选择要读服务器的字幕表；媒体信息还在路上就先等，
         // 否则会把「已套用」标记掉，等表到了也不再选。

@@ -93,6 +93,12 @@ final class MpvEngine {
 
     private var audioTracks: [RawTrack] = []
     private var subtitleTracks: [RawTrack] = []
+    /// 当前文件同目录的外挂字幕；`track-list` 里按路径补语言 / 标题。
+    private(set) var sidecars: [SidecarSubtitle] = []
+    /// 这一份文件的外挂字幕已经加过（`@file-loaded` 可能重复触发）。
+    private var sidecarsAdded = false
+    /// 只为了给 PlayerSession 判断「外挂字幕都到齐了没有」。
+    var sidecarPaths: [String] { sidecars.map(\.path) }
     private var audioId: Int64 = 0
     private var subtitleId: Int64 = 0
     private var pendingLoad: (url: String, headers: [String: String], start: Double, proxy: String?)?
@@ -166,6 +172,10 @@ final class MpvEngine {
             "input-vo-keyboard": "no",
             "keep-open": "yes",
             "hwdec": "auto-safe",
+            // 同目录外挂字幕由 SidecarSubtitles 自己找（支持片名是字幕名前缀、
+            // 语言写在中文件名里的情况），这里关掉 mpv 的 `exact` 自动加载，
+            // 免得同一张字幕被加两次。
+            "sub-auto": "no",
             "msg-level": "all=info,vo/gpu-next=warn",
             // 出问题看这个文件：.app 里没有终端。
             "log-file": NSTemporaryDirectory() + "dvplayer-mpv.log",
@@ -267,6 +277,15 @@ final class MpvEngine {
         }
     }
 
+    /// 文件加载完再 `sub-add`：loadfile 之后立刻发容易被核心丢掉。
+    private func addSidecarSubtitles() {
+        guard !sidecarsAdded else { return }
+        sidecarsAdded = true
+        for sub in sidecars {
+            client.command(["sub-add", sub.path, "auto"])
+        }
+    }
+
     /// 渲染上下文就绪之后的收尾。
     private func finishConnect() {
         guard !shuttingDown else { return }
@@ -350,6 +369,17 @@ final class MpvEngine {
 
         NSLog("[Play] mpv load \(Self.redacted(url).prefix(72))… start=\(startValue)")
         client.command(["loadfile", url, "replace"])
+
+        // 同目录外挂字幕：mpv 只按完全相同的文件名认，`Movie.2024.srt`
+        // 配不上 `Movie.2024.1080p.mkv`，所以这里自己找。
+        // 真正 `sub-add` 要等 `@file-loaded`：loadfile 之后立刻加会被丢掉。
+        sidecars = SidecarSubtitles.find(for: url)
+        sidecarsAdded = false
+        if !sidecars.isEmpty {
+            NSLog("[Play] sidecar subs \(sidecars.count): "
+                  + sidecars.map { "\($0.language ?? "-"):\((($0.path) as NSString).lastPathComponent)" }
+                      .joined(separator: ", "))
+        }
         waitFirstFrame()
     }
 
@@ -777,6 +807,7 @@ final class MpvEngine {
                 subtitleId = parseTrackId(data)
                 emitTracks()
             case "@file-loaded":
+                self.addSidecarSubtitles()
                 isLoaded = true
                 eofSent = false
                 onLoaded?(duration)
@@ -812,15 +843,24 @@ final class MpvEngine {
                 continue
             }
 
+            let filename = item["external-filename"] as? String
+            let sidecar = filename.flatMap { name in
+                sidecars.first { Self.samePath($0.path, name) }
+            }
+
             let track = RawTrack(
                 id: (item["id"] as? NSNumber)?.int64Value ?? 0,
                 type: type,
-                title: item["title"] as? String ?? "",
-                language: item["lang"] as? String ?? "",
+                // 外挂字幕的语言写在我们找到的这条记录里（mpv 只从文件名猜，
+                // `Movie.chs.srt` 这种它认不出）。认不出语言时标题写「外挂」，
+                // 别把文件名里的 `eng.srt` 当成标题。
+                title: sidecar.map { $0.title ?? ($0.language == nil ? "外挂" : "") }
+                    ?? item["title"] as? String ?? "",
+                language: sidecar?.language ?? item["lang"] as? String ?? "",
                 codec: item["codec"] as? String ?? "",
                 isDefault: (item["default"] as? Bool) ?? false,
                 isExternal: (item["external"] as? Bool) ?? false,
-                externalFilename: item["external-filename"] as? String)
+                externalFilename: filename)
 
             if type == "audio" {
                 audio.append(track)
@@ -862,6 +902,12 @@ final class MpvEngine {
 
     private func emitTracks() {
         onTracks?(audioTracks, subtitleTracks, audioId, subtitleId)
+    }
+
+    /// 外挂字幕路径比较：mpv 可能把路径规范化，这里统一成标准形式再比。
+    private static func samePath(_ first: String, _ second: String) -> Bool {
+        URL(fileURLWithPath: first).standardizedFileURL.path
+            == URL(fileURLWithPath: second).standardizedFileURL.path
     }
 
     /// 日志里不能出现签名 / token：去掉 query 和 userinfo。

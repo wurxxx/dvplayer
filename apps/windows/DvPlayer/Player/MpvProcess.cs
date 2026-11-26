@@ -276,6 +276,9 @@ public sealed class MpvProcess : IMpvEngine
         yield return $"--wid={wid.ToInt64()}";           // 挂进壳的 HWND
         yield return "--osc=no";                         // UI 由壳提供
         yield return "--keep-open=yes";                  // 播完留住最后一帧，别闪回桌面
+        // 同目录外挂字幕由 SidecarSubtitles 自己找（片名是字幕名前缀也能配），
+        // 关掉 mpv 的 exact 自动加载，免得同一张字幕被加两次。
+        yield return "--sub-auto=no";
 
         // 起播先停在第一帧：音频约 0.4 秒就出声，而首帧要 1 秒左右，直接播
         // 会「声音先出来、画面晚约 1 秒」。壳等 `vo-configured` 就绪（或 4 秒

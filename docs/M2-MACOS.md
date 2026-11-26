@@ -359,6 +359,19 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
 - 播放器菜单读 mpv 的 `track-list`，详情页 / 媒体信息卡读服务器的
   `MediaInfo.subtitles`，两边共用同一个函数。
 
+**同目录外挂字幕**
+
+- `SidecarSubtitles.swift` 在视频目录（不递归）找 `srt/ass/ssa/vtt/sup/idx`，
+  按文件名配对：去分隔符后两边互为前缀，多出部分全是数字才拒绝
+  （`Movie.2024.srt` 配 `Movie.2024.1080p.mkv`，`E01.srt` 不配 `E010.mkv`）。
+  语言从字幕名多出来的整词认（`chs` / `zh-Hans` / `简中` / `eng`…），
+  认不出就写「外挂」。规则见 `LOCAL-SOURCE.md` §3。
+- mpv 侧加了 `sub-auto=no`，避免它按同名再加载一次。真正 `sub-add` 放在
+  `@file-loaded` 之后（`loadfile` 后立刻加会被丢掉），加完查 `track-list`，
+  按 `external-filename` 给轨补语言 / 标题。
+- `PlayerSession.sidecarSubsReady`：外挂轨没全进 `track-list` 前不套用字幕偏好，
+  免得把「第 2 张外挂」套到内嵌轨。回归日志：`[Play] sidecar subs N: …`。
+
 **弹幕（弹弹play）**
 
 - 按「剧名 + 集号」匹配：`/api/v2/search/episodes?anime=&episode=` → episodeId，
