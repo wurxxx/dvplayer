@@ -23,11 +23,13 @@ on:
     paths:
       - 'apps/android/**'
       - 'scripts/android/**'
+      - 'core/**'
       - '.github/workflows/android.yml'
   pull_request:
     paths:
       - 'apps/android/**'
       - 'scripts/android/**'
+      - 'core/**'
       - '.github/workflows/android.yml'
 
 concurrency:
@@ -129,6 +131,29 @@ jobs:
              apps/android/player-mpv/src/main/cpp/include/mpv/
 
       - uses: gradle/actions/setup-gradle@v4
+
+      # 核心是 Rust：APK 里的 libdvplayer_media_jni.so 就是 core/media 的 JNI 门面。
+      # 不编它，APK 能装能起，但设置页永远「核心未加载」。
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: 安装 cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('core/Cargo.lock', 'core/*/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: 编译原生核心（arm64-v8a）
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/28.2.13676358"
+          ABIS=arm64-v8a PROFILE=release scripts/android/build-native.sh
 
       - name: 编译手机 + TV 壳
         working-directory: apps/android

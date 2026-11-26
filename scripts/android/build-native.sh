@@ -37,6 +37,11 @@ echo "==> cargo ndk ${ndk_targets[*]} build -p $CRATE ($PROFILE)"
 cd "$ROOT/core"
 cargo ndk --platform 26 "${ndk_targets[@]}" -o "$OUT" build -p "$CRATE" "${cargo_flags[@]}"
 
+# dvplayer-media 自己是 cdylib（桌面端 C ABI 需要），cargo ndk 会把它一起复制出来。
+# Android 侧只通过 _jni.so 用核心（静态链接进去了），再打一份 libdvplayer_media.so
+# 就是同一份代码的重复，白占 4MB/ABI。
+rm -f "$OUT"/*/libdvplayer_media.so
+
 # ---------------------------------------------------------------- 16KB 校验
 # Android 15（API 35）起 64 位设备可能用 16KB 页。NDK r28 默认按 16KB 对齐，
 # 但链接参数被改过就会退回 4KB，装到这类设备上起不来。

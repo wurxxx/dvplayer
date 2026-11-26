@@ -41,5 +41,11 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true"
             android:theme="@style/Theme.DvPlayer" />
+
+        <!-- A3 数据层冒烟：Kotlin → JNI → Rust 核心，结果进 logcat。 -->
+        <activity
+            android:name=".CoreSmokeActivity"
+            android:exported="true"
+            android:theme="@style/Theme.DvPlayer" />
     </application>
 </manifest>
