@@ -163,7 +163,8 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
   还原**（`actions.zoom()`），和 Windows 一致；进假全屏会把三个圆点收掉，
   打开阶段不能这么干。
 - 详情页带续播（某一集进度 1%–99.5%）时：「播放」按钮写成 `播放 第 20 集 01:47`，
-  那一集的卡片用强调色描边、集号变色，进页面后选集行自动滚到它（`resumeEpisode`
+  那一集的卡片用强调色描边、集号变色（进度条向里缩 4pt 并改成白色，免得和描边
+  连成一条），进页面后选集行自动滚到它（`resumeEpisode`
   + `jumpEpisodeID`，只做一次：之后用户自己滚到别处不会被补页拽回来）。续播集
   落在后面的分页时，集数变多（`onChange(of: episodes.count)`）再试一次，补到那页
   才定位。回归：`DVPLAYER_DETAIL=<剧集 id> DVPLAYER_SHOT=…`，日志有

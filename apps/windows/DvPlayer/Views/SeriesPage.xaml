@@ -276,10 +276,12 @@
                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
 
-                        <!-- 进度 -->
-                        <Border VerticalAlignment="Bottom" Height="3" Background="#33000000"
+                        <!-- 进度：往里缩 4px，贴着底边会和强调色描边连成一条 -->
+                        <Border VerticalAlignment="Bottom" Height="3" Margin="4,0,4,4"
+                                CornerRadius="1.5" Background="#59000000"
                                 Visibility="{Binding ProgressVisibility}">
-                          <Border Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
+                          <Border x:Name="ProgressFill" CornerRadius="1.5"
+                                  Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
                                   Width="{Binding ProgressWidth}" />
                         </Border>
                       </Grid>
@@ -304,6 +306,8 @@
                     <DataTrigger Binding="{Binding IsActive}" Value="True">
                       <Setter TargetName="Thumb" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                       <Setter TargetName="BadgeText" Property="Foreground" Value="{StaticResource AccentBrush}" />
+                      <!-- 进度条改成白色：强调色描边和强调色进度各管一件事，不互相吃色 -->
+                      <Setter TargetName="ProgressFill" Property="Background" Value="#F2FFFFFF" />
                     </DataTrigger>
                   </DataTemplate.Triggers>
                 </DataTemplate>

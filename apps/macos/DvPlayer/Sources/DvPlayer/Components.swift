@@ -311,12 +311,16 @@ struct LibraryCard: View {
 struct ProgressBar: View {
     let value: Double
     var height: CGFloat = 4
+    /// 填充色；选集卡高亮时用白色，别和强调色的描边混在一起。
+    var tint: Color = Theme.accent
+    /// 轨道色；白条要配深一点的轨道才看得清。
+    var track: Color = Color.white.opacity(0.18)
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Color.white.opacity(0.18)
-                Theme.accent
+                track
+                tint
                     .frame(width: geo.size.width * min(1, max(0, value)))
             }
         }
