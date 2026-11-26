@@ -198,6 +198,9 @@ public sealed class LibMpvProcess : IMpvEngine
             Opt("target-peak", settings.HdrPeakNits.ToString(CultureInfo.InvariantCulture));
         }
 
+        // 弹幕 ASS 走第二字幕：默认 strip 会剥掉样式（滚动 / 颜色 / 字号）。
+        Opt("secondary-sub-ass-override", "no");
+
         if (!string.IsNullOrWhiteSpace(settings.AudioDevice))
         {
             Opt("audio-device", settings.AudioDevice);

@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// 一条弹幕（弹弹play 的 `<d p="…">`）。
+/// 一条弹幕（弹弹play 的 `<d p="…">` / v2 JSON 的 `{"p":…,"m":…}`）。
 struct DanmakuComment {
     /// 出现时间（秒）。
     let time: Double
@@ -15,6 +15,8 @@ struct DanmakuComment {
 
 enum DanmakuError: LocalizedError {
     case notMatched
+    /// 电影按片名去库里找剧场版，没找到对得上的条目。
+    case noMovie
     /// 状态码 + 服务器给的 `X-Error-Message`（`Invalid AppId` 这类，没给就是空）。
     case http(Int, String)
     case empty
@@ -23,6 +25,8 @@ enum DanmakuError: LocalizedError {
         switch self {
             case .notMatched:
                 return "弹弹play 没匹配到这一集"
+            case .noMovie:
+                return "弹弹play 库里没有这部片"
             case .http(let code, let detail):
                 return detail.isEmpty
                     ? "弹弹play 返回 HTTP \(code)"
@@ -35,7 +39,7 @@ enum DanmakuError: LocalizedError {
 
 /// 弹弹play 客户端（v2，AppId + 签名鉴权）。
 ///
-/// 只做两件事：按「剧名 + 集号」找 episodeId，再取这一集的 XML 弹幕。
+/// 只做两件事：按「剧名 + 集号」找 episodeId，再取这一集的弹幕（JSON / XML 都认）。
 /// 返回的弹幕最终写成 ASS，交给 mpv 当第二字幕显示（见 `DanmakuAss`）。
 final class DanmakuService {
     static let shared = DanmakuService()
@@ -63,29 +67,8 @@ final class DanmakuService {
     /// 找这一集的 episodeId（先按集号匹配标题，再按顺序兜底）。
     func episodeId(anime: String, episode: Int,
                    appId: String, appSecret: String) async throws -> Int {
-        var components = URLComponents(string: base + "/api/v2/search/episodes")!
-        components.queryItems = [
-            URLQueryItem(name: "anime", value: anime),
-            URLQueryItem(name: "episode", value: String(episode)),
-        ]
-
-        let path = "/api/v2/search/episodes"
-        var request = URLRequest(url: components.url!)
-        for (key, value) in headers(path: path, appId: appId, appSecret: appSecret) {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw DanmakuError.notMatched }
-        guard http.statusCode == 200 else {
-            throw DanmakuError.http(http.statusCode,
-                                    http.value(forHTTPHeaderField: "X-Error-Message") ?? "")
-        }
-
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let animes = root["animes"] as? [[String: Any]] else {
-            throw DanmakuError.notMatched
-        }
+        let animes = try await search(anime: anime, episode: episode,
+                                      appId: appId, appSecret: appSecret)
 
         for animeItem in animes {
             guard let episodes = animeItem["episodes"] as? [[String: Any]], !episodes.isEmpty else {
@@ -113,6 +96,61 @@ final class DanmakuService {
         throw DanmakuError.notMatched
     }
 
+    /// 电影（剧场版）没有集号：按片名搜一次，只认 `type == "movie"` 且片名对得上的条目。
+    ///
+    /// 结果里常有同名 TV 动画（搜「进击的巨人」会带出「进击的巨人 剧场版」），
+    /// 挂错弹幕比没有更糟，所以片名不是完全对得上就放弃。
+    func movieEpisodeId(title: String, appId: String, appSecret: String) async throws -> Int? {
+        let animes = try await search(anime: title, episode: 1,
+                                      appId: appId, appSecret: appSecret)
+        let wanted = Self.normalized(title)
+
+        for animeItem in animes where (animeItem["type"] as? String) == "movie" {
+            let name = Self.normalized(animeItem["animeTitle"] as? String ?? "")
+            guard name == wanted else { continue }
+            if let episodes = animeItem["episodes"] as? [[String: Any]],
+               let id = episodes.first?["episodeId"] as? Int {
+                return id
+            }
+        }
+
+        return nil
+    }
+
+    /// 片名比对：去掉空白和标点再比，全半角 / 空格差异不影响。
+    private static func normalized(_ title: String) -> String {
+        title.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private func search(anime: String, episode: Int,
+                        appId: String, appSecret: String) async throws -> [[String: Any]] {
+        var components = URLComponents(string: base + "/api/v2/search/episodes")!
+        components.queryItems = [
+            URLQueryItem(name: "anime", value: anime),
+            URLQueryItem(name: "episode", value: String(episode)),
+        ]
+
+        let path = "/api/v2/search/episodes"
+        var request = URLRequest(url: components.url!)
+        for (key, value) in headers(path: path, appId: appId, appSecret: appSecret) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw DanmakuError.notMatched }
+        guard http.statusCode == 200 else {
+            throw DanmakuError.http(http.statusCode,
+                                    http.value(forHTTPHeaderField: "X-Error-Message") ?? "")
+        }
+
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let animes = root["animes"] as? [[String: Any]] else {
+            throw DanmakuError.notMatched
+        }
+
+        return animes
+    }
+
     /// 标题里是不是这一集：「第1」不能命中「第10」，数字后面还是数字就不算。
     /// 也兼容「第 1 集」这种中间带空格的写法。
     private static func matchesEpisode(_ title: String, _ episode: Int) -> Bool {
@@ -131,7 +169,7 @@ final class DanmakuService {
         return false
     }
 
-    /// 取一集的弹幕 XML 并解析。
+    /// 取一集的弹幕并解析。
     func comments(episodeId: Int,
                   appId: String, appSecret: String) async throws -> [DanmakuComment] {
         let path = "/api/v2/comment/\(episodeId)"
@@ -153,9 +191,56 @@ final class DanmakuService {
                                     http.value(forHTTPHeaderField: "X-Error-Message") ?? "")
         }
 
-        let comments = DanmakuXML.parse(data)
+        let comments = DanmakuParser.parse(data)
         guard !comments.isEmpty else { throw DanmakuError.empty }
         return comments
+    }
+}
+
+/// 弹幕体解析。
+///
+/// 弹弹play v2 的 `/api/v2/comment` 现在只回 JSON
+/// （`{"count":N,"comments":[{"p":"time,mode,color,uid","m":"text"}]}`），
+/// 老版本回 XML（`<i><d p="time,mode,size,color,…">text</d>`）。两种都认。
+///
+/// 之前只认 XML，接口换成 JSON 之后解析出 0 条，表现是「这一集没有弹幕」。
+enum DanmakuParser {
+    static func parse(_ data: Data) -> [DanmakuComment] {
+        if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let list = root["comments"] as? [[String: Any]] {
+            let comments = list.compactMap(comment(from:))
+            if !comments.isEmpty { return comments }
+        }
+
+        // 老接口 / 缓存里可能还是 XML。
+        return DanmakuXML.parse(data)
+    }
+
+    /// v2 的 `p` 只有 4 段（时间,模式,颜色,用户），没有字号。
+    private static func comment(from item: [String: Any]) -> DanmakuComment? {
+        guard let raw = item["p"] as? String,
+              let text = (item["m"] as? String)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+
+        let fields = raw.split(separator: ",", omittingEmptySubsequences: false)
+        guard fields.count >= 4,
+              let time = Double(fields[0]),
+              let mode = Int(fields[1]) else { return nil }
+
+        // XML 是 8 段（时间,模式,字号,颜色,…），JSON 是 4 段（时间,模式,颜色,用户）。
+        var size = 0
+        var color = 0
+        if fields.count >= 8 {
+            guard let xmlSize = Int(fields[2]), let xmlColor = Int(fields[3]) else { return nil }
+            size = xmlSize
+            color = xmlColor
+        } else {
+            guard let jsonColor = Int(fields[2]) else { return nil }
+            color = jsonColor
+        }
+
+        return DanmakuComment(time: time, mode: mode, size: size, color: color, text: text)
     }
 }
 

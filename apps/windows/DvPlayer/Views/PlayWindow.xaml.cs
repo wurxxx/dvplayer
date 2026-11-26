@@ -258,6 +258,7 @@ public partial class PlayWindow : Window
         InitializeComponent();
 
         ApplySourceToUi(source);
+        SyncDanmakuButton();
         DurationText.Text = Format(source.DurationSeconds);
 
         _surface = new PlayerSurfaceWindow();
@@ -898,6 +899,7 @@ public partial class PlayWindow : Window
         Volume.Visibility = tools;
         AudioButton.Visibility = tools;
         SubtitleButton.Visibility = tools;
+        DanmakuButton.Visibility = tools;
         SpeedButton.Visibility = tools;
         FullscreenButton.Visibility = tools;
 
@@ -3052,6 +3054,17 @@ public partial class PlayWindow : Window
 
     private void OnMoreClick(object sender, RoutedEventArgs e) => OpenMoreMenu();
 
+    private void OnDanmakuClick(object sender, RoutedEventArgs e) => SetDanmaku(!_danmakuEnabled);
+
+    /// <summary>弹幕按钮跟着开关走：开着用强调色，提示也换个说法。</summary>
+    private void SyncDanmakuButton()
+    {
+        DanmakuGlyph.Foreground = _danmakuEnabled
+            ? (Brush)FindResource("AccentBrush")
+            : new SolidColorBrush(Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF));
+        ToolTipService.SetToolTip(DanmakuButton, _danmakuEnabled ? "弹幕：开" : "弹幕：关");
+    }
+
     private ContextMenu OpenMoreMenu()
     {
         var choices = new List<(string Label, bool Selected, Action Action)>();
@@ -3070,8 +3083,13 @@ public partial class PlayWindow : Window
             SleepLabel() is { } sleep ? $"定时关闭（{sleep}）" : "定时关闭",
             _sleepDeadline is not null || _sleepAtEof,
             () => OpenSleepMenu()));
-        choices.Add((_danmakuEnabled ? "弹幕：开" : "弹幕：关", _danmakuEnabled,
-            () => SetDanmaku(!_danmakuEnabled)));
+
+        // 弹幕开关平时在控制条上（字幕后面），只有窄窗收进「更多」时才列在这里。
+        if (_compactChrome)
+        {
+            choices.Add((_danmakuEnabled ? "弹幕：开" : "弹幕：关", _danmakuEnabled,
+                () => SetDanmaku(!_danmakuEnabled)));
+        }
 
         choices.Add(("-", false, NoOp));
 
@@ -3678,6 +3696,7 @@ public partial class PlayWindow : Window
 
         ShowToast(enabled ? "弹幕：开" : "弹幕：关");
         UpdateChips();
+        SyncDanmakuButton();
         ShowChrome();
     }
 
@@ -3704,8 +3723,8 @@ public partial class PlayWindow : Window
         var episode = EpisodeNumber();
         if (episode is null)
         {
-            Trace.Write("danmaku skipped: 不知道是第几集");
-            return;
+            // 电影 / 没有 SxxExx 的条目：按片名去库里找剧场版。
+            Trace.Write($"danmaku 没有集号，按剧场版查找 series={series}");
         }
 
         var appId = DanmakuCredential.AppId;
@@ -3728,9 +3747,13 @@ public partial class PlayWindow : Window
 
         try
         {
-            var episodeId = await DanmakuService.Shared
-                .EpisodeIdAsync(series!, episode.Value, appId!, secret!, cts.Token)
-                .ConfigureAwait(true);
+            var episodeId = episode is { } number
+                ? await DanmakuService.Shared
+                    .EpisodeIdAsync(series!, number, appId!, secret!, cts.Token)
+                    .ConfigureAwait(true)
+                : await DanmakuService.Shared
+                    .MovieEpisodeIdAsync(series!, appId!, secret!, cts.Token)
+                    .ConfigureAwait(true);
             var comments = await DanmakuService.Shared
                 .CommentsAsync(episodeId, appId!, secret!, cts.Token)
                 .ConfigureAwait(true);
@@ -5013,18 +5036,30 @@ public partial class PlayWindow : Window
             "<d p=\"2,5,25,255,0,0,0,0\">顶部弹幕</d>" +
             "<d p=\"3,4,25,16777215,0,0,0,0\">底部弹幕</d></i>";
 
-        var comments = DanmakuXml.Parse(xml);
+        // v2 真实接口现在只回 JSON，`p` 是 time,mode,color,uid（没有字号）。
+        // 只认 XML 的解析器在这里会得到 0 条，所以两种都要覆盖。
+        const string json =
+            "{\"count\":3,\"comments\":[" +
+            "{\"p\":\"1.5,1,16711680,abc\",\"m\":\"JSON 滚动\"}," +
+            "{\"p\":\"2,5,255,abc\",\"m\":\"JSON 顶部\"}," +
+            "{\"p\":\"3,4,16777215,abc\",\"m\":\"JSON 底部\"}]}";
+
+        var fromXml = DanmakuParser.Parse(xml);
+        var fromJson = DanmakuParser.Parse(json);
+        var comments = fromXml.Concat(fromJson).ToList();
         var ass = DanmakuAss.Build(comments);
         var path = DanmakuAss.Write(comments, 999999);
 
-        var valid = comments.Count == 3
-                    && ass.Contains("Dialogue:", StringComparison.Ordinal)
-                    && ass.Contains("\\move(", StringComparison.Ordinal)
-                    && ass.Contains("\\an8", StringComparison.Ordinal)
-                    && ass.Contains("\\an2", StringComparison.Ordinal)
-                    && File.Exists(path);
+        var valid = fromXml.Count == 3 &&
+                    fromJson.Count == 3 &&
+                    ass.Contains("Dialogue:", StringComparison.Ordinal) &&
+                    ass.Contains("\\move(", StringComparison.Ordinal) &&
+                    ass.Contains("\\an8", StringComparison.Ordinal) &&
+                    ass.Contains("\\an2", StringComparison.Ordinal) &&
+                    File.Exists(path);
 
-        Trace.Write($"danmaku self-test comments={comments.Count} valid={valid} file={path}");
+        Trace.Write($"danmaku self-test xml={fromXml.Count} json={fromJson.Count} " +
+                    $"valid={valid} file={path}");
     }
 
     /// <summary>截图巡检用：直接打开媒体信息面板。</summary>

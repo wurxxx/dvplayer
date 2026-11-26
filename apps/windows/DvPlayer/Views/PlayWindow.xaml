@@ -256,6 +256,7 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <Button x:Name="PrevButton" Style="{StaticResource PlayerButton}"
@@ -338,19 +339,26 @@
               </Viewbox>
             </Button>
 
-            <Button x:Name="SpeedButton" Grid.Column="10" Style="{StaticResource PlayerButton}"
+            <!-- 弹幕开关：放在字幕后面，点一下就切，不用翻「更多」。 -->
+            <Button x:Name="DanmakuButton" Grid.Column="10" Style="{StaticResource PlayerButton}"
+                    Click="OnDanmakuClick" ToolTip="弹幕" VerticalAlignment="Center">
+              <TextBlock x:Name="DanmakuGlyph" Text="弹" FontSize="13.5" FontWeight="SemiBold"
+                         Foreground="#F2FFFFFF" />
+            </Button>
+
+            <Button x:Name="SpeedButton" Grid.Column="11" Style="{StaticResource PlayerButton}"
                     Click="OnSpeedClick" ToolTip="播放速度" VerticalAlignment="Center">
               <TextBlock x:Name="SpeedGlyph" Text="1.0×" FontSize="12.5" FontWeight="SemiBold"
                          Foreground="#F2FFFFFF" />
             </Button>
 
-            <Button x:Name="FullscreenButton" Grid.Column="11" Style="{StaticResource PlayerButton}"
+            <Button x:Name="FullscreenButton" Grid.Column="12" Style="{StaticResource PlayerButton}"
                     Click="OnFullscreenClick" ToolTip="全屏（F11 / 双击画面）" VerticalAlignment="Center">
               <TextBlock x:Name="FullscreenGlyph" Text="&#xE740;" FontFamily="{StaticResource IconFont}"
                          FontSize="16" Foreground="#F2FFFFFF" />
             </Button>
 
-            <Button x:Name="MoreButton" Grid.Column="12" Style="{StaticResource PlayerButton}"
+            <Button x:Name="MoreButton" Grid.Column="13" Style="{StaticResource PlayerButton}"
                     Click="OnMoreClick" ToolTip="更多" VerticalAlignment="Center">
               <TextBlock Text="&#xE712;" FontFamily="{StaticResource IconFont}" FontSize="17"
                          Foreground="#F2FFFFFF" />

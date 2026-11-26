@@ -21,7 +21,7 @@ public sealed class DanmakuException : Exception
 /// <summary>
 /// 弹弹play 客户端（v2，AppId + 签名鉴权）。
 ///
-/// 只做两件事：按「剧名 + 集号」找 episodeId，再取这一集的 XML 弹幕。
+/// 只做两件事：按「剧名 + 集号」找 episodeId，再取这一集的弹幕（JSON / XML 都认）。
 /// 弹幕最终写成 ASS，交给 mpv 当第二字幕显示（见 <see cref="DanmakuAss"/>）。
 /// </summary>
 public sealed class DanmakuService
@@ -79,13 +79,7 @@ public sealed class DanmakuService
     public async Task<int> EpisodeIdAsync(string anime, int episode, string appId, string appSecret,
         CancellationToken token)
     {
-        var path = "/api/v2/search/episodes";
-        var url = BaseUrl + path
-                  + "?anime=" + Uri.EscapeDataString(anime)
-                  + "&episode=" + episode.ToString(CultureInfo.InvariantCulture);
-        var body = await GetAsync(url, path, appId, appSecret, token).ConfigureAwait(false);
-
-        using var doc = JsonDocument.Parse(body);
+        using var doc = await SearchAsync(anime, episode, appId, appSecret, token).ConfigureAwait(false);
         if (!doc.RootElement.TryGetProperty("animes", out var animes) ||
             animes.ValueKind != JsonValueKind.Array)
         {
@@ -134,6 +128,65 @@ public sealed class DanmakuService
     }
 
     /// <summary>
+    /// 电影（剧场版）没有集号：按片名搜一次，只认 <c>type == "movie"</c> 且片名对得上的条目。
+    ///
+    /// 结果里常有同名 TV 动画（搜「进击的巨人」会带出「进击的巨人 剧场版」），
+    /// 挂错弹幕比没有更糟，所以片名不是完全对得上就放弃。
+    /// </summary>
+    public async Task<int> MovieEpisodeIdAsync(string title, string appId, string appSecret,
+        CancellationToken token)
+    {
+        using var doc = await SearchAsync(title, 1, appId, appSecret, token).ConfigureAwait(false);
+        if (!doc.RootElement.TryGetProperty("animes", out var animes) ||
+            animes.ValueKind != JsonValueKind.Array)
+        {
+            throw new DanmakuException("弹弹play 库里没有这部片");
+        }
+
+        var wanted = Normalize(title);
+        foreach (var animeItem in animes.EnumerateArray())
+        {
+            if (!animeItem.TryGetProperty("type", out var type) || type.GetString() != "movie")
+            {
+                continue;
+            }
+
+            var name = animeItem.TryGetProperty("animeTitle", out var titleElement)
+                ? titleElement.GetString()
+                : null;
+            if (name is null || Normalize(name) != wanted)
+            {
+                continue;
+            }
+
+            if (animeItem.TryGetProperty("episodes", out var episodes) &&
+                episodes.ValueKind == JsonValueKind.Array &&
+                episodes.GetArrayLength() > 0 &&
+                episodes[0].TryGetProperty("episodeId", out var id))
+            {
+                return id.GetInt32();
+            }
+        }
+
+        throw new DanmakuException("弹弹play 库里没有这部片");
+    }
+
+    /// <summary>片名比对：去掉空白和标点再比，全半角 / 空格差异不影响。</summary>
+    private static string Normalize(string title) =>
+        new(title.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private async Task<JsonDocument> SearchAsync(string anime, int episode, string appId,
+        string appSecret, CancellationToken token)
+    {
+        var path = "/api/v2/search/episodes";
+        var url = BaseUrl + path
+                  + "?anime=" + Uri.EscapeDataString(anime)
+                  + "&episode=" + episode.ToString(CultureInfo.InvariantCulture);
+        var body = await GetAsync(url, path, appId, appSecret, token).ConfigureAwait(false);
+        return JsonDocument.Parse(body);
+    }
+
+    /// <summary>
     /// 标题里是不是这一集。「第1」不能命中「第10」：数字后面还是数字就不算。
     /// 也兼容「第 1 集」这种中间带空格的写法。
     /// </summary>
@@ -160,7 +213,7 @@ public sealed class DanmakuService
         return false;
     }
 
-    /// <summary>取一集的弹幕 XML 并解析。</summary>
+    /// <summary>取一集的弹幕并解析。</summary>
     public async Task<List<DanmakuComment>> CommentsAsync(int episodeId, string appId,
         string appSecret, CancellationToken token)
     {
@@ -168,7 +221,7 @@ public sealed class DanmakuService
         var url = BaseUrl + path + "?withRelated=true&chConvert=1";
         var body = await GetAsync(url, path, appId, appSecret, token).ConfigureAwait(false);
 
-        var comments = DanmakuXml.Parse(body);
+        var comments = DanmakuParser.Parse(body);
         if (comments.Count == 0)
         {
             throw new DanmakuException("这一集没有弹幕");
@@ -178,10 +231,65 @@ public sealed class DanmakuService
     }
 }
 
-/// <summary>弹幕 XML（&lt;i&gt;&lt;d p="time,mode,size,color,…"&gt;text&lt;/d&gt;）解析。</summary>
-public static class DanmakuXml
+/// <summary>
+/// 弹幕体解析。
+///
+/// 弹弹play v2 的 <c>/api/v2/comment</c> 现在只回 JSON
+/// （<c>{"count":N,"comments":[{"p":"time,mode,color,uid","m":"text"}]}</c>），
+/// 老版本回 XML（<c>&lt;i&gt;&lt;d p="time,mode,size,color,…"&gt;text&lt;/d&gt;</c>）。
+/// 两种都认：开头是 <c>{</c> 就按 JSON，否则按 XML。
+///
+/// 之前只认 XML，接口换成 JSON 之后解析出 0 条，表现是「这一集没有弹幕」。
+/// </summary>
+public static class DanmakuParser
 {
-    public static List<DanmakuComment> Parse(string xml)
+    public static List<DanmakuComment> Parse(string body)
+    {
+        var text = body.TrimStart();
+        return text.StartsWith("{", StringComparison.Ordinal)
+            ? ParseJson(text)
+            : ParseXml(text);
+    }
+
+    /// <summary>v2 JSON：<c>p</c> 只有 4 段（时间,模式,颜色,用户），没有字号。</summary>
+    private static List<DanmakuComment> ParseJson(string json)
+    {
+        var comments = new List<DanmakuComment>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("comments", out var list) ||
+                list.ValueKind != JsonValueKind.Array)
+            {
+                return comments;
+            }
+
+            foreach (var item in list.EnumerateArray())
+            {
+                var raw = item.TryGetProperty("p", out var p) ? p.GetString() : null;
+                var text = item.TryGetProperty("m", out var m) ? m.GetString()?.Trim() : null;
+                if (raw is null || string.IsNullOrEmpty(text))
+                {
+                    continue;
+                }
+
+                var comment = ParseFields(raw, text);
+                if (comment is not null)
+                {
+                    comments.Add(comment);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // 不是合法 JSON 就当成没解析到，交给上层报「这一集没有弹幕」。
+        }
+
+        return comments;
+    }
+
+    private static List<DanmakuComment> ParseXml(string xml)
     {
         var comments = new List<DanmakuComment>();
 
@@ -203,26 +311,56 @@ public static class DanmakuXml
                 continue;
             }
 
-            var fields = raw.Split(',');
-            if (fields.Length < 4 ||
-                !double.TryParse(fields[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var time) ||
-                !int.TryParse(fields[1], out var mode) ||
-                !int.TryParse(fields[2], out var size) ||
-                !int.TryParse(fields[3], out var color))
+            var comment = ParseFields(raw, element.Value.Trim());
+            if (comment is not null)
             {
-                continue;
+                comments.Add(comment);
             }
-
-            var text = element.Value.Trim();
-            if (text.Length == 0)
-            {
-                continue;
-            }
-
-            comments.Add(new DanmakuComment(time, mode, size, color, text));
         }
 
         return comments;
+    }
+
+    /// <summary>
+    /// <c>p</c> 字段。XML 是 8 段（时间,模式,字号,颜色,…），JSON 是 4 段
+    /// （时间,模式,颜色,用户）—— 段数不同，字号和颜色的位置也不同。
+    /// </summary>
+    private static DanmakuComment? ParseFields(string raw, string text)
+    {
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
+        var fields = raw.Split(',');
+        if (fields.Length < 4 ||
+            !double.TryParse(fields[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var time) ||
+            !int.TryParse(fields[1], out var mode))
+        {
+            return null;
+        }
+
+        int size;
+        int color;
+        if (fields.Length >= 8)
+        {
+            // XML：字号在 [2]，颜色在 [3]。
+            if (!int.TryParse(fields[2], out size) || !int.TryParse(fields[3], out color))
+            {
+                return null;
+            }
+        }
+        else
+        {
+            // JSON：没有字号，颜色在 [2]。
+            size = 0;
+            if (!int.TryParse(fields[2], out color))
+            {
+                return null;
+            }
+        }
+
+        return new DanmakuComment(time, mode, size, color, text);
     }
 }
 

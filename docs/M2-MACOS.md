@@ -336,10 +336,17 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
 **弹幕（弹弹play）**
 
 - 按「剧名 + 集号」匹配：`/api/v2/search/episodes?anime=&episode=` → episodeId，
-  再取 `/api/v2/comment/{episodeId}?withRelated=true&chConvert=1`（XML）。
+  再取 `/api/v2/comment/{episodeId}?withRelated=true&chConvert=1`。
+  电影没有集号：按片名再搜一次，只认 `type == "movie"`、片名去掉空白标点后
+  完全一致的条目；宁可没有也不挂错（同名 TV 动画也会出现在结果里）。
+  好莱坞动画（《疯狂动物城 2》《功夫熊猫》这类）在弹弹play 库里没有条目。
+  这条接口**只回 JSON**（`{"comments":[{"p":"time,mode,color,uid","m":"text"}]}`），
+  老版本是 XML；`DanmakuParser` 两种都认（先看开头是不是 `{`）。
+  `p` 的段数也不同：XML 8 段（字号在 [2]、颜色在 [3]），JSON 4 段（颜色在 [2]、
+  没有字号）。只认 XML 的时候解析结果是 0 条，表现成「这一集没有弹幕」。
 - v2 鉴权要三个头：`X-AppId`、`X-Timestamp`、`X-Signature`，签名是
   `Base64(SHA256(AppId + Timestamp + Path + AppSecret))`（Path 不含 query）。
-- XML 转 ASS（滚动 9 秒 / 顶部 / 底部 4 秒，按行错开避免重叠），
+- 弹幕转 ASS（滚动 9 秒 / 顶部 / 底部 4 秒，按行错开避免重叠），
   写到 `~/Library/Caches/DvPlayer/danmaku/DVPlayer-danmaku-<episodeId>.ass`，
   再用 `sub-add` 挂上、`secondary-sid` 让弹幕和正片字幕**同时**显示。
   弹幕轨不进字幕菜单：按 `external-filename` 过滤掉。
