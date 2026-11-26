@@ -23,6 +23,10 @@
 
 - 共享核心绑定：`Sources/DvCore/Core.swift`（串行队列 + `async/await`，JSON 解成强类型）
 - 配置：`~/Library/Application Support/DvPlayer/settings.json`
+- 主窗口尺寸：`defaultSize(1440×900)` 只在第一次生效（之后 macOS 自己记住
+  窗口 frame）。`AppDelegate.fitToVisibleFrame` 在启动时兜一次：窗口比
+  `visibleFrame`（已扣菜单栏和 Dock）大就收进去并重新居中，放得下不动，
+  日志 `[Window] fit 1440x1200 -> 1440x954`。
 - 侧栏：服务器 / 记录 / 搜索 / 设置 + 服务器列表（连上绿点 / 未连红点）+ 左下角只显示版本（「媒体库」不单列菜单）
 - 服务器页：添加 / 编辑 / 删除源（删除走深色确认卡片，和 Windows 同一套视觉），
   连接状态与媒体库数量

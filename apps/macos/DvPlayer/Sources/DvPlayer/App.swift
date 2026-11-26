@@ -66,6 +66,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             NSApp.windows.first(where: { $0.contentView != nil })?.makeKeyAndOrderFront(nil)
+
+            // 1440×900 在 13 寸 / 1280×800 这类屏幕上比可视区还高，系统居中后
+            // 顶部会顶到菜单栏上面，顶栏和红绿灯都点不到。放不下就收进
+            // `visibleFrame`（已扣掉菜单栏与 Dock），放得下就一点不动。
+            Self.fitToVisibleFrame(NSApp.windows.first(where: { $0.contentView != nil }))
         }
 
         // 自检：`DVPLAYER_WINDOWTEST=1` 依次点一下三个窗口按钮，验证
@@ -426,6 +431,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    /// 把主窗口收进屏幕可视区。
+    ///
+    /// SwiftUI 的 `defaultSize(1440×900)` 不会看屏幕大小：13 寸笔记本的可视高度
+    /// 只有 800 出头，窗口按设计尺寸居中后顶部会跑到菜单栏上面，顶栏和红绿灯
+    /// 都点不到。放不下就收进 `visibleFrame`（已扣掉菜单栏与 Dock），
+    /// 放得下就一点不动，别改大屏上的观感。
+    private static func fitToVisibleFrame(_ window: NSWindow?) {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        var frame = window.frame
+        guard frame.width > visible.width || frame.height > visible.height else { return }
+
+        let before = frame.size
+        frame.size.width = min(frame.width, visible.width)
+        frame.size.height = min(frame.height, visible.height)
+        frame.origin.x = visible.midX - frame.width / 2
+        frame.origin.y = visible.midY - frame.height / 2
+        window.setFrame(frame, display: true)
+        NSLog("[Window] fit %.0fx%.0f -> %.0fx%.0f visible=%.0fx%.0f",
+              before.width, before.height, frame.width, frame.height,
+              visible.width, visible.height)
     }
 
     /// 等核心连上（媒体源的手动连接 / 自动连接都在 `AppState.start()` 里）。

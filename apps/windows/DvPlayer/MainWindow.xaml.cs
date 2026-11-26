@@ -23,6 +23,12 @@ public partial class MainWindow : FluentWindow
     public MainWindow()
     {
         InitializeComponent();
+
+        // 设计稿 1440×900 是按 100% 缩放算的。笔记本常见的 125% / 150% 下
+        // 工作区只有 1000×600 多 DIP，窗口按原尺寸居中就会顶出屏幕上方，
+        // 标题区和右上角的窗口按钮都点不到。启动时先收一次。
+        FitToWorkArea();
+
         Loaded += OnLoaded;
 
         // 每个源连完都会发一次：侧栏的红绿灯跟着立刻变，不等最慢的源。
@@ -32,6 +38,48 @@ public partial class MainWindow : FluentWindow
 
     private void OnConnectionsChanged(object? sender, EventArgs e) =>
         Dispatcher.BeginInvoke(UpdateSourceNavStatus);
+
+    /// <summary>
+    /// 把设计稿尺寸收进当前显示器工作区（已扣掉任务栏），四周留 16 DIP。
+    /// 窗口位置交给 XAML 的 <c>CenterScreen</c>，只要尺寸不超过工作区，
+    /// 居中就不会算出负的顶边。
+    /// </summary>
+    private void FitToWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        if (area.Width < 320 || area.Height < 240)
+        {
+            // 读不到工作区（远程会话刚起来时可能出现）：保持 XAML 的默认值。
+            return;
+        }
+
+        // 最小尺寸也得跟着放宽，否则 1366×768 / 125% 这种工作区高度不到
+        // 700 DIP 的屏幕上，MinHeight=680 会让窗口根本缩不下来。
+        var maxWidth = Math.Max(320, area.Width - WindowMargin * 2);
+        var maxHeight = Math.Max(240, area.Height - WindowMargin * 2);
+        MinWidth = Math.Min(MinWidth, maxWidth);
+        MinHeight = Math.Min(MinHeight, maxHeight);
+
+        var size = ClampToWorkArea(area, new Size(Width, Height));
+        Width = size.Width;
+        Height = size.Height;
+    }
+
+    /// <summary>窗口四周留出的空隙（DIP），别贴死屏幕边缘和任务栏。</summary>
+    private const double WindowMargin = 16;
+
+    /// <summary>
+    /// 尺寸夹进工作区：宽高各不超过「工作区 - 2×边距」。
+    /// 抽成纯函数是为了自检能拿 125% / 150% 这些本机不一定有的工作区直接验算。
+    /// </summary>
+    internal static Size ClampToWorkArea(Rect area, Size desired)
+    {
+        var maxWidth = Math.Max(320, area.Width - WindowMargin * 2);
+        var maxHeight = Math.Max(240, area.Height - WindowMargin * 2);
+        return new Size(
+            Math.Round(Math.Min(desired.Width, maxWidth)),
+            Math.Round(Math.Min(desired.Height, maxHeight)));
+    }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -2339,6 +2387,24 @@ public partial class MainWindow : FluentWindow
         await Task.Delay(800);
         var chrome = WindowChrome.GetWindowChrome(this);
         Log($"起始 state={WindowState} size={ActualWidth:0}x{ActualHeight:0} 工作区={SystemParameters.WorkArea}");
+
+        // 125% / 150% 缩放的工作区本机不一定有，用几组常见值验算「夹进工作区」：
+        // 顶边为负就是这次要修的「窗口顶部超出屏幕」。
+        foreach (var (label, workWidth, workHeight) in new[]
+                 {
+                     ("1080p@100%", 1920.0, 1040.0),
+                     ("1080p@125%", 1536.0, 832.0),
+                     ("1080p@150%", 1280.0, 693.0),
+                     ("1366x768@125%", 1093.0, 590.0),
+                 })
+        {
+            var work = new Rect(0, 0, workWidth, workHeight);
+            var size = ClampToWorkArea(work, new Size(1440, 900));
+            var top = (workHeight - size.Height) / 2;
+            Log($"适配 {label} 工作区={workWidth:0}x{workHeight:0} → " +
+                $"窗口={size.Width:0}x{size.Height:0} 居中顶边={top:0} " +
+                $"越界={(size.Width > workWidth || size.Height > workHeight || top < 0 ? "是" : "否")}");
+        }
         Log($"chrome 标题区={chrome?.CaptionHeight} 缩放边={chrome?.ResizeBorderThickness} " +
             $"系统按钮={chrome?.UseAeroCaptionButtons}");
 
