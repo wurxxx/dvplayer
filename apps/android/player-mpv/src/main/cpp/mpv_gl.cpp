@@ -106,6 +106,9 @@ struct Player {
     std::atomic<int32_t> desired_dataspace{kDataspaceSrgb};
     // HDR 直出开关：false 时 mpv 做 HDR→SDR tone mapping，surface 固定 sRGB。
     std::atomic<bool> hdr_passthrough{true};
+    // 设备 / 窗口给不了 HDR surface（EGL 没有 colorspace 扩展，或创建失败）。
+    // 一旦置位就不要再打开直出：把 PQ 画进 sRGB 缓冲区会整屏偏色。
+    std::atomic<bool> hdr_surface_unavailable{false};
     std::atomic<bool> surface_dirty{false};
     std::string primaries;
     std::string gamma;
@@ -127,6 +130,7 @@ struct Player {
     std::atomic<bool> gl_ready{false};
     bool has_pq_colorspace = false;
     bool has_hlg_colorspace = false;
+    bool has_gl_colorspace = false;
     bool has_smpte2086_meta = false;
     bool has_cta861_meta = false;
 };
@@ -154,6 +158,7 @@ bool init_egl(Player *p) {
     }
 
     const char *exts = eglQueryString(p->display, EGL_EXTENSIONS);
+    p->has_gl_colorspace = exts && strstr(exts, "EGL_KHR_gl_colorspace");
     p->has_pq_colorspace = exts && strstr(exts, "EGL_EXT_gl_colorspace_bt2020_pq");
     p->has_hlg_colorspace = exts && strstr(exts, "EGL_EXT_gl_colorspace_bt2020_hlg");
     p->has_smpte2086_meta = exts && strstr(exts, "EGL_EXT_surface_SMPTE2086_metadata");
@@ -237,6 +242,30 @@ bool create_render_context(Player *p) {
     return true;
 }
 
+/**
+ * 设备 / 窗口给不了 HDR surface：把 mpv 切回 SDR tone mapping。
+ * 只改 surface dataspace 是不够的——mpv 若还按 target-colorspace-hint=yes 输出
+ * PQ，画面会被当成 sRGB 解释，整屏发灰 / 偏色（模拟器 SwiftShader 就是这种）。
+ * 只在渲染线程（重建 surface 时）调用，此时不在 mpv_render_context_render 里。
+ */
+void force_sdr_output(Player *p, const char *why) {
+    p->hdr_surface_unavailable.store(true, std::memory_order_release);
+    if (!p->hdr_passthrough.exchange(false, std::memory_order_acq_rel)) {
+        // 已经是 SDR：surface 本来就是 sRGB，直接返回。
+        p->desired_dataspace.store(kDataspaceSrgb, std::memory_order_release);
+        return;
+    }
+    int err = 0;
+    err |= mpv_set_property_string(p->mpv, "target-colorspace-hint", "no");
+    err |= mpv_set_property_string(p->mpv, "target-prim", "bt.709");
+    err |= mpv_set_property_string(p->mpv, "target-trc", "bt.1886");
+    err |= mpv_set_property_string(p->mpv, "tone-mapping", "auto");
+    err |= mpv_set_property_string(p->mpv, "hdr-compute-peak", "yes");
+    // surface 已经是 sRGB，不需要再走一次 surface_dirty 重建。
+    p->desired_dataspace.store(kDataspaceSrgb, std::memory_order_release);
+    LOGW("%s：改由 mpv 做 HDR→SDR tone mapping（err=%d）", why, err);
+}
+
 /** dataspace → EGL surface 的 GL colorspace。设备不支持时回退 SRGB。 */
 EGLint egl_colorspace_for(Player *p, int32_t dataspace) {
     if (dataspace == kDataspaceBt2020Pq && p->has_pq_colorspace) {
@@ -255,6 +284,14 @@ bool rebuild_surface(Player *p, EGLint colorspace) {
     }
     if (!p->window) {
         return false;
+    }
+
+    // 没有 EGL_KHR_gl_colorspace 就等于没有任何 colorspace 能力：连 SRGB 属性都
+    // 传不进去（会 EGL_BAD_ATTRIBUTE），只能无属性建面。这时必须让 mpv 做
+    // tone mapping，否则 PQ 数据被当成 sRGB 显示。
+    if (!p->has_gl_colorspace) {
+        force_sdr_output(p, "EGL 无 EGL_KHR_gl_colorspace");
+        colorspace = EGL_GL_COLORSPACE_SRGB_KHR;
     }
 
     if (p->surface != EGL_NO_SURFACE) {
@@ -292,6 +329,11 @@ bool rebuild_surface(Player *p, EGLint colorspace) {
         p->surface_dataspace = kDataspaceBt2020Hlg;
     } else {
         p->surface_dataspace = kDataspaceSrgb;
+    }
+    // 想要 HDR 却只拿到 sRGB（扩展在、但窗口/驱动不认这个 colorspace）：
+    // 同样不能让 mpv 继续按 PQ 直出，否则整屏偏色。
+    if (colorspace != EGL_GL_COLORSPACE_SRGB_KHR && p->surface_dataspace == kDataspaceSrgb) {
+        force_sdr_output(p, "HDR colorspace 创建失败，回退 sRGB surface");
     }
     if (!eglMakeCurrent(p->display, p->surface, p->surface, p->context)) {
         LOGE("eglMakeCurrent 失败: 0x%x", eglGetError());
@@ -803,7 +845,11 @@ Java_com_dvplayer_player_mpv_MpvNative_setHdrPassthrough(JNIEnv *, jobject, jlon
     if (!p) {
         return;
     }
-    const bool on = enabled == JNI_TRUE;
+    bool on = enabled == JNI_TRUE;
+    if (on && p->hdr_surface_unavailable.load(std::memory_order_acquire)) {
+        LOGW("setHdrPassthrough(true) 忽略：设备给不了 HDR surface，继续 SDR tone mapping");
+        on = false;
+    }
     p->hdr_passthrough.store(on, std::memory_order_release);
     int err = 0;
     if (on) {

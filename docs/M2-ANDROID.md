@@ -406,10 +406,16 @@ P7 / P8 不切软解：BL 本身就是 HDR10，硬解只少一层动态元数据
 `screenshot-to-file ... video`（绕开 adb 对 HDR 的合成）。gpu-next + GLES 下偶发
 `Taking screenshot failed.`（seek 刚结束时最容易），验证页会重试 3 次。
 
-**`adb screencap` 抓 HDR 不能用于判颜色**：它拿的是合成后的输出，BT2020/PQ 转
-SDR 做得不到位，高饱和色被明显放大。实测同一个 4K DV P5 片源（NFS 上的
-`Lovesick S01E01`）：mpv 自己的截图是自然的暖色，`screencap` 里天空的青色明显
-过饱和。所以颜色结论一律走 mpv 截图；`screencap` 只用来确认构图 / OSD。
+截图格式不影响颜色：同一帧分别出 PNG 与 JPG，六条彩条逐像素差 ≤1（白
+`(221,221,221)` vs `(221,221,221)`、绿 `(0,214,126)` vs `(0,214,126)`），说明
+8-bit PNG 截的不是 PQ 原始值，而是渲染到 sRGB 之后的画面；PNG 里的 `sRGB/gAMA`
+标记是真的。
+
+**`adb screencap` 抓 HDR 不能用于判颜色**：它拿的是 SurfaceFlinger 合成后的输出，
+BT2020/PQ 转 SDR 由系统那套 tone mapping 负责，和 mpv 自己截的不是一张图。
+实测同一个 4K DV P5 片源（NFS 上的 `Lovesick S01E01`）：mpv 自己的截图是自然的
+暖色，`screencap` 里天空的青色明显过饱和。所以**判解码/渲染颜色一律走 mpv 截图**；
+`screencap` 只用来确认构图 / OSD，或者看「系统最终送到屏幕上的大概是什么」。
 
 反过来验证「mpv 的 HDR 输出本身没偏色」用了合成 HDR10 彩条
 （`dv-hdr10-4k-30s.mp4`）：mpv 与 Media3 两条路径各 `screencap` 一张，六条彩条
@@ -429,6 +435,60 @@ SDR 做得不到位，高饱和色被明显放大。实测同一个 4K DV P5 片
 
 4K P5 软解在骁龙 8 Gen 1 上能跑满 24p，不需要「只降级不软解」的兜底；低端机以后
 按 `dumpsys media.codec` 的 DV 解码器能力再分流。
+
+### 7.4.1 HDR 直出的设备前提（模拟器上暴露的真 bug）
+
+`target-colorspace-hint=yes` 是「把 PQ 原样交给显示端」，它要求显示端**真的接住
+PQ**。之前只要 `DeviceCapabilities` 认为设备支持 HDR 就一路开着直出，但
+EGLSurface 能不能用 `EGL_GL_COLORSPACE_BT2020_PQ_EXT` 建出来是另一个前提：
+
+- 模拟器（`android-35;google_apis_ps16k;x86_64`，SwiftShader）扩展列表里连
+  `EGL_KHR_gl_colorspace` 都没有，带 colorspace 属性建面一律
+  `EGL_BAD_ATTRIBUTE`，只能无属性创建 → surface 实际是 sRGB；
+- 而 mpv 仍按直出渲染 PQ，`window dataspace -> 0x8810000`（SRGB）。PQ 数据被
+  当成 sRGB 解释，HDR / DV 片源整片偏色，SDR 片源看不出问题——正是「各种片源
+  色彩不大对、但有的又正常」的样子。
+
+修法（`mpv_gl.cpp`，三处判断，只要命中一处就永久关直出）：
+
+1. `init_egl` 里没有 `EGL_KHR_gl_colorspace`：在**建面之前**就把
+   `target-colorspace-hint=no / target-prim=bt.709 / target-trc=bt.1886 /
+   tone-mapping=auto` 设好，首帧就是 tone mapping 过的；
+2. 带 PQ/HLG 属性建面失败、回退成 sRGB surface；
+3. 之后 Java 再调 `setHdrPassthrough(true)` 也被忽略（否则一次误调又整屏偏色）。
+
+日志对照（同一个 `dv-hdr10-4k-30s.mp4`）：
+
+| | 修复前 | 修复后 |
+| --- | --- | --- |
+| 片源属性 | `prim bt.2020 gamma pq hdr=on` | 同左 |
+| 请求的 dataspace | `0x9c60000`（BT2020_PQ） | 不再请求 |
+| 实际 surface | `colorspace 0x3089`（SRGB） | `0x3089` |
+| window dataspace | `0x8810000` | `0x8810000` |
+| 渲染 | PQ 写进 sRGB 缓冲区 ✗ | mpv 先 tone map 到 sRGB ✓ |
+
+`EGL 无 EGL_KHR_gl_colorspace：改由 mpv 做 HDR→SDR tone mapping（err=0）` 这条
+日志出现，就说明走了回退。
+
+**模拟器上的色彩回归**（全部用 mpv 自己的截图取证）：
+
+| 片源 | mpv 输出 | 参照 | 结论 |
+| --- | --- | --- | --- |
+| 8-bit H.264 BT.709 彩条 | 青 `(14,210,185)`、绿 `(10,221,2)` | ffmpeg 解同一帧 `(12,208,183)` / `(8,219,1)` | 差 1–3，✓ |
+| 10-bit HEVC BT.709 彩条 | 75% 条 `(191,191,0)` `(0,191,190)` `(191,0,1)` | 75% 的数学值 191 | 逐条一致，✓ |
+| HDR10 PQ 400nit 彩条（SDR 回退） | 白 `(221,221,221)`、黄 `(226,221,0)`、青 `(0,216,210)`、品红 `(240,0,209)` | 白必须中性、二次色两通道相等 | 白完全中性，二次色对得上，✓ |
+| DV P5（`samples/p5.mkv`，软解） | gpu-next + libdovi，无绿/紫，SDR 回退正常出画 | — | ✓（无 DV 显示，HDR 观感待真机） |
+
+HDR10 彩条里 2020 纯色映射到 709 会「变淡」（绿 `(0,214,126)`、蓝 `(0,50,170)`），
+这是 mpv 默认的 perceptual gamut mapping，不是矩阵错：把
+`--es mpv_prop "gamut-mapping-mode=clip"` 传进去，同样的三条立刻回到
+`(0,233,0)` / `(0,0,231)`，白与亮度和 perceptual 完全一致。要不要为「颜色更艳」
+换默认值，等真机/电视上对着参考片再定。
+
+一个容易误判的例子：`Lovesick` 晾衣绳那个镜头（NFS 310s 附近）mpv 截图整体
+偏暖，但它是逆光 + 纱帘的调色，不是渲染问题——同一帧 HDR 直出与 `force_sdr`
+两条路径的高光 R−B 都是 +50 左右；换到 317s 的拉远镜头，白衣/蓝披肩就正常。
+判「偏色」要看**白色物体是否中性**（彩条白 221/221/221），而不是看整帧的平均色。
 
 ### 7.5 Media3（A6）
 

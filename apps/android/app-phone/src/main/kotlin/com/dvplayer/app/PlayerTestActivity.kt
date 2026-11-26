@@ -259,6 +259,16 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 intent.getStringExtra("hwdec")?.let {
                     Log.i(TAG, "hwdec -> $it ${mpv.setProperty("hwdec", it) ?: "ok"}")
                 }
+                // 调试用：--es mpv_prop "tone-mapping-mode=hybrid,gamut-mapping-mode=relative"
+                // 用来在模拟器上 A/B 色彩相关的 mpv 属性，不影响正式播放路径。
+                intent.getStringExtra("mpv_prop")?.split(',')?.forEach { kv ->
+                    val eq = kv.indexOf('=')
+                    if (eq > 0) {
+                        val key = kv.substring(0, eq).trim()
+                        val value = kv.substring(eq + 1).trim()
+                        Log.i(TAG, "prop $key=$value -> ${mpv.setProperty(key, value) ?: "ok"}")
+                    }
+                }
                 // A9：WebDAV 需要认证时，把 Basic 头交给 mpv 的 HTTP 层。
                 vfsUser?.let { user ->
                     val token = android.util.Base64.encodeToString(
