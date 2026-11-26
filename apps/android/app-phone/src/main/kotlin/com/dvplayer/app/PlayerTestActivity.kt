@@ -605,7 +605,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             appendLine("engine media3")
             routeReason?.let { appendLine("路由 $it") }
             if (format != null) {
-                appendLine("codec ${format.codecs} · ${format.width}×${format.height}")
+                appendLine("codec ${format.codecs} · ${format.width}×${format.height} · drops ${player.droppedTotal}")
                 appendLine("color ${format.colorInfo}")
             }
             appendLine(player.debugCue)

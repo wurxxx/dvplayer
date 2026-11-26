@@ -430,6 +430,9 @@ Main10 / BT.2020 PQ 的 10 秒与 30 秒样片，两个内核都实测：
 - Media3：`hvc1.2.6.L153.B0 · 3840×2160`，
   `ColorInfo(BT2020, Limited range, ST2084 PQ, false, 10bit Luma, 10bit Chroma)`，
   SurfaceFlinger `dataspace=BT2020_ITU_PQ (298188800) hdr metadata types=1`。
+  Media3 侧接 `AnalyticsListener.onDroppedVideoFrames` 统计渲染掉帧，30 秒 4K
+  样片每 5 秒一条：`pos 5.1s / 10.1s / 15.1s / 20.1s / 25.2s · drops 0`，
+  全程 **0 掉帧**（比 mpv 的启动掉 3 帧更干净）。
 
 内核路由（A7 第一步）：`:player` 新增 `EngineRouter`，规则按上面定稿：
 

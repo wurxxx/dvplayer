@@ -75,14 +75,27 @@ class Media3Player(context: Context) : PlayerEngine {
     /** 字幕 cue（含 PGS 位图），由 UI 交给 SubtitleView 渲染。 */
     var onCues: ((CueGroup) -> Unit)? = null
 
+    /** 渲染侧累计掉帧数（调试页显示）。 */
+    @Volatile
+    var droppedTotal: Long = 0L
+        private set
+
     /** 调试页显示：最近一次 cue 的数量 / 位图数 / 文本。 */
     var debugCue: String = "-"
         private set
+
+    /** 上次打印「pos + 掉帧」的时间片，5 秒一条，便于长时间观察稳定态。 */
+    private var lastLogSlot = -1L
 
     private val tick = object : Runnable {
         override fun run() {
             if (!polling) return
             val state = state()
+            val slot = state.positionMs / 5_000
+            if (slot != lastLogSlot) {
+                lastLogSlot = slot
+                Log.i(TAG, "pos ${state.positionMs}ms · drops $droppedTotal")
+            }
             if (state != lastState) {
                 lastState = state
                 listener?.onPlayerEvent(PlayerEvent.State(state))
@@ -144,6 +157,19 @@ class Media3Player(context: Context) : PlayerEngine {
                 renderTimeMs: Long,
             ) {
                 Log.i(TAG, "first frame rendered")
+            }
+
+            /**
+             * 渲染侧掉帧（送进 Surface 之后没赶上显示）。mpv 侧有
+             * `frame-drop-count`，Media3 只能从这里拿，验证页显示在状态行。
+             */
+            override fun onDroppedVideoFrames(
+                eventTime: AnalyticsListener.EventTime,
+                droppedFrames: Int,
+                elapsedMs: Long,
+            ) {
+                droppedTotal += droppedFrames
+                Log.i(TAG, "dropped +$droppedFrames / ${elapsedMs}ms（累计 $droppedTotal）")
             }
         })
     }
