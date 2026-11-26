@@ -191,14 +191,14 @@ for round in 1 2 3 4 5 6; do
                     done <<< "$rp_list"
                     [[ -z "$found" ]] && found="$(find_lib "$base" || true)"
                     if [[ -z "$found" ]]; then
-                        echo "警告：找不到 @rpath 依赖 $base（$(basename "$file") 需要）" >&2
+                        echo "警告：找不到 @rpath 依赖 ${base}（$(basename "$file") 需要）" >&2
                         continue
                     fi
                     real="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$found")"
                     realbase="$(basename "$real")"
                     if [[ ! -f "$FRAMEWORKS/$realbase" ]]; then
                         cp "$real" "$FRAMEWORKS/"
-                        echo "  补齐依赖 $realbase（@rpath）"
+                        echo "  补齐依赖 ${realbase}（@rpath）"
                         added=1
                     fi
                     continue ;;
