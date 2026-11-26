@@ -302,6 +302,8 @@ struct DetailPage: View {
             .padding(.top, 20)
         }
         .task(id: itemId) { await load() }
+        // 续播集可能在后面的分页里：集数变多就再试一次定位。
+        .onChange(of: episodes.count) { _ in autoJumpToResumeIfNeeded() }
         // 自检：`DVPLAYER_PICK_TRACK="subtitle:1"`，等详情读完按卡片点击的同一条路切轨，
         // 验证卡片打勾与顶部按钮联动（合成点击在手动滚动的 ScrollView 里不可靠）。
         .task {
@@ -376,11 +378,16 @@ struct DetailPage: View {
                 guard let detail else { return }
                 play(playTargetId ?? detail.id, startSeconds: nil)
             } label: {
-                // 看过但没看完：按钮上带上「上次看到哪」，对齐 Windows 的
-                // `播放  00:03:16`（SeriesPage.UpdatePlayButton）。
+                // 看过但没看完：剧集带上正在看的那一集，再加上次看到哪，
+                // 对齐 Windows 的 `播放 第 20 集 01:53`（SeriesPage.UpdatePlayButton）。
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
                     Text("播放")
+                    if let episode = resumeEpisode {
+                        Text("第 \(episode.number) 集")
+                            .monospacedDigit()
+                            .opacity(0.85)
+                    }
                     if resumeSeconds >= 5 {
                         Text(MediaText.duration(Double(resumeSeconds)))
                             .monospacedDigit()
@@ -511,7 +518,7 @@ struct DetailPage: View {
 
             HorizontalRow(items: episodes, itemWidth: 314, spacing: 18,
                           jumpID: jumpEpisodeID, jumpToken: jumpToken) { row in
-                EpisodeCard(episode: row) {
+                EpisodeCard(episode: row, active: row.id == resumeEpisode?.id) {
                     play(row.id, startSeconds: nil)
                 }
             }
@@ -527,11 +534,16 @@ struct DetailPage: View {
         }
     }
 
+    /// 看到一半的那一集（进度 1%..99.5%）：详情页的「续播集」。
+    /// 一集看完（≥99.5%）不算，下一集没开始时不会误高亮。
+    private var resumeEpisode: EpisodeRow? {
+        episodes.first { $0.item.progress > 0.01 && $0.item.progress < 0.995 }
+    }
+
     /// 高亮哪一段：点过的优先，否则跟着续播点所在的那段。
     private var activeRangeStart: Int {
         if selectedRangeStart > 0 { return rangeStart(selectedRangeStart) }
-        let resume = episodes.first { $0.item.progress > 0.01 && $0.item.progress < 0.995 }
-        return rangeStart(resume?.number ?? 1)
+        return rangeStart(resumeEpisode?.number ?? 1)
     }
 
     private func rangeStart(_ number: Int) -> Int {
@@ -1077,6 +1089,9 @@ struct DetailPage: View {
     /// 截图巡检：DVPLAYER_RANGE=31 就自动点一次这一段。
     @State private var rangeShotDone = false
 
+    /// 进来后已经自动滚到续播集：只做一次，别把用户手动滚的位置拽回去。
+    @State private var didAutoJumpResume = false
+
     private func load() async {
         guard let core = state.core else {
             loading = false
@@ -1101,6 +1116,7 @@ struct DetailPage: View {
 
             Task { await loadMediaInfo() }
             Task { await loadSources() }
+            autoJumpToResumeIfNeeded()
             autoRangeShotIfNeeded()
             return
         }
@@ -1152,6 +1168,7 @@ struct DetailPage: View {
 
         await loadMediaInfo()
         saveCache()
+        autoJumpToResumeIfNeeded()
         autoRangeShotIfNeeded()
     }
 
@@ -1229,11 +1246,27 @@ struct DetailPage: View {
     private func loadEpisodes(_ season: String) async {
         seasonId = season
         selectedRangeStart = 0
+        didAutoJumpResume = false
         // 上一季还没跑完的补页请求作废（旧 fill 自己会因为 seasonId 变了退出）。
         fillPending = nil
         await loadFirstEpisodes(season)
         await loadMediaInfo()
         saveCache()
+    }
+
+    /// 一进详情就定位到看到一半的那一集：集卡高亮 + 选集行滚过去。
+    /// 首屏只拿一页，续播集可能在后面的分页里，所以集数变多时还会再试。
+    private func autoJumpToResumeIfNeeded() {
+        guard !didAutoJumpResume, let resume = resumeEpisode else { return }
+        didAutoJumpResume = true
+
+        Task {
+            // 等一帧让新卡片进视图，桥才找得到目标位置。
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            NSLog("[Detail] auto jump resume E%d", resume.number)
+            jumpEpisodeID = resume.id
+            jumpToken += 1
+        }
     }
 
     /// 截图巡检：DVPLAYER_RANGE=31 自动点一次「31-60」，用来截跳段后的画面。
@@ -1326,6 +1359,8 @@ struct DetailPage: View {
 
 private struct EpisodeCard: View {
     let episode: EpisodeRow
+    /// 看到一半的那一集：描边 + 集号用强调色，进详情一眼能找到。
+    var active: Bool = false
     let onTap: () -> Void
 
     @State private var hovering = false
@@ -1346,6 +1381,10 @@ private struct EpisodeCard: View {
                 }
                 .frame(width: 296, height: 166)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(active ? Theme.accent : .clear, lineWidth: 2)
+                }
                 .overlay(alignment: .bottom) {
                     if episode.item.progress > 0.01 && episode.item.progress < 0.995 {
                         ProgressBar(value: episode.item.progress, height: 3)
@@ -1355,7 +1394,7 @@ private struct EpisodeCard: View {
                 HStack(spacing: 7) {
                     Text(episode.badge)
                         .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(Theme.text)
+                        .foregroundStyle(active ? Theme.accent : Theme.text)
                     Text("·")
                         .font(.system(size: 13.5))
                         .foregroundStyle(Theme.faint)

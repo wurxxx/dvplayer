@@ -261,6 +261,7 @@
                   <StackPanel Width="296" Margin="0,0,18,6" Cursor="Hand"
                               Tag="{Binding Id}" MouseLeftButtonUp="OnEpisodeClick">
                     <Border x:Name="Thumb" Height="166" CornerRadius="10"
+                            BorderThickness="2" BorderBrush="Transparent"
                             Background="{Binding Background}" SnapsToDevicePixels="True">
                       <Grid ClipToBounds="True">
                         <TextBlock Text="{Binding Initial}" FontSize="34" FontWeight="SemiBold"
@@ -285,7 +286,7 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal" Margin="2,9,0,0">
-                      <TextBlock Text="{Binding Badge}" FontSize="13.5" FontWeight="SemiBold"
+                      <TextBlock x:Name="BadgeText" Text="{Binding Badge}" FontSize="13.5" FontWeight="SemiBold"
                                  Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
                       <TextBlock Text="·" FontSize="13.5" Margin="7,0"
                                  Foreground="{StaticResource FaintBrush}" VerticalAlignment="Center" />
@@ -299,6 +300,11 @@
                     <Trigger SourceName="Thumb" Property="IsMouseOver" Value="True">
                       <Setter TargetName="HoverVeil" Property="Visibility" Value="Visible" />
                     </Trigger>
+                    <!-- 看到一半的那一集：强调描边 + 集号变色 -->
+                    <DataTrigger Binding="{Binding IsActive}" Value="True">
+                      <Setter TargetName="Thumb" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                      <Setter TargetName="BadgeText" Property="Foreground" Value="{StaticResource AccentBrush}" />
+                    </DataTrigger>
                   </DataTemplate.Triggers>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>

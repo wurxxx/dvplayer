@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using DvPlayer.Player;
 using DvPlayer.Services;
 
@@ -63,6 +64,9 @@ public partial class SeriesPage : Page
 
     private string? _playTargetId;
     private int _resumeEpisode;
+
+    /// <summary>进详情后已经自动滚到续播集：只做一次。</summary>
+    private bool _didAutoScrollResume;
     private string? _currentSeasonId;
     private bool _episodesAreFlat;
 
@@ -441,6 +445,10 @@ public partial class SeriesPage : Page
         // 有看到一半的集就接着看，否则从第 1 集开始。
         var resume = _episodeTiles.FirstOrDefault(t => t.Progress is > 0.01 and < 0.99);
 
+        // 换季 / 重渲染：自动定位重新来一次。
+        _didAutoScrollResume = false;
+        MarkActiveEpisode(resume);
+
         if (_episodeTiles.Count > 0)
         {
             _playTargetId = resume?.Id ?? _episodeTiles[0].Id;
@@ -459,6 +467,7 @@ public partial class SeriesPage : Page
             }
             StatusText.Text = string.Empty;
             UpdatePlayButton();
+            AutoScrollToResume();
         }
         else
         {
@@ -573,7 +582,9 @@ public partial class SeriesPage : Page
         {
             _playTargetId = resume.Id;
             _resumeEpisode = resume.Number;
+            MarkActiveEpisode(resume);
             UpdatePlayButton();
+            AutoScrollToResume();
         }
 
         await Task.WhenAll(fresh.Select(t => t.ApplyPosterAsync(t.PosterPath)));
@@ -648,6 +659,34 @@ public partial class SeriesPage : Page
         }
 
         ScrollEpisodeRowTo(chip.From);
+    }
+
+    /// <summary>把「看到一半」的那一集标成 active（其余取消），集卡描边跟着变。</summary>
+    private void MarkActiveEpisode(EpisodeTile? resume)
+    {
+        foreach (var tile in _episodeTiles)
+        {
+            tile.IsActive = resume is not null && ReferenceEquals(tile, resume);
+        }
+    }
+
+    /// <summary>
+    /// 进来后自动把续播集滚到选集行最左边，只做一次：
+    /// 之后用户自己滚到别处，不能被补页 / 刷新拽回来。
+    /// </summary>
+    private void AutoScrollToResume()
+    {
+        if (_didAutoScrollResume || _resumeEpisode <= 0)
+        {
+            return;
+        }
+
+        _didAutoScrollResume = true;
+        Dispatcher.InvokeAsync(() =>
+        {
+            ScrollEpisodeRowTo(_resumeEpisode);
+            Trace.Write($"auto scroll resume E{_resumeEpisode}");
+        }, DispatcherPriority.Loaded);
     }
 
     /// <summary>把某一集滚到横向选集行的最左边。</summary>
@@ -876,8 +915,10 @@ public partial class SeriesPage : Page
 
         RestartButton.IsEnabled = !string.IsNullOrEmpty(_playTargetId);
 
+        // 续播时把集号写出来，和详情页集卡的强调描边对得上；
+        // 时间紧跟在后面（`播放 第 20 集 01:53`）。
         var text = _resumeEpisode > 0
-            ? $"继续观看 第 {_resumeEpisode} 集"
+            ? $"播放 第 {_resumeEpisode} 集"
             : _episodesAreFlat ? "播放" : "从第 1 集开始";
 
         // 有进度就把时间也显示出来。
@@ -2223,6 +2264,24 @@ public partial class SeriesPage : Page
 
     private sealed class EpisodeTile : CardVisual
     {
+        private bool _isActive;
+
+        /// <summary>看到一半的那一集：描边 + 集号强调色，和播放按钮的集号对应。</summary>
+        public bool IsActive
+        {
+            get => _isActive;
+            set
+            {
+                if (_isActive == value)
+                {
+                    return;
+                }
+
+                _isActive = value;
+                Raise(nameof(IsActive));
+            }
+        }
+
         public int Number { get; init; }
         public string Id { get; init; } = "";
         public string Title { get; init; } = "";
