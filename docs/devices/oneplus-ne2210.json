@@ -160,5 +160,30 @@
         ]
       }
     ]
-  }
+  },
+  "audioCodecs": [
+    "audio/3gpp",
+    "audio/ac3",
+    "audio/ac4",
+    "audio/alac",
+    "audio/amr-wb",
+    "audio/amr-wb-plus",
+    "audio/eac3",
+    "audio/eac3-joc",
+    "audio/evrc",
+    "audio/ffmpeg",
+    "audio/flac",
+    "audio/g711-alaw",
+    "audio/g711-mlaw",
+    "audio/gsm",
+    "audio/mp4a-latm",
+    "audio/mpeg",
+    "audio/opus",
+    "audio/qcelp",
+    "audio/raw",
+    "audio/vorbis",
+    "audio/x-ape",
+    "audio/x-ms-wma"
+  ],
+  "tunneling": false
 }

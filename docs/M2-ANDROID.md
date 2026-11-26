@@ -399,10 +399,23 @@ DV P5/P8 与 EGL 渲染路径。
 `--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
 都跑通；外部字幕用 `MediaItem.SubtitleConfiguration`（按扩展名给 MIME），
 reload 时记住位置与当前音轨，`onTracksChanged` 之后再恢复（否则会回落默认
-音轨）。内嵌字幕（`mov_text`）能识别、能切。章节暂缺——ExoPlayer 1.11 的
-`MediaMetadata` 没有章节字段，`Mp4Extractor` 也不解析 `chpl`。
-PGS 字幕、FFmpeg 音频扩展（自定义 decoder / renderer）、tunneling 还没做，
-这三块是 A6 剩下的主要工作。
+音轨）。内嵌字幕（`mov_text`）能识别、能切。章节由 `Mp4Chapters` 解析
+`moov/udta/chpl` 补上。
+
+音频与 tunneling（A6 第三步，2026-11-27）：`DeviceCapabilities` 补了
+`audioCodecs` 与 `tunneling` 两项采集（`MediaCodecList` + `FEATURE_TunneledPlayback`）。
+OnePlus 的结果是：
+
+- 音频解码 mime 里有 `audio/ffmpeg`（`OMX.ffmpeg.vtrial.decoder`），DTS 与
+  TrueHD 都能直接交给 Media3：10 秒 DTS 5.1 样片（从 `p7-fel.mkv` 抽的）与
+  8 秒 TrueHD 5.1 样片都播到 `pos 7.0s · 播放`，mpv 侧同样正常。所以在
+  **这台机器上不需要自建 FFmpeg 音频扩展**；只有缺 `audio/ffmpeg` 的设备
+  （低端盒子上常见）才需要，A7 的路由按 `DeviceProfile.audioCodecs` 判断。
+- `tunneling：不支持`——手机的 `MediaCodec` 没有 `FEATURE_TunneledPlayback`。
+  这项要等 TV / 盒子（B3 / A11）验，手机侧只用普通渲染路径。
+- PGS 字幕没有验：仓库里没有 `.sup` 素材，Media3 的 PGS 需要
+  `media3-extractor` 的 `PgsParser` + 位图 cue 渲染，等有样片再补；内嵌
+  `mov_text` 与外部 SRT/ASS（mpv 侧）已经验过。
 
 A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
 `MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +

@@ -47,6 +47,8 @@ object Capabilities {
         val display = displayJson(context)
         root.put("display", display)
         root.put("codecs", codecsJson())
+        root.put("audioCodecs", audioDecodersJson())
+        root.put("tunneling", tunnelingJson())
         root.put("audio", audioJson(context))
 
         val json = root.toString(2)
@@ -117,6 +119,47 @@ object Capabilities {
             obj.put(mime, JSONArray(names.sorted()))
         }
         return obj
+    }
+
+    /** 系统自带的音频解码器（DTS / TrueHD 通常没有，需要 FFmpeg 扩展）。 */
+    private fun audioDecodersJson(): JSONObject {
+        val byMime = linkedMapOf<String, MutableList<String>>()
+        MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.forEach { info ->
+            if (info.isEncoder) return@forEach
+            info.supportedTypes
+                .filter { it.startsWith("audio/") }
+                .forEach { mime -> byMime.getOrPut(mime) { mutableListOf() }.add(info.name) }
+        }
+        val obj = JSONObject()
+        byMime.forEach { (mime, names) -> obj.put(mime, JSONArray(names.sorted())) }
+        return obj
+    }
+
+    /**
+     * tunneling（A6 / B3）：解码器是否声明了 FEATURE_TunneledPlayback。
+     * 手机一般没有，TV / 盒子才有；A7 的路由需要这个结论。
+     */
+    private fun tunnelingJson(): JSONObject {
+        val codecs = mutableListOf<String>()
+        MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.forEach { info ->
+            if (info.isEncoder) return@forEach
+            info.supportedTypes
+                .filter { it.startsWith("video/") }
+                .forEach { mime ->
+                    val caps = runCatching { info.getCapabilitiesForType(mime) }.getOrNull()
+                        ?: return@forEach
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                        caps.isFeatureSupported(
+                            MediaCodecInfo.CodecCapabilities.FEATURE_TunneledPlayback,
+                        )
+                    ) {
+                        codecs.add("${info.name}:$mime")
+                    }
+                }
+        }
+        return JSONObject()
+            .put("supported", codecs.isNotEmpty())
+            .put("codecs", JSONArray(codecs.distinct()))
     }
 
     private fun audioJson(context: Context): JSONObject {
@@ -194,11 +237,17 @@ object Capabilities {
             }
         }
 
+        val audioCodecs = root.getJSONObject("audioCodecs")
+        val audioMimes = audioCodecs.keys().asSequence().sorted().joinToString(" ")
+        val tunneling = root.getJSONObject("tunneling").getBoolean("supported")
+
         return listOf(
             "${root.getString("manufacturer")} ${root.getString("model")} · Android ${root.getString("release")} (API ${root.getInt("sdk")})",
             "${root.getString("abi")} · ${root.getString("hardware")} · GLES ${root.getString("gles")}",
             "${display.getInt("width")}×${display.getInt("height")} @ ${display.getDouble("fps")}Hz · $hdrText · PiP ${if (root.getBoolean("pip")) "有" else "无"}",
             "解码 mime：$mimes",
+            "音频解码 mime：$audioMimes",
+            "tunneling：${if (tunneling) "支持" else "不支持"}",
             "直通：${if (passthrough.isEmpty()) "无" else passthrough.joinToString("/")}",
         )
     }
