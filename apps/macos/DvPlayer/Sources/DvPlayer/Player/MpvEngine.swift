@@ -180,6 +180,9 @@ final class MpvEngine {
             // 更愿意抬暗部/中间调）。SDR 内容不受影响（实测灰阶 125 不变）。
             "target-peak": String(Int(displayTarget.toneMapPeak)),
             "tone-mapping": "mobius",
+            // 弹幕 ASS 挂在第二字幕上：mpv 默认 strip 会把样式全剥掉
+            // （`\move` / `\fs` / `\c` 全部失效），所有弹幕都堆在顶部正中。
+            "secondary-sub-ass-override": "no",
         ]
 
         // 自检 / A/B 用：注入任意 vf（`scripts/fel-ab.sh` 用它关掉增强层做对照）。

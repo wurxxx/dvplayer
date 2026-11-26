@@ -322,6 +322,9 @@ public sealed class MpvProcess : IMpvEngine
         yield return $"--input-ipc-server=\\\\.\\pipe\\{pipeName}";
         yield return "--input-default-bindings=no";      // 快捷键归壳，mpv 不抢键盘
         yield return "--input-vo-keyboard=no";
+        // 弹幕 ASS 走第二字幕：默认 strip 会剥掉样式（滚动 / 颜色 / 字号），
+        // 弹幕会全挤在顶部中间。
+        yield return "--secondary-sub-ass-override=no";
         yield return "--msg-level=all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info";
 
         if (!string.IsNullOrWhiteSpace(launch.Title))

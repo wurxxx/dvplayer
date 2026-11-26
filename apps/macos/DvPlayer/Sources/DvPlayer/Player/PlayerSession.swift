@@ -732,6 +732,12 @@ final class PlayerSession: ObservableObject {
             title = displayTitle(source, itemId: itemId)
         }
         NSLog("[Play] playlist attached item=\(itemId) n=\(episodes.count) title=\(self.seriesTitle ?? "-")")
+
+        // 续播是先用记录里的剧名起播、选集后到：弹幕要等集号才查得准，
+        // 前面那次可能已经按「电影」查过了，这里补一次。
+        if danmakuEnabled, danmakuStatus == nil {
+            loadDanmakuIfNeeded()
+        }
     }
 
     // MARK: - mpv 回调
@@ -1548,7 +1554,15 @@ final class PlayerSession: ObservableObject {
     private func loadDanmakuIfNeeded() {
         danmakuTask?.cancel()
         guard danmakuEnabled else { return }
-        guard let series = seriesTitle, let episode = episodeNumber else { return }
+        guard let series = seriesTitle else {
+            NSLog("[Danmaku] 没有剧名，跳过")
+            return
+        }
+        let episode = episodeNumber
+        if episode == nil {
+            // 电影 / 没有 SxxExx 的条目：按片名去库里找剧场版。
+            NSLog("[Danmaku] 没有集号，按剧场版查找 series=\(series)")
+        }
 
         let appId = DanmakuCredential.appId
         let secret = DanmakuCredential.appSecret
@@ -1560,8 +1574,18 @@ final class PlayerSession: ObservableObject {
         let item = itemId
         danmakuTask = Task { [weak self] in
             do {
-                let episodeId = try await DanmakuService.shared.episodeId(
-                    anime: series, episode: episode, appId: appId, appSecret: secret)
+                let episodeId: Int
+                if let episode {
+                    episodeId = try await DanmakuService.shared.episodeId(
+                        anime: series, episode: episode, appId: appId, appSecret: secret)
+                } else {
+                    // 电影：按片名找剧场版；库里没有就报「没有这部片」。
+                    guard let movie = try await DanmakuService.shared.movieEpisodeId(
+                        title: series, appId: appId, appSecret: secret) else {
+                        throw DanmakuError.noMovie
+                    }
+                    episodeId = movie
+                }
                 try Task.checkCancellation()
                 let comments = try await DanmakuService.shared.comments(
                     episodeId: episodeId, appId: appId, appSecret: secret)

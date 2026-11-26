@@ -430,6 +430,7 @@ struct PlayerView: View {
 
             audioMenu
             subtitleMenu
+            danmakuButton
             speedMenu
 
             PlayerBarButton(icon: session.isFullscreen
@@ -541,6 +542,19 @@ struct PlayerView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("字幕")
+    }
+
+    /// 弹幕开关：就在字幕后面，点一下切换。
+    /// 放在「更多」里要展开两层菜单，看片时太麻烦。
+    private var danmakuButton: some View {
+        Button {
+            session.setDanmaku(enabled: !session.danmakuEnabled)
+        } label: {
+            PlayerMenuIcon(icon: session.danmakuEnabled ? "text.bubble.fill" : "text.bubble",
+                           active: session.danmakuEnabled)
+        }
+        .buttonStyle(.plain)
+        .help(session.danmakuEnabled ? "弹幕：开" : "弹幕：关")
     }
 
     @ViewBuilder
@@ -658,12 +672,6 @@ struct PlayerView: View {
 
             Divider()
 
-            Button(session.danmakuEnabled ? "弹幕：开" : "弹幕：关") {
-                session.setDanmaku(enabled: !session.danmakuEnabled)
-            }
-
-            Divider()
-
             if let intro = session.markers.introEnd {
                 Button("清除片头标记（\(timeText(intro))）") { session.clearIntro() }
             } else {
@@ -689,6 +697,9 @@ struct PlayerView: View {
                 Button("音量 −10") { session.setVolume(session.volume - 10) }
                 Menu("音轨") { audioMenuItems }
                 Menu("字幕") { subtitleMenuItems }
+                Button(session.danmakuEnabled ? "弹幕：开" : "弹幕：关") {
+                    session.setDanmaku(enabled: !session.danmakuEnabled)
+                }
                 Menu("倍速") { speedMenuItems }
             }
 
@@ -1178,12 +1189,14 @@ private struct PlayerBarButton: View {
 
 private struct PlayerMenuIcon: View {
     let icon: String
+    /// 开关类按钮（弹幕）：打开时用强调色，一眼能看出状态。
+    var active = false
     @State private var hovering = false
 
     var body: some View {
         Image(systemName: icon)
             .font(.system(size: 14))
-            .foregroundStyle(Color.white.opacity(0.9))
+            .foregroundStyle(active ? Theme.accent : Color.white.opacity(0.9))
             .frame(width: 30, height: 26)
             .background(hovering ? Color.white.opacity(0.14) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 7))
