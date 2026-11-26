@@ -273,8 +273,16 @@ bool rebuild_surface(Player *p, EGLint colorspace) {
         const EGLint fallback[] = {EGL_GL_COLORSPACE_KHR, used_colorspace, EGL_NONE};
         p->surface = eglCreateWindowSurface(p->display, p->config, p->window, fallback);
         if (p->surface == EGL_NO_SURFACE) {
-            LOGE("回退 SRGB 也失败: 0x%x", eglGetError());
-            return false;
+            // 有些实现（模拟器的 SwiftShader、部分老盒子）整个不认识
+            // EGL_KHR_gl_colorspace：带这个属性一律 EGL_BAD_ATTRIBUTE。
+            // 再不传属性创建一次，颜色按 surface 默认来，至少有画面。
+            LOGE("回退 SRGB 也失败: 0x%x，改用无属性创建", eglGetError());
+            p->surface = eglCreateWindowSurface(p->display, p->config, p->window, nullptr);
+            if (p->surface == EGL_NO_SURFACE) {
+                LOGE("无属性创建也失败: 0x%x", eglGetError());
+                return false;
+            }
+            used_colorspace = 0;
         }
     }
 

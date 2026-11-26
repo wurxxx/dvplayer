@@ -41,7 +41,9 @@ import com.dvplayer.core.download.MediaDownloader
 import com.dvplayer.core.credential.Credential
 import com.dvplayer.core.credential.CredentialStore
 import com.dvplayer.core.vfs.DavVfs
+import com.dvplayer.core.vfs.NfsVfs
 import com.dvplayer.core.vfs.SmbVfs
+import com.dvplayer.core.vfs.Vfs
 import com.dvplayer.core.vfs.VfsHttpBridge
 import com.dvplayer.player.Hdr10PlusProbe
 import com.dvplayer.player.media3.Media3Player
@@ -109,6 +111,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     /** SMB 文件经本地 HTTP 桥接后的地址（A9）。 */
     private var bridgedUrl: String? = null
     private var smbVfs: SmbVfs? = null
+    private var nfsVfs: NfsVfs? = null
     private var bridge: VfsHttpBridge? = null
 
     /** DV 配置（P5 要软解）；本地与桥接都探一次。 */
@@ -116,7 +119,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     /** 续播 / 记录用的片源标识：SMB 用 smb:// 地址，其余用 intent 里的 url。 */
     private val contentKey: String
-        get() = intent.getStringExtra("smb_play") ?: url
+        get() = intent.getStringExtra("smb_play")
+            ?: intent.getStringExtra("nfs_play")
+            ?: url
 
     /** 原盘换成普通路径、SMB 换成桥接地址，其余原样。 */
     private val playUrl: String
@@ -199,39 +204,17 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         playback = PlaybackController(memory) { target ->
             EngineRouter(this@PlayerTestActivity).choose(target)
         }
-        // SMB 播放必须先拿到桥接地址，再创建内核 / 媒体会话，否则会先拿 smb:// 地址去起播。
-        // 验证页在这里同步等一次（正式实现应在浏览页就完成握手，播放页直接拿 URL）。
-        intent.getStringExtra("smb_play")?.let { smbUrl ->
-            val ready = java.util.concurrent.CountDownLatch(1)
-            Thread({
-                try {
-                    val vfs = SmbVfs(
-                        smbUrl,
-                        smbUser,
-                        smbPass,
-                        smbDomain,
-                    )
-                    smbVfs = vfs
-                    val file = vfs.open(smbUrl)
-                    // 桥接地址是 127.0.0.1，播放器没法按路径探 DV，这里先用 VfsFile 探。
-                    dvProfile = DolbyVisionProbe.probe(
-                        { offset, buffer, count -> file.read(offset, buffer, count) },
-                        file.size,
-                    )?.profile
-                    Log.i(TAG, "SMB 片源 DV profile=${dvProfile ?: "无"}")
-                    val b = VfsHttpBridge(file, smbUrl.substringAfterLast('/'))
-                    b.start()
-                    bridge = b
-                    bridgedUrl = b.url
-                    Log.i(TAG, "SMB 桥接：$smbUrl -> ${b.url}")
-                } catch (t: Throwable) {
-                    Log.e(TAG, "SMB 桥接失败", t)
-                } finally {
-                    ready.countDown()
-                }
-            }, "smb-bridge").start()
-            if (!ready.await(20, java.util.concurrent.TimeUnit.SECONDS)) {
-                Log.e(TAG, "SMB 桥接超时")
+        // SMB / NFS 播放必须先拿到桥接地址，再创建内核 / 媒体会话，否则会先拿
+        // smb:// 地址去起播。验证页在这里同步等一次（正式实现应在浏览页就完成
+        // 握手，播放页直接拿 URL）。
+        intent.getStringExtra("smb_play")?.let { source ->
+            prepareBridge(source, "SMB") {
+                SmbVfs(source, smbUser, smbPass, smbDomain).also { smbVfs = it }
+            }
+        }
+        intent.getStringExtra("nfs_play")?.let { source ->
+            prepareBridge(source, "NFS") {
+                NfsVfs(source).also { nfsVfs = it }
             }
         }
         runCatching {
@@ -381,20 +364,20 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                         smbPass,
                         smbDomain,
                     ).also { smbVfs = it }
-                    fun walk(dir: String, level: Int) {
-                        val entries = vfs.list(dir)
-                        Log.i(TAG, "SMB|L$level|${entries.size}|$dir")
-                        entries.forEach {
-                            Log.i(TAG, "SMB|${if (it.isDirectory) "D" else "F"}|${it.size}|${it.path}")
-                            if (it.isDirectory && level < depth) {
-                                runCatching { walk(it.path, level + 1) }
-                                    .onFailure { e -> Log.w(TAG, "SMB 子目录失败 ${it.path}", e) }
-                            }
-                        }
-                    }
-                    walk(smbUrl, 0)
+                    listTree(vfs, smbUrl, depth, "SMB")
                 }.onFailure { Log.e(TAG, "SMB 列表失败", it) }
             }, "smb-list").start()
+        }
+
+        // A9 验证钩子：--es nfs <目录> 列目录（--es nfs_deep N 递归 N 层）。
+        intent.getStringExtra("nfs")?.let { nfsUrl ->
+            val depth = intent.getStringExtra("nfs_deep")?.toIntOrNull() ?: 0
+            Thread({
+                runCatching {
+                    val vfs = nfsVfs ?: NfsVfs(nfsUrl).also { nfsVfs = it }
+                    listTree(vfs, nfsUrl, depth, "NFS")
+                }.onFailure { Log.e(TAG, "NFS 列表失败", it) }
+            }, "nfs-list").start()
         }
 
         // A9 验证钩子：--es vfs <WebDAV 目录 URL> 列一次目录并打日志，
@@ -448,6 +431,57 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     }
 
     /**
+     * 把 SMB / NFS 片源经 [VfsHttpBridge] 换成 `127.0.0.1` 的 HTTP 地址。
+     *
+     * 必须在创建内核之前完成：[playUrl] 直接取 [bridgedUrl]，晚到就只能先拿
+     * `smb://` 起播再失败。这里同步等，超时基本就是 NAS 连不上或认证失败。
+     */
+    private fun prepareBridge(source: String, label: String, open: () -> Vfs) {
+        val ready = java.util.concurrent.CountDownLatch(1)
+        Thread({
+            try {
+                val file = open().open(source)
+                // 桥接地址是 127.0.0.1，播放器没法按路径探 DV，这里先用 VfsFile 探。
+                dvProfile = DolbyVisionProbe.probe(
+                    { offset, buffer, count -> file.read(offset, buffer, count) },
+                    file.size,
+                )?.profile
+                Log.i(TAG, "$label 片源 DV profile=${dvProfile ?: "无"}")
+                val b = VfsHttpBridge(file, source.substringAfterLast('/'))
+                b.start()
+                bridge = b
+                bridgedUrl = b.url
+                Log.i(TAG, "$label 桥接：$source -> ${b.url}")
+            } catch (t: Throwable) {
+                Log.e(TAG, "$label 桥接失败", t)
+            } finally {
+                ready.countDown()
+            }
+        }, "${label.lowercase()}-bridge").start()
+        if (!ready.await(20, java.util.concurrent.TimeUnit.SECONDS)) {
+            Log.e(TAG, "$label 桥接超时")
+        }
+    }
+
+    /**
+     * 递归列目录，日志格式固定为 `<标签>|D或F|size|path`，方便 shell 侧解析。
+     */
+    private fun listTree(vfs: Vfs, root: String, depth: Int, label: String) {
+        fun walk(dir: String, level: Int) {
+            val entries = vfs.list(dir)
+            Log.i(TAG, "$label|L$level|${entries.size}|$dir")
+            entries.forEach {
+                Log.i(TAG, "$label|${if (it.isDirectory) "D" else "F"}|${it.size}|${it.path}")
+                if (it.isDirectory && level < depth) {
+                    runCatching { walk(it.path, level + 1) }
+                        .onFailure { e -> Log.w(TAG, "$label 子目录失败 ${it.path}", e) }
+                }
+            }
+        }
+        walk(root, 0)
+    }
+
+    /**
      * A7「自动重试」：Media3 起播失败（容器 / 编码不支持、解码器初始化失败）时，
      * 换 mpv 从当前位置重来一次。只重试一次，且只在 Media3 上触发——
      * mpv 失败通常是真的打不开，再换回去没有意义。
@@ -468,6 +502,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             intent.getStringExtra("sub")?.let { putExtra("sub", it) }
             intent.getStringExtra("hwdec")?.let { putExtra("hwdec", it) }
             intent.getStringExtra("force_sdr")?.let { putExtra("force_sdr", it) }
+            intent.getStringExtra("smb_play")?.let { putExtra("smb_play", it) }
+            intent.getStringExtra("nfs_play")?.let { putExtra("nfs_play", it) }
             putExtra("seek_to", recovery.positionMs)
         }
         startActivity(next)
@@ -832,16 +868,19 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         val m3 = media3
         val b = bridge
         val smb = smbVfs
+        val nfs = nfsVfs
         player = null
         media3 = null
         bridge = null
         smbVfs = null
-        if (mpv != null || m3 != null || b != null || smb != null) {
+        nfsVfs = null
+        if (mpv != null || m3 != null || b != null || smb != null || nfs != null) {
             Thread({
                 runCatching { m3?.close() }
                 runCatching { mpv?.close() }
                 runCatching { b?.close() }
                 runCatching { smb?.close() }
+                runCatching { nfs?.close() }
                 Log.i(TAG, "播放内核已释放")
             }, "engine-close").start()
         }

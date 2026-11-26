@@ -31,6 +31,8 @@ EGL + mpv render API 画出来——HBY 5502（Android 9）与 OnePlus 10 Pro
 - **凭据**：SMB / WebDAV 密码进 Android Keystore（AES-256-GCM），日志不打印。
 - **播放控制**：路由 / 续播 / 切内核 / 回退收进 `:player` 的
   `PlaybackController`。
+- **NFS**：纯 Kotlin 的 NFSv3（AUTH_SYS）+ `MOUNT` / `READDIRPLUS` / `READ`，
+  不需要 libnfs，`nfs://host/export/sub` 直接交给 `NfsVfs`，播放走同一个 HTTP 桥接。
 
 验证页可用 `--es engine mpv|media3|codec` 切换内核，
 见 [`docs/M2-ANDROID.md`](../../docs/M2-ANDROID.md)。样片生成器见

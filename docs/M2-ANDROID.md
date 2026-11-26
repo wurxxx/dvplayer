@@ -183,7 +183,7 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
 | A6 | Media3（HDR10+、音频、PGS / Sup、契约对齐） | 完成 |
 | A7 | 路由 / 切换 / 回退 | 完成 |
 | A8 | 原盘入口 | 入口链完成；真实原盘样片缺 |
-| A9 | VFS（WebDAV / SMB / 桥接） | WebDAV + SMB 完成；NFS 缺 |
+| A9 | VFS（WebDAV / SMB / NFS / 桥接） | WebDAV + SMB + NFS 完成 |
 | A10 | PiP / 前台服务 / 下载 | 完成 |
 | A11 | TV 冒烟 | 未开始 |
 
@@ -501,7 +501,26 @@ mpv 播放由 mbedTLS 提供（见 7.1），Media3 侧走 OkHttp 自己的 TLS�
 `bytes=<offset>-`；Media3 seek 同样发 `bytes=`。两者都走这条路径，没有额外
 DataSource。
 
-**未做**：NFS（libnfs JNI，AUTH_SYS）；共享名枚举（SMB2 无公开接口，目前用
+**NFS**：纯 Kotlin 的 NFSv3 客户端（`core/vfs/nfs/`），不用 libnfs：
+XDR、ONC RPC 的记录标记、AUTH_SYS、rpcbind `GETPORT`、`MOUNT`、`LOOKUP`、
+`READDIRPLUS`（带 cookie 分页）、`READ` 全在 Kotlin 里。这样没有额外的 native
+库要编、要过 16KB 对齐，也能在 Mac 的 JVM 上直接测。
+
+- 地址 `nfs://host/export/sub`。导出点只有服务器知道，`MOUNT` 从最深路径往
+  上层逐个试，成功的那层就是导出点，余下的段用 `LOOKUP` 走。
+- 只支持 AUTH_SYS（M2 的范围），uid / gid 默认 `65534`（anonymous）：
+  按 IP 放行或 all_squash 的导出直接可读，要特定身份时构造时传入。
+- 端口走 rpcbind（111）；`GETPORT` 查不到 NFS 时退回 2049。`Nfs3Client`
+  留了端口注入口，单测与「rpcbind 被墙」的固定端口场景都能用。
+- 播放和 SMB 一样经 `VfsHttpBridge` 变成 `127.0.0.1` 的 HTTP。
+
+协议层用 `FakeNfsServer`（测试源码里、只监听回环的真实 NFSv3 服务器）端到端
+验证，8 个用例覆盖：列目录与大小、导出点在更浅一层时逐级回退挂载、按偏移随机
+读、中文目录名、AUTH_SYS 把 uid/gid 送到服务端、经桥接的 `Range` 请求、找不到
+导出点时的报错、300 项目录的分页（至少两次 `READDIRPLUS`）。真实 NAS / Mac
+上的 NFS 导出还没接，见 §9。
+
+**未做**：共享名枚举（SMB2 无公开接口，目前用
 `tests/android/smb-enum.py` 的 impacket `srvsvc.NetShareEnumAll` 在桌面问，App 里
 要求用户知道共享名）；`VfsEntry` 接核心虚拟源（`dv_hub_replace`）。
 **SMB 上的 BDMV 原盘还不能直接播**：桥接只服务单文件，libbluray 需要本地路径或
@@ -656,6 +675,9 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 4. **SMB 认证**：已解决，早先的 `Authentication failed` 是测试时密码输错
    （长度都对不上），不是设备侧 NTLM / Samba 签名问题；带密码与只带加密凭据
    两条路径都已实测通过（§7.10）。
+5. **NFS**：协议层已用回环上的真实 NFSv3 服务器端到端验证，但还没对真机 /
+   真 NAS 跑过。下一步是用 macOS 自带 `nfsd` 导出一个目录（需要 sudo），
+   在手机上看 `nfs://<mac-ip>/<export>` 的列表与起播。
 
 | 未决项 | 待定 |
 | --- | --- |
@@ -665,6 +687,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 | NAS 原盘 | v1「先下载到缓存」是否可接受；边读边播排 B5 |
 | 投屏 | Cast 明确列为非目标 |
 | Android 16 | 本地网络访问限制，待 SDK 文档确认权限声明 |
+| NFS 身份 | 哪些 NAS 的导出需要非匿名 uid；是否在源配置里暴露 uid/gid |
 
 ## 10. M2-B TV
 
