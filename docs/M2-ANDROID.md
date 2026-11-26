@@ -404,8 +404,28 @@ P7 / P8 不切软解：BL 本身就是 HDR10，硬解只少一层动态元数据
 
 取证：`--es shot <png> --el shot_at <ms>` 让 mpv 播到该位置时自己
 `screenshot-to-file ... video`（绕开 adb 对 HDR 的合成）。gpu-next + GLES 下偶发
-`Taking screenshot failed.`（seek 刚结束时最容易），验证页会重试 3 次，仍失败就
-用 `adb exec-out screencap -p` 兜底。
+`Taking screenshot failed.`（seek 刚结束时最容易），验证页会重试 3 次。
+
+**`adb screencap` 抓 HDR 不能用于判颜色**：它拿的是合成后的输出，BT2020/PQ 转
+SDR 做得不到位，高饱和色被明显放大。实测同一个 4K DV P5 片源（NFS 上的
+`Lovesick S01E01`）：mpv 自己的截图是自然的暖色，`screencap` 里天空的青色明显
+过饱和。所以颜色结论一律走 mpv 截图；`screencap` 只用来确认构图 / OSD。
+
+反过来验证「mpv 的 HDR 输出本身没偏色」用了合成 HDR10 彩条
+（`dv-hdr10-4k-30s.mp4`）：mpv 与 Media3 两条路径各 `screencap` 一张，六条彩条
+的中心色几乎相同——
+
+| 彩条 | mpv | Media3 |
+| --- | --- | --- |
+| 红 | (231,0,6) | (221,0,5) |
+| 黄 | (247,247,0) | (252,245,0) |
+| 绿 | (1,232,1) | (0,243,0) |
+| 青 | (0,238,228) | (0,247,240) |
+| 品红 | (227,0,167) | (225,0,203) |
+| 蓝 | (6,14,222) | (1,3,220) |
+
+另一个坑：4K 软解 seek 后要 3–10 秒才有第一帧，`shot_at` 贴着 `seek_to` 会
+「no frame」失败（验证页重试 3 次也来不及），留 3–5 秒余量。
 
 4K P5 软解在骁龙 8 Gen 1 上能跑满 24p，不需要「只降级不软解」的兜底；低端机以后
 按 `dumpsys media.codec` 的 DV 解码器能力再分流。
