@@ -118,6 +118,21 @@ SMB_LIVE=1 SMB_USER=... SMB_PASS=... \
   ./gradlew :core:testDebugUnitTest --tests '*SmbLiveTest*'
 ```
 
+NFS 的协议层测试默认跑（回环上的真实 NFSv3 服务器），真服务器用门控测试：
+
+```bash
+cd apps/android
+NFS_LIVE=1 NFS_URL=nfs://10.0.0.134/fs/1000/nfs \
+  ./gradlew :core:testDebugUnitTest --tests '*NfsLiveTest*' --rerun-tasks
+```
+
+真机验证 NFS 浏览与起播（路径里的中文先 percent-encode）：
+
+```bash
+NFS_URL=nfs://10.0.0.134/fs/1000/nfs/%E5%BD%B1%E8%A7%86 \
+  tests/android/verify-nfs.sh
+```
+
 ## 基线
 
 | 项 | 值 | 说明 |

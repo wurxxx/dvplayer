@@ -517,14 +517,27 @@ XDR、ONC RPC 的记录标记、AUTH_SYS、rpcbind `GETPORT`、`MOUNT`、`LOOKUP
 协议层用 `FakeNfsServer`（测试源码里、只监听回环的真实 NFSv3 服务器）端到端
 验证，8 个用例覆盖：列目录与大小、导出点在更浅一层时逐级回退挂载、按偏移随机
 读、中文目录名、AUTH_SYS 把 uid/gid 送到服务端、经桥接的 `Range` 请求、找不到
-导出点时的报错、300 项目录的分页（至少两次 `READDIRPLUS`）。真实 NAS / Mac
-上的 NFS 导出还没接，见 §9。
+导出点时的报错、300 项目录的分页（至少两次 `READDIRPLUS`）。
+
+真服务器：NAS 自己就开了 NFS，导出 `/fs/1000/nfs`（匿名可读）。先在 Mac 的
+JVM 上用门控测试 `NfsLiveTest`（`NFS_LIVE=1 NFS_URL=...`）校准协议，
+再上手机：
+
+| 项 | 结果 |
+| --- | --- |
+| Mac JVM 列表 / 读 | `nfs://10.0.0.134/fs/1000/nfs` 自动挂到 3 段导出点，2 项；进 `影视` 20 项；读 95GB ISO 前 4KB 成功 |
+| 手机浏览 | `影视` 20 项；`保种2` deep=1 递归 101 项；中文、空格、`@` 全对（URL 每段编码） |
+| 手机播 1080p AVC | `seek_to 60000` → `pos=60200ms`，bw ~8.4MB/s，`drops 0`，`hwdec=mediacodec-copy` |
+| 手机播 4K DV P5 | `seek_to 300000` → `pos=300884ms`，`DV profile=5` 软解，`prim bt.2020 · trc pq`，`drops` 停在 5，bw ~8.5MB/s |
+
+`adb shell` 同 SMB：路径里的中文先 percent-encode 再传给 `--es nfs` / `--es nfs_play`，
+否则设备端 shell 会改字节。脚本见 `tests/android/verify-nfs.sh`。
 
 **未做**：共享名枚举（SMB2 无公开接口，目前用
 `tests/android/smb-enum.py` 的 impacket `srvsvc.NetShareEnumAll` 在桌面问，App 里
 要求用户知道共享名）；`VfsEntry` 接核心虚拟源（`dv_hub_replace`）。
-**SMB 上的 BDMV 原盘还不能直接播**：桥接只服务单文件，libbluray 需要本地路径或
-可列目录的流；当前要播原盘得先下载或用 ISO。
+**SMB / NFS 上的 BDMV 原盘还不能直接播**：桥接只服务单文件，libbluray 需要本地路径或
+可列目录的流；当前要播原盘得先下载，或走能直接给出路径的本地存储 / ISO。
 
 ### 7.9 手机特性（A10）
 
@@ -594,16 +607,22 @@ libmpv 缓存在 `build/android-mpv/arm64/prefix`，key 是
 
 **16KB 页实测**（模拟器）：
 
-- 镜像 `system-images;android-36.1;google_apis_ps16k;x86_64`，
-  设备上 `getconf PAGE_SIZE` 返回 `16384`，Android 16。
-- x86_64 的 `libmpv.so` push 到 `/data/local/tmp`，用 NDK 编的小探针
-  `dlopen(..., RTLD_NOW)` + `dlsym("mpv_create")` → 成功（exit 0），
-  没有 `invalid ELF alignment`。
+- 镜像 `system-images;android-35;google_apis_ps16k;x86_64`（Android 15），
+  设备上 `getconf PAGE_SIZE` 返回 `16384`；之前试的 `android-36.1`
+  是 pre-release，`system_server` 会反复重启。
+- **APK 端到端跑通**：`-Pdvplayer.debugAbi=x86_64` 打包 → 安装 → 起
+  `PlayerTestActivity` → 应用加载 `libmpv.so`（日志 `mpv v0.42.0`）→
+  DV 探测、章节、软解、渲染出帧全部正常，没有 `invalid ELF alignment`。
+  4K DV P5 软解在模拟器上很慢（1 秒内容要十几秒），这是 CPU 软解的正常表现。
+- 单独验证过：x86_64 的 `libmpv.so` push 到 `/data/local/tmp`，NDK 探针
+  `dlopen(..., RTLD_NOW)` + `dlsym("mpv_create")` → 成功（exit 0）。
 - APK 层由 `check-apk.sh` 静态校验：4 个 `.so` 全部 `Stored`、
   `zipalign -c -P 16` 通过、ELF 每个 `PT_LOAD` ≥ `0x4000`。
-- 这个 pre-release 16KB 镜像在本机（Intel Mac + swiftshader）上
-  `system_server` 会反复重启，装 APK 起 Activity 的端到端没跑完；
-  但「16KB 系统上 dlopen 这个 `.so`」已经直接验过。
+- 模拟器本身不稳：swiftshader 渲染时会偶发 `bad color buffer handle`
+  把整个模拟器带崩，和页大小无关。
+- 顺带修的一个真问题：SwiftShader 不认识 `EGL_KHR_gl_colorspace`，
+  带 `EGL_GL_COLORSPACE_KHR` 一律 `EGL_BAD_ATTRIBUTE`。`rebuild_surface`
+  现在多了第三档「不传属性创建」，这类实现（模拟器、部分老盒子）不再黑屏。
 
 **凭据实测**（`tests/android/verify-credentials.sh`）：带密码列一次目录后，
 SharedPreferences 里是 `cred:smb://10.0.0.134:445 → iv:Base64(密文)`，
@@ -654,6 +673,13 @@ SMB_LIVE=1 SMB_USER=... SMB_PASS=... \
 - Android 16 上 `/sdcard/Android/data/<pkg>/files/` 的文件 mpv 用路径打不开
   （`loading failed`），放进内部 `filesDir` 正常；下载缓存因此落内部目录。
 - Android 16 强制 edge-to-edge，状态栏会压画面，UI 按 inset 处理。
+- 16KB 模拟器：`avdmanager create avd -k "system-images;android-35;google_apis_ps16k;x86_64"`
+  建出来的 AVD 默认 `hw.ramSize=96M`、320×640，必须改成 4096 / 1080×1920，
+  否则 boot 之后 `system_server` 一直重启。启动参数
+  `-no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
+  -memory 3072 -cores 2`；swiftshader 偶尔 `bad color buffer handle` 崩掉。
+- 装完 APK 先 `pm grant <pkg> android.permission.POST_NOTIFICATIONS`，
+  否则通知权限对话框会盖住 Activity，Surface 拿不到前台。
 
 ```bash
 ./gradlew :app-phone:assembleDebug
@@ -667,17 +693,17 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 风险登记在 [PLAN.md](PLAN.md) §7，与 Android 直接相关的：
 
-1. **libmpv 构建链**：已接 CI 缓存（§7.10）；16KB 页在模拟器上直接
-   `dlopen` 验过，剩下真实 16KB 设备的端到端。
+1. **libmpv 构建链**：已接 CI 缓存（§7.10）；16KB 页在 `android-35`
+   16KB 模拟器上装 APK 起播验过，剩下真实 16KB 设备。
 2. **TV / 盒子的 HDR 与 tunneling**：手机侧已验，盒子合成器只认 tunneled HDR 时
    要 Media3 补。
 3. **mpv 的音频直通**：`ao_audiotrack` 的 IEC61937 支持未验证；不支持就路由 Media3。
 4. **SMB 认证**：已解决，早先的 `Authentication failed` 是测试时密码输错
    （长度都对不上），不是设备侧 NTLM / Samba 签名问题；带密码与只带加密凭据
    两条路径都已实测通过（§7.10）。
-5. **NFS**：协议层已用回环上的真实 NFSv3 服务器端到端验证，但还没对真机 /
-   真 NAS 跑过。下一步是用 macOS 自带 `nfsd` 导出一个目录（需要 sudo），
-   在手机上看 `nfs://<mac-ip>/<export>` 的列表与起播。
+5. **NFS**：已实测。协议层有回环上的真实 NFSv3 服务器测试，真机对 NAS
+   的 `/fs/1000/nfs` 导出也跑通了浏览与 4K DV P5 起播（§7.8）。剩下的是
+   极端情况：需要非匿名 uid 的导出、rpcbind 被墙只开 2049。
 
 | 未决项 | 待定 |
 | --- | --- |
