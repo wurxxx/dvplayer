@@ -19,6 +19,8 @@ import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import com.dvplayer.player.EngineId
+import com.dvplayer.player.FrameRateMatcher
+import com.dvplayer.player.MediaSessionController
 import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
 import com.dvplayer.player.TrackKind
@@ -53,6 +55,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var speedIndex = 0
     private var tickCount = 0
     private var resumeApplied = false
+    private var askedNotification = false
+    private var session: MediaSessionController? = null
     private lateinit var memory: PlaybackMemory
     private val handler = Handler(Looper.getMainLooper())
 
@@ -78,6 +82,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                     maybeMatchFrameRate()
                     statusLine()
                 }
+            }
+            enginePlayer?.let { player ->
+                session?.update(MediaSessionController.snapshot(player.state()))
             }
             maybeResume()
             if (++tickCount % 3 == 0) maybeSave()
@@ -144,11 +151,20 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             }
         }
 
+        enginePlayer?.let {
+            session = MediaSessionController(this, it, url.substringAfterLast('/'))
+            Log.i(TAG, "媒体会话就绪")
+        }
+
         Log.i(TAG, "engine=$engine url=$url")
     }
 
     override fun onResume() {
         super.onResume()
+        if (!askedNotification && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            askedNotification = true
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
+        }
         handler.post(refresh)
     }
 
@@ -310,6 +326,8 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onDestroy() {
         handler.removeCallbacks(refresh)
+        session?.release()
+        session = null
         player?.close()
         media3?.close()
         super.onDestroy()
@@ -378,19 +396,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         if (matchedFps > 0 && abs(fps - matchedFps) < 0.01) return
 
         val display = currentDisplay
-        val current = display.mode
-        val sameSize = display.supportedModes.filter {
-            it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight
-        }
+        val sameSize = FrameRateMatcher.sameSizeModes(display)
         if (sameSize.isEmpty()) return
-
-        val best = sameSize
-            .map { it to it.refreshRate / fps }
-            .filter { (_, ratio) -> ratio >= 0.999 && abs(ratio - round(ratio)) < 0.01 }
-            .minByOrNull { (_, ratio) -> ratio }
-            ?.first
-            ?: sameSize.maxByOrNull { it.refreshRate }
-            ?: return
+        val best = FrameRateMatcher.bestMode(sameSize, fps) ?: return
 
         matchedFps = fps
 

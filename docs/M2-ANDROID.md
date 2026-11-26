@@ -232,7 +232,17 @@ libmpv 构建链（A0 的另一半，2026-11-26）：
   `sub:test.srt*`；Media3 侧同流程，载入外部字幕后位置与音轨都保持
   （`audio:en*` 不回落默认音轨）。Media3 的章节暂时为空——ExoPlayer 1.11 的
   `MediaMetadata` 没有章节字段，`Mp4Extractor` 也不解析 `chpl`。
-  会话 / 通知 / 续播还没接，属于 A4 末尾。
+  会话 / 通知 / 续播 / 章节 / ASS 都已接上（见下）。
+
+**会话与通知（A4，2026-11-27）**：`:player` 的 `MediaSessionController` 用平台
+`MediaSession`（不引额外依赖）把播放状态挂上去，锁屏 / 蓝牙 / 通知按钮的回调
+统一转到 `PlayerEngine`；通知用 `Notification.MediaStyle`，暂停 / 播放切换时
+更新。验证：`dumpsys media_session` 显示
+`state=PLAYING(3) position=3791 speed=1.0`，`cmd media_session dispatch pause`
+之后变 `PAUSED(2)`、页面状态同步「暂停」，`dispatch play` 恢复；
+ColorOS 的状态栏媒体胶囊也识别了这条通知。帧率匹配的选模式逻辑抽到
+`:player` 的 `FrameRateMatcher`，验证页只负责应用结果，24p → 120Hz 仍是
+`mode 6@120.00Hz`。
 
 章节 / 续播 / ASS（A4 收尾，2026-11-27）：
 
