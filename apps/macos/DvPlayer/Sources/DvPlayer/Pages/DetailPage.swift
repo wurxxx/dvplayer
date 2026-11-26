@@ -1387,7 +1387,14 @@ private struct EpisodeCard: View {
                 }
                 .overlay(alignment: .bottom) {
                     if episode.item.progress > 0.01 && episode.item.progress < 0.995 {
-                        ProgressBar(value: episode.item.progress, height: 3)
+                        // 往里缩 4pt：贴着底边会和强调色描边连成一条，
+                        // 分不清「高亮」还是「进度」。
+                        ProgressBar(value: episode.item.progress, height: 3,
+                                    tint: active ? Color.white.opacity(0.95) : Theme.accent,
+                                    track: active ? Color.black.opacity(0.45) : Color.white.opacity(0.18))
+                            .clipShape(Capsule())
+                            .padding(.horizontal, 4)
+                            .padding(.bottom, 4)
                     }
                 }
 

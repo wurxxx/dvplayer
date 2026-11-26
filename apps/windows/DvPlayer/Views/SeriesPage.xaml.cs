@@ -548,7 +548,8 @@ public partial class SeriesPage : Page
                 PosterPath = item.PosterPath,
                 Initial = Palette.InitialOf(item.Title ?? ""),
                 Progress = item.Progress,
-                ProgressWidth = Math.Max(0, TileWidth * Math.Clamp(item.Progress, 0, 1)),
+                // 进度条左右各缩进 4px，可用宽度要跟着减。
+                ProgressWidth = Math.Max(0, (TileWidth - 8) * Math.Clamp(item.Progress, 0, 1)),
                 ProgressVisibility = item.Progress > 0.01 ? Visibility.Visible : Visibility.Collapsed,
             };
             tile.UseGradient(tile.Id + tile.Title);
