@@ -125,8 +125,12 @@ HOMEBREW_DEPS=(
     "$BREW_PREFIX/opt/harfbuzz/lib/libharfbuzz.0.dylib"
     "$BREW_PREFIX/opt/fontconfig/lib/libfontconfig.1.dylib"
     "$BREW_PREFIX/opt/freetype/lib/libfreetype.6.dylib"
-    "$BREW_PREFIX/opt/jpeg/lib/libjpeg.9.dylib"
 )
+# jpeg：版本号会跟着 Homebrew 的 formula 变（Intel 上是 libjpeg.8/9，arm64
+# runner 上是另一版），写死具体版本号必然有一边落空，用 glob 取。
+for jp in "$BREW_PREFIX"/opt/jpeg/lib/libjpeg.*.dylib; do
+    [[ -f "$jp" ]] && HOMEBREW_DEPS+=("$jp")
+done
 # little-cms2：mpv 的 `lcms` 是 auto 检测，CI runner 预装了它，编出来的 libmpv
 # 就会链接 liblcms2（本机没装就不会）。不补进包里，发布包在用户机器上启动就
 # 报 `Library not loaded: @rpath/liblcms2.2.dylib`。ABI 版本号会变，用 glob 取。
@@ -144,15 +148,61 @@ done
 
 # 依赖是链式的：freetype → libpng、harfbuzz → graphite2 + glib、glib →
 # libintl + pcre2 … 硬编码清单永远追不上（先是漏了 lcms2，补上 lcms2 又发现
-# 漏了 png / graphite2 / glib）。这里循环扫描包里每个 dylib 的**绝对路径**
-# 依赖，源文件存在就拷进来，直到没有新增。
+# 漏了 png / graphite2 / glib）。这里循环扫描包里每个 dylib 的依赖，源文件
+# 存在就拷进来，直到没有新增。
+#
+# 两种依赖写法都要处理：
+#   1) 绝对路径（Homebrew 的库常见）—— 直接按路径拷；
+#   2) @rpath/xxx —— 先拿依赖方自己的 LC_RPATH 去找；找不到再在已知目录
+#      里兜底搜索。arm64 runner 上 libbrotlidec 就是这种：它自己被绝对路径
+#      拷进来，依赖的 libbrotlicommon 写成 @rpath，而 Apple Silicon 的
+#      Homebrew 库自己**不带** LC_RPATH（rpath 是消费方声明的），只看它
+#      自己的 rpath 会一无所获。漏掉的话发布包一启动就报
+#      Library not loaded: @rpath/libbrotlicommon.1.dylib。
+find_lib() {
+    local base="$1" stem dir hit
+    stem="${base%.dylib}"
+    for dir in "$FRAMEWORKS" "$PREFIX_LIB" "$BREW_PREFIX/lib" "$BREW_PREFIX"/opt/*/lib; do
+        [[ -e "$dir/$base" ]] && { echo "$dir/$base"; return 0; }
+        # 只有带完整版本号的文件、没有软链时也能命中。
+        for hit in "$dir/$stem"*.dylib; do
+            [[ -e "$hit" ]] && { echo "$hit"; return 0; }
+        done
+    done
+    return 1
+}
+
 for round in 1 2 3 4 5 6; do
     added=0
     for file in "$FRAMEWORKS"/*.dylib; do
+        # 这个文件自己声明的 rpath 目录（可能有多个）。
+        rp_list=$(otool -l "$file" | awk '/LC_RPATH/{f=1;next} f&&/path /{print $2; f=0}')
         while read -r dep; do
             [[ -z "$dep" ]] && continue
             case "$dep" in
-                @rpath/*|@loader_path/*|@executable_path/*|/usr/lib/*|/System/*) continue ;;
+                @rpath/*)
+                    base="${dep#@rpath/}"
+                    found=""
+                    while IFS= read -r rp; do
+                        [[ -z "$rp" ]] && continue
+                        [[ -f "$rp/$base" ]] || continue
+                        found="$rp/$base"
+                        break
+                    done <<< "$rp_list"
+                    [[ -z "$found" ]] && found="$(find_lib "$base" || true)"
+                    if [[ -z "$found" ]]; then
+                        echo "警告：找不到 @rpath 依赖 ${base}（$(basename "$file") 需要）" >&2
+                        continue
+                    fi
+                    real="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$found")"
+                    realbase="$(basename "$real")"
+                    if [[ ! -f "$FRAMEWORKS/$realbase" ]]; then
+                        cp "$real" "$FRAMEWORKS/"
+                        echo "  补齐依赖 ${realbase}（@rpath）"
+                        added=1
+                    fi
+                    continue ;;
+                @loader_path/*|@executable_path/*|/usr/lib/*|/System/*) continue ;;
             esac
             [[ -f "$dep" ]] || continue
             real="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$dep")"
@@ -186,9 +236,12 @@ for file in "$FRAMEWORKS"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
 
     while read -r dep; do
         [[ -z "$dep" ]] && continue
+        # @rpath 的也要改：包里放的是带完整版本号的文件名
+        # （libbrotlicommon.1.2.1.dylib），依赖写的是 libbrotlicommon.1.dylib，
+        # 不归一化的话发布包自检会认为缺文件。
         install_name_tool -change "$dep" "@rpath/$(real_name "$(basename "$dep")")" "$file"
     done < <(otool -L "$file" | tail -n +2 | awk '{print $1}' \
-             | grep -E "^($BREW_PREFIX/|$PREFIX_LIB/)" || true)
+             | grep -E "^(@rpath/|$BREW_PREFIX/|$PREFIX_LIB/)" || true)
 done
 
 # 发布包自检：改写后所有依赖都应该是 @rpath/xxx 或系统库，@rpath 的目标必须
