@@ -91,12 +91,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // 自检：`DVPLAYER_DISC=<iso>` 不经过媒体库，直接开原盘播放窗。
-        // `DVPLAYER_DISC_TITLE=N` 选第 N 个标题（不给就弹标题框，远程没法点）。
+        // `DVPLAYER_DISC_TITLE=N` 选第 N 个标题（不给就弹标题框，远程没法点）；
+        // `DVPLAYER_DISC_START=<秒>` 从这一秒起播（验证章节起播）。
         if let iso = ProcessInfo.processInfo.environment["DVPLAYER_DISC"], !iso.isEmpty {
             Task { @MainActor in
                 let env = ProcessInfo.processInfo.environment
                 let wanted = Int(env["DVPLAYER_DISC_TITLE"] ?? "")
-                DiscUI.open(path: iso, autoTitle: wanted)
+                let discStart = Double(env["DVPLAYER_DISC_START"] ?? "")
+                DiscUI.open(path: iso, autoTitle: wanted,
+                            start: discStart.map { max(0, $0) })
 
                 // 挂载 + 读 mpls 要一两秒；等播放窗真的出来。
                 var waited = 0

@@ -91,6 +91,8 @@ struct DiscPlayback {
     /// 从媒体库点开时核心给的片名；直接打开 ISO 时没有。
     let hintTitle: String?
     let coreItemId: String?
+    /// 从媒体库续播时核心给的起播点（只对默认标题有意义，菜单里当「继续」用）。
+    var suggestedStart: Double?
 
     var displayName: String {
         if let hint = hintTitle, !hint.isEmpty {
