@@ -434,6 +434,86 @@ actor TraktClient {
         _ = try await send("POST", "/scrobble/\(action)", body: body)
     }
 
+    // MARK: playback（跨设备续播）
+
+    /// `/sync/playback` 里的一条。Trakt 只存百分比，没有绝对秒数。
+    private struct PlaybackEntry {
+        let id: Int
+        let progress: Double
+        let kind: String
+        let traktId: Int
+        let season: Int?
+        let episode: Int?
+    }
+
+    private var playbackCache: (at: Date, entries: [PlaybackEntry])?
+
+    /// 同一条目在 Trakt 上的「看到哪」（0–1）。列表 5 分钟内复用一次。
+    func playbackProgress(for match: TraktMatch, season: Int?, episode: Int?) async -> Double? {
+        let entries = await playbackEntries()
+        let entry: PlaybackEntry?
+        if match.kind == "movie" {
+            entry = entries.first { $0.kind == "movie" && $0.traktId == match.traktId }
+        } else {
+            entry = entries.first {
+                $0.kind == "show" && $0.traktId == match.traktId &&
+                $0.season == season && $0.episode == episode
+            }
+        }
+
+        guard let entry, entry.progress > 0 else { return nil }
+        return min(1, entry.progress / 100)
+    }
+
+    /// Trakt 没有单独的「写 playback」接口：/sync/playback 只支持 GET / DELETE，
+    /// 观看位置由 /scrobble 的 start / pause / stop 自动维护，这里只负责读。
+
+    private func playbackEntries() async -> [PlaybackEntry] {
+        if let cached = playbackCache, Date().timeIntervalSince(cached.at) < 300 {
+            return cached.entries
+        }
+
+        let data: Data
+        do {
+            data = try await send("GET", "/sync/playback")
+        } catch {
+            NSLog("[Trakt] playback 列表读取失败：\(error.localizedDescription)")
+            return []
+        }
+
+        guard let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else {
+            NSLog("[Trakt] playback 列表解析失败：\(String(data: data, encoding: .utf8)?.prefix(120) ?? "")")
+            return []
+        }
+
+        let entries: [PlaybackEntry] = list.compactMap { row in
+            guard let id = row["id"] as? Int,
+                  let progress = row["progress"] as? Double else { return nil }
+
+            if let movie = row["movie"] as? [String: Any],
+               let ids = movie["ids"] as? [String: Any],
+               let trakt = ids["trakt"] as? Int {
+                return PlaybackEntry(id: id, progress: progress, kind: "movie",
+                                     traktId: trakt, season: nil, episode: nil)
+            }
+
+            if let show = row["show"] as? [String: Any],
+               let ids = show["ids"] as? [String: Any],
+               let trakt = ids["trakt"] as? Int {
+                let ep = row["episode"] as? [String: Any]
+                return PlaybackEntry(id: id, progress: progress, kind: "show",
+                                     traktId: trakt,
+                                     season: ep?["season"] as? Int,
+                                     episode: ep?["number"] as? Int)
+            }
+            return nil
+        }
+
+        playbackCache = (Date(), entries)
+        return entries
+    }
+
     // MARK: - 请求
 
     private func send(_ method: String, _ path: String,

@@ -67,6 +67,12 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   **播放中**卡住（mpv `paused-for-cache`，停超过 400ms）则在画面中间浮一个
   「正在缓冲…」小胶囊，画面、控制条都不盖掉。回归：`--play <id> --play-cover-shot
   <目录>`（配合 `DVPLAYER_OPENING_HOLD=1` 假装首帧不来，截 1.5 / 12 / 31 秒三张）。
+- **电影续播取较长的进度**：同一部片在「资源」里的其它源看过更多，或 Trakt 的
+  playback 更远时，按百分比取较长的那条，用当前源片长换算（`PlaySource` 不给
+  duration 时退到详情 `RuntimeSeconds`）；差不足 1% 保留本地，≥99.5% 视为看完
+  从头播。只对电影 / 视频生效，剧集不合并。Trakt 位置由 `/scrobble` 维护，
+  详情页只读 `/sync/playback`。回归：`resume merge … / resume keep own …` 落
+  `player.log`。
 - **进来就定位到续播集**：详情页算出的续播集（进度 1%–99%）除了决定播放目标，
   还让 `EpisodeTile.IsActive` 亮起（集卡强调色描边、集号变色；进度条往里缩 4px、
   高亮集改成白色，免得和描边连成一条；≥99.5% 算看完，不画进度条、也不续播），

@@ -432,6 +432,123 @@ internal sealed class TraktClient
             token: token).ConfigureAwait(false);
     }
 
+    // MARK: playback（跨设备续播）
+
+    private sealed record PlaybackEntry(int Id, double Progress, string Kind, int TraktId,
+        int? Season, int? Episode);
+
+    private List<PlaybackEntry>? _playback;
+    private DateTime _playbackAt = DateTime.MinValue;
+    private readonly object _playbackLock = new();
+
+    /// <summary>
+    /// 同一条目在 Trakt 上的「看到哪」（0–1）。Trakt 只存百分比，没有绝对秒数；
+    /// 列表 5 分钟内复用一次，详情页反复打开不会一直打接口。
+    /// </summary>
+    public async Task<double?> PlaybackProgressAsync(TraktMatch match, int? season, int? episode,
+        CancellationToken token = default)
+    {
+        var entries = await PlaybackEntriesAsync(token).ConfigureAwait(false);
+        var entry = match.Kind == "movie"
+            ? entries.FirstOrDefault(e => e.Kind == "movie" && e.TraktId == match.TraktId)
+            : entries.FirstOrDefault(e => e.Kind == "show" && e.TraktId == match.TraktId &&
+                                          e.Season == season && e.Episode == episode);
+        if (entry is null || entry.Progress <= 0)
+        {
+            return null;
+        }
+
+        return Math.Clamp(entry.Progress / 100, 0, 1);
+    }
+
+    // Trakt 没有单独的「写 playback」接口：/sync/playback 只支持 GET / DELETE，
+    // 观看位置由 /scrobble 的 start / pause / stop 自动维护，这里只负责读。
+
+    private async Task<List<PlaybackEntry>> PlaybackEntriesAsync(CancellationToken token)
+    {
+        lock (_playbackLock)
+        {
+            if (_playback is not null && DateTime.UtcNow - _playbackAt < TimeSpan.FromMinutes(5))
+            {
+                return _playback;
+            }
+        }
+
+        var entries = new List<PlaybackEntry>();
+        try
+        {
+            var text = await SendAsync(HttpMethod.Get, "/sync/playback", null, null, token: token)
+                .ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var row in doc.RootElement.EnumerateArray())
+                {
+                    if (!row.TryGetProperty("id", out var idElement) ||
+                        !row.TryGetProperty("progress", out var progressElement) ||
+                        idElement.ValueKind != JsonValueKind.Number ||
+                        progressElement.ValueKind != JsonValueKind.Number)
+                    {
+                        continue;
+                    }
+
+                    var id = idElement.GetInt32();
+                    var progress = progressElement.GetDouble();
+                    var kind = "";
+                    var traktId = 0;
+                    int? season = null;
+                    int? episode = null;
+
+                    if (row.TryGetProperty("movie", out var movie) &&
+                        movie.TryGetProperty("ids", out var movieIds) &&
+                        movieIds.TryGetProperty("trakt", out var movieTrakt) &&
+                        movieTrakt.ValueKind == JsonValueKind.Number)
+                    {
+                        kind = "movie";
+                        traktId = movieTrakt.GetInt32();
+                    }
+                    else if (row.TryGetProperty("show", out var show) &&
+                             show.TryGetProperty("ids", out var showIds) &&
+                             showIds.TryGetProperty("trakt", out var showTrakt) &&
+                             showTrakt.ValueKind == JsonValueKind.Number)
+                    {
+                        kind = "show";
+                        traktId = showTrakt.GetInt32();
+                        if (row.TryGetProperty("episode", out var ep))
+                        {
+                            if (ep.TryGetProperty("season", out var seasonElement))
+                            {
+                                season = seasonElement.GetInt32();
+                            }
+                            if (ep.TryGetProperty("number", out var numberElement))
+                            {
+                                episode = numberElement.GetInt32();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    entries.Add(new PlaybackEntry(id, progress, kind, traktId, season, episode));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("trakt playback read failed: " + ex.Message);
+        }
+
+        lock (_playbackLock)
+        {
+            _playback = entries;
+            _playbackAt = DateTime.UtcNow;
+        }
+
+        return entries;
+    }
+
     // MARK: - 请求
 
     private async Task<string> SendAsync(HttpMethod method, string path, string? query,
