@@ -447,6 +447,20 @@ Media3 重建；再切回 mpv 同样接着播（`pos 27.5s`）。两个坑：
   这台机器上钉钉（另一个应用）自己也请求了 120Hz，会盖住恢复结果；
   以窗口属性 `preferredDisplayMode=6` 是否还在来判定。
 
+Dolby Vision 路由（A7 第三步，2026-11-27）：新增 `DolbyVisionProbe`，在本地
+文件头 1MB / 尾部 2MB 里找 `dvcC` / `dvvC` 与紧随其后的 DV 配置记录
+（`version_major=1`，profile 1..9）。MP4 的记录在四字符码后 4 字节，MKV 的
+`dvcC` 是 `BlockAddIDType`、后面还有 EBML 长度字段，所以命中后在 +4..+12
+里找 `01 00` 开头的记录。路由顺序改成 **DV → mpv**、HDR10+ → Media3、
+其余 → mpv；DV 必须先判，因为 P7 的 SEI 也会被 HDR10+ 探针认成 ST2094-40
+（第一次实测 p7-fel.mkv 就被错误路由到 Media3）。
+
+实测（`samples/p5.mkv` / `p7-fel.mkv`）：
+
+- P7 FEL：`路由 Dolby Vision P7，交 mpv 整形`，mpv 正常播放（20.7s 样片）。
+- P5：`路由 Dolby Vision P5，交 mpv 整形`，mpv 把 P5 重塑成
+  `prim bt.2020 · trc bt.1886`（SDR 输出）——和 A1 的例外表一致。
+
 PiP（A10 第一步，2026-11-27）：验证页 `supportsPictureInPicture=true`，
 按钮「PIP」与按 Home 都能进画中画。实测
 `mLastReportedPictureInPictureMode=true`、任务 `mode=pinned`、
