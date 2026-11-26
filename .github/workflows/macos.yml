@@ -174,8 +174,9 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo --version
 
-      - name: 缓存依赖栈
-        uses: actions/cache@v4
+      - name: 缓存依赖栈（还原）
+        id: deps-cache
+        uses: actions/cache/restore@v4
         with:
           # 只缓存 prefix（编好的 dylib + 头文件），不缓存源码树：
           # build/src 有几个 GB，而且 ffmpeg 的 config.h 残留会让下次
@@ -212,6 +213,15 @@ jobs:
             echo "::error::有 dylib 的 minos 不是 $MACOSX_DEPLOYMENT_TARGET"
             exit 1
           fi
+
+      - name: 缓存依赖栈（保存）
+        # 显式保存：以前靠 actions/cache 的后置步骤，job 一旦在后面（比如打包）
+        # 失败，这一步会被跳过，下次又得从零编 40 分钟。依赖栈编完就存下来。
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: prefix
+          key: deps-${{ env.DEPS_CACHE_KEY }}-${{ runner.os }}-${{ matrix.arch }}
 
       - name: 编 Rust 核心
         run: |

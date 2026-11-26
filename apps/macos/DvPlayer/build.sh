@@ -153,10 +153,25 @@ done
 #
 # 两种依赖写法都要处理：
 #   1) 绝对路径（Homebrew 的库常见）—— 直接按路径拷；
-#   2) @rpath/xxx —— 得拿依赖方自己的 LC_RPATH 去找。arm64 runner 上
-#      libbrotlidec 就是这种：它自己被绝对路径拷进来了，但它依赖的
-#      libbrotlicommon 只写成 @rpath，漏掉的话发布包一启动就报
+#   2) @rpath/xxx —— 先拿依赖方自己的 LC_RPATH 去找；找不到再在已知目录
+#      里兜底搜索。arm64 runner 上 libbrotlidec 就是这种：它自己被绝对路径
+#      拷进来，依赖的 libbrotlicommon 写成 @rpath，而 Apple Silicon 的
+#      Homebrew 库自己**不带** LC_RPATH（rpath 是消费方声明的），只看它
+#      自己的 rpath 会一无所获。漏掉的话发布包一启动就报
 #      Library not loaded: @rpath/libbrotlicommon.1.dylib。
+find_lib() {
+    local base="$1" stem dir hit
+    stem="${base%.dylib}"
+    for dir in "$FRAMEWORKS" "$PREFIX_LIB" "$BREW_PREFIX/lib" "$BREW_PREFIX"/opt/*/lib; do
+        [[ -e "$dir/$base" ]] && { echo "$dir/$base"; return 0; }
+        # 只有带完整版本号的文件、没有软链时也能命中。
+        for hit in "$dir/$stem"*.dylib; do
+            [[ -e "$hit" ]] && { echo "$hit"; return 0; }
+        done
+    done
+    return 1
+}
+
 for round in 1 2 3 4 5 6; do
     added=0
     for file in "$FRAMEWORKS"/*.dylib; do
@@ -167,18 +182,25 @@ for round in 1 2 3 4 5 6; do
             case "$dep" in
                 @rpath/*)
                     base="${dep#@rpath/}"
+                    found=""
                     while IFS= read -r rp; do
                         [[ -z "$rp" ]] && continue
                         [[ -f "$rp/$base" ]] || continue
-                        real="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$rp/$base")"
-                        realbase="$(basename "$real")"
-                        if [[ ! -f "$FRAMEWORKS/$realbase" ]]; then
-                            cp "$real" "$FRAMEWORKS/"
-                            echo "  补齐依赖 $realbase（@rpath）"
-                            added=1
-                        fi
+                        found="$rp/$base"
                         break
                     done <<< "$rp_list"
+                    [[ -z "$found" ]] && found="$(find_lib "$base" || true)"
+                    if [[ -z "$found" ]]; then
+                        echo "警告：找不到 @rpath 依赖 $base（$(basename "$file") 需要）" >&2
+                        continue
+                    fi
+                    real="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$found")"
+                    realbase="$(basename "$real")"
+                    if [[ ! -f "$FRAMEWORKS/$realbase" ]]; then
+                        cp "$real" "$FRAMEWORKS/"
+                        echo "  补齐依赖 $realbase（@rpath）"
+                        added=1
+                    fi
                     continue ;;
                 @loader_path/*|@executable_path/*|/usr/lib/*|/System/*) continue ;;
             esac
