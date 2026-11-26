@@ -15,6 +15,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
@@ -61,6 +62,9 @@ class Media3Player(context: Context) : PlayerEngine {
     var videoFormat: Format? = null
         private set
 
+    /** 字幕 cue（含 PGS 位图），由 UI 交给 SubtitleView 渲染。 */
+    var onCues: ((CueGroup) -> Unit)? = null
+
     private val tick = object : Runnable {
         override fun run() {
             if (!polling) return
@@ -83,6 +87,10 @@ class Media3Player(context: Context) : PlayerEngine {
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "playback error", error)
                 listener?.onPlayerEvent(PlayerEvent.Error(error.errorCodeName))
+            }
+
+            override fun onCues(cueGroup: CueGroup) {
+                onCues?.invoke(cueGroup)
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -159,8 +167,10 @@ class Media3Player(context: Context) : PlayerEngine {
     }
 
     override fun addSubtitle(path: String) {
+        val mime = subtitleMime(path)
+        Log.i(TAG, "addSubtitle $path mime=$mime")
         subtitles += MediaItem.SubtitleConfiguration.Builder(uriOf(path))
-            .setMimeType(subtitleMime(path))
+            .setMimeType(mime)
             .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
             .build()
         reloadKeepingPosition()
@@ -274,6 +284,8 @@ class Media3Player(context: Context) : PlayerEngine {
         "ass", "ssa" -> MimeTypes.TEXT_SSA
         "vtt" -> MimeTypes.TEXT_VTT
         "ttml", "xml" -> MimeTypes.APPLICATION_TTML
+        // PGS 是位图字幕，Media3 用 media3-extractor 的 PgsParser 解析。
+        "sup" -> MimeTypes.APPLICATION_PGS
         else -> MimeTypes.APPLICATION_SUBRIP
     }
 

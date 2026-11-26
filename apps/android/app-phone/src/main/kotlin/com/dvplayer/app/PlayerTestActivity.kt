@@ -18,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.SubtitleView
 import com.dvplayer.player.EngineId
 import com.dvplayer.player.FrameRateMatcher
 import com.dvplayer.player.MediaSessionController
@@ -48,6 +49,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var media3: Media3Player? = null
     private lateinit var surfaceView: SurfaceView
     private lateinit var status: TextView
+    private var subtitleView: SubtitleView? = null
     private lateinit var controlsBox: LinearLayout
     private var started = false
     private var matchedFps = 0.0
@@ -133,6 +135,20 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+        // PGS 是位图字幕，必须由 SubtitleView 渲染；mpv 侧由 libass 画在画面里。
+        if (engine == "media3") {
+            subtitleView = SubtitleView(this).apply {
+                setApplyEmbeddedStyles(true)
+                setApplyEmbeddedFontSizes(true)
+            }
+            root.addView(
+                subtitleView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
         root.addView(status, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
         if (engine != "codec") {
             controlsBox = controls()
@@ -183,9 +199,11 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         when (engine) {
             "media3" -> {
                 media3?.attachView(surfaceView)
+                media3?.onCues = { cues -> subtitleView?.setCues(cues.cues) }
                 if (!started) {
                     started = true
                     media3?.load(url)
+                    if (intent.getStringExtra("sub") != null) media3?.addSubtitle(subtitleUrl)
                 }
             }
             "codec" -> {

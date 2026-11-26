@@ -413,9 +413,15 @@ OnePlus 的结果是：
   （低端盒子上常见）才需要，A7 的路由按 `DeviceProfile.audioCodecs` 判断。
 - `tunneling：不支持`——手机的 `MediaCodec` 没有 `FEATURE_TunneledPlayback`。
   这项要等 TV / 盒子（B3 / A11）验，手机侧只用普通渲染路径。
-- PGS 字幕没有验：仓库里没有 `.sup` 素材，Media3 的 PGS 需要
-  `media3-extractor` 的 `PgsParser` + 位图 cue 渲染，等有样片再补；内嵌
-  `mov_text` 与外部 SRT/ASS（mpv 侧）已经验过。
+- PGS 字幕：内嵌 PGS 能显示——Media3 的 `PgsParser` 生成位图 cue，验证页用
+  `SubtitleView` 渲染，截图里样片的「This text should be red, not blue」正常出现。
+  外部 `.sup` 还差一步：轨道能被识别（`sub:字幕 0`）、也能选中，但 cue 不出画面，
+  怀疑 `SubtitleExtractor` 对裸 `.sup` 的时间轴 / 位图输出和 `SubtitleView` 的
+  衔接有问题，先在文档里记为已知边界。mpv 侧 PGS 走 libavcodec 解码 + libass 叠加，
+  没有单独验。
+- 顺带修正：Media3 的 PGS MIME 是 `MimeTypes.APPLICATION_PGS`
+  （`application/pgs`），不是 `application/x-pgs`；写错时外部字幕会被当成 SRT
+  静默丢掉。
 
 A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
 `MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +
