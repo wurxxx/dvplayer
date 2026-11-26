@@ -32,6 +32,7 @@ import com.dvplayer.player.MediaSessionController
 import com.dvplayer.player.PlaybackForegroundService
 import com.dvplayer.player.PlaybackMemory
 import com.dvplayer.player.PlayerEngine
+import com.dvplayer.player.PlayerEvent
 import com.dvplayer.player.TrackKind
 import com.dvplayer.player.Hdr10PlusProbe
 import com.dvplayer.player.media3.Media3Player
@@ -66,6 +67,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
     private var tickCount = 0
     private var resumeApplied = false
     private var askedNotification = false
+    /** 已经为重播换过一次内核；避免两个内核互相踢皮球。 */
+    private var fallbackTried = false
+
     /** 进入本页前的显示模式，退出时恢复（帧率匹配不能把系统一直锁在 120Hz）。 */
     private var originalModeId = 0
     private var originalRefreshRate = 0f
@@ -202,6 +206,15 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             }
         }
 
+        enginePlayer?.let { engine ->
+            engine.setListener { event ->
+                if (event is PlayerEvent.Error) {
+                    Log.w(TAG, "内核错误：${event.message}")
+                    handler.post { fallbackToMpv(event.message) }
+                }
+            }
+        }
+
         enginePlayer?.let {
             val controller = MediaSessionController(this, it, url.substringAfterLast('/'))
             session = controller
@@ -212,6 +225,31 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         }
 
         Log.i(TAG, "engine=$engine url=$url")
+    }
+
+    /**
+     * A7「自动重试」：Media3 起播失败（容器 / 编码不支持、解码器初始化失败）时，
+     * 换 mpv 从当前位置重来一次。只重试一次，且只在 Media3 上触发——
+     * mpv 失败通常是真的打不开，再换回去没有意义。
+     */
+    private fun fallbackToMpv(reason: String) {
+        if (engine != "media3" || fallbackTried) return
+        if (intent.getStringExtra("fallback") == "1") return
+        fallbackTried = true
+        val position = runCatching { media3?.state()?.positionMs ?: 0L }.getOrDefault(0L)
+        Log.w(TAG, "Media3 失败（$reason），回退 mpv @ ${position}ms")
+        routeReason = "Media3 起播失败，回退 mpv：$reason"
+        val next = Intent(this, PlayerTestActivity::class.java).apply {
+            putExtra("url", url)
+            putExtra("engine", "mpv")
+            putExtra("fallback", "1")
+            intent.getStringExtra("sub")?.let { putExtra("sub", it) }
+            intent.getStringExtra("hwdec")?.let { putExtra("hwdec", it) }
+            intent.getStringExtra("force_sdr")?.let { putExtra("force_sdr", it) }
+            putExtra("seek_to", position)
+        }
+        startActivity(next)
+        finish()
     }
 
     /**

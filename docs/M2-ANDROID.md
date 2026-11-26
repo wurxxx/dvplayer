@@ -528,6 +528,16 @@ EGLSurface；之前新 surface 是黑的，因为 `mpv_render_context_update()` 
 - **真实原盘播放仍未验**：需要至少一张未加密的 ISO / BDMV 目录样片，才可能
   看到 libbluray 选主播放列表、章节与 PGS。这一步记为阻塞项。
 
+自动重试（A7 第四步，2026-11-27）：`PlayerEngine.Listener` 的 `Error` 事件现在
+接到验证页：Media3 起播失败时把当前 `positionMs` 放进新 Intent，换 mpv 重开
+同一个片源（`fallback=1` 标记，两个内核最多互相换一次，避免来回踢皮球）。
+只在 Media3 上触发——mpv 失败一般是文件真的打不开。
+
+实测用一个 Media3 不支持的容器 `rv20.rm`（FFmpeg `rv20` 编码的 RealMedia，
+mpv 能解）：强制 `--es engine media3` 起播 → `DvMedia3: playback error /
+ExoPlaybackException: Source error` → 同一进程内 `engine=mpv` 重新加载同一路径，
+`切换后恢复：0ms`，`file loaded`，5 秒片源正常播到 `reason=0`（EOF）。
+
 契约对齐（A6 第二步）：`Media3Player` 实现同一份 `PlayerEngine`，验证页
 `--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
 都跑通；外部字幕用 `MediaItem.SubtitleConfiguration`（按扩展名给 MIME），
