@@ -2,7 +2,9 @@
 
 > 状态：方案定稿（2026-11-25）；A0 环境与 A2 骨架已落地（2026-11-26），
 > 两个 APK 可构建、native 自检库通过 16KB 校验，并在 Android 33 x86_64
-> 模拟器上装起、显示 native 版本；libmpv 构建链未完成。
+> 模拟器上装起、显示 native 版本；libmpv（LGPL）+ FFmpeg + libplacebo +
+> libass + libbluray 的 NDK 构建链已跑通，`libmpv.so` 在模拟器上能加载、
+> `mpv_create` 成功。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）。
@@ -186,6 +188,22 @@ A0 / A2 已落地（2026-11-26）：
   Compose 1.13 要求 compileSdk 37 / AGP 9.1，和当前基线冲突；
 - `core/media-jni` 的 JNI 自检桩 + 两个 APK 的 16KB 校验通过。
 
+libmpv 构建链（A0 的另一半，2026-11-26）：
+
+- `scripts/android/build-mpv.sh`：依赖全静态，只产一个 `libmpv.so`；FFmpeg
+  `n9.0.2`（`--disable-gpl --disable-version3`，`-fPIC`）、libplacebo `v7.387.0`
+  （`vulkan=disabled`，只留 OpenGL）、libass `0.17.4`、libbluray `1.5.0` +
+  libudfread `1.2.0`、freetype / fontconfig / harfbuzz / fribidi / libunibreak；
+- 不产 `libavcodec.so.62` 这类版本化 soname（Android 装不进 APK）；`NEEDED` 只剩
+  `libm / libc / libdl / libandroid / libmediandk / libOpenSLES / libEGL`；
+- harfbuzz 是 C++ 静态库，mpv 用 C 链接器，所以把 `libc++_static.a` /
+  `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`（不额外带 `libc++_shared.so`）；
+- `strip` 后 x86_64 约 28MB，LOAD 对齐 `0x4000`（16KB）；
+- `scripts/android/{mpv-probe.c,check-mpv.sh}`：推到设备上 `dlopen` + 读 client API
+  版本 + `mpv_create`。Android 33 x86_64 模拟器实测 `libmpv client API: 2.6`、
+  `mpv_create ok`。
+- 出画（Surface + EGL）还没做，属于 A4。
+
 ### M2-B TV
 
 | # | 阶段 | 内容 |
@@ -218,6 +236,7 @@ adb logcat -s DvPlayer:D MPV:D MediaCodec:D
 风险登记在 [PLAN.md](PLAN.md) §7，前三条与 Android 直接相关：
 
 1. **libmpv 的 Android 构建链**——头号排期风险，CI 全量编译会拖死迭代。
+   本地链路已通（2026-11-26），剩下的是把产物接进 CI 缓存，避免每次全量重编。
 2. **mpv 的 HDR 输出**——默认内核可能是 SDR；盒子合成器只认 tunneled HDR 时补不齐。
 3. **mpv 的音频直通**——`ao_audiotrack` 的 IEC61937 支持未验证；不支持就路由 Media3。
 

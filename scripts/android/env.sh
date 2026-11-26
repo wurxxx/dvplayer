@@ -23,6 +23,11 @@ export NDK_HOME=$ANDROID_NDK_HOME
 # 想强制走官方仓库就 `DVPLAYER_MAVEN_MIRROR= source scripts/android/env.sh`。
 export DVPLAYER_MAVEN_MIRROR=${DVPLAYER_MAVEN_MIRROR-https://maven.aliyun.com/repository}
 
+# ---- GitHub 下载镜像
+# github.com 的 Release 资产在这台机器上经常几十 KB/s 或直接超时。
+# 构建脚本只对 github.com 的 URL 套这个前缀；CI 上设空串直连。
+export DVPLAYER_GH_PROXY=${DVPLAYER_GH_PROXY-https://v4.gh-proxy.com}
+
 # ---- JDK 17（AGP 8 要求 17；本机默认 JAVA_HOME 为空）
 if [ -z "${JAVA_HOME:-}" ] || ! "$JAVA_HOME/bin/java" -version 2>&1 | grep -q 'version "17'; then
     _jdk17=$(/usr/libexec/java_home -v 17 2>/dev/null || true)
