@@ -28,6 +28,20 @@ Emby 客户端习惯 `X-Emby-Authorization`，Jellyfin 习惯 `Authorization`，
 `DeviceId` 用媒体源配置的 id，换源不会变成新设备——Emby 的播放记录按用户存，
 不会按设备分裂。
 
+### 登录失败怎么读
+
+- `api error 401: Invalid username or password.`：服务端明确拒绝。这个账号在服务器上
+  没有本地口令、填的是 Emby Connect 的口令、或连续失败被临时锁定，都会落到这一句。
+- 错误里带「请求被重定向到 …」：地址写的是 `http`，反代 301 到 `https` 后登录 POST
+  被改写成 GET；把地址改成 `https://` 再试。
+- `api error 403`：认证已经过了，是设备 / 远程访问策略不允许，不是口令错。
+- `api error 0` / 「登录返回无法解析」：多半是地址落到了反代的单页应用（回了 HTML），
+  检查是不是少了 `/emby` 前缀或端口不对。
+
+非 2xx 的错误保留 `api error <状态码>: <服务端原文>`；如果登录请求被重定向到别的
+地址，再追加最终地址和 http→https 的提示。Windows 侧的建连日志还会带 `base` /
+`user` / `pass=set(n)`，见 [M2-WINDOWS.md](M2-WINDOWS.md)。
+
 ## 2. 用到的接口
 
 | 用途 | 请求 | 关键字段 |

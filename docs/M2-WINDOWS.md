@@ -38,6 +38,25 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
 （进程内后端靠 `log-file`，子进程靠重定向 stderr）；进程内后端还有
 `mpv-shell.log`，放壳侧的初始化 / 选项错误。
 
+应用自己的运行日志是 `%LOCALAPPDATA%\dvplayer\player.log`（超过 4 MB 轮转成
+`player.log.1`），时间戳带日期和毫秒。每次启动先写一行版本 / 核心 / 系统 / 源数量，
+再写配置路径；每个源建连前写一行
+
+```
+connect <名称> id=… kind=emby base=http://host:8096 user="alice" pass=set(8) proxy=-
+```
+
+建连结果写
+
+```
+source <名称> (emby) -> fail in 812 ms: api error 401: Invalid username or password.
+```
+
+口令只记有没有和多长（能看出粘贴时多带了空格 / 换行），不记原文。错误文本里带
+HTTP 状态码；登录请求被反代重定向（http → https）时还会追加最终地址和提示，
+用来区分「地址不对」和「账号真不对」。核心里的 `eprintln!` 不进 player.log，
+从 cmd / PowerShell 启动 `DvPlayer.exe` 才能在窗口里看到。
+
 ## 3. 和 macOS 的差异
 
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以

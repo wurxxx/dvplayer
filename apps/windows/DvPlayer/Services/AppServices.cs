@@ -5,6 +5,7 @@ namespace DvPlayer.Services;
 /// <summary>一个源的连接结果，设置页与顶栏用它显示状态。</summary>
 /// <param name="LatencyMs">网络往返延迟（毫秒）；本地源或探测失败为 null。</param>
 /// <param name="ConnectedAt">这次连上的时刻，卡片上显示 HH:mm。</param>
+/// <param name="Ms">建连（含登录）耗时，毫秒；只进日志。</param>
 /// <param name="Connecting">这个源还在建连，卡片显示「正在连接…」。</param>
 public sealed record SourceConnection(
     string Id,
@@ -14,6 +15,7 @@ public sealed record SourceConnection(
     string? Error,
     long? LatencyMs = null,
     DateTime? ConnectedAt = null,
+    long? Ms = null,
     bool Connecting = false);
 
 /// <summary>进程级服务容器。正式项目会用依赖注入，这里先保持简单。</summary>
@@ -173,9 +175,12 @@ public sealed class AppServices
             }
 
             // 逐源记录：日志里应该看到快源先 ok、慢源后 ok，而不是最后一起出现。
-            Trace.Write("source " + connection.Name + " -> " +
+            // 带上类型和耗时，排查某个源为什么慢 / 为什么被服务端拒绝时不用再猜。
+            Trace.Write($"source {connection.Name} ({connection.Kind}) -> " +
                         (connection.Connecting ? "connecting"
-                            : connection.Ok ? "ok" : "fail: " + connection.Error));
+                            : connection.Ok
+                                ? $"ok in {connection.Ms?.ToString() ?? "-"} ms"
+                                : $"fail in {connection.Ms?.ToString() ?? "-"} ms: {connection.Error}"));
             Publish();
         }
 
@@ -198,6 +203,7 @@ public sealed class AppServices
             catch (Exception ex)
             {
                 mountErrors[i] = ex.Message;
+                Trace.Write("mount " + DescribeSource(config) + " -> fail: " + ex.Message);
                 Update(new SourceConnection(config.Id, config.Name, config.Kind, false, ex.Message));
             }
         })).ConfigureAwait(false);
@@ -210,6 +216,14 @@ public sealed class AppServices
             .Where(x => mountErrors[x.Index] is null && effective[x.Index] is not null)
             .Select(x => effective[x.Index]!)
             .ToList();
+
+        // 建连前把每个源的地址 / 账号形态写进日志：登录失败时不用再问用户填了什么。
+        // 口令只记有没有和多长（能看出粘贴时多带了空格 / 换行），不记原文。
+        foreach (var config in toConnect)
+        {
+            Trace.Write("connect " + DescribeSource(config));
+        }
+
         ApiResult<List<SourceConnectDto>> batch;
         var watch = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -225,7 +239,8 @@ public sealed class AppServices
                         dto.Ok,
                         dto.Ok ? null : dto.Error ?? "连接失败",
                         dto.LatencyMs,
-                        dto.Ok ? DateTime.Now : null));
+                        dto.Ok ? DateTime.Now : null,
+                        Ms: dto.Ms));
                 })).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -288,6 +303,16 @@ public sealed class AppServices
         return (true, failed.Count == 0
             ? null
             : "部分源不可用：" + string.Join("；", failed.Select(r => $"{r.Name}：{r.Error}")));
+    }
+
+    /// <summary>日志用的源描述：地址、账号和口令形态，绝不写口令原文。</summary>
+    private static string DescribeSource(SourceConfig config)
+    {
+        var user = string.IsNullOrEmpty(config.Username) ? "<空>" : "\"" + config.Username + "\"";
+        var pass = string.IsNullOrEmpty(config.Password) ? "<空>" : $"set({config.Password.Length})";
+        var proxy = string.IsNullOrEmpty(config.Proxy) ? "-" : config.Proxy;
+        return $"{config.Name} id={config.Id} kind={config.Kind} base={config.Base} " +
+               $"user={user} pass={pass} proxy={proxy}";
     }
 
     /// <summary>启动时自动连一次。</summary>

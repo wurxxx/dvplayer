@@ -221,6 +221,45 @@ pub(crate) fn normalize_proxy(raw: &str) -> Option<String> {
     })
 }
 
+/// 登录失败时补上重定向信息；请求地址和状态码本身在 `connect` 日志行里。
+///
+/// 反代把 `http` 301 到 `https` 时，HTTP 客户端会把登录 POST 改写成 GET，
+/// Emby / Jellyfin 便回 401「Invalid username or password」——
+/// 表面上看就是账号填错了。把最终地址写进错误文本，日志里才能一眼分清。
+pub(crate) fn login_error_context(
+    label: &str,
+    requested: &str,
+    final_url: &str,
+    status: u16,
+    err: MediaError,
+) -> MediaError {
+    let note = redirect_note(requested, final_url);
+
+    match err {
+        // 401 的 Display 已经带状态码（`api error 401: …`），只在重定向时追加提示，
+        // 普通失败保持原来的短文案，界面上的错误行不会被 URL 撑长。
+        MediaError::Api { code, msg } => MediaError::Api {
+            code,
+            msg: format!("{msg}{note}"),
+        },
+        MediaError::Other(msg) => {
+            MediaError::Other(format!("{label} 登录失败（HTTP {status}）：{msg}{note}"))
+        }
+        other => MediaError::Other(format!(
+            "{label} 登录失败（HTTP {status}）：{other}{note}"
+        )),
+    }
+}
+
+/// 请求被重定向时给一句可操作的提示；没重定向就是空串。
+pub(crate) fn redirect_note(requested: &str, final_url: &str) -> String {
+    if final_url == requested {
+        return String::new();
+    }
+
+    format!("；请求被重定向到 {final_url}，POST 可能被改成了 GET（地址如果是 http，试试 https）")
+}
+
 // —— 条目标签的中文化 ——
 //
 // 服务器给的是英文职位和 ISO 639 语言代码，界面统一显示中文；
@@ -373,6 +412,15 @@ mod proxy_tests {
             normalize_proxy("http://10.0.0.2:8080").as_deref(),
             Some("http://10.0.0.2:8080")
         );
+    }
+
+    #[test]
+    fn login_redirect_note_only_when_url_changed() {
+        assert!(redirect_note("http://h/login", "http://h/login").is_empty());
+
+        let note = redirect_note("http://h/login", "https://h/login");
+        assert!(note.contains("https://h/login"), "缺少最终地址：{note}");
+        assert!(note.contains("https"), "缺少 https 提示：{note}");
     }
 
     #[test]

@@ -90,7 +90,7 @@ public static class Playback
     }
 }
 
-/// <summary>播放链路的轻量日志：%LOCALAPPDATA%\dvplayer\player.log。</summary>
+/// <summary>应用运行日志：%LOCALAPPDATA%\dvplayer\player.log。</summary>
 internal static class Trace
 {
     private static readonly object Gate = new();
@@ -115,7 +115,7 @@ internal static class Trace
                     System.IO.File.Move(log, log + ".1", overwrite: true);
                 }
 
-                System.IO.File.AppendAllText(log, $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}");
+                System.IO.File.AppendAllText(log, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {line}{Environment.NewLine}");
             }
         }
         catch (Exception)

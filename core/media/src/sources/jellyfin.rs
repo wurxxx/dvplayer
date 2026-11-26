@@ -36,7 +36,7 @@ use crate::models::{
     AudioTrack, Genre, HttpHeader, ImageSource, ListQuery, MediaDetail, MediaItem, MediaKind,
     MediaLibrary, Paged, PlayRecord, PlaySource, SubtitleTrack,
 };
-use crate::sources::{job_label, language_label, MediaSource};
+use crate::sources::{job_label, language_label, login_error_context, redirect_note, MediaSource};
 
 const TICKS_PER_SECOND: i64 = 10_000_000;
 const CLIENT_VERSION: &str = "0.1.0";
@@ -143,16 +143,39 @@ impl JellyfinSource {
         let client = self.client_header();
         let response = self
             .http
-            .post(url)
+            .post(url.clone())
             .header("Authorization", client)
             .header("Content-Type", "application/json")
             .body(body.to_string())
             .send()?;
 
-        let text = self.read_body(response)?;
+        // 401 时把请求地址、状态码和最终地址一起写进错误：反代把 http 301 到
+        // https 时，POST 会被改写成 GET，服务端回的就是「账号不对」。
+        let status = response.status();
+        let final_url = response.url().as_str().to_string();
+
+        let text = match self.read_body(response) {
+            Ok(text) => text,
+            Err(err) => {
+                return Err(login_error_context(
+                    &self.label,
+                    &url,
+                    &final_url,
+                    status.as_u16(),
+                    err,
+                ))
+            }
+        };
+
         let parsed: LoginDto = serde_json::from_str(&text).map_err(|e| MediaError::Api {
             code: 0,
-            msg: format!("{} 登录返回无法解析：{e}｜{}", self.label, truncate(&text, 160)),
+            msg: format!(
+                "{} 登录返回无法解析（HTTP {}）：{e}｜{}{}",
+                self.label,
+                status.as_u16(),
+                truncate(&text, 160),
+                redirect_note(&url, &final_url)
+            ),
         })?;
 
         if parsed.access_token.is_empty() {

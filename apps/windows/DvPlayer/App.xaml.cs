@@ -25,5 +25,13 @@ public partial class App : Application
                 Services.Trace.Write("unhandled exception: " + ex);
             }
         };
+
+        // 诊断用：一次启动的版本、核心、系统、配置位置和源数量。
+        // 客服拿到的 player.log 第一屏就能对上环境。
+        Services.Trace.Write(
+            $"=== DvPlayer {Services.AppServices.AppVersion} | core {Services.MediaCore.Version()} | " +
+            $"{Environment.OSVersion.VersionString} | 64bit={Environment.Is64BitProcess} | " +
+            $"sources={Services.AppServices.Instance.Settings.Sources.Count} ===");
+        Services.Trace.Write("settings " + Services.AppSettings.FilePath);
     }
 }
