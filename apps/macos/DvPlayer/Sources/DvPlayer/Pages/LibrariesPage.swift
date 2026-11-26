@@ -50,6 +50,8 @@ struct LibrariesPage: View {
     @State private var loading = true
     @State private var browseTarget: BrowseTarget?
     @State private var detailId: String?
+    /// 详情关掉后 +1：让库网格重拉已加载页（进度 / 收藏会变），筛选和滚动不动。
+    @State private var browseRefresh = 0
     @State private var searchText = ""
     @State private var searchResults: [LibrarySearchHit] = []
     @State private var searching = false
@@ -84,18 +86,28 @@ struct LibrariesPage: View {
 
     var body: some View {
         ZStack {
-            if let detailId {
-                DetailPage(itemId: detailId, onBack: { self.detailId = nil })
-                    .transition(.opacity)
-            } else if let target = browseTarget {
+            if let target = browseTarget {
                 BrowseView(scopeId: target.id, title: target.title,
                            isLibrary: target.isLibrary,
+                           refreshToken: browseRefresh,
                            onBack: { self.browseTarget = nil },
                            onOpen: { self.detailId = $0 })
                     .transition(.opacity)
             } else {
                 sourceHome
                     .transition(.opacity)
+            }
+
+            // 详情**叠在**列表上面，不要替掉它：换成 if/else 分支会把 BrowseView
+            // 从视图树里摘掉，@State 跟着销毁，返回后分类、排序、分页和滚动位置
+            // 全回到默认值（选了「电影」再点进详情，回来又变成「全部」）。
+            if let detailId {
+                DetailPage(itemId: detailId, onBack: {
+                    self.detailId = nil
+                    self.browseRefresh &+= 1
+                })
+                .transition(.opacity)
+                .zIndex(1)
             }
         }
         // 库列表是 refresh() 里后到的：核心就绪那一刻它可能还是空的。
