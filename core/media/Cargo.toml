@@ -9,13 +9,21 @@ description = "DVPlayer shared media library core (fnOS Media / Emby)."
 name = "dvplayer_media"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
-[dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+[target.'cfg(target_os = "android")'.dependencies]
+# Android 既没有 OpenSSL 也没有 SChannel，native-tls 编不过（openssl-sys 直接报
+# 找不到安装目录）。改用 rustls + ring：纯 Rust，NDK 交叉编译不用额外 C 工具链。
+# 根证书走 webpki-roots（mozilla 打包的），内网自签 https 暂不支持。
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-webpki-roots"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
 # TLS 用 native-tls：Windows 走 SChannel、macOS 走 Security.framework，
 # 都不需要 OpenSSL 或额外 C 工具链，windows-gnu 也能直接编。
 # 内网 http 照常可用；公网反代（https）现在也能接了。
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 md-5 = "0.10"
 thiserror = "2"
 dolby_vision = "3.4"

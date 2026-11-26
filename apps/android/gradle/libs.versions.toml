@@ -8,7 +8,9 @@ coreKtx = "1.19.1"
 activityCompose = "1.13.0"
 lifecycle = "2.11.1"
 tvMaterial = "1.1.0"
-serialization = "1.13.0"
+# kotlinx.serialization 1.13 起用 Kotlin 2.4 编译（metadata 2.4，2.2 的编译器读不了）；
+# 1.9.0 是对应 Kotlin 2.2 的最后一条兼容线。
+serialization = "1.9.0"
 media3 = "1.11.1"
 okhttp = "4.12.0"
 smbj = "0.13.0"

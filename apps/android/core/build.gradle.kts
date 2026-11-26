@@ -1,5 +1,7 @@
 plugins {
     id("dvplayer.android.library")
+    // 核心 JSON 契约（`{"ok":…,"data":…}`）直接映射成 @Serializable 模型。
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -11,6 +13,8 @@ dependencies {
     implementation(libs.okhttp)
     // SMB2/3 客户端（A9）。
     implementation(libs.smbj)
+    // 共享核心的 JSON 外壳与模型。
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
 }
