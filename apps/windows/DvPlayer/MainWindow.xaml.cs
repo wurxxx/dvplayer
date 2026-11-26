@@ -137,6 +137,11 @@ public partial class MainWindow : FluentWindow
         // 启动页都是真实菜单项：选中哪一项，右边就是哪一页。
         SelectNav(start);
 
+        // 顺手查一次更新：不挡启动，有结果才在左下角版本号下面提示。
+        UpdateService.AvailabilityChanged -= OnUpdateAvailabilityChanged;
+        UpdateService.AvailabilityChanged += OnUpdateAvailabilityChanged;
+        _ = CheckUpdatesOnStartupAsync();
+
         // 截图巡检时不受「启动时自动连接」开关影响，否则回归会拍到空页面。
         if (AppServices.Instance.Settings.AutoConnect || shotDir is not null)
         {
@@ -1444,6 +1449,52 @@ public partial class MainWindow : FluentWindow
         {
             Trace.Write("auto connect failed: " + error);
         }
+    }
+
+    // —— 更新提示 ——
+
+    private static async Task CheckUpdatesOnStartupAsync()
+    {
+        await UpdateService.CheckAsync(AppServices.AppVersion);
+    }
+
+    private void OnUpdateAvailabilityChanged()
+    {
+        // 检查可能在线程池上完成：切回 UI 线程改控件。
+        if (Dispatcher.CheckAccess())
+        {
+            ApplyUpdateHint();
+        }
+        else
+        {
+            Dispatcher.BeginInvoke(ApplyUpdateHint);
+        }
+    }
+
+    private void ApplyUpdateHint()
+    {
+        if (UpdateService.AvailableVersion is not { Length: > 0 } version)
+        {
+            UpdateHintText.Text = "";
+            UpdateHintText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        UpdateHintText.Text = $"可更新 v{version}";
+        UpdateHintText.ToolTip = $"发现新版本 v{version}，点这里打开「设置 → 关于」";
+        UpdateHintText.Visibility = Visibility.Visible;
+    }
+
+    private void OnVersionHintClick(object sender, MouseButtonEventArgs e)
+    {
+        SelectNav("settings");
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (ContentFrame.Content is SettingsPage page)
+            {
+                page.ShowTabForShot("about");
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     /// <summary>连接状态变化后刷新左下角版本和服务器列表的状态点。</summary>

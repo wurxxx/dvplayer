@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using DvPlayer.Player;
 using DvPlayer.Services;
 
@@ -13,6 +14,9 @@ namespace DvPlayer.Views;
 public partial class SettingsPage : Page
 {
     private bool _ready;
+    private bool _updateAutoChecked;
+    private bool _checkingUpdate;
+    private UpdateCheckResult? _updateResult;
     private CancellationTokenSource? _traktLogin;
     private readonly System.Windows.Threading.DispatcherTimer _saveTimer = new()
     {
@@ -166,8 +170,96 @@ public partial class SettingsPage : Page
         TraktPanel.Visibility = Visible(TraktSegment);
         AboutPanel.Visibility = Visible(AboutSegment);
 
+        // 第一次打开「关于」自动查一次；服务层有 10 分钟缓存，切分段不会反复打接口。
+        if (AboutSegment.IsChecked == true && !_updateAutoChecked)
+        {
+            _updateAutoChecked = true;
+            _ = CheckUpdatesAsync(force: false);
+        }
+
         static Visibility Visible(RadioButton button) =>
             button.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // —— 关于：项目地址 / 更新检查 ——
+
+    private void OnProjectLinkClick(object sender, System.Windows.Input.MouseButtonEventArgs e) =>
+        OpenUrl(UpdateService.RepoUrl);
+
+    private async void OnCheckUpdateClick(object sender, RoutedEventArgs e)
+    {
+        // 已经发现新版本：这个按钮变成「下载更新」，点了直接开浏览器的发布页。
+        if (_updateResult is { Status: UpdateCheckStatus.Available, Url: { Length: > 0 } url })
+        {
+            OpenUrl(url);
+            return;
+        }
+
+        await CheckUpdatesAsync(force: true);
+    }
+
+    private async Task CheckUpdatesAsync(bool force)
+    {
+        if (_checkingUpdate)
+        {
+            return;
+        }
+
+        _checkingUpdate = true;
+        RenderUpdateState();
+
+        try
+        {
+            _updateResult = await UpdateService.CheckAsync(AppServices.AppVersion, force)
+                .ConfigureAwait(true);
+        }
+        finally
+        {
+            _checkingUpdate = false;
+            RenderUpdateState();
+        }
+    }
+
+    private void RenderUpdateState()
+    {
+        UpdateButton.IsEnabled = !_checkingUpdate;
+
+        if (_checkingUpdate)
+        {
+            UpdateButton.Content = "检查中…";
+            UpdateStatusText.Text = "正在检查…";
+            UpdateStatusText.Foreground = (Brush)FindResource("MutedBrush");
+            return;
+        }
+
+        switch (_updateResult?.Status)
+        {
+            case UpdateCheckStatus.Available:
+                UpdateButton.Content = "下载更新";
+                UpdateStatusText.Text = _updateResult.Message;
+                UpdateStatusText.Foreground = (Brush)FindResource("AccentBrush");
+                break;
+            case UpdateCheckStatus.UpToDate:
+                UpdateButton.Content = "重新检查";
+                UpdateStatusText.Text = _updateResult.Message;
+                UpdateStatusText.Foreground = (Brush)FindResource("SuccessBrush");
+                break;
+            case UpdateCheckStatus.NoRelease:
+                UpdateButton.Content = "重新检查";
+                UpdateStatusText.Text = _updateResult.Message;
+                UpdateStatusText.Foreground = (Brush)FindResource("FaintBrush");
+                break;
+            case UpdateCheckStatus.Failed:
+                UpdateButton.Content = "重新检查";
+                UpdateStatusText.Text = _updateResult!.Message;
+                UpdateStatusText.Foreground = (Brush)FindResource("DangerBrush");
+                break;
+            default:
+                UpdateButton.Content = "检查更新";
+                UpdateStatusText.Text = "还没有检查过";
+                UpdateStatusText.Foreground = (Brush)FindResource("FaintBrush");
+                break;
+        }
     }
 
     private void OnSettingChanged(object sender, RoutedEventArgs e)
