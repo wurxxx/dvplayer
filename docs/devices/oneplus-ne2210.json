@@ -53,6 +53,16 @@
     "hdrMaxAverageLuminance": 270.1,
     "wideColorGamut": true
   },
+  "egl": {
+    "colorspace": [
+      "bt2020_pq",
+      "bt2020_hlg"
+    ],
+    "hdrMetadata": [
+      "smpte2086",
+      "cta861_3"
+    ]
+  },
   "codecs": {
     "video/avc": [
       "OMX.google.h264.decoder",

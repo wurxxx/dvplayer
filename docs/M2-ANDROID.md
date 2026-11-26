@@ -8,8 +8,10 @@
 > 720p H.264 走 `mediacodec-copy`；Android 9 的 MT6765 与 Android 16 的
 > 骁龙 8 Gen 1 都验过）；A5 的 HDR 通路已接通并用法生成的**真 PQ / HLG** 片源
 > 验过（BT.2020_PQ / BT2020_HLG 的 EGL colorspace + buffer dataspace，
-> SurfaceFlinger 侧已是 `BT2020_PQ` / `BT2020_HLG` 且 HWC 直出）；24p → 120Hz
-> 的整数倍帧率匹配也已验证。
+> SurfaceFlinger 侧已是 `BT2020_PQ` / `BT2020_HLG` 且 HWC 直出）；PQ 的静态
+> HDR 元数据（SMPTE2086 / CTA861_3）经 EGL surface 扩展进 buffer layer；24p → 120Hz
+> 的整数倍帧率匹配也已验证；HDR10+（ST2094-40）已用注入样片验到 mpv 软解能读，
+> 但平台无公开写入接口，动态元数据归 Media3 内核。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）、
