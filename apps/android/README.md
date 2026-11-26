@@ -21,8 +21,9 @@ EGL + mpv render API 画出来——HBY 5502（Android 9）与 OnePlus 10 Pro
 这一轮补的工程化项：
 
 - **TLS**：FFmpeg 静态链 mbedTLS 3.6.4，https 可播；mpv 默认
-  `tls-verify=no`（系统 CA 不在 mbedTLS 默认路径），`--es tls_verify 1`
-  可开校验，配 `--es tls_ca` 指定 CA。
+  `tls-verify=no`（自签名 NAS 很常见），`--es tls_verify 1` 开校验，
+  没给 `--es tls_ca` 就用 APK 内置的 Mozilla CA 包
+  （`core/src/main/assets/cacert.pem`，`scripts/android/update-cacert.sh` 刷新）。
 - **起播帧率**：mp4 load 前用 `FrameRateProbe` 读容器帧率，mkv 由 mpv
   起播后 50ms 轮询 `container-fps`；起播丢帧从 6–7 降到 1。
 - **单测 + CI**：路由顺序 / 帧率匹配 / DV 探测 / Range / `.sup` 切分 / 续播
@@ -131,6 +132,13 @@ NFS_LIVE=1 NFS_URL=nfs://10.0.0.134/fs/1000/nfs \
 ```bash
 NFS_URL=nfs://10.0.0.134/fs/1000/nfs/%E5%BD%B1%E8%A7%86 \
   tests/android/verify-nfs.sh
+```
+
+https 与内置 CA 包的三组实测（自签拦截 / 默认放行 / 公网证书可校验）：
+
+```bash
+tests/android/verify-tls.sh          # NO_NET=1 跳过公网那组
+scripts/android/update-cacert.sh     # 需要刷新 Mozilla CA 包时
 ```
 
 ## 基线

@@ -229,9 +229,21 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
   3.6.4 + `--enable-mbedtls`。mbedTLS 是 Apache-2.0，FFmpeg 把它归为
   version3，所以 **Android 这份 libmpv 按 LGPLv3 分发**（桌面端用
   securetransport / schannel，仍是 2.1）。
-- **证书**：Android 的系统 CA 不在 mbedTLS 的默认路径里，开校验会让所有
-  https 直接失败，所以 mpv 侧默认 `tls-verify=no`；需要校验时用
-  `tls-ca-file`（源级「允许自签名」开关待接）。
+- **证书**：Android 的系统 CA 在 conscrypt 的 APEX 里，native 的 mbedTLS 既读不到
+  也没有默认路径，开校验会让所有 https 直接失败。做法是把 curl 维护的 Mozilla
+  `cacert.pem`（118 张证书，约 200KB）打进 APK：`core/src/main/assets/cacert.pem`，
+  首次用到时复制到 `filesDir/ca/`，用 `scripts/android/update-cacert.sh` 刷新。
+  默认仍是 `tls-verify=no`（自签名 NAS 很常见），需要校验时
+  `--es tls_verify 1`，没给 `--es tls_ca` 就自动用内置包。
+  实测三组（`tests/android/verify-tls.sh`）：
+
+  | 场景 | 结果 |
+  | --- | --- |
+  | 自签证书 + 校验 | `loading failed`，`mbedtls_ssl_get_verify_result ... flags: 8`「not correctly signed by the trusted CA」 |
+  | 自签证书 + 默认 | 正常起播（pos 在走） |
+  | 公网 HLS（`test-streams.mux.dev`）+ 校验 | 正常起播，`dur=634584ms`，`drops 2` |
+
+  源级「允许自签名」开关还没进 UI（现在是全局参数），见 §9。
 - **https 实测**：`tests/android/https_server.py`（自签 + Range）→ mpv
   `Mime-type: video/mp4`、`mediacodec-copy`、Range `206`、`drops 0`、播到 EOF。
 - `--stage` 同步 `libmpv.so` 与 mpv 头文件（`client.h` / `render.h` /
@@ -707,7 +719,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 未决项 | 待定 |
 | --- | --- |
-| TLS | Android 已用 mbedTLS 打通 https，现在默认不校验；待做系统 CA bundle + 源级「允许自签名」开关 |
+| TLS | 内置 Mozilla CA 包已接（`--es tls_verify 1` 即校验，实测自签被拦、公网可播）；还差源级「允许自签名」开关进 UI |
 | applicationId | `com.dvplayer.app` / `com.dvplayer.app.tv` 两个商店条目 |
 | 下载 | 手机 v1 是否必须；TV 明确不做 |
 | NAS 原盘 | v1「先下载到缓存」是否可接受；边读边播排 B5 |

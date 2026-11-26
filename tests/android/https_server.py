@@ -13,8 +13,10 @@
     adb reverse tcp:8443 tcp:8443
     # 设备上播 https://127.0.0.1:8443/<文件>
 
-mpv 的 Android 构建默认 `tls-verify=no`（系统 CA 不在 mbedTLS 的默认路径里），
-所以自签证书可以直接播；公共证书也能播，只是同样不校验。
+mpv 的 Android 构建默认 `tls-verify=no`，所以自签证书可以直接播。
+要验证「校验真的在跑」，加 `--es tls_verify 1`：自签会被 mbedTLS 拒掉
+（CA 用 APK 内置的 Mozilla 包），公网证书则正常。三组回归见
+tests/android/verify-tls.sh。
 """
 import argparse
 import os

@@ -244,10 +244,16 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
                 player = mpv
                 // mkv 的帧率只有 mpv 能读到：起播后立刻切显示模式。
                 mpv.onFrameRate = { fps -> handler.post { maybeMatchFrameRate(fps) } }
-                // 默认 tls-verify=no（系统 CA 不在 mbedTLS 默认路径）；要校验就
-                // 传 --es tls_verify 1，可选 --es tls_ca /path/to/ca.pem。
+                // 默认 tls-verify=no（自签名 NAS 很常见）；要校验就传
+                // --es tls_verify 1：没给 --es tls_ca 时用 APK 内置的 Mozilla
+                // CA 包（系统 CA 在 conscrypt 的 APEX 里，native mbedTLS 读不到）。
                 if (intent.getStringExtra("tls_verify") == "1") {
-                    mpv.setTlsVerification(true, intent.getStringExtra("tls_ca"))
+                    val ca = intent.getStringExtra("tls_ca")
+                        ?: runCatching { com.dvplayer.core.net.SystemCa.ensure(this).absolutePath }
+                            .onFailure { Log.w(TAG, "内置 CA 包不可用", it) }
+                            .getOrNull()
+                    mpv.setTlsVerification(true, ca)
+                    Log.i(TAG, "TLS 校验：开，CA=${ca ?: "mbedTLS 默认"}")
                 }
                 // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
                 intent.getStringExtra("hwdec")?.let {
