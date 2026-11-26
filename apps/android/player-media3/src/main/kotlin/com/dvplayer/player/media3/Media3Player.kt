@@ -20,6 +20,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.dvplayer.player.ChapterInfo
@@ -52,10 +53,17 @@ class Media3Player(context: Context) : PlayerEngine {
      */
     private val httpDataSource = DefaultHttpDataSource.Factory()
 
+    /**
+     * 不能直接把 [httpDataSource] 交给 MediaSourceFactory：那样本地 `file://`
+     * 也会被当成 HTTP 打开（`FileURLConnection cannot be cast to
+     * HttpURLConnection`）。用 [DefaultDataSource] 按 scheme 分派。
+     */
+    private val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSource)
+
     private val player: ExoPlayer = ExoPlayer.Builder(context)
         // 裸 .sup 需要自己的解析器；其余格式仍交给 Media3 默认实现。
         .setMediaSourceFactory(
-            DefaultMediaSourceFactory(httpDataSource)
+            DefaultMediaSourceFactory(dataSourceFactory)
                 .setSubtitleParserFactory(DvSubtitleParserFactory()),
         )
         .build()
