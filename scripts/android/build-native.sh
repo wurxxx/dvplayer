@@ -3,8 +3,8 @@
 #
 # A0 阶段只有一个 JNI 自检桩（core/media-jni）；A3 起换成真正的 core/media 绑定。
 #
-#   scripts/android/build-native.sh                  # arm64-v8a + x86_64，release
-#   ABIS="arm64-v8a" scripts/android/build-native.sh
+#   scripts/android/build-native.sh                  # arm64-v8a，release
+#   ABIS="arm64-v8a x86_64" scripts/android/build-native.sh  # 模拟器调试用
 #   PROFILE=debug scripts/android/build-native.sh
 set -euo pipefail
 
@@ -12,7 +12,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 # shellcheck source=env.sh
 source "$ROOT/scripts/android/env.sh"
 
-ABIS=${ABIS:-"arm64-v8a x86_64"}
+ABIS=${ABIS:-arm64-v8a}
 PROFILE=${PROFILE:-release}
 CRATE=${CRATE:-dvplayer-media-jni}
 OUT="$ROOT/apps/android/core/src/main/jniLibs"
@@ -22,7 +22,7 @@ for abi in $ABIS; do
     case "$abi" in
         arm64-v8a | x86_64) ndk_targets+=(-t "$abi") ;;
         *)
-            echo "不支持的 ABI：$abi（A0 只做 arm64-v8a / x86_64）" >&2
+            echo "不支持的 ABI：$abi（只做 arm64-v8a，x86_64 仅本机模拟器调试）" >&2
             exit 2
             ;;
     esac

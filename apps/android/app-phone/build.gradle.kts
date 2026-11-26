@@ -21,6 +21,7 @@ android {
 
 dependencies {
     implementation(project(":ui-phone"))
+    implementation(project(":player-mpv"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

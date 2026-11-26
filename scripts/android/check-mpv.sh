@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 把 libmpv.so 推到已连接的设备/模拟器，跑最小加载探针。
 #
-#   scripts/android/check-mpv.sh                    # 默认 x86_64（模拟器）
+#   scripts/android/check-mpv.sh                    # 默认 arm64（真机）
 #   ADB_SERIAL=QS48... scripts/android/check-mpv.sh # 指定设备（多台连着时必须）
 #   ARCH=arm64 scripts/android/check-mpv.sh
 set -euo pipefail
@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 # shellcheck source=env.sh
 source "$ROOT/scripts/android/env.sh"
 
-ARCH=${ARCH:-x86_64}
+ARCH=${ARCH:-arm64}
 case "$ARCH" in
     x86_64) TRIPLE=x86_64-linux-android ;;
     arm64) TRIPLE=aarch64-linux-android ;;

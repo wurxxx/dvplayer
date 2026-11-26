@@ -21,9 +21,9 @@ class DvPlayerAndroidApplicationConventionPlugin : Plugin<Project> {
                     vectorDrawables.useSupportLibrary = true
 
                     ndk {
-                        // 目前只编了这两个 ABI 的 native 库；其余 ABI 进包也只是
-                        // 白占体积，而且 loadLibrary 会直接失败。
-                        abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+                        // 只发 arm64-v8a。x86_64 只在本机用模拟器调试时才需要，
+                        // 产物会白占两份 .so 的体积（libmpv.so 一份就 25MB+）。
+                        abiFilters.add("arm64-v8a")
                     }
                 }
 

@@ -44,6 +44,7 @@ include(":ui-phone")
 include(":ui-tv")
 include(":design")
 include(":core")
+include(":player-mpv")
 
 // 约定插件（compileSdk / minSdk / JDK 17 / Compose）
 includeBuild("build-logic")

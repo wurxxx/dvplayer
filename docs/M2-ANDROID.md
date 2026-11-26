@@ -3,11 +3,13 @@
 > 状态：方案定稿（2026-11-25）；A0 环境与 A2 骨架已落地（2026-11-26），
 > 两个 APK 可构建、native 自检库通过 16KB 校验，并在 Android 33 x86_64
 > 模拟器上装起、显示 native 版本；libmpv（LGPL）+ FFmpeg + libplacebo +
-> libass + libbluray 的 NDK 构建链已跑通，`libmpv.so` 在模拟器与真机上都能加载、
-> `mpv_create` 成功；A1 的设备能力采集（`DeviceProfile`）已落地。
+> libass + libbluray 的 NDK 构建链已跑通；A1 的设备能力采集（`DeviceProfile`）
+> 已落地；A4 的最小出画已在真机上跑通（Surface + EGL + mpv render API，720p
+> H.264 走 `mediacodec-copy`）。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
-> [ADR-0015](adr/0015-android-vfs.md)（存储）。
+> [ADR-0015](adr/0015-android-vfs.md)（存储）、
+> [ADR-0016](adr/0016-android-player-native.md)（播放器 native 层）。
 
 ## 1. 范围
 
@@ -182,7 +184,8 @@ interface PlaybackEngine {
 A0 / A2 已落地（2026-11-26）：
 
 - `scripts/android/{env,build-native,check-apk}.sh`：JDK 17 / SDK 36 / NDK r28 环境，
-  `cargo ndk` 出 `arm64-v8a` + `x86_64`，`zipalign -c -P 16` 校验；
+  `cargo ndk` 出 `arm64-v8a`（x86_64 只在模拟器调试时按需编），
+  `zipalign -c -P 16` 校验；
 - `apps/android`：AGP 8.13.2 / Gradle 8.13 / Kotlin 2.2.21，约定插件在 `build-logic`；
 - Compose BOM 钉在 **2026.06.01**（ui 1.11.x，minCompileSdk 35）。2026.11.01 的
   Compose 1.13 要求 compileSdk 37 / AGP 9.1，和当前基线冲突；
@@ -198,12 +201,16 @@ libmpv 构建链（A0 的另一半，2026-11-26）：
   `libm / libc / libdl / libandroid / libmediandk / libOpenSLES / libEGL`；
 - harfbuzz 是 C++ 静态库，mpv 用 C 链接器，所以把 `libc++_static.a` /
   `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`（不额外带 `libc++_shared.so`）；
-- `strip` 后 x86_64 约 28MB，LOAD 对齐 `0x4000`（16KB）；
+- `strip` 后 arm64 约 25MB（x86_64 28MB，平时不编），LOAD 对齐 `0x4000`；
 - `scripts/android/{mpv-probe.c,check-mpv.sh}`：推到设备上 `dlopen` + 读 client API
   版本 + `mpv_create`。Android 33 x86_64 模拟器与真机（HBY 5502 / Android 9 /
   arm64）实测均为 `libmpv client API: 2.6`、`mpv_create ok`；从装好的 APK 里
   抽出的 `libmpv.so` 再测一次同样通过。
-- 出画（Surface + EGL）还没做，属于 A4。
+- 出画（A4 第一步，2026-11-27）：`:player-mpv` 是 C++ / CMake 模块
+  （[ADR-0016](adr/0016-android-player-native.md)），渲染线程独占 EGL 与
+  `mpv_render_context`。真机 HBY 5502（Android 9 / arm64）上 720p H.264 测试片
+  走 `mediacodec-copy` 出画，时间码正常推进；`libdvplayer_mpv.so` 同样 16KB 对齐、
+  未压缩打包。播放控制、切轨、字幕、属性桥属于 A4 剩下的部分。
 
 A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
 `MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +
@@ -225,7 +232,7 @@ HDR + HDMI 输出的设备，仍挂在 A1 门禁上。
 
 | 设备 | 用途 | 必测 |
 | --- | --- | --- |
-| x86_64 模拟器 | 逻辑与 UI 回归 | JNI / JSON、导航、ViewModel |
+| arm64 真机 / 模拟器 | 逻辑与 UI 回归 | JNI / JSON、导航、ViewModel |
 | HBY 5502（Android 9 / MT6765） | 低端降级路径 | SDR 输出、软/硬解回退、无直通时的 PCM 下混 |
 | Android 12+ 真机 | 手机 Alpha 主验 | 两个引擎、DV P5、ASS、PiP、VFS |
 | 低端 Android 9 盒子（Amlogic） | TV 冒烟 | 起播、焦点、4K 掉帧、直通 |
@@ -250,7 +257,7 @@ HBY 5502 的实测能力（2026-11-27，完整 JSON 见
 
 ```bash
 ./gradlew :app-phone:assembleDebug
-cargo ndk -t arm64-v8a -t x86_64 -o core/src/main/jniLibs build -p dvplayer-media-jni --release
+cargo ndk -t arm64-v8a -o core/src/main/jniLibs build -p dvplayer-media-jni --release
 adb install -r app-phone-debug.apk
 adb shell dumpsys media.codec | head -80
 adb logcat -s DvPlayer:D MPV:D MediaCodec:D

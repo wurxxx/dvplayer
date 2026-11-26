@@ -12,8 +12,8 @@
 #       libxml2 2.15.4 / libbluray 1.5.0 / libudfread 1.2.0
 #
 # 用法：
-#   scripts/android/build-mpv.sh                  # x86_64 + arm64
-#   ARCHES=arm64 scripts/android/build-mpv.sh
+#   scripts/android/build-mpv.sh                  # arm64
+#   ARCHES="arm64 x86_64" scripts/android/build-mpv.sh   # x86_64 只给模拟器调试
 #   scripts/android/build-mpv.sh --clean          # 清掉两个 arch 的 build/prefix
 #   scripts/android/build-mpv.sh --stage          # 顺带拷进 core/src/main/jniLibs
 #
@@ -28,7 +28,7 @@ WORK=${WORK:-$ROOT/build/android-mpv}
 SRC=$WORK/src
 DL=$WORK/dl
 API=${API:-26}
-ARCHES=${ARCHES:-"x86_64 arm64"}
+ARCHES=${ARCHES:-arm64}
 JOBS=${JOBS:-$(sysctl -n hw.ncpu)}
 TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64"
 SYSROOT="$TOOLCHAIN/sysroot"

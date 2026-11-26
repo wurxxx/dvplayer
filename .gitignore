@@ -34,6 +34,7 @@ core/target/
 
 # Android（Gradle / AGP）
 apps/android/**/.gradle/
+apps/android/**/.cxx/
 apps/android/**/build/
 apps/android/.kotlin/
 apps/android/local.properties
