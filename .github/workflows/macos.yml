@@ -1,7 +1,7 @@
 name: macOS
 
-# 显示名里带上架构和要附的 Release tag：重试流程（macos-arm64-retry.yml）
-# 靠它把 release_tag 原样传下去（workflow_dispatch 的输入不出现在运行记录里）。
+# 显示名里带上架构和要附的 Release tag：手工补产物时靠它把 release_tag
+# 原样传下去（workflow_dispatch 的输入不出现在运行记录里）。
 run-name: macOS ${{ inputs.arch || 'both' }}${{ inputs.arch == 'arm64' && format('@{0}', inputs.arm_runner || 'macos-26') || '' }}${{ inputs.release_tag != '' && format(' release:{0}', inputs.release_tag) || '' }}
 
 # 在 GitHub 托管的 macOS runner 上编 dmg + zip，两种架构各一个 job：
@@ -47,7 +47,7 @@ on:
           - arm64
           - x86_64
       release_tag:
-        description: '产物附到这个 tag 的 Release（排队重试用；留空则看 github.ref）'
+        description: '产物附到这个 tag 的 Release（手工补产物时用；留空则看 github.ref）'
         required: false
         default: ''
       arm_runner:
@@ -352,7 +352,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          # 重试流程（macos-arm64-retry.yml）在 master 上重跑，所以不能靠
+          # 手工补产物时在别的分支/commit 上重跑，不能靠
           # github.ref 判断目标 Release，改由输入指定。
           tag_name: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
           files: |
