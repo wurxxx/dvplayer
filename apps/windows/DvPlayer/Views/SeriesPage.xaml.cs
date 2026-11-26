@@ -88,6 +88,12 @@ public partial class SeriesPage : Page
     /// <summary>Trakt 上记的播放进度（0–1）；电影换设备 / 换源时用来补续播点。</summary>
     private double? _traktProgress;
 
+    /// <summary>其它源「同一集」的最大进度（0–1）。剧集在「资源」里只有整剧进度。</summary>
+    private double? _crossEpisodeProgress;
+
+    /// <summary>详情页「资源」的原始行：找同集时要知道每个源的剧条目 id。</summary>
+    private List<ItemSourceDto> _sourceRows = new();
+
     /// <summary>合并后要覆盖的起播位置：null = 用源自己的，0 = 别的源已看完（从头播）。</summary>
     private long? _mergedStart;
 
@@ -559,6 +565,7 @@ public partial class SeriesPage : Page
                 Title = EpisodeTitle(item, value),
                 Badge = $"E{value:00}",
                 Duration = FormatDuration(item.RuntimeSeconds),
+                RuntimeSeconds = item.RuntimeSeconds ?? 0,
                 Resolution = item.Resolution,
                 PosterPath = item.PosterPath,
                 Initial = Palette.InitialOf(item.Title ?? ""),
@@ -940,14 +947,21 @@ public partial class SeriesPage : Page
             ? cachedDuration
             : 0;
         var kind = _detail?.Kind?.ToLowerInvariant() ?? "";
+        var isMovie = kind is "movie" or "video";
+        var isSeries = kind is "series" or "tv" or "season" or "folder";
 
-        // 飞牛的播放源不给片长（duration=0），退到详情里的片长。
+        // 飞牛的播放源不给片长（duration=0）：电影退到详情，剧集退到当前集。
+        if (duration <= 0 && isSeries && _resumeEpisode > 0)
+        {
+            duration = _episodeTiles.FirstOrDefault(t => t.Number == _resumeEpisode)
+                ?.RuntimeSeconds ?? 0;
+        }
         if (duration <= 0)
         {
             duration = _detail?.RuntimeSeconds ?? 0;
         }
 
-        if (duration <= 0 || (kind != "movie" && kind != "video"))
+        if (duration <= 0 || (!isMovie && !isSeries))
         {
             _mergedStart = null;
             _resumeSeconds = ownSeconds;
@@ -955,7 +969,9 @@ public partial class SeriesPage : Page
         }
 
         var own = (double)ownSeconds / duration;
-        var best = Math.Max(_sourcesMaxProgress, _traktProgress ?? 0);
+        var best = isMovie
+            ? Math.Max(_sourcesMaxProgress, _traktProgress ?? 0)
+            : _crossEpisodeProgress ?? 0;
 
         if (best >= 0.995)
         {
@@ -1591,6 +1607,107 @@ public partial class SeriesPage : Page
     // —— 资源（同一部片的多个来源）——
 
     /// <summary>
+    /// 剧集按「同一集」跨源合并：在别的源里找同季同集号的集，读它的位置。
+    /// 只认 1%–99.5%，另一源已看完的集不拿来覆盖，免得这一集从 0 重播。
+    /// </summary>
+    private async Task LoadCrossSourceEpisodeProgressAsync()
+    {
+        var core = AppServices.Instance.Core;
+
+        if (core is null || _resumeEpisode <= 0 || _sourceRows.Count <= 1)
+        {
+            _crossEpisodeProgress = null;
+            ApplyMergedResume();
+            return;
+        }
+
+        var activeSeason = _seasons.FirstOrDefault(chip => chip.Active);
+        var season = _seasonItems.FirstOrDefault(item => item.Id == activeSeason?.Id)
+            ?.SeasonNumber ?? 0;
+
+        double? best = null;
+        foreach (var row in _sourceRows)
+        {
+            if (row.ItemId == _itemId || row.ItemId == _playTargetId)
+            {
+                continue;
+            }
+
+            var value = await EpisodeProgressAsync(core, row.ItemId, season, _resumeEpisode)
+                .ConfigureAwait(true);
+            if (value is { } found)
+            {
+                best = Math.Max(best ?? 0, found);
+            }
+        }
+
+        _crossEpisodeProgress = best;
+        if (best is { } progress)
+        {
+            Trace.Write($"cross episode E{_resumeEpisode} best={progress:P0}");
+        }
+        ApplyMergedResume();
+    }
+
+    /// <summary>在另一个源的同一部剧里找同季同集号的那一集，返回播放进度（0–1）。</summary>
+    private static async Task<double?> EpisodeProgressAsync(MediaCore core, string sourceItemId,
+        int season, int number)
+    {
+        try
+        {
+            var first = await Task.Run(() => core.Children(sourceItemId, 1, 300))
+                .ConfigureAwait(false);
+            var kids = first.Data?.Items ?? new List<MediaItemDto>();
+
+            MediaItemDto? episode = null;
+            var seasonItem = kids.FirstOrDefault(item => item.Kind == "season" &&
+                (item.SeasonNumber ?? 0) == season);
+            if (seasonItem is not null)
+            {
+                var episodes = await Task.Run(() => core.Children(seasonItem.Id, 1, 600))
+                    .ConfigureAwait(false);
+                var items = episodes.Data?.Items ?? new List<MediaItemDto>();
+                // 集号优先；未刮削目录里常没有 episodeNumber，按顺序补第 N 集。
+                episode = items.FirstOrDefault(item => (item.EpisodeNumber ?? 0) == number)
+                    ?? (number >= 1 && number <= items.Count ? items[number - 1] : null);
+            }
+            else
+            {
+                episode = kids.FirstOrDefault(item => (item.EpisodeNumber ?? 0) == number)
+                    ?? (number >= 1 && number <= kids.Count ? kids[number - 1] : null);
+            }
+
+            if (episode is null)
+            {
+                return null;
+            }
+
+            var play = await Task.Run(() => core.PlaySource(episode.Id)).ConfigureAwait(false);
+            if (!play.Ok || play.Data is null)
+            {
+                return null;
+            }
+
+            // 飞牛等源播放源不给 duration，退到条目的片长。
+            var duration = play.Data.DurationSeconds > 0
+                ? play.Data.DurationSeconds
+                : episode.RuntimeSeconds ?? 0;
+            if (duration <= 0)
+            {
+                return null;
+            }
+
+            var progress = (double)play.Data.PositionSeconds / duration;
+            return progress is > 0.01 and < 0.995 ? progress : null;
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("cross episode failed: " + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Trakt 的 playback：电影在别的设备 / 别的源看过更多时，用它补续播点。
     /// 匹配走 TMDB / IMDb id，没有才按片名 + 年份；拿不到就当作没有。
     /// </summary>
@@ -1656,8 +1773,10 @@ public partial class SeriesPage : Page
 
         var rows = result.Data;
         var bestId = rows[0].ItemId;
+        _sourceRows = rows;
         _sourcesMaxProgress = rows.Count > 0 ? rows.Max(row => row.Progress) : 0;
         ApplyMergedResume();
+        await LoadCrossSourceEpisodeProgressAsync().ConfigureAwait(true);
 
         SourcesList.ItemsSource = rows.Select(row =>
         {
@@ -1875,6 +1994,8 @@ public partial class SeriesPage : Page
             _resumeSeconds = _resumeCache.TryGetValue(id, out var resume) ? resume : 0;
             ApplyMergedResume();
             UpdatePlayButton();
+            // 续播集要等这一轮才有；「资源」先到也没关系，这里再找一次同集。
+            _ = LoadCrossSourceEpisodeProgressAsync();
             UpdateTrackButtons(info);
             RenderMediaInfo(info);
             UpdateLocation(info);
@@ -2410,6 +2531,9 @@ public partial class SeriesPage : Page
         public string Title { get; init; } = "";
         public string Badge { get; init; } = "";
         public string Duration { get; init; } = "";
+
+        /// <summary>这一集的片长（秒）；飞牛播放源不给 duration 时用它换算。</summary>
+        public long RuntimeSeconds { get; init; }
         public string? Resolution { get; init; }
         public string Initial { get; init; } = "";
         public string? PosterPath { get; init; }
