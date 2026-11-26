@@ -55,6 +55,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             finish()
             return
         }
+        // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
+        intent.getStringExtra("hwdec")?.let {
+            Log.i(TAG, "hwdec -> $it ${player.setProperty("hwdec", it) ?: "ok"}")
+        }
 
         surfaceView = SurfaceView(this)
         surfaceView.holder.addCallback(this)
@@ -132,6 +136,10 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             appendLine("${p("width")}×${p("height")} · ${p("video-params/pixelformat")} · hwdec ${p("hwdec-current")}")
             appendLine("prim ${p("video-params/primaries")} · trc ${p("video-params/gamma")} · light ${p("video-params/light")}")
             appendLine("sig-peak ${p("video-params/sig-peak")} · min-luma ${p("video-params/min-luma")} · max-luma ${p("video-params/max-luma")}")
+            val sceneMax = p("video-params/scene-max-r")
+            if (sceneMax != "-") {
+                appendLine("HDR10+ maxRGB ${sceneMax}/${p("video-params/scene-max-g")}/${p("video-params/scene-max-b")} · avg ${p("video-params/scene-avg")}")
+            }
             appendLine("fps ${p("estimated-vf-fps")} · drops ${p("frame-drop-count")} · mode ${mode.modeId}@${"%.2f".format(mode.refreshRate)}Hz")
             append(url)
         }

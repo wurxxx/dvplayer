@@ -16,8 +16,13 @@ OnePlus 10 Pro（Android 16）上都以 720p H.264 + `mediacodec-copy` 出画，
 正常推进。HDR 片源会按 `primaries`/`gamma` 重建 `EGLSurface`（BT2020_PQ / HLG）
 并写 buffer dataspace，真 PQ / HLG 样片在 OnePlus 上 SurfaceFlinger 已按
 `BT2020_PQ` / `BT2020_HLG` 走 HWC 直出；24p 片源会自动切到 120Hz（每帧重复 5 次
-刷新）且稳定态不掉帧。样片生成器见
-[`scripts/android/gen-hdr-sample.py`](../../scripts/android/gen-hdr-sample.py)。
+刷新）且稳定态不掉帧。PQ 的静态 HDR 元数据（SMPTE2086 / CTA861_3）通过 EGL
+surface 扩展挂到 buffer 上，SurfaceFlinger 层显示 `hdr metadata types=1`。
+HDR10+ 动态元数据只有 Media3 内核能做（mpv 软解能读、但平台没有公开的写入接口），
+见 [`docs/M2-ANDROID.md`](../../docs/M2-ANDROID.md)。样片生成器见
+[`scripts/android/gen-hdr-sample.py`](../../scripts/android/gen-hdr-sample.py)，
+HDR10+ SEI 注入见
+[`scripts/android/gen-hdr10plus-sample.sh`](../../scripts/android/gen-hdr10plus-sample.sh)。
 播放控制（暂停 / seek / 切轨 / 字幕）还没接，属于 A4 的后半段。
 
 ## 模块

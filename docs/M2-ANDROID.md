@@ -266,6 +266,37 @@ window dataspace -> 0xa060000
 ```
 SurfaceFlinger：`dataspace=BT2020_HLG (168165376)`。
 
+**静态 HDR 元数据（SMPTE2086 / CTA861_3）**：片源的 mastering display 亮度元数据
+用 EGL 的 `EGL_EXT_surface_SMPTE2086_metadata` / `EGL_EXT_surface_CTA861_3_metadata`
+扩展挂到 `EGLSurface` 上：`eglSurfaceAttrib` 的浮点属性按 IEEE-754 位模式塞进
+`EGLint`，且必须在 `eglSwapBuffers` **之前**设置，元数据才会随这一帧的 buffer 走。
+OnePlus 上验证 PQ 片源 SurfaceFlinger 层 `hdr metadata types=1`；HLG 片源仍是 0
+（只对 PQ 写）。
+
+不要走 `ASurfaceControl_createFromWindow` + `ASurfaceTransaction_setHdrMetadata_*`：
+它只能给 window 建一个 child layer，元数据挂不在 SurfaceView 自己的 buffer layer 上。
+实测 `dumpsys SurfaceFlinger --layers` 里多出一个 `dvplayer-mpv` 层（无 buffer、
+`composition type=SOLID_COLOR`），而真正显示的 `BT2020_PQ` 层 `hdr metadata types`
+仍是 0。这条路已从代码里移除。
+
+**HDR10+ 动态元数据（ST2094-40）**：样片把 HDR10 片源用
+`ffmpeg -bsf:v hevc_mp4toannexb` 提成裸 HEVC，`hdr10plus_tool inject --json` 注入
+每帧的 ST2094-40 SEI，再封回 mp4；`hdr10plus_tool extract` 校验 240 帧全部带上。
+mpv 侧只有**软解**能读到动态元数据：数据来自 FFmpeg 的
+`AV_FRAME_DATA_DYNAMIC_HDR_PLUS`，`mediacodec-copy` 硬解不产这个 side data，
+状态行 `HDR10+ maxRGB` 不出现；存成 `--es hwdec no` 软解后
+`video-params/scene-max-r/g/b`、`scene-avg` 才与注入的 `MaxScl` 对上
+（`776.8/658.9/691.2 · avg 26.3`）。
+
+但**写不进显示端**：NDK 的 `AHdrMetadataType` 只有 `HDR10PLUS_SEI = 3` 这个枚举，
+没有对应的 setter；`libandroid.so` 只导出
+`ASurfaceTransaction_setHdrMetadata_smpte2086/cta861_3`；通用的
+`SurfaceControl::setHdrMetadata(HdrMetadata)` 是 libgui 的 C++ ABI，不是公开 C API。
+结论：mpv / EGL 这条路做不了动态 HDR10+。正解是 Media3——平台 MediaCodec 会把
+ST2094-40 交给显示端，`MediaFormat.KEY_HDR10_PLUS_INFO`（`"hdr10-plus-info"`）
+API 29+ 就有。M2 的取舍：mpv 内核保证静态 HDR10 / HLG，HDR10+ 片源在 mpv 下按
+HDR10 静态播放；动态元数据留给 Media3 内核（A6）验证。
+
 **帧率匹配**：`PlayerTestActivity` 每秒读一次 `container-fps`（退回
 `estimated-vf-fps`），在「与当前分辨率相同」的显示模式里挑**刷新率是片源帧率
 整数倍、且倍数最小**的那个，写
@@ -293,11 +324,10 @@ Surface 不可见、mpv 不出帧，`screencap` 也是黑的。先
   `hdrSdrRatio NaN`——ColorOS 不把 HDR 当作一种 color mode，不能靠这两个字段
   判定；目前以 SurfaceFlinger 层的 `dataspace=BT2020_PQ/HLG` + `DEVICE` 合成为准。
   真 HDR 亮度效果最终还得靠仪器或人眼在真实片源上确认。
-- **HDR10+ 动态元数据（ST2094-40）还没做**：当前只走 VUI + 静态 dataspace，
-  `hevc_videotoolbox` 不产 ST2094-40 SEI，渲染层也没有通过
-  `ANativeWindow_setBuffersHdrMetadata(HDR10PLUS)` 透传动态元数据。要验 HDR10+
-  需要另做三件事：生成带 ST2094-40 SEI 的样片（如 x265 + `hdr10plus_tool`）、
-  mpv 侧读出每帧元数据、渲染层按 API 34+ 写入 window HDR metadata。
+- **HDR10+ 动态元数据只在 Media3 内核**：mpv 侧软解能读出 ST2094-40（`scene-max-*`），
+  硬解 `mediacodec-copy` 拿不到，且平台没有公开的写入接口，动态元数据进不了显示端。
+  mpv 下 HDR10+ 片源按 HDR10 静态元数据播放，等 A6 的 Media3 路径验证。
+- **HLG 静态元数据没写**：目前只对 PQ 写 SMPTE2086 / CTA861_3，HLG 只切 dataspace。
 - **SDR tone mapping 回退**：显示器不支持 HDR 时的 `tone-mapping` 选项还没接。
 - **帧率匹配目前只在验证页**：正式实现要挪到播放器控制器，并在暂停 / 切轨 /
   退出时恢复默认模式；可变帧率（VFR）片源还没处理。

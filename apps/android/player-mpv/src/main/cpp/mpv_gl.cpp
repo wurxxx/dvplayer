@@ -65,6 +65,21 @@ SetBuffersDataSpaceFn set_buffers_dataspace() {
     return fn;
 }
 
+// 静态 HDR 元数据走 EGL 的 surface 扩展，随 buffer 一起交给 SurfaceFlinger：
+//   EGL_EXT_surface_SMPTE2086_metadata / EGL_EXT_surface_CTA861_3_metadata
+// 这比 ASurfaceControl_* 可靠：后者只能建一个 child layer，元数据挂不在
+// SurfaceView 自己的 buffer layer 上，SF 侧的 `hdr metadata types` 仍是 0。
+// HDR10+ 的动态元数据（ST2094-40）没有公开写入接口，必须走平台解码器（Media3）。
+// 常量用 NDK eglext.h 里的 EGL_SMPTE2086_*_EXT / EGL_CTA861_3_*_EXT。
+
+/** eglSurfaceAttrib 的浮点属性要按 IEEE-754 位模式塞进 EGLint。 */
+EGLint float_bits(float v) {
+    EGLint out = 0;
+    static_assert(sizeof(out) == sizeof(v), "float 与 EGLint 尺寸不一致");
+    memcpy(&out, &v, sizeof(out));
+    return out;
+}
+
 struct Player {
     mpv_handle *mpv = nullptr;
     mpv_render_context *render = nullptr;
@@ -99,6 +114,7 @@ struct Player {
     EGLSurface surface = EGL_NO_SURFACE;
     EGLConfig config = nullptr;
     ANativeWindow *window = nullptr;  // 持有引用，直到 detach
+    bool hdr_static_applied = false;
     int32_t applied_dataspace = -1;
     int32_t surface_dataspace = kDataspaceSrgb;
     int width = 0;
@@ -106,6 +122,8 @@ struct Player {
     std::atomic<bool> gl_ready{false};
     bool has_pq_colorspace = false;
     bool has_hlg_colorspace = false;
+    bool has_smpte2086_meta = false;
+    bool has_cta861_meta = false;
 };
 
 void on_render_update(void *ctx) {
@@ -133,6 +151,11 @@ bool init_egl(Player *p) {
     const char *exts = eglQueryString(p->display, EGL_EXTENSIONS);
     p->has_pq_colorspace = exts && strstr(exts, "EGL_EXT_gl_colorspace_bt2020_pq");
     p->has_hlg_colorspace = exts && strstr(exts, "EGL_EXT_gl_colorspace_bt2020_hlg");
+    p->has_smpte2086_meta = exts && strstr(exts, "EGL_EXT_surface_SMPTE2086_metadata");
+    p->has_cta861_meta = exts && strstr(exts, "EGL_EXT_surface_CTA861_3_metadata");
+    if (exts) {
+        LOGI("EGL 扩展: %.*s", 900, exts);
+    }
 
     const EGLint attribs[] = {
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
@@ -246,10 +269,69 @@ bool rebuild_surface(Player *p, EGLint colorspace) {
     }
 
     p->applied_dataspace = -1;  // 强制重新设置 window dataspace
+    p->hdr_static_applied = false;
     p->gl_ready.store(create_render_context(p), std::memory_order_release);
     p->redraw.store(true, std::memory_order_release);
     LOGI("EGLSurface 重建：colorspace 0x%x · %dx%d", colorspace, p->width, p->height);
     return p->gl_ready.load(std::memory_order_acquire);
+}
+
+/**
+ * 把片源的静态 HDR 元数据挂到 EGLSurface 上（SMPTE2086 / CTA861_3 扩展）。
+ * 元数据随 buffer 一起进 SurfaceFlinger，`dumpsys SurfaceFlinger --layers`
+ * 能看到 hdr metadata types。动态 HDR10+ 不在这里：平台没有公开写入接口，
+ * 只能走平台解码器（Media3）。
+ * 返回 true 表示已经写入；false 会在下一帧重试（属性可能还没就绪）。
+ */
+bool apply_static_hdr(Player *p) {
+    if (p->surface_dataspace != kDataspaceBt2020Pq) {
+        return false;
+    }
+    if (p->surface == EGL_NO_SURFACE || !p->has_smpte2086_meta) {
+        return false;
+    }
+
+    // mpv 的属性读取是线程安全的，直接在渲染线程取当前值。
+    auto read_prop = [p](const char *name) -> float {
+        double value = 0.0;
+        if (mpv_get_property(p->mpv, name, MPV_FORMAT_DOUBLE, &value) < 0) {
+            return 0.0f;
+        }
+        return static_cast<float>(value);
+    };
+    const float max_luma = read_prop("video-params/max-luma");
+    const float min_luma = read_prop("video-params/min-luma");
+    const float max_cll = read_prop("video-params/max-cll");
+    const float max_fall = read_prop("video-params/max-fall");
+    if (!(max_luma > 0.0f)) {
+        return false;
+    }
+
+    auto set_f = [p](EGLint attr, float value) {
+        if (!eglSurfaceAttrib(p->display, p->surface, attr, float_bits(value))) {
+            LOGW("eglSurfaceAttrib 0x%x 失败: 0x%x", attr, eglGetError());
+        }
+    };
+
+    // BT.2020 主色 + D65。片源是 HDR10，这里报的就是容器色域。
+    set_f(EGL_SMPTE2086_DISPLAY_PRIMARY_RX_EXT, 0.708f);
+    set_f(EGL_SMPTE2086_DISPLAY_PRIMARY_RY_EXT, 0.292f);
+    set_f(EGL_SMPTE2086_DISPLAY_PRIMARY_GX_EXT, 0.170f);
+    set_f(EGL_SMPTE2086_DISPLAY_PRIMARY_GY_EXT, 0.797f);
+    set_f(EGL_SMPTE2086_DISPLAY_PRIMARY_BX_EXT, 0.131f);
+    set_f(EGL_SMPTE2086_DISPLAY_PRIMARY_BY_EXT, 0.046f);
+    set_f(EGL_SMPTE2086_WHITE_POINT_X_EXT, 0.3127f);
+    set_f(EGL_SMPTE2086_WHITE_POINT_Y_EXT, 0.3290f);
+    set_f(EGL_SMPTE2086_MAX_LUMINANCE_EXT, max_luma);
+    // min_luma 为 0 表示未知，用一个很小的正数表示「接近纯黑」。
+    set_f(EGL_SMPTE2086_MIN_LUMINANCE_EXT, min_luma > 0.0f ? min_luma : 0.0001f);
+    if (p->has_cta861_meta && (max_cll > 0.0f || max_fall > 0.0f)) {
+        set_f(EGL_CTA861_3_MAX_CONTENT_LIGHT_LEVEL_EXT, max_cll);
+        set_f(EGL_CTA861_3_MAX_FRAME_AVERAGE_LEVEL_EXT, max_fall);
+    }
+    LOGI("静态 HDR 元数据(EGL)：max=%.0f min=%.4f cll=%.0f fall=%.0f", max_luma, min_luma,
+         max_cll, max_fall);
+    return true;
 }
 
 /** 第一次拿到 window：存引用并建面。 */
@@ -315,6 +397,11 @@ void draw_frame(Player *p) {
     if (err < 0) {
         LOGE("mpv_render_context_render 失败: %s", mpv_error_string(err));
         return;
+    }
+    // 静态元数据要在 swap 之前挂到 EGLSurface 上，才会随这一帧的 buffer 走。
+    // 属性还没就绪（max_luma 为 0）时返回 false，下一帧再试。
+    if (!p->hdr_static_applied && p->surface_dataspace == kDataspaceBt2020Pq) {
+        p->hdr_static_applied = apply_static_hdr(p);
     }
     eglSwapBuffers(p->display, p->surface);
     // advanced control 打开时必须报告 swap，否则 mpv 的帧调度会停摆。
