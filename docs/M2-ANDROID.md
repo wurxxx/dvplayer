@@ -4,8 +4,9 @@
 > 两个 APK 可构建、native 自检库通过 16KB 校验，并在 Android 33 x86_64
 > 模拟器上装起、显示 native 版本；libmpv（LGPL）+ FFmpeg + libplacebo +
 > libass + libbluray 的 NDK 构建链已跑通；A1 的设备能力采集（`DeviceProfile`）
-> 已落地；A4 的最小出画已在真机上跑通（Surface + EGL + mpv render API，720p
-> H.264 走 `mediacodec-copy`）。
+> 已落地；A4 的最小出画已在两台真机上跑通（Surface + EGL + mpv render API，
+> 720p H.264 走 `mediacodec-copy`；Android 9 的 MT6765 与 Android 16 的
+> 骁龙 8 Gen 1 都验过）。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）、
@@ -233,6 +234,7 @@ HDR + HDMI 输出的设备，仍挂在 A1 门禁上。
 | 设备 | 用途 | 必测 |
 | --- | --- | --- |
 | arm64 真机 / 模拟器 | 逻辑与 UI 回归 | JNI / JSON、导航、ViewModel |
+| OnePlus 10 Pro（Android 16 / 骁龙 8 Gen 1） | 手机主验 | HDR10 / HDR10+ 输出、120Hz 帧率匹配、AV1 软解、Android 16 行为 |
 | HBY 5502（Android 9 / MT6765） | 低端降级路径 | SDR 输出、软/硬解回退、无直通时的 PCM 下混 |
 | Android 12+ 真机 | 手机 Alpha 主验 | 两个引擎、DV P5、ASS、PiP、VFS |
 | 低端 Android 9 盒子（Amlogic） | TV 冒烟 | 起播、焦点、4K 掉帧、直通 |
@@ -254,6 +256,27 @@ HBY 5502 的实测能力（2026-11-27，完整 JSON 见
 
 它适合验「按设备能力兜底」这条主线：没有 HDR、没有直通、没有 AV1，路由应该全部
 落到 SDR + PCM + mpv/软解。
+
+OnePlus 10 Pro 的实测能力（2026-11-27，JSON 见
+[devices/oneplus-ne2210.json](devices/oneplus-ne2210.json)）：
+
+| 项 | 结果 |
+| --- | --- |
+| 屏幕 | 1440×3216，支持 1080p/1440p × 60/90/120Hz 六种模式；`wideColorGamut=true` |
+| HDR | `hdr10` / `hlg` / `hdr10_plus`，最大亮度 540 nit；**没有 Dolby Vision** |
+| 解码 | AVC / HEVC / VP9 有 `qcom` 硬解（含 secure、low_latency）；AV1 只有 `c2.android.av1-dav1d` 软解 |
+| 音频输出 | speaker / earpiece / telephony，只有 `pcm_16`，无 HDMI 直通 |
+| 页大小 | 4096——不是 16KB 设备，16KB 兼容仍靠静态校验（`zipalign -P 16` + ELF LOAD） |
+| PiP | 有 |
+
+这台补上了 HDR 与多刷新率两块：A5 的 HDR10 / HDR10+ 输出和 24p 帧率匹配可以在
+它上面验。DV 仍然缺设备（P5 / P8 没有解码器，也没有 DV 显示）。
+
+Android 16 上还踩到一个存储问题：`/sdcard/Android/data/<pkg>/files/` 里的文件，
+mpv 用路径直接打开会 `loading failed`；同一个文件放进 app 内部 `filesDir`
+（`/data/user/0/<pkg>/files/`）就正常。A9 的下载缓存因此应该落在内部目录，
+不要落 external 的 app 专属目录。Android 16 强制 edge-to-edge 也让状态栏压在
+画面上，UI 侧要按 inset 处理。
 
 ```bash
 ./gradlew :app-phone:assembleDebug
