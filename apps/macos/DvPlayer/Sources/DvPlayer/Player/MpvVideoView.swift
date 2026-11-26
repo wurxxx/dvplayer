@@ -33,6 +33,9 @@ final class MpvVideoView: NSOpenGLView {
     private(set) var drawnFrames = 0
     var onRenderReady: (() -> Void)?
     var onFirstDraw: (() -> Void)?
+    /// 窗口换了屏幕（多显示器 / 拔插屏）。
+    var onScreenChanged: ((NSScreen?) -> Void)?
+    private var screenObserver: NSObjectProtocol?
 
     init(client: MpvClient) {
         self.client = client
@@ -56,14 +59,29 @@ final class MpvVideoView: NSOpenGLView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil else { return }
+        guard let window else { return }
         // layer-backed 容器里 `prepareOpenGL` 不会自动调用（AppKit 只在
         // 传统 drawing path 里调它），这里手动来一次，保证 GL 上下文建好。
         if !prepared {
             prepared = true
             prepareOpenGL()
         }
+        if screenObserver == nil {
+            screenObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeScreenNotification,
+                object: window, queue: .main
+            ) { [weak self, weak window] _ in
+                self?.onScreenChanged?(window?.screen)
+            }
+        }
+        onScreenChanged?(window.screen)
         scheduleRender()
+    }
+
+    deinit {
+        if let screenObserver {
+            NotificationCenter.default.removeObserver(screenObserver)
+        }
     }
 
     override func prepareOpenGL() {

@@ -503,6 +503,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "ontop":
                 session.toggleAlwaysOnTop()
                 NSLog("[PlayTest] alwaysOnTop=\(session.isAlwaysOnTop)")
+            case "hdrpeak":
+                let nits = Int(parts.count > 1 ? parts[1] : "") ?? 0
+                session.setHdrPeakNits(nits)
+                NSLog("[PlayTest] hdrPeak=\(session.hdrPeakNits) label=\(session.hdrPeakLabel)")
             case "audio":
                 let index = Int(parts.count > 1 ? parts[1] : "") ?? 0
                 if session.audioTracks.indices.contains(index) {

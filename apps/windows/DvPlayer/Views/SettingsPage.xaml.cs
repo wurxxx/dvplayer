@@ -69,6 +69,7 @@ public partial class SettingsPage : Page
         SelectTag(StartPageBox, settings.StartPage);
         SelectContent(PageSizeBox, settings.PageSize.ToString());
         SelectTag(BufferSizeBox, settings.BufferSizeMb.ToString());
+        SelectTag(HdrPeakBox, settings.HdrPeakNits.ToString());
 
         DanmakuSwitch.IsChecked = settings.DanmakuEnabled ?? false;
         SubtitleKeyBox.Password = settings.OpenSubtitlesApiKey ?? "";
@@ -187,8 +188,20 @@ public partial class SettingsPage : Page
             settings.BufferSizeMb = bufferMb;
         }
 
+        if (HdrPeakBox.SelectedItem is ComboBoxItem { Tag: string hdrPeak }
+            && int.TryParse(hdrPeak, out var hdrPeakNits))
+        {
+            settings.HdrPeakNits = hdrPeakNits;
+        }
+
         settings.Save();
         StatusText.Text = "已保存";
+
+        // 播放窗还开着的话，亮度参考立刻生效，不用等下一次播放。
+        foreach (var window in Application.Current.Windows.OfType<PlayWindow>())
+        {
+            window.ApplyHdrPeakFromSettings();
+        }
     }
 
     /// <summary>弹幕 / 字幕的文本框：边输入边写回 settings.json，不依赖配色或分段切换。</summary>

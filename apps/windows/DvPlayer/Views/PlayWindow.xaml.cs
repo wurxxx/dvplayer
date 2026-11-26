@@ -113,6 +113,8 @@ public partial class PlayWindow : Window
     private string _audioDevice = "";
     private bool _audioPassthrough;
     private bool _hdrPassthrough;
+    /// <summary>HDR → SDR 的亮度参考（nits）；0 = 自动（跟随系统）。</summary>
+    private int _hdrPeakNits;
 
     /// <summary>本次起播的续播点与起播时刻：用来认出「一开就播完」的假片尾。</summary>
     private double _launchStart;
@@ -249,6 +251,7 @@ public partial class PlayWindow : Window
         _danmakuEnabled = settings.DanmakuEnabled ?? false;
         _audioPassthrough = settings.AudioPassthrough;
         _hdrPassthrough = settings.HdrPassthrough;
+        _hdrPeakNits = settings.HdrPeakNits;
         _audioDevice = settings.AudioDevice ?? "";
         ResetMarkerKey();
 
@@ -2930,6 +2933,8 @@ public partial class PlayWindow : Window
             ToggleAudioPassthrough));
         choices.Add((_hdrPassthrough ? "HDR 直通：开" : "HDR 直通：关", _hdrPassthrough,
             ToggleHdrPassthrough));
+        choices.Add(($"HDR 亮度参考（{HdrPeakLabel()}）", _hdrPeakNits > 0,
+            () => OpenHdrPeakMenu()));
 
         return OpenMenu(anchor ?? MoreButton, choices);
     }
@@ -2979,6 +2984,61 @@ public partial class PlayWindow : Window
         settings.HdrPassthrough = enabled;
         settings.Save();
         ShowToast(enabled ? "HDR 直通：开（系统要开 HDR）" : "HDR 直通：关");
+    }
+
+    private string HdrPeakLabel() => _hdrPeakNits <= 0 ? "自动" : $"{_hdrPeakNits} nit";
+
+    /// <summary>HDR 亮度参考二级菜单（WPF 菜单模板没有子菜单，连开一层）。</summary>
+    private ContextMenu OpenHdrPeakMenu()
+    {
+        var choices = new List<(string Label, bool Selected, Action Action)>
+        {
+            ("自动（跟随系统）", _hdrPeakNits <= 0, () => SetHdrPeakNits(0)),
+            ("-", false, NoOp),
+        };
+
+        foreach (var nits in new[] { 60, 80, 100, 120, 150, 180, 200 })
+        {
+            var value = nits;
+            choices.Add(($"{value} nit", _hdrPeakNits == value, () => SetHdrPeakNits(value)));
+        }
+
+        return OpenMenu(MoreButton, choices);
+    }
+
+    private void SetHdrPeakNits(int nits)
+    {
+        _hdrPeakNits = Math.Clamp(nits, 0, 400);
+        _ipc?.Command("set_property", "target-peak",
+            _hdrPeakNits > 0 ? (object)_hdrPeakNits : "auto");
+
+        var settings = AppServices.Instance.Settings;
+        settings.HdrPeakNits = _hdrPeakNits;
+        settings.Save();
+
+        ShowToast(_hdrPeakNits <= 0
+            ? "HDR 亮度参考：自动（跟随系统）"
+            : $"HDR 亮度参考：{_hdrPeakNits} nit");
+    }
+
+    /// <summary>自检：切一次亮度参考并落盘。</summary>
+    public string SetHdrPeakForShot(int nits)
+    {
+        SetHdrPeakNits(nits);
+        return $"hdrPeak={_hdrPeakNits}";
+    }
+
+    /// <summary>设置页改了「HDR 亮度参考」：同步到已经开着的播放窗口。</summary>
+    public void ApplyHdrPeakFromSettings()
+    {
+        var nits = AppServices.Instance.Settings.HdrPeakNits;
+        if (nits == _hdrPeakNits)
+        {
+            return;
+        }
+
+        _hdrPeakNits = nits;
+        _ipc?.Command("set_property", "target-peak", nits > 0 ? (object)nits : "auto");
     }
 
     private double _lastSpeed = 1;

@@ -236,6 +236,39 @@ struct SettingsPage: View {
                                 .pickerStyle(.menu)
                                 .frame(width: 112)
                             }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("HDR 亮度参考")
+                                            .font(.system(size: 13.5))
+                                            .foregroundStyle(Theme.text)
+                                        Text("HDR 片转 SDR 时的目标白点。默认自动（100 nit）。"
+                                             + "觉得 HDR 片偏暗就把数值调小（画面更亮），偏亮就调大；"
+                                             + "SDR 内容不受影响。")
+                                            .font(.system(size: 11.5))
+                                            .foregroundStyle(Theme.faint)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer()
+                                    Toggle("自动", isOn: hdrPeakAuto)
+                                        .toggleStyle(.switch)
+                                        .font(.system(size: 12))
+                                }
+
+                                HStack(spacing: 10) {
+                                    Slider(value: hdrPeakSlider, in: 60...200, step: 5,
+                                           onEditingChanged: { editing in
+                                               if !editing { applyHdrPeakToPlayer() }
+                                           })
+                                        .disabled(hdrPeakAuto.wrappedValue)
+                                    Text(hdrPeakText)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(Theme.faint)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                        .frame(width: 104, alignment: .trailing)
+                                }
+                            }
                         }
                     }
 
@@ -326,6 +359,40 @@ struct SettingsPage: View {
         .onChange(of: state.settings.showResolution) { _ in state.settings.save() }
         .onChange(of: state.settings.autoConnect) { _ in state.settings.save() }
         .onChange(of: state.settings.bufferSizeMb) { _ in state.settings.save() }
+        .onChange(of: state.settings.hdrPeakNits) { _ in state.settings.save() }
+    }
+
+    // MARK: - HDR 亮度参考
+
+    /// 0 / nil = 自动（100 nit）。
+    private var hdrPeakAuto: Binding<Bool> {
+        Binding(
+            get: { (state.settings.hdrPeakNits ?? 0) <= 0 },
+            set: { auto in
+                if auto {
+                    state.settings.hdrPeakNits = 0
+                } else if (state.settings.hdrPeakNits ?? 0) <= 0 {
+                    state.settings.hdrPeakNits = 100
+                }
+                DispatchQueue.main.async { applyHdrPeakToPlayer() }
+            })
+    }
+
+    private var hdrPeakSlider: Binding<Double> {
+        Binding(
+            get: { Double(state.settings.hdrPeakNits ?? 100) },
+            set: { state.settings.hdrPeakNits = Int($0.rounded()) })
+    }
+
+    private var hdrPeakText: String {
+        let nits = state.settings.hdrPeakNits ?? 0
+        return nits > 0 ? "\(nits) nit" : "100 nit（自动）"
+    }
+
+    /// 设置页改动时，如果播放窗还开着就同步过去（不用等下一次播放）。
+    private func applyHdrPeakToPlayer() {
+        guard let session = PlayerLauncher.shared.current else { return }
+        session.setHdrPeakNits(state.settings.hdrPeakNits ?? 0)
     }
 
     // MARK: - 弹幕 / 字幕凭据

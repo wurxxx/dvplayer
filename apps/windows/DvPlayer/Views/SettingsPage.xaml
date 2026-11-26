@@ -205,6 +205,32 @@
                 </ComboBox>
               </Grid>
 
+              <Grid Margin="0,20,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="HDR 亮度参考" FontSize="14"
+                             Foreground="{StaticResource TextBrush}" />
+                  <TextBlock Text="HDR 片转 SDR 时的目标白点。默认自动（跟随系统）；觉得偏暗就选更小的值，SDR 内容不受影响。"
+                             FontSize="12.5" Foreground="{StaticResource FaintBrush}"
+                             Margin="0,4,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+                <ComboBox x:Name="HdrPeakBox" Grid.Column="1" Width="156" Height="34"
+                          Style="{StaticResource Select}" VerticalAlignment="Center"
+                          SelectionChanged="OnSettingChanged">
+                  <ComboBoxItem Content="自动（跟随系统）" Tag="0" />
+                  <ComboBoxItem Content="60 nit" Tag="60" />
+                  <ComboBoxItem Content="80 nit" Tag="80" />
+                  <ComboBoxItem Content="100 nit" Tag="100" />
+                  <ComboBoxItem Content="120 nit" Tag="120" />
+                  <ComboBoxItem Content="150 nit" Tag="150" />
+                  <ComboBoxItem Content="180 nit" Tag="180" />
+                  <ComboBoxItem Content="200 nit" Tag="200" />
+                </ComboBox>
+              </Grid>
+
             </StackPanel>
           </Border>
 

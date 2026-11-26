@@ -192,6 +192,12 @@ public sealed class LibMpvProcess : IMpvEngine
             Opt("target-colorspace-hint", "yes");
         }
 
+        // HDR 亮度参考：0 = 自动（跟随系统 SDR 白点）。
+        if (settings.HdrPeakNits > 0)
+        {
+            Opt("target-peak", settings.HdrPeakNits.ToString(CultureInfo.InvariantCulture));
+        }
+
         if (!string.IsNullOrWhiteSpace(settings.AudioDevice))
         {
             Opt("audio-device", settings.AudioDevice);
