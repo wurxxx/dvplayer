@@ -31,8 +31,8 @@ Media3 则在另外几处更强：HDR 直通（平台原生路径）、tunneling
    支持自动与手动切换。
 2. **引擎契约放在 `:player`**：Surface 由壳持有（`SurfaceView`），
    切换 = 停一个、按当前位置开另一个；约 1 秒空档，不做无缝。
-3. **默认 mpv；三条硬例外走 Media3**：
-   - 片源是 HDR10 / HDR10+ / DV 且设备支持 HDR；
+3. **默认 mpv；例外走 Media3**（2026-11-26 按实测修订，见「路由」下的说明）：
+   - 片源带 HDR10+ 且设备支持 → Media3（动态元数据只有平台能写进显示端）；
    - 需要 TrueHD / DTS-HD / Atmos 直通，且 mpv 实测不支持；
    - `DeviceProfile` 判定性能不达标（4K 掉帧 / 盒子无 HDR 合成）。
 4. **用户手动指定优先**；运行时失败自动换另一个引擎重试一次，不循环。
@@ -73,12 +73,18 @@ interface PlaybackEngine {
 
 | 场景 | 内核 | 原因 |
 | --- | --- | --- |
-| 默认 | mpv | 格式覆盖、原盘、ASS 内嵌字体 |
-| HDR / DV 且设备支持 | Media3 | 平台 HDR 直通；HDR10+ 动态元数据不丢 |
+| 默认：SDR / HDR10 / HLG / DV / 原盘 / 非本地 | mpv | 格式覆盖、原盘、DV 整形、ASS 内嵌字体 |
+| 片源带 HDR10+ 且设备支持 | Media3 | 平台 HDR 直通；HDR10+ 动态元数据不丢 |
 | 需要直通且 mpv 不支持 | Media3 | 平台 `AudioTrack` 直通链路成熟 |
 | 设备能力不达标 | Media3 | 4K 掉帧 / 盒子无 HDR 合成 |
 | Media3 报错 / 打不开 | 自动重试 mpv | 每片最多一次，记日志 |
 | 用户手动指定 | 按用户 | 播放页「换个内核重播」+ 设置页默认值 |
+
+> **实施修订（2026-11-26）**：最初写的「HDR10 / DV 且设备支持 → Media3」在实测后
+> 推翻。DV P5 只有 libmpv + libplacebo + libdovi 能整形（Media3 在没有 DV 解码器
+> 的设备上画面绿紫），所以 DV 一律 mpv；HDR10 / HLG 的 EGL dataspace 与静态元数据
+> 在 mpv 侧也已验通，不必为静态 HDR 切内核。最终只保留 HDR10+ 这一条 HDR 例外。
+> 顺序上 DV 要先于 HDR10+ 判：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-40。
 
 路由依赖 `DeviceProfile`（HDR 类型、DV profile、直通编码、4K 解码能力、tunneling），
 由能力探测页生成并缓存；这使探测页从调试工具变成发布必需项。

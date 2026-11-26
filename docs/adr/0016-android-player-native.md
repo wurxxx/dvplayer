@@ -19,9 +19,11 @@ Rust 也能做这件事，但要手写 mpv render API、EGL、GLES 的 FFI 绑�
 
 1. `:player-mpv` 的 native 层用 **C++17 + CMake**（Gradle `externalNativeBuild`），
    产物是 `libdvplayer_mpv.so`，链接 `libmpv.so`（`IMPORTED` target）。
-2. mpv 头文件（`client.h` / `render.h` / `render_gl.h`，mpv 0.42.0 原样，LGPL-2.1+）
-   随仓库走，放在 `player-mpv/src/main/cpp/include/mpv/`；`libmpv.so` 本身不进仓库，
-   由 `scripts/android/build-mpv.sh` 生成。
+2. mpv 头文件（`client.h` / `render.h` / `render_gl.h`，mpv `1eb941f` 原样，
+   LGPL-2.1+）随仓库走，放在 `player-mpv/src/main/cpp/include/mpv/`，由
+   `build-mpv.sh --stage` 同步；`libmpv.so` 本身不进仓库，由
+   `scripts/android/build-mpv.sh` 生成。版本必须 ≥ `ad9d850`——那是 libmpv
+   拿到 gpu-next 渲染后端的起点，之前的 v0.42.0 只有老 gpu，会剥掉 DV 映射。
 3. 线代模型：**渲染线程独占** `EGLDisplay` / `EGLContext` / `EGLSurface` 与
    `mpv_render_context`。`attach` / `detach` 只把 `Surface` 投递给渲染线程，
    不跨线程 `eglMakeCurrent`。

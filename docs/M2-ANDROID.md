@@ -1,38 +1,27 @@
 # M2 · Android / TV 客户端
 
-> 状态：方案定稿（2026-11-25）；A0 环境与 A2 骨架已落地（2026-11-26），
-> 两个 APK 可构建、native 自检库通过 16KB 校验，并在 Android 33 x86_64
-> 模拟器上装起、显示 native 版本；libmpv（LGPL）+ FFmpeg + libplacebo +
-> libass + libbluray 的 NDK 构建链已跑通；A1 的设备能力采集（`DeviceProfile`）
-> 已落地；A4 的最小出画已在两台真机上跑通（Surface + EGL + mpv render API，
-> 720p H.264 走 `mediacodec-copy`；Android 9 的 MT6765 与 Android 16 的
-> 骁龙 8 Gen 1 都验过）；A5 的 HDR 通路已接通并用法生成的**真 PQ / HLG** 片源
-> 验过（BT.2020_PQ / BT2020_HLG 的 EGL colorspace + buffer dataspace，
-> SurfaceFlinger 侧已是 `BT2020_PQ` / `BT2020_HLG` 且 HWC 直出）；PQ 的静态
-> HDR 元数据（SMPTE2086 / CTA861_3）经 EGL surface 扩展进 buffer layer；24p → 120Hz
-> 的整数倍帧率匹配也已验证；HDR10+（ST2094-40）已用注入样片验到 mpv 软解能读，
-> 但平台无公开写入接口，动态元数据归 Media3 内核——`:player-media3` 已用
-> ExoPlayer 与 MediaCodec 探针验通（SF 层 `hdr metadata types=4`）。
-> 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
+> 状态：A0–A10 主体已在真机落地（2026-11-26），手机可用；A1 的 TV / 盒子项、
+> A11（TV 冒烟）与真实原盘样片仍缺。
+> 决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）、
-> [ADR-0016](adr/0016-android-player-native.md)（播放器 native 层）。
+> [ADR-0016](adr/0016-android-player-native.md)（native 层）。
+> 主验机 OnePlus NE2210（Android 16 / 骁龙 8 Gen 1），降级机 HBY 5502（Android 9 / MT6765）。
 
-## 1. 范围
+## 1. 范围与边界
 
-和桌面一致的产品能力：多源接入（飞牛 / Emby / Jellyfin + 本地 / SMB / NFS /
-WebDAV）、聚合搜索、续播、蓝光原盘、PGS / ASS / SRT、HDR / DV、音频直通。
+产品能力与桌面一致：多源（飞牛 / Emby / 本地 / SMB / NFS / WebDAV）、聚合搜索、
+续播、蓝光原盘、PGS / ASS / SRT、HDR / DV、音频直通。Android 的差异如实呈现：
 
-Android 的差异要如实呈现，不假装支持：
-
-| 项 | Android 的边界 |
+| 项 | 边界 |
 | --- | --- |
-| 解码 | 取决于设备 `MediaCodec`，不做视频软解（DV P5 例外，见 A5） |
+| 解码 | 平台 `MediaCodec`；只有 DV P5 必须软解 |
 | DV P7 | 公共 API 拿不到增强层，只播 BL |
-| DV P5 | 无 DV 解码器时由 libplacebo（含 libdovi）把 IPTPQc2 还原成 HDR10 输出；这条路径必须软解 |
-| 原盘 | 只支持未加密盘；AACS / AACS2 明确拒绝 |
-| 直通 | 按设备 `AudioDeviceInfo.getEncodings()`，TrueHD / DTS-HD 多数盒子没有 |
-| 蓝光菜单 | 不跑 BD-J，用标题列表代替（与桌面一致） |
+| DV P5 | libplacebo + libdovi 把 IPTPQc2 还原成 HDR10，必须软解 |
+| DV P8 | BL 本身就是 HDR10，硬解即可 |
+| 原盘 | 只支持未加密 ISO / BDMV；AACS / AACS2 明确拒绝 |
+| 直通 | 按 `AudioDeviceInfo.getEncodings()`，手机基本没有 |
+| 蓝光菜单 | 不跑 BD-J，用标题列表代替 |
 
 ## 2. 模块
 
@@ -43,7 +32,7 @@ apps/android/
 ├── ui-phone/        手机屏幕 + 导航（Material3）
 ├── ui-tv/           TV 屏幕 + 导航（androidx.tv:tv-material）
 ├── feature/         共享 ViewModel / UiState / 交互逻辑
-├── player/          引擎契约、路由策略、音频焦点、MediaSession、字幕样式、诊断
+├── player/          引擎契约、路由、音频焦点、MediaSession、字幕样式、诊断
 ├── player-media3/   Media3 适配
 ├── player-mpv/      libmpv JNI + EGL 渲染线程 + 属性桥
 ├── player-disc/     libbluray JNI（title / 章节），与 mpv 共用同一份 libbluray
@@ -52,8 +41,6 @@ apps/android/
 ├── core/            JNI 声明 + camelCase 模型（kotlinx.serialization）
 └── build-logic/     约定插件（Compose、JDK 17、minSdk、R8、jniLibs、16KB、ABI splits）
 ```
-
-依赖方向：
 
 ```
 app-phone ─┐
@@ -88,30 +75,40 @@ interface PlaybackEngine {
 
 四条不能省的约定：
 
-- **Surface 归属**：壳持有 `SurfaceView`；Media3 用 `setVideoSurface`，
-  mpv 用 `ANativeWindow_fromSurface` + EGL。
+- **Surface 归属**：壳持有 `SurfaceView`；Media3 用 `setVideoSurface`，mpv 用
+  `ANativeWindow_fromSurface` + EGL。
 - **字幕归属**：`subtitleMode = ENGINE | CUES`。ENGINE 时壳关掉自己的字幕层，
   样式映射到 `sub-scale` / `sub-pos` / `sub-ass-override`。
-- **轨道匹配**：切换按「类型 + 语言 + 编码 + 序号」回选，不按 id。
+- **轨道匹配**：按「类型 + 语言 + 编码 + 序号」回选，不按 id。
 - **错误码**：带 `retryableWithOtherEngine`，自动回退只认它。
 
-上移到 `:player`、两个引擎共用的：音频焦点、MediaSession / 通知、PiP、进度回写、
-字幕样式映射、诊断采集。Media3 自带的焦点管理要关掉，避免双重处理。
+两个引擎共用：音频焦点、MediaSession / 通知、PiP、进度回写、字幕样式映射、
+诊断采集。Media3 自带的焦点管理要关掉，避免双重处理。
 
-### 3.2 默认与例外
+### 3.2 路由（最终版）
 
-默认 **mpv**。三条硬例外走 Media3：
+**默认 mpv。** `EngineRouter` 按顺序判，先命中先返回：
 
-1. 片源是 HDR10 / HDR10+ / DV 且设备支持 HDR；
-2. 需要 TrueHD / DTS-HD / Atmos 直通，且 mpv 实测不支持；
-3. `DeviceProfile` 判定性能不达标（4K 掉帧 / 盒子无 HDR 合成）。
+| # | 条件 | 内核 | 原因 |
+| --- | --- | --- | --- |
+| 1 | 非本地（含 `://`） | mpv | 跳过探测；桥接 / HTTP 都能喂 |
+| 2 | 原盘（ISO / BDMV） | mpv | 只有它链了 libbluray，Media3 不认识盘结构 |
+| 3 | DV（P5 / P7 / P8） | mpv | 平台解码器丢 DV 元数据；P5 靠 libplacebo 整形 |
+| 4 | 设备不支持 HDR10+ | mpv | 不必解 SEI |
+| 5 | 片源带 ST2094-40（HDR10+） | Media3 | 只有平台 MediaCodec 能把动态元数据交给显示端 |
+| 6 | 其余 | mpv | 默认内核，负责 ASS / 原盘 / 软解 |
 
-运行时失败自动换另一个引擎重试一次，不循环。用户手动指定优先。
+DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-40（实测过）。
+本地文件先探 DV，再用 `Hdr10PlusProbe` 解 12 帧看输出格式里有没有
+`hdr10-plus-info`。
+
+运行时失败跨内核重试一次（只 Media3 → mpv，Intent 带 `fallback=1`），不来回踢皮球；
+用户手动指定优先。
 
 ### 3.3 切换
 
-不是无缝，是「停一个、按当前位置重开」，约 1 秒空档；seek 用精确模式，
-从最近关键帧起。UI 明确显示「正在切换内核…」。
+不是无缝，是「停一个、按当前位置重开」，约 1 秒空档；seek 用精确模式，从最近
+关键帧起。UI 显示「正在切换内核…」。
 
 ### 3.4 设备能力
 
@@ -130,31 +127,33 @@ interface PlaybackEngine {
 
 ## 4. 格式矩阵
 
-逐格结果在 [DECODE.md](DECODE.md) §8（当前是规划口径，A1 spike 后回填）。摘要：
+逐格结果在 [DECODE.md](DECODE.md) §8。摘要：
 
-- **mpv**：原盘、ASS（含内嵌字体）、P5 整形、DTS / TrueHD 软解；HDR 输出待验。
-- **Media3**：HDR 直通、HDR10+ 元数据、tunneling、平台直通；ASS 只有基础文本。
+- **mpv**：原盘、ASS（libass，含内嵌字体）、DV P5 整形、DTS / TrueHD 软解、
+  HDR10 / HLG 直出（已验）。
+- **Media3**：HDR10 / HDR10+ 直通（含动态元数据）、tunneling（设备支持时）、
+  平台直通；ASS 只有基础文本。
 - **两套都没有**：DV P7 增强层、AACS / AACS2、3D MVC、BD-J 菜单。
 
 ## 5. 原盘
 
 见 [BLU-RAY.md](BLU-RAY.md) §5.3。要点：
 
-- 本地 ISO / BDMV 目录**直接用普通路径**交给 mpv；mpv 的 `bdmv_dir_stream_open`
-  会识别 `.iso` 与含 `BDMV/MovieObject.bdmv` 的目录，验证后内部转
-  `bluray://<title>/<device>`。不要自己拼 `bluray://`：这条协议的路径是
+- 本地 ISO / BDMV 目录**直接用普通路径**交给 mpv：`bdmv_dir_stream_open` 会识别
+  `.iso` 与含 `BDMV/MovieObject.bdmv` 的目录，验证后内部转
+  `bluray://<title>/<device>`。不要自己拼 `bluray://`——这条协议的路径是
   `bluray://title/device`，拼成 `bluray:///abs/path` 会被当成相对路径。
-- 光盘设备（`/dev/sr0`）才需要 `--bluray-device`，移动端用不上；
-- `:player-disc` 用 libbluray 1.5 列 title / 章节（含 HDR / DV 标记与章节名）；
-- NAS 原盘 v1 先下载到缓存，边读边播排 M2-B 之后；
+- 光盘设备（`/dev/sr0`）才需要 `--bluray-device`，移动端用不上。
+- `:player-disc` 用 libbluray 1.5 列 title / 章节（含 HDR / DV 标记与章节名）。
+- NAS 原盘 v1 先下载到缓存；边读边播排 M2-B 之后。
 - Media3 不参与原盘。
 
-## 6. 存储
+## 6. 存储与 VFS
 
 ```
 :feature → :data → Vfs（list / stat / open / seek）
                     ├── SmbVfs    smbj（SMB2/3）
-                    ├── NfsVfs    libnfs（JNI，AUTH_SYS）
+                    ├── NfsVfs    libnfs（JNI，AUTH_SYS）   ← 未实现
                     └── DavVfs    OkHttp（PROPFIND + Range）
                           │  目录树 JSON
                           ▼
@@ -163,7 +162,7 @@ interface PlaybackEngine {
         player-media3 DataSource / player-mpv 自定义 stream
 ```
 
-核心需要补的三件事：
+核心要补的三件事：
 
 | 项 | 原因 |
 | --- | --- |
@@ -171,615 +170,397 @@ interface PlaybackEngine {
 | `dv_probe_dovi_bytes(ptr, len)` | VFS / SAF 拿不到路径，判定逻辑仍只在 `core/dovi` |
 | `sources/vfs.rs` + 共享扫描函数 | 复用 `local.rs` 的目录树与集号解析 |
 
-## 7. 里程碑
+## 7. 实测记录
 
-单人粗估；VFS 与 UI 可与引擎工作并行。
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| A0 | 构建链（JDK 17 / SDK 36 / NDK r28、libmpv、16KB） | 完成 |
+| A1 | 可行性 spike（设备能力六项） | 手机侧完成；TV / 盒子 / DV 显示项缺（门禁未关） |
+| A2 | 骨架（两个 app、约定插件、`:design` / `:core`） | 完成 |
+| A3 | 数据层（`core/media-jni`、hub 生命周期、库 / 详情 / 记录） | 完成 |
+| A4 | 引擎契约 + mpv（EGL、属性桥、会话、章节、续播、ASS） | 完成 |
+| A5 | HDR 输出（dataspace、静态元数据、帧率匹配） | 完成 |
+| A6 | Media3（HDR10+、音频、PGS / Sup、契约对齐） | 完成 |
+| A7 | 路由 / 切换 / 回退 | 完成 |
+| A8 | 原盘入口 | 入口链完成；真实原盘样片缺 |
+| A9 | VFS（WebDAV / SMB / 桥接） | WebDAV + SMB 完成；NFS 缺 |
+| A10 | PiP / 前台服务 / 下载 | 完成 |
+| A11 | TV 冒烟 | 未开始 |
 
-| # | 阶段 | 内容 | 验收 |
-| --- | --- | --- | --- |
-| A0 | 环境与 libmpv 构建链 | JDK 17 / SDK 36 / NDK r28 / meson；libmpv（LGPL）+ FFmpeg + libplacebo + libass + libbluray；CI 缓存；16KB 校验 | `libmpv.so` 能加载，最小 demo 出画 |
-| A1 | 可行性 spike（门禁） | 4K HDR10 输出与掉帧、DV P8、DV P5、DTS-HD / TrueHD 直通、24p、后台 / PiP | 六项有结论，写进 `DeviceProfile` 与例外表 |
-| A2 | 骨架 | Gradle 约定、两个 app + 两份 manifest、`:design` 令牌、`:core` 加载 native | 两个 APK 能装能起，TV 出现在 leanback 桌面 |
-| A3 | 数据层 | `core/media-jni` + 首包 12 个函数、模型、hub 生命周期、连接页、库 / 详情 / 记录、图片 | 飞牛全链路可浏览，记录有续播点 |
-| A4 | 引擎契约 + mpv | 接口、EGL 渲染线程、属性桥、轨道 / 章节 / 字幕 / 倍速、焦点 / 会话 / 通知 / 进度 | SDR 1080p / 4K 播放、切轨、ASS、后台、续播 |
-| A5 | HDR 输出 | dataspace、`colorMode`、`preferredDisplayModeId`、帧率匹配 | HDR10 真进 HDR；不达标时显示「SDR 映射」 |
-| A6 | Media3 适配 | 第二引擎、FFmpeg 音频扩展、PGS / SRT、HDR 直通、tunneling | 同片源两个引擎都能播，能力表一致 |
-| A7 | 切换与回退 | `DeviceProfile` 页与导出、路由、手动重播、自动重试、设置页 | HDR 自动走 Media3、P5 自动走 mpv、切换不丢位置 |
-| A8 | 原盘 | libbluray 进 mpv、`player-disc` 列 title / 章节、ISO / BDMV 入口、NAS 下载缓存、加密盘提示 | 本地 ISO 选集播放；AACS 盘给出可读原因 |
-| A9 | VFS | `Vfs` + WebDAV → SMB → NFS、核心虚拟源、`dv_hub_replace`、`dv_probe_dovi_bytes` | 三种协议浏览 / 起播 / seek / 续播 |
-| A10 | 手机特性 | PiP、通知与后台、下载（先存应用私有目录） | PiP 可切、通知可控、离线可播 |
-| A11 | TV 冒烟（门禁） | TV 壳接 `:feature` + 两个引擎 + 一个播放页 | 遥控器完成选片 → 起播 → 暂停 → 切轨 → 退出 |
+**A1 与 A11 是门禁**：A1 决定例外表，A11 不通过就不开 M2-B。A1 的静态部分已用
+`:core` 的 `Capabilities.collect()` 落地（`MediaCodecList` / `Display` /
+`AudioManager` 采 `DeviceProfile`，JSON + 摘要，首页显示，日志 tag `DvCaps`）；
+六项里只有「后台 / PiP」能在 HBY 5502 上验完，其余依赖 §8 的设备。
 
-**A1 与 A11 是门禁**：A1 决定例外表，A11 不通过就不开 M2-B。
+### 7.1 构建链（A0）
 
-A0 / A2 已落地（2026-11-26）：
+- `scripts/android/{env,build-native,check-apk}.sh`：JDK 17 / SDK 36 / NDK r28；
+  `cargo ndk` 出 `arm64-v8a`（x86_64 只给模拟器，默认不编不打包）；
+  `zipalign -c -P 16` + ELF `LOAD` 对齐校验。
+- AGP 8.13.2 / Gradle 8.13 / Kotlin 2.2.21，约定插件在 `build-logic`。
+- Compose BOM 钉 **2026.06.01**（ui 1.11.x，minCompileSdk 35）。2026.11.01 的
+  Compose 1.13 要 compileSdk 37 / AGP 9.1，和当前基线冲突。
 
-- `scripts/android/{env,build-native,check-apk}.sh`：JDK 17 / SDK 36 / NDK r28 环境，
-  `cargo ndk` 出 `arm64-v8a`（x86_64 只在模拟器调试时按需编），
-  `zipalign -c -P 16` 校验；
-- `apps/android`：AGP 8.13.2 / Gradle 8.13 / Kotlin 2.2.21，约定插件在 `build-logic`；
-- Compose BOM 钉在 **2026.06.01**（ui 1.11.x，minCompileSdk 35）。2026.11.01 的
-  Compose 1.13 要求 compileSdk 37 / AGP 9.1，和当前基线冲突；
-- `core/media-jni` 的 JNI 自检桩 + 两个 APK 的 16KB 校验通过。
+`scripts/android/build-mpv.sh`：依赖全静态，只产一个 `libmpv.so`。
 
-libmpv 构建链（A0 的另一半，2026-11-26）：
+| 依赖 | 版本 / 选项 |
+| --- | --- |
+| mpv | **`1eb941f`**（含 `ad9d850 libmpv: add a gpu-next render backend`），与桌面端同 commit |
+| FFmpeg | n9.0.2（`--disable-gpl --disable-version3`，`-fPIC`） |
+| libplacebo | v7.387.0（`vulkan=disabled`，`-Ddovi=enabled -Dlibdovi=enabled`） |
+| libdovi | 3.4.0（Rust crate，cbindgen + `cargo build --features capi` 出 staticlib，手写 `dovi.pc`） |
+| libass / libbluray | 0.17.4 / 1.5.0 + libudfread 1.2.0 |
+| 字体 | freetype / fontconfig / harfbuzz / fribidi / libunibreak |
 
-- `scripts/android/build-mpv.sh`：依赖全静态，只产一个 `libmpv.so`；FFmpeg
-  `n9.0.2`（`--disable-gpl --disable-version3`，`-fPIC`）、libplacebo `v7.387.0`
-  （`vulkan=disabled`，只留 OpenGL）、libass `0.17.4`、libbluray `1.5.0` +
-  libudfread `1.2.0`、freetype / fontconfig / harfbuzz / fribidi / libunibreak；
-- 不产 `libavcodec.so.62` 这类版本化 soname（Android 装不进 APK）；`NEEDED` 只剩
-  `libm / libc / libdl / libandroid / libmediandk / libOpenSLES / libEGL`；
-- harfbuzz 是 C++ 静态库，mpv 用 C 链接器，所以把 `libc++_static.a` /
-  `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`（不额外带 `libc++_shared.so`）；
-- `strip` 后 arm64 约 25MB（x86_64 28MB，平时不编），LOAD 对齐 `0x4000`；
-- `scripts/android/{mpv-probe.c,check-mpv.sh}`：推到设备上 `dlopen` + 读 client API
-  版本 + `mpv_create`。Android 33 x86_64 模拟器与真机（HBY 5502 / Android 9 /
-  arm64）实测均为 `libmpv client API: 2.6`、`mpv_create ok`；从装好的 APK 里
-  抽出的 `libmpv.so` 再测一次同样通过。
-- 出画（A4 第一步，2026-11-27）：`:player-mpv` 是 C++ / CMake 模块
-  （[ADR-0016](adr/0016-android-player-native.md)），渲染线程独占 EGL 与
-  `mpv_render_context`。真机 HBY 5502（Android 9 / arm64）上 720p H.264 测试片
-  走 `mediacodec-copy` 出画，时间码正常推进；`libdvplayer_mpv.so` 同样 16KB 对齐、
-  未压缩打包。
-- 引擎契约与播放控制（A4 后半段，2026-11-27）：新增 `:player` 模块，定义
-  `PlayerEngine`（attach / load / play / pause / seek / speed / 轨道 / 章节 /
-  外部字幕 / 状态快照 + 事件回调），mpv 与 Media3 都实现同一份契约，壳层只依赖
-  接口。`:player-mpv` 的属性桥全部走 libmpv：暂停 `set pause`、seek
-  `seek <秒> absolute`、倍速 `set speed`、轨道读 `track-list/N/{type,id,title,lang,
-  codec,selected,external}`、切轨 `set vid/aid/sid`、外部字幕
-  `sub-add <path> select`、章节读 `chapter-list/N/{title,time}`。状态用 200ms
-  轮询线程推送（读属性本身线程安全），Media3 用主线程 250ms 轮询，两边行为一致。
-  验证页加了控制条（播放/暂停、±10s、倍速、音轨、字幕、载入字幕），
-  用一份多轨样片（2 音轨 + 1 内嵌字幕 + 3 章节）在 OnePlus 上跑通：
-  mpv 侧 `pos 40.625s · 暂停` → `+10s → 50.625s` → `audio:音轨 2*` →
-  `sub:test.srt*`；Media3 侧同流程，载入外部字幕后位置与音轨都保持
-  （`audio:en*` 不回落默认音轨）。Media3 的章节暂时为空——ExoPlayer 1.11 的
-  `MediaMetadata` 没有章节字段，`Mp4Extractor` 也不解析 `chpl`。
-  会话 / 通知 / 续播 / 章节 / ASS 都已接上（见下）。
+- 不产 `libavcodec.so.62` 这种版本化 soname；`NEEDED` 只剩
+  `libm / libc / libdl / libandroid / libmediandk / libOpenSLES / libEGL`。
+- harfbuzz 是 C++ 静态库，mpv 用 C 链接器，所以 `libc++_static.a` /
+  `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`，不额外带 `libc++_shared.so`。
+- strip 后 arm64 约 **28.4MB**（含 libdovi；x86_64 更大，平时不编），
+  `LOAD` 对齐 `0x4000`。
+- `--stage` 同步 `libmpv.so` 与 mpv 头文件（`client.h` / `render.h` /
+  `render_gl.h`）到 `player-mpv/.../include/mpv/`。
+- **换 mpv 版本时必须删** `build/android-mpv/src/mpv`、`.../arm64/build/mpv`、
+  `.../arm64/prefix/.done/mpv`：`ensure_tar` 看到源码目录已存在就跳过，只改
+  版本号不会换源码。
+- 自检：`scripts/android/{mpv-probe.c,check-mpv.sh}` 推到设备上 `dlopen` + 读
+  client API 版本 + `mpv_create`；模拟器、HBY 5502、APK 里抽出的 `.so` 都通过
+  （`client API: 2.6`）。
 
-**会话与通知（A4，2026-11-27）**：`:player` 的 `MediaSessionController` 用平台
-`MediaSession`（不引额外依赖）把播放状态挂上去，锁屏 / 蓝牙 / 通知按钮的回调
-统一转到 `PlayerEngine`；通知用 `Notification.MediaStyle`，暂停 / 播放切换时
-更新。验证：`dumpsys media_session` 显示
-`state=PLAYING(3) position=3791 speed=1.0`，`cmd media_session dispatch pause`
-之后变 `PAUSED(2)`、页面状态同步「暂停」，`dispatch play` 恢复；
-ColorOS 的状态栏媒体胶囊也识别了这条通知。帧率匹配的选模式逻辑抽到
-`:player` 的 `FrameRateMatcher`，验证页只负责应用结果，24p → 120Hz 仍是
-`mode 6@120.00Hz`。
+### 7.2 出画与播放控制（A4）
 
-章节 / 续播 / ASS（A4 收尾，2026-11-27）：
+`:player-mpv` 是 C++ / CMake 模块，渲染线程独占 EGL 与 `mpv_render_context`。
+HBY 5502（Android 9）与 OnePlus 上 720p H.264 走 `mediacodec-copy` 出画，
+时间码正常。
 
-- **章节**：mpv 读 `chapter-list`；Media3 的 `Mp4Extractor` 不解析 `chpl`，
-  新增 `Mp4Chapters` 直接读 `moov/udta/chpl`（`version/flags + reserved + count +
-  [start(100ns) len title]`）。同一份样片两边都得到「第一章 / 第二章 / 第三章」，
-  验证页「下一章」把位置从 4.7s 跳到 20s、再跳到 40s。
-- **续播**：`:player` 的 `PlaybackMemory` 按片源地址存位置（`SharedPreferences`），
-  片尾 5 秒内清记录。实测播到 51.4s 退出，重启后日志
-  `续播：51377 ms`，从原位置继续。
-- **ASS**：mpv 走 libass，`sub-add <path>` 加载 `.ass` 后渲染正常
-  （`{\pos}`、`\c`、`\fscx/\fscy` 都生效，截图为证）。Media3 侧用自带的
-  `SsaParser` 也能出字（`sub:test.ass[text/x-ssa]*`，`cue 2 文本 2`），但只做
-  基础文本：`{\pos}` 被忽略、字号按 PlayRes 放大得很大。所以 **ASS 的参考内核
-  是 mpv**；Media3 的 ASS 只保证「能看」，真正的排版等 FFmpeg/字幕扩展。
+属性桥全部走 libmpv：暂停 `set pause`、seek `seek <秒> absolute`、倍速
+`set speed`、轨道 `track-list/N/{type,id,title,lang,codec,selected,external}`、
+切轨 `set vid/aid/sid`、外部字幕 `sub-add <path> select`、章节
+`chapter-list/N/{title,time}`。状态用 200ms 轮询线程推送；Media3 用主线程 250ms
+轮询，行为一致。
 
-HDR 输出（A5，2026-11-27）：在 OnePlus 10 Pro（Android 16）上，mpv 把 BT.2020 +
-PQ 的 HEVC Main10 片源识别为 `prim=bt.2020`、`gamma=pq`、`max-luma=10000`，
-把 BT.2020 + HLG 的片源识别为 `gamma=hlg`、`light=hlg`、`max-luma=1000`。
-渲染层据此把输出切到 HDR 通路。要点是**两件事必须一起做**，只改其中一个不会
-真的进 HDR：
+多轨样片（2 音轨 + 1 内嵌字幕 + 3 章节）实测：mpv `pos 40.625s · 暂停` →
+`+10s → 50.625s` → `audio:音轨 2*` → `sub:test.srt*`；Media3 同流程，载入外部
+字幕后位置与音轨都保持。
 
-1. **EGLSurface 的 GL colorspace**：用
-   `EGL_GL_COLORSPACE_BT2020_PQ_EXT`（`0x3340`）重建 `EGLSurface`，
-   `eglCreateWindowSurface` 时传入 `EGL_GL_COLORSPACE_KHR`；HLG 用
-   `EGL_GL_COLORSPACE_BT2020_HLG_EXT`（`0x3540`）；设备没有对应扩展时回退
-   `EGL_GL_COLORSPACE_SRGB_KHR`，并同步把 window dataspace 退回 SRGB。
-2. **Buffer dataspace**：`ANativeWindow_setBuffersDataSpace(window,
-   ADATASPACE_BT2020_PQ)`（`163971072` / `0x9C60000`；HLG 是
-   `168165376` / `0xA060000`）。这个 API 是 `__INTRODUCED_IN(28)`，minSdk 26
-   不能直接链接，运行时用
-   `dlsym("libandroid.so", "ANativeWindow_setBuffersDataSpace")` 取，取不到就只做
-   EGL colorspace（HDR 效果不完整）。
+- **章节**：mpv 读 `chapter-list`；Media3 的 `Mp4Extractor` 不解析 `chpl`，新增
+  `Mp4Chapters` 直接读 `moov/udta/chpl`。两边都得到「第一章 / 第二章 / 第三章」，
+  「下一章」4.7s → 20s → 40s。
+- **续播**：`PlaybackMemory` 按片源地址存位置（`SharedPreferences`），片尾 5 秒
+  内清记录。实测 51.4s 退出，重启后 `续播：51377 ms`。
+- **会话 / 通知**：`MediaSessionController` 用平台 `MediaSession`，通知用
+  `Notification.MediaStyle`（id 1001）。`dumpsys media_session` 显示
+  `state=PLAYING(3) position=3791`；`dispatch pause` → `PAUSED(2)`，
+  `dispatch play` 恢复；ColorOS 状态栏胶囊能识别。
+- **ASS**：mpv 走 libass，`{\pos}` / `\c` / `\fscx` 都生效（截图为证）。Media3 的
+  `SsaParser` 能出字但忽略 `\pos`、按 PlayRes 放大字号。**ASS 参考内核是 mpv**。
 
-渲染线程监听 mpv 的 `video-params/primaries` 与 `video-params/gamma`，变化时置
-`surface_dirty`，重建 `EGLSurface` 再在新 buffer 上写 dataspace。
-`target-colorspace-hint=yes` 让 mpv 把片源色彩空间透传给显示端、不做 tone mapping。
+### 7.3 HDR 输出（A5）
 
-**真片源**：桌面 ffmpeg 没有 `zscale` / `x265`，所以
-[`scripts/android/gen-hdr-sample.py`](../scripts/android/gen-hdr-sample.py) 直接在
-numpy 里做传递函数——PQ 用 SMPTE ST 2084 的 OETF，HLG 用 ARIB STD-B67 的
-OETF——把编码后的 RGB 按 BT.2020 非恒定亮度矩阵转成 10-bit 有限范围 YUV，再交给
-`hevc_videotoolbox` 编成 Main10，最后用 `hevc_metadata` bsf 写入 VUI
-（PQ: `colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9`；
-HLG: `transfer_characteristics=18`）。这样画面本身是真正的 PQ / HLG 曲线，
-不是只打标签。片源内容是灰阶斜坡 + 8 条色条 + 8 级灰阶 + 底部移动白块。
+片源识别：PQ 片源 `prim=bt.2020`、`gamma=pq`、`max-luma=10000`；HLG 片源
+`gamma=hlg`、`max-luma=1000`。**两件事必须一起做**，只改一个不会真进 HDR：
 
-真机证据链（日志 tag `DvMpv`，OnePlus 10 Pro / Android 16）：
+1. **EGLSurface 的 GL colorspace**：PQ 用 `EGL_GL_COLORSPACE_BT2020_PQ_EXT`
+   （`0x3340`），HLG 用 `EGL_GL_COLORSPACE_BT2020_HLG_EXT`（`0x3540`），
+   `eglCreateWindowSurface` 时传 `EGL_GL_COLORSPACE_KHR` 重建；不支持时回退
+   `EGL_GL_COLORSPACE_SRGB_KHR` 并把 dataspace 退回 SRGB。
+2. **Buffer dataspace**：`ANativeWindow_setBuffersDataSpace(window, ...)`，PQ
+   `0x9C60000`、HLG `0xA060000`。这是 API 28 才有的符号，minSdk 26 用
+   `dlsym("libandroid.so", ...)` 取，取不到就只做 EGL colorspace。
 
-PQ（`dv-hdr10-real.mp4`，BT.2020 / PQ / Main10 / 24p）：
-```
-file loaded: ... hwdec=mediacodec-copy pixfmt=nv12 prim=bt.2020 gamma=pq
-色彩空间变化：prim=bt.2020 gamma=pq -> dataspace 0x9c60000
-EGLSurface 重建：colorspace 0x3340 · 1440x3216
-window dataspace -> 0x9c60000
-```
-SurfaceFlinger：`dataspace=BT2020_PQ (163971072)`，`composition type=DEVICE`。
+渲染线程监听 `video-params/{primaries,gamma}`，变化时重建 `EGLSurface` 再写
+dataspace。`target-colorspace-hint=yes` 让 mpv 透传色彩空间、不做 tone mapping。
 
-HLG（`dv-hlg-real.mp4`，BT.2020 / HLG / Main10 / 24p）：
-```
-色彩空间变化：prim=bt.2020 gamma=hlg -> dataspace 0xa060000
-EGLSurface 重建：colorspace 0x3540 · 1440x3216
-window dataspace -> 0xa060000
-```
-SurfaceFlinger：`dataspace=BT2020_HLG (168165376)`。
+实测（OnePlus）：PQ `dataspace=BT2020_PQ (163971072)`、HLG
+`dataspace=BT2020_HLG (168165376)`，SurfaceFlinger 层 `composition type=DEVICE`。
 
-**静态 HDR 元数据（SMPTE2086 / CTA861_3）**：片源的 mastering display 亮度元数据
-用 EGL 的 `EGL_EXT_surface_SMPTE2086_metadata` / `EGL_EXT_surface_CTA861_3_metadata`
-扩展挂到 `EGLSurface` 上：`eglSurfaceAttrib` 的浮点属性按 IEEE-754 位模式塞进
-`EGLint`，且必须在 `eglSwapBuffers` **之前**设置，元数据才会随这一帧的 buffer 走。
-OnePlus 上验证 PQ 片源 SurfaceFlinger 层 `hdr metadata types=1`；HLG 片源仍是 0
-（只对 PQ 写）。
+**静态元数据**：mastering display 的 SMPTE2086 / CTA861_3 用
+`EGL_EXT_surface_SMPTE2086_metadata` / `EGL_EXT_surface_CTA861_3_metadata` 挂到
+`EGLSurface`：浮点属性按 IEEE-754 位模式塞进 `EGLint`，且必须在 `eglSwapBuffers`
+**之前**设置。OnePlus 上 PQ 层 `hdr metadata types=1`。不要走
+`ASurfaceControl_createFromWindow` + `ASurfaceTransaction_setHdrMetadata_*`：
+它只能建 child layer，元数据挂不到 SurfaceView 自己的 buffer layer（实测多出
+一个无 buffer 的 `dvplayer-mpv` 层，真正显示的层 types 仍是 0）。这条路已移除。
 
-不要走 `ASurfaceControl_createFromWindow` + `ASurfaceTransaction_setHdrMetadata_*`：
-它只能给 window 建一个 child layer，元数据挂不在 SurfaceView 自己的 buffer layer 上。
-实测 `dumpsys SurfaceFlinger --layers` 里多出一个 `dvplayer-mpv` 层（无 buffer、
-`composition type=SOLID_COLOR`），而真正显示的 `BT2020_PQ` 层 `hdr metadata types`
-仍是 0。这条路已从代码里移除。
+**HDR10+**：样片用 `hdr10plus_tool inject` 注入每帧 ST2094-40 SEI（240 帧校验）。
+mpv 只有软解能读到（`AV_FRAME_DATA_DYNAMIC_HDR_PLUS`），`mediacodec-copy` 不产，
+软解后 `scene-max-r/g/b` 与注入的 `MaxScl` 对上（`776.8/658.9/691.2 · avg 26.3`）。
+但**写不进显示端**：NDK 只有 `HDR10PLUS_SEI = 3` 枚举、没有 setter，通用
+`SurfaceControl::setHdrMetadata` 是 libgui 的 C++ ABI。所以 mpv 下 HDR10+ 片源按
+HDR10 静态元数据播；动态元数据归 Media3（见 7.5）。
 
-**HDR10+ 动态元数据（ST2094-40）**：样片把 HDR10 片源用
-`ffmpeg -bsf:v hevc_mp4toannexb` 提成裸 HEVC，`hdr10plus_tool inject --json` 注入
-每帧的 ST2094-40 SEI，再封回 mp4；`hdr10plus_tool extract` 校验 240 帧全部带上。
-mpv 侧只有**软解**能读到动态元数据：数据来自 FFmpeg 的
-`AV_FRAME_DATA_DYNAMIC_HDR_PLUS`，`mediacodec-copy` 硬解不产这个 side data，
-状态行 `HDR10+ maxRGB` 不出现；存成 `--es hwdec no` 软解后
-`video-params/scene-max-r/g/b`、`scene-avg` 才与注入的 `MaxScl` 对上
-（`776.8/658.9/691.2 · avg 26.3`）。
+**帧率匹配**：每秒读 `container-fps`（退回 `estimated-vf-fps`），在「与当前
+分辨率相同」的模式里挑**刷新率是片源帧率整数倍且倍数最小**的，写
+`preferredDisplayModeId`（同时设 `preferredRefreshRate`）；API 30+ 再调
+`Surface.setFrameRate(fps, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)`。`onStop` 把
+`preferredDisplayModeId` 交还系统（设 0）。
 
-但**写不进显示端**：NDK 的 `AHdrMetadataType` 只有 `HDR10PLUS_SEI = 3` 这个枚举，
-没有对应的 setter；`libandroid.so` 只导出
-`ASurfaceTransaction_setHdrMetadata_smpte2086/cta861_3`；通用的
-`SurfaceControl::setHdrMetadata(HdrMetadata)` 是 libgui 的 C++ ABI，不是公开 C API。
-结论：mpv / EGL 这条路做不了动态 HDR10+。正解是 Media3——平台 MediaCodec 会把
-ST2094-40 交给显示端，`MediaFormat.KEY_HDR10_PLUS_INFO`（`"hdr10-plus-info"`）
-API 29+ 就有。M2 的取舍：mpv 内核保证静态 HDR10 / HLG，HDR10+ 片源在 mpv 下按
-HDR10 静态播放；动态元数据留给 Media3 内核（A6）验证。
+| 片源 | 选中模式 | 倍数 |
+| --- | --- | --- |
+| 30p | mode 4 @ 60Hz | ×2（最小整数倍，不盲目上 120） |
+| 24p | mode 6 @ 120Hz | ×5 |
+| 23.976p | mode 6 @ 120Hz | ×5.005 |
+| 25p | mode 6 @ 120Hz | ×4.8（无整数倍，退回最高刷新率） |
 
-**帧率匹配**：`PlayerTestActivity` 每秒读一次 `container-fps`（退回
-`estimated-vf-fps`），在「与当前分辨率相同」的显示模式里挑**刷新率是片源帧率
-整数倍、且倍数最小**的那个，写
-`WindowManager.LayoutParams.preferredDisplayModeId`（同时设
-`preferredRefreshRate`），API 30+ 再调
-`Surface.setFrameRate(fps, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)`。
+24p 时 `dumpsys display` 的 `mActiveModeId=6`、SurfaceFlinger `vsyncRate=120.00Hz`；
+切模式不重建 Surface（`EGLSurface` 日志只有 SRGB→PQ 两次）。
 
-- 24p → 120Hz：`120 / 24 = 5`，每个视频帧在 120Hz 面板上重复 5 次刷新。
-  日志 `帧率匹配：source=24.0fps -> mode 6 @ 120.00001Hz（×5.000）`，
-  `dumpsys display` 的 `mActiveModeId=6`，SurfaceFlinger 的
-  `vsyncRate=120.00 Hz`。
-- 30 秒 24p 片源在稳定态两次采样都是 `fps 24.000000 · drops 0 · mode 6@120.00Hz`；
-  切模式本身不重建 Surface（`EGLSurface` 日志只有 SRGB→PQ 两次）。
-- 60/90/120 都支持；25p 没有整数倍模式（120/25=4.8），退回最高刷新率。
-  23.976 时 120/23.976=5.005，1% 容差内仍按 5 倍处理。
-- 三种帧率的实测（同一台机器，验证页只打开片源）：
+**已知边界**：
 
-  | 片源 | 选中模式 | 倍数 |
-  | --- | --- | --- |
-  | 30p | mode 4 @ 60Hz | ×2（最小整数倍，不盲目上 120） |
-  | 24p | mode 6 @ 120Hz | ×5 |
-  | 23.976p | mode 6 @ 120Hz | ×5.005 |
-  | 25p | mode 6 @ 120Hz | ×4.8（无整数倍，退回最高刷新率） |
+- OnePlus 的 `dumpsys display` 仍是 `mActiveColorMode=0`、`hdrSdrRatio NaN`——
+  ColorOS 不把 HDR 当 color mode，以 SurfaceFlinger 层的
+  `dataspace=BT2020_PQ/HLG` + `DEVICE` 合成为准。
+- HLG 静态元数据：`apply_static_hdr` 对 PQ / HLG 都写；实测 HLG 层
+  `hdr metadata types=1`，CTA861_3 要片源带 `max-cll/max-fall` 才写。
+- SDR 回退：`--es force_sdr 1` 时设 `target-colorspace-hint=no`、
+  `target-prim=bt.709`、`target-trc=bt.1886`、`tone-mapping=auto`、
+  `hdr-compute-peak=yes`，并强制 dataspace SRGB；实测 SF 层 `V0_SRGB types=0`。
+  什么时候回退由 A7 路由按 `DeviceProfile` 判，现在只是验证页开关。
+- 帧率匹配目前只在验证页；正式实现要挪进播放器控制器，并处理 VFR。
 
+### 7.4 Dolby Vision
 
-测试注意：`am start` 不会自动亮屏。设备息屏 / doze 时 activity 能起来，但
-Surface 不可见、mpv 不出帧，`screencap` 也是黑的。先
-`adb shell input keyevent KEYCODE_WAKEUP` + `wm dismiss-keyguard`，并
-`svc power stayon true`。
+`:player` 的 `DolbyVisionProbe` 在文件头 1MB / 尾 2MB 找 `dvcC` / `dvvC` 与
+紧随其后的配置记录（`version_major=1`，profile 1..9）。MP4 在四字符码后 4 字节；
+MKV 的 `dvcC` 是 `BlockAddIDType`、后面还有 EBML 长度，命中后在 +4..+12 里找
+`01 00` 开头。VFS 播放拿不到路径，所以扩了随机读版本
+`probe(readAt, size)`，先用 `VfsFile` 探再起播。
 
-已知边界：
+**P5 发紫的三层根因**（最后一层才是前两次「修好」没生效的原因）：
 
-- **显示端状态**：OnePlus 的 `dumpsys display` 仍是 `mActiveColorMode=0`、
-  `hdrSdrRatio NaN`——ColorOS 不把 HDR 当作一种 color mode，不能靠这两个字段
-  判定；目前以 SurfaceFlinger 层的 `dataspace=BT2020_PQ/HLG` + `DEVICE` 合成为准。
-  真 HDR 亮度效果最终还得靠仪器或人眼在真实片源上确认。
-- **HDR10+ 动态元数据只在 Media3 内核**：mpv 侧软解能读出 ST2094-40（`scene-max-*`），
-  硬解 `mediacodec-copy` 拿不到，且平台没有公开的写入接口，动态元数据进不了显示端。
-  mpv 下 HDR10+ 片源按 HDR10 静态元数据播放；Media3 路径已验通（见下）。
-- **HLG 静态元数据**：`apply_static_hdr` 现在对 PQ 与 HLG 都写 SMPTE2086 /
-  CTA861_3。HLG 片源实测
-  `dataspace=BT2020_HLG (168165376) hdr metadata types=1`，说明 EGL 扩展被
-  接收；CTA861_3 需要片源带 `max-cll/max-fall` 才会写（该样片没有）。
-- **SDR tone mapping 回退**：已接。`--es force_sdr 1` 时 native 侧把
-  `target-colorspace-hint=no`、`target-prim=bt.709`、`target-trc=bt.1886`、
-  `tone-mapping=auto`、`hdr-compute-peak=yes` 一起设上，并强制 dataspace 为
-  SRGB；实测 HDR10 片源在 SurfaceFlinger 上是 `V0_SRGB types=0`，截图与直出
-  对比是明显的 SDR 映射（不再过饱和）。反过来还能切回直出。
-- **正式接法还没做**：什么时候该回退（显示端 HDR 类型不支持 / 用户选 SDR）
-  由 A7 的路由层根据 `DeviceProfile` 判定，现在只是验证页的开关。
-- **帧率匹配目前只在验证页**：正式实现要挪到播放器控制器，并在暂停 / 切轨 /
-  退出时恢复默认模式；可变帧率（VFR）片源还没处理。
+1. **Android 的 mpv 没有 gpu-next 后端**（决定性）。此前用 v0.42.0 tarball，
+   `vo_libmpv.c` 的 `render_backends[]` 只有 `gpu` / `sw`，
+   `MPV_RENDER_PARAM_RENDERER` 还不存在。render API 落到老 `gpu`，而老 gpu 在
+   `video/out/gpu/video.c` 里一上来就 `mp_image_params_restore_dovi_mapping()`，
+   把 DV 映射连 RPU 一起剥掉，P5 的 IPTPQc2 被当成普通 BT.2020 输出 → 绿紫。
+   桌面端早就是 gpu-next，所以同一个 `samples/p5.mkv` 在 macOS 上正常、在
+   Android 上发紫。
+   修法：mpv 钉 `1eb941f`，并在 `create_render_context()` 显式传
+   `MPV_RENDER_PARAM_RENDERER="gpu-next"`。不能靠默认探测：gpu-next 失败会被
+   **静默**回退到老 gpu，必须强制并记录回退。
+2. **libplacebo 编译时把 DOVI 关了**（`-Ddovi=disabled -Dlibdovi=disabled`）。
+   即使 gpu-next 也拿不到 RPU。已补 libdovi 并全开。
+3. **mediacodec 硬解不吐 DV 元数据**：`mediacodec-copy` 的帧没有
+   `AV_FRAME_DATA_DOVI_METADATA`（实测 `pixfmt=nv12`、`trc bt.1886`、
+   `sig-peak 0`）。所以 **P5 必须软解**：`MpvPlayer.setDolbyVisionProfile()` 记住
+   探到的 profile，`load()` 前把 `hwdec` 设 `no`，libplacebo 自己从码流取 RPU。
 
-Media3 内核与 HDR10+（A6 第一步，2026-11-27）：新增 `:player-media3` 模块，
-`Media3Player` 是 ExoPlayer 的最小封装（SurfaceView + 播放 + 格式回调），
-`Hdr10PlusProbe` 直连 `MediaExtractor` + `MediaCodec`，专门看解码器的**输出格式**。
-验证页加 `--es engine mpv|media3|codec`，三条路径在同一台 OnePlus 上的实测：
-
-| 路径 | dataspace | SF 层 `hdr metadata types` | 说明 |
-| --- | --- | --- | --- |
-| mpv 软解 | `BT2020_PQ` | `1` | SMPTE2086 静态元数据（EGL 扩展写入） |
-| Media3 / 硬解，真 HDR10 | `BT2020_ITU_PQ` | `1` | 平台解码器带 `hdr-static-info`（25 字节） |
-| Media3 / 硬解，HDR10+ | `BT2020_ITU_PQ` | `4` | 平台解码器带 `hdr10-plus-info`（64 字节） |
-
-`4` 就是 `HDR10PLUS_SEI`（`android::HdrMetadata` 的位标志：SMPTE2086=1、
-CTA861_3=2、HDR10PLUS=4）。`codec` 探针的输出格式同时给出
-`color-standard=6`（BT.2020）、`color-transfer=6`（ST 2084）、
-`hdr-static-info`（25 字节）、`hdr10-plus-info`（64 字节）。对照很干净：
-同一份 PQ 片源去掉 ST2094-40 后 `types` 从 `4` 回落到 `1`，说明这个字段确实反映
-动态元数据有没有被解码器识别，不是误报。
-
-结论：**HDR10+ 只能走 Media3 / MediaCodec**。A7 的路由规则据此定为「片源是
-HDR10+ 且设备支持时自动切 Media3；否则默认 mpv」。mpv 内核继续负责原盘、
-DV P5/P8 与 EGL 渲染路径。
-
-4K HDR10 播放（A4/A5，2026-11-27）：`gen-hdr-sample.py` 生成 3840×2160 / 24p /
-Main10 / BT.2020 PQ 的 10 秒与 30 秒样片，两个内核都实测：
-
-- mpv：`3840×2160 · nv12 · hwdec mediacodec-copy`、`prim bt.2020 · trc pq`，
-  帧率匹配到 `mode 6 @ 120Hz`（24p ×5）。30 秒样片在 4.5s / 11.5s / 18.7s /
-  25.8s 四个时间点读到 `drops 3`，**启动阶段掉 3 帧后不再增长**（21 秒稳定态
-  0 掉帧）。10 秒样片是启动 `drops 6` 后保持，差异只来自起播时解码器预热的
-  时机，不是持续掉帧。
-- Media3：`hvc1.2.6.L153.B0 · 3840×2160`，
-  `ColorInfo(BT2020, Limited range, ST2084 PQ, false, 10bit Luma, 10bit Chroma)`，
-  SurfaceFlinger `dataspace=BT2020_ITU_PQ (298188800) hdr metadata types=1`。
-  Media3 侧接 `AnalyticsListener.onDroppedVideoFrames` 统计渲染掉帧，30 秒 4K
-  样片每 5 秒一条：`pos 5.1s / 10.1s / 15.1s / 20.1s / 25.2s · drops 0`，
-  全程 **0 掉帧**（比 mpv 的启动掉 3 帧更干净）。
-
-内核路由（A7 第一步）：`:player` 新增 `EngineRouter`，规则按上面定稿：
-
-1. 设备不支持 HDR10+（`Display.hdrCapabilities` 没有 `HDR_TYPE_HDR10_PLUS`）
-   → mpv，不去解 SEI；
-2. 非本地片源（含 `://`）→ mpv，跳过探测；
-3. 本地文件用 `Hdr10PlusProbe` 解 12 帧看输出格式有没有 `hdr10-plus-info`
-   → 有就选 Media3，没有回退 mpv。
-
-验证页加 `--es auto 1`，实测同一台机器上
-`dv-hdr10plus.mp4` 路由到 `engine media3`（理由「片源带 HDR10+（ST2094-40），
-动态元数据交 Media3」），`dv-multitrack.mp4` 路由到 mpv（理由「无 HDR10+，
-用默认 mpv」）。`--es engine mpv|media3` 仍然优先于自动路由。
-
-内核切换（A7 第二步，2026-11-27）：验证页加「切内核」，把当前 kernel 的
-位置 / 倍速 / 暂停态放进新 Intent 重开同一个片源。实测
-mpv → media3 时位置从 ~4s 切过去后继续到 `pos 7.4s`，轨道 / 章节 / 会话都按
-Media3 重建；再切回 mpv 同样接着播（`pos 27.5s`）。两个坑：
-
-- 原来的启动 Intent 带 `FLAG_ACTIVITY_NEW_TASK`，直接复制再
-  `startActivity + finish` 会把新 activity 也收掉；切换时要新建一份干净的
-  Intent（只带 url / engine / sub / hwdec / force_sdr / seek_to / speed / paused）。
-- mpv 的 `destroy` 会 join 渲染线程并等 mpv 退出，偶尔卡十几秒；它发生在
-  `onDestroy`，会堵住同进程的新 activity。现在把关闭放到后台线程，
-  主线程只做 `detach`。
-- 帧率匹配在 `onStop` 把 `preferredDisplayModeId` 交还系统（设 0）。注意
-  ColorOS 上 `dumpsys display` 的 `mActiveModeId` 不一定马上回默认值——
-  这台机器上钉钉（另一个应用）自己也请求了 120Hz，会盖住恢复结果；
-  以窗口属性 `preferredDisplayMode=6` 是否还在来判定。
-
-Dolby Vision 路由（A7 第三步，2026-11-27）：新增 `DolbyVisionProbe`，在本地
-文件头 1MB / 尾部 2MB 里找 `dvcC` / `dvvC` 与紧随其后的 DV 配置记录
-（`version_major=1`，profile 1..9）。MP4 的记录在四字符码后 4 字节，MKV 的
-`dvcC` 是 `BlockAddIDType`、后面还有 EBML 长度字段，所以命中后在 +4..+12
-里找 `01 00` 开头的记录。路由顺序改成 **DV → mpv**、HDR10+ → Media3、
-其余 → mpv；DV 必须先判，因为 P7 的 SEI 也会被 HDR10+ 探针认成 ST2094-40
-（第一次实测 p7-fel.mkv 就被错误路由到 Media3）。
-
-实测（`samples/p5.mkv` / `p7-fel.mkv`）：
-
-- P7 FEL：`路由 Dolby Vision P7，交 mpv 整形`，mpv 正常播放（20.7s 样片）。
-- P5：一开始画面**发紫**，查下来是三处问题叠加，见下面的 A5 DV 段。
-
-### A5 补：DV P5 发紫的根因与软解策略（2026-11-26）
-
-现象：P5 样片在 OnePlus 10 Pro 上播出来是绿紫，P7 / HDR10 正常。
-
-根因有三层，最后一层才是前面两次「修好」都没生效的原因：
-
-1. **Android 上的 mpv 没有 gpu-next 后端**（决定性）。之前 Android 用的是
-   v0.42.0 tarball，`vo_libmpv.c` 的 `render_backends[]` 只有 `gpu`/`sw`，
-   `MPV_RENDER_PARAM_RENDERER` 这个参数也还不存在。libmpv render API 于是落到
-   老 `gpu` 渲染器，而老 gpu 在 `video/out/gpu/video.c` 里一上来就
-   `mp_image_params_restore_dovi_mapping()`，把 DV 映射连同 RPU 一起剥掉——
-   P5 的 IPTPQc2 被当成普通 BT.2020 输出，必然绿紫。桌面端早就是 gpu-next，
-   所以同一个 `samples/p5.mkv` 在 macOS 上是正常肤色、在 Android 上是紫的。
-   修法：mpv 钉到 `1eb941f`（含 `ad9d850 libmpv: add a gpu-next render
-   backend`，与桌面端同一 commit），并在 `create_render_context()` 显式传
-   `MPV_RENDER_PARAM_RENDERER="gpu-next"`。不能靠默认探测：gpu-next 初始化
-   失败时会被**静默**回退到老 gpu，必须强制指定并在回退时打日志。
-   **构建坑**：`build-mpv.sh` 的 `ensure_tar` 发现 `build/android-mpv/src/mpv`
-   已存在就直接返回，只改版本号不会换源码——换 mpv 时要同时删
-   `build/android-mpv/src/mpv`、`.../arm64/build/mpv` 和 `.done/mpv`。
-2. **libplacebo 编译时把 DOVI 关了**。`-Ddovi=disabled -Dlibdovi=disabled`
-   时即使 gpu-next 也拿不到 RPU（`pl_map_avdovi_metadata` 用不了），P5 依旧
-   绿紫。现在补了 libdovi 3.4.0：它是 Rust crate（MIT），GitHub Release 只有
-   Windows 预编译包，所以从 crates.io 取 `.crate` 源码，`cbindgen` 生成
-   `libdovi/rpu_parser.h`、`cargo build --features capi` 产 staticlib，再写
-   一个 `dovi.pc` 让 pkg-config 能解析；libplacebo 改成
-   `-Ddovi=enabled -Dlibdovi=enabled`。Rust 静态库带 std，链接时加
-   `-Wl,--gc-sections` 裁掉没用到的部分，`libmpv.so` 27.0MB → 28.4MB。
-3. **mediacodec 硬解不吐 DV 元数据**。`mediacodec-copy` 解出来的帧没有
-   `AV_FRAME_DATA_DOVI_METADATA`，libplacebo 还是拿不到 RPU，画面依旧绿紫
-   （实测 `pixfmt=nv12`、`trc bt.1886`、`sig-peak 0`）。所以 **P5 必须软解**：
-   `MpvPlayer.setDolbyVisionProfile()` 记住探到的 profile，`load()` 之前把
-   `hwdec` 设成 `no`。软解后 libplacebo 自己从码流里取 RPU，把 IPTPQc2 还原成
-   HDR10 交给显示端。
-
-P8 / P7 不切软解：它们的 BL 本身就是 HDR10，硬解只是少一层动态元数据，
-颜色不受影响，没必要付软解的代价。
-
-探测也扩成了随机读版本（`probe(readAt, size)`）：SMB / WebDAV 播放时播放器
-只拿到 `127.0.0.1` 的桥接地址，没法按路径判断，得先用 `VfsFile` 探。
+P7 / P8 不切软解：BL 本身就是 HDR10，硬解只少一层动态元数据，颜色不受影响。
 
 实测：
 
 | 片源 | 结果 |
 | --- | --- |
-| `samples/p5.mkv`（3840×2160 24p） | `yuv420p10 · hwdec no`、`prim bt.2020 · trc pq · sig-peak 4.929096`、`fps 24.000000`；起播 1 秒内 6–7 帧呈现丢弃（显示模式切 120Hz×5），之后 0，`decoder-frame-drop-count` 恒为 0 |
-| `samples/p7-fel.mkv` | `profile=7`，**不切软解**，`mediacodec-copy`、`trc pq`、23.976fps、0 丢帧 |
-| 4K HDR10（`dv-hdr10-4k-30s.mp4`） | `profile=无`，`mediacodec-copy`、`prim bt.2020 · trc pq` |
-| SMB `Lovesick S01E01`（9.36GB，2160p DV P5） | VFS 探到 `profile=5` → 自动软解；`prim bt.2020 · trc pq`；23.976fps；20s 窗口丢 19 帧全落在起播 seek 阶段，之后 12s 播放期 `drops` 不再增长；demuxer cache 涨到 14.1s，读速 ~4.8MB/s |
+| `samples/p5.mkv`（3840×2160 24p） | `yuv420p10 · hwdec no`、`prim bt.2020 · trc pq · sig-peak 4.929096`、`fps 24.000000`；起播窗口内有呈现丢弃（显示模式切 120Hz×5），之后 0，`decoder-frame-drop-count` 恒为 0 |
+| `samples/p7-fel.mkv` | `profile=7`，不切软解，`mediacodec-copy`、`trc pq`、23.976fps、0 丢帧 |
+| 4K HDR10（`dv-hdr10-4k-30s.mp4`） | 无 profile，`mediacodec-copy`、`prim bt.2020 · trc pq` |
+| SMB `Lovesick S01E01`（9.36GB，2160p DV P5） | 探到 `profile=5` → 自动软解；`prim bt.2020 · trc pq`；23.976fps；20s 窗口丢 19 帧全在起播 seek 阶段，之后 12s `drops` 不再增长；cache 涨到 14.1s，读速 ~4.8MB/s |
 
-**颜色证据（像素，不是只看元数据）**：取同一帧脸部中心区域的平均 RGB。
+**颜色证据（像素）**：同一帧脸部中心区域的平均 RGB。
 
 | 渲染路径 | 平均 RGB | 通道顺序 | 结论 |
 | --- | --- | --- | --- |
 | Mac 产品播放器（gpu-next，参考） | (49,42,37) | R>G>B | 暖肤色 ✓ |
 | Android gpu-next（升级后） | (41,35,31) | R>G>B | 暖肤色 ✓，与参考同比例 |
 | Mac `--vf=format:dolbyvision=no`（剥 DV） | (107,88,96) | R>B>G | 品红 ✗ |
-| Android 老 gpu（升级前） | 整屏洋红/紫 | — | ✗ |
+| Android 老 gpu（升级前） | 整屏洋红 / 紫 | — | ✗ |
 
-两行正确的 R:G:B 比例分别是 1.32:1.13:1 与 1.32:1.14:1，色相一致；Android
-整体低约 16%，是手机走 PQ 直出、截图时再转 SDR 的亮度差，不是色偏。
+两条正确路径的 R:G:B 比例是 1.32:1.13:1 与 1.32:1.14:1，色相一致；Android 整体低
+约 16%，是手机走 PQ 直出、截图时再转 SDR 的亮度差，不是色偏。
 
-取证方式：`--es shot <png> --el shot_at <ms>` 让 mpv 播到该位置时自己
-`screenshot-to-file ... video`（绕开 adb 对 HDR 的合成）。gpu-next + GLES 下
-这个命令偶发失败（`Taking screenshot failed.`，seek 刚结束时最容易），失败就
-用 `adb exec-out screencap -p` 兜底——色相仍可判，只是多过一层系统色调映射。
+取证：`--es shot <png> --el shot_at <ms>` 让 mpv 播到该位置时自己
+`screenshot-to-file ... video`（绕开 adb 对 HDR 的合成）。gpu-next + GLES 下偶发
+`Taking screenshot failed.`（seek 刚结束时最容易），验证页会重试 3 次，仍失败就
+用 `adb exec-out screencap -p` 兜底。
 
-4K P5 软解在这台机器（骁龙 8 Gen 1）上能跑满 24p，没有持续掉帧，
-所以不需要「只降级不软解」的兜底；低端机以后要按 `dumpsys media.codec` 的
-DV 解码器能力再定分流。
+4K P5 软解在骁龙 8 Gen 1 上能跑满 24p，不需要「只降级不软解」的兜底；低端机以后
+按 `dumpsys media.codec` 的 DV 解码器能力再分流。
 
-起播那几帧丢弃跟解码无关：是 `preferredDisplayModeId` 的切换落在解码开始之后，
-切换窗口里的帧没能呈现。要消掉得先钉模式再起播（或切换期间短暂暂停），
-当前留着，记在「未决」里。
+### 7.5 Media3（A6）
 
-PiP（A10 第一步，2026-11-27）：验证页 `supportsPictureInPicture=true`，
-按钮「PIP」与按 Home 都能进画中画。实测
-`mLastReportedPictureInPictureMode=true`、任务 `mode=pinned`、
-`rootPinnedTask` 指向播放页。进 PiP 时 Surface 缩到 787×443，mpv 会重建
-EGLSurface；之前新 surface 是黑的，因为 `mpv_render_context_update()` 没有
-新帧时我们直接返回、不会重画。现在重建 surface 时置 `force_render`，
-即使没有新帧也把上一帧重画进新 buffer，PiP 窗口正常出画。
+`Media3Player` 是 ExoPlayer 的最小封装（SurfaceView + 播放 + 格式回调）；
+`Hdr10PlusProbe` 直连 `MediaExtractor` + `MediaCodec` 看**输出格式**。三条路径
+在同一台 OnePlus 上：
 
-前台服务与后台播放（A10 第二步，2026-11-27）：新增
-`:player` 的 `PlaybackForegroundService`。播放器对象仍在播放页，服务只负责把
-那条 MediaStyle 通知（`MediaSessionController.notification()`，id 1001）提升为
-前台通知，让系统在退到后台后不急着杀进程；通知内容继续由会话每秒更新同一个 id，
-前台状态不会掉。`AndroidManifest` 里声明 `foregroundServiceType="mediaPlayback"`。
+| 路径 | dataspace | SF 层 `hdr metadata types` |
+| --- | --- | --- |
+| mpv 软解 | `BT2020_PQ` | 1（SMPTE2086，EGL 扩展写入） |
+| Media3 硬解，真 HDR10 | `BT2020_ITU_PQ` | 1（平台 `hdr-static-info`，25 字节） |
+| Media3 硬解，HDR10+ | `BT2020_ITU_PQ` | 4（`hdr10-plus-info`，64 字节） |
 
-实测（`--es no_pip 1` 跳过 PiP，直接按 Home 退后台）：
+`4` 是 `HDR10PLUS_SEI` 位标志（SMPTE2086=1、CTA861_3=2、HDR10PLUS=4）。同一份
+PQ 片源去掉 ST2094-40 后 `types` 从 4 回落到 1，说明不是误报。**HDR10+ 只能走
+Media3。**
 
-- `dumpsys activity services com.dvplayer.app`：
-  `isForeground=true foregroundId=1001 types=0x00000002`，通知带
-  `FOREGROUND_SERVICE|ONGOING_EVENT`。
-- 后台播放：`dv-multitrack.mp4` 按 Home 后 media session 的 position 继续增长
-  （2.0s → 4.9s → 8.0s → 11.2s → 14.1s），进程 60 秒后仍存活。
-- 后台控制：`cmd media_session dispatch pause` → `PAUSED(2)`，
-  `dispatch play` → 继续 `PLAYING(3)`，position 继续推进。
+4K HDR10（`gen-hdr-sample.py` 生成 3840×2160 / 24p / Main10 / BT.2020 PQ）：
+mpv `nv12 · mediacodec-copy`、`mode 6 @ 120Hz`，启动掉 3 帧后不再增长（10 秒样片
+启动 6 帧，只是预热时机差异）；Media3 `hvc1.2.6.L153.B0`、
+`ColorInfo(BT2020, Limited range, ST2084 PQ, 10bit)`，30 秒全程 **0 掉帧**。
 
-已知边界：
+能力与字幕：
 
-- **纯视频片源 + Surface 被释放后位置停住**：`gen-hdr-sample.py` 生成的 HDR
-  样片没有音轨，按 Home 后 SurfaceView 的 surface 被销毁、我们 detach 掉
-  EGLSurface，mpv 的 `video-sync` 以显示为时钟，没有输出时就不再推进（会话里
-  position 停在最后一帧的时间上）。带音轨的片源不受影响（音频时钟继续走）。
-  这在实际使用里可以接受：没有声音的片源退到后台本来也没有继续播的意义。
-- **播放器还没搬进服务**：正式播放页接入后台播放时，应该把 MediaSession 与
-  播放引擎一起搬进 `PlaybackForegroundService`，否则 Activity 被系统回收时
-  播放还是会停。这一步是正式页面的工作，验证页只验通道。
-- **修 `setFrameRate` 崩溃**：按 Home 退后台时 Surface 已经释放，
-  `Surface.setFrameRate` 会抛 `IllegalStateException: Surface has already been
-  released`。现在统一走 `setSurfaceFrameRate()`：先看 `surface.isValid`，
-  再兜一层 `runCatching`，帧率提示失败只记日志。
+- **音频**：OnePlus 有 `audio/ffmpeg`（`OMX.ffmpeg.vtrial.decoder`），DTS 5.1 /
+  TrueHD 5.1 样片直接交给 Media3 能播，mpv 侧也正常——这台机器不需要自建 FFmpeg
+  音频扩展；缺 `audio/ffmpeg` 的低端盒子才需要，按 `DeviceProfile.audioCodecs` 判。
+- **tunneling**：手机 `MediaCodec` 没有 `FEATURE_TunneledPlayback`，等 TV / 盒子
+  （B3 / A11）验。
+- **PGS**：内嵌 PGS 由 `PgsParser` 出位图 cue，`SubtitleView` 正常显示。
+- **外部 `.sup`**：`PgsParser` 只认 Matroska 载荷，裸 `.sup` 每段前还有 13 字节
+  `PG` 头，整文件喂进去会越界。新增 `SupSubtitleParser` 按 `.sup` 分段拆，复用
+  PCS/ODS/PDS/END 解析；无 `PG` 头的数据原样交给 `PgsParser`。MIME 是
+  `MimeTypes.APPLICATION_PGS`（`application/pgs`，写错会被当 SRT 静默丢掉）。
+- **外挂字幕选中**：内嵌与外部 PGS 的 MIME 相同、`Format.id` 又不填，reload 后
+  内嵌轨会抢回默认。给 `SubtitleConfiguration` 设 `label=文件名`，在
+  `onTracksChanged` 里按 label 找回外挂轨并强制选中。
+- **mpv 字幕时序**：`loadfile` 后立刻 `sub-add` 会赶在文件打开前，mpv 拒绝。
+  `MpvPlayer` 在拿到 duration 前挂起字幕，`pollLoop` 看到片长再补
+  `sub-add ... select`；播放中调用仍立即生效。
+- mpv 的 `sub-auto` 会默认加载同名外挂字幕，验证内嵌轨时要改名或去掉同名文件。
 
-下载（A10，2026-11-27）：`:core` 新增 `MediaDownloader`，落
-`filesDir/downloads`（Android 11+ 的 external 专属目录在部分 ROM 上
-`adb` / 播放器读不到，内部目录最稳）。先写 `<name>.part`，用
-`Range: bytes=<已下载>-` 续传；服务器不回 206 就从头下；完成后改名。
-验证页 `--es download <url>`（配 `vfs_user/vfs_pass`）触发。
+### 7.6 路由 / 切换 / 回退（A7）
 
-实测（本地 WebDAV 服务）：
+- 自动路由实测：`dv-hdr10plus.mp4` → `engine media3`（「片源带 HDR10+，动态元数据
+  交 Media3」），`dv-multitrack.mp4` → mpv（「无 HDR10+，用默认 mpv」）。
+  `--es engine` 仍优先于自动路由。
+- 切内核：mpv → media3 从 ~4s 接着播到 `pos 7.4s`，轨道 / 章节 / 会话按 Media3
+  重建；再切回 mpv 接着播（`pos 27.5s`）。三个坑：
+  - 启动 Intent 带 `FLAG_ACTIVITY_NEW_TASK`，直接复制再 `startActivity + finish`
+    会把新 activity 也收掉；要新建只带 url / engine / sub / hwdec / force_sdr /
+    seek_to / speed / paused 的干净 Intent。
+  - mpv 的 `destroy` 会 join 渲染线程并等 mpv 退出，偶尔卡十几秒；放到后台线程，
+    主线程只做 `detach`。
+  - 帧率匹配在 `onStop` 设 `preferredDisplayModeId=0`；ColorOS 上
+    `mActiveModeId` 不一定马上回默认（别的应用也请求了 120Hz），以窗口属性为准。
+- 自动重试：Media3 起播失败时把 `positionMs` 放进新 Intent 换 mpv（`fallback=1`）。
+  用 `rv20.rm`（Media3 不支持、mpv 能解）实测：`ExoPlaybackException: Source error`
+  → 同进程 `engine=mpv` 重新加载，`切换后恢复：0ms`，正常播到 EOF。
 
-- 全新下载 11.9MB：进度 0/20/…/100%，`下载完成 ... 11894722 字节`。
-- 续传：手工造一个 5,000,000 字节的 `.part` 再下 → 只补后面的部分，
-  完成后与整文件 `md5sum` 一致（`840edf0e…`）。
-- 离线播放：`--es url <files/downloads/dv-test.mp4>`（Media3）→
-  media session `position=3000 → 5000`，不依赖网络。
+### 7.7 原盘入口（A8）
 
-蓝光原盘入口（A8 第一步，2026-11-27）：`:player` 新增 `DiscSource`，在加载前把
-原盘认出来，并让路由直接判给 mpv。
+`:player` 的 `DiscSource` 在加载前识别原盘，路由直接判给 mpv：
 
-- **目录**：`<root>/BDMV/index.bdmv` 存在 → `root`；用户直接给到 `BDMV`
-  目录时自动上跳一层。
-- **ISO**：文件 ≥ 1MB、32768 处有 UDF 卷识别序列（`BEA01` / `NSR02` / `NSR03`）、
-  且前 4MB 里出现 `BDMV` 目录名。两个条件都满足才算，避免把普通 UDF 镜像
-  误送进 libbluray。
-- `EngineRouter` 里原盘排在 DV / HDR10+ 之前（原盘没有普通视频轨可探）；
-  `PlayerTestActivity` 用 `DiscSource.playUrl` 加载，验证页状态行显示
-  「原盘 BDMV 目录 / ISO 镜像：<path>」。
+- **目录**：`<root>/BDMV/index.bdmv` 存在 → `root`；直接给到 `BDMV` 时自动上跳。
+- **ISO**：≥ 1MB、32768 处有 UDF 卷识别序列（`BEA01` / `NSR02` / `NSR03`）、
+  且前 4MB 出现 `BDMV` 目录名，两个条件都满足才算，避免误判普通 UDF 镜像。
+- 验证页状态行显示「原盘 BDMV 目录 / ISO 镜像」。
 
-实测（设备上没有真实原盘样片，用合成结构验证入口链路）：
+用合成结构验过入口链路：`movie-disc/BDMV/{index.bdmv,MovieObject.bdmv}`
+（`MOBJ0200` 开头满足 mpv 的 `check_bdmv`）→ 路由正确，mpv 尝试按 BDMV 打开后
+`unrecognized file format`（合成结构没有真实播放列表，符合预期）；合成 UDF
+`fake-bd.iso` 同样路由正确。**真实原盘播放仍未验**，缺一张未加密 ISO / BDMV 样片。
 
-- 合成 `movie-disc/BDMV/{index.bdmv,MovieObject.bdmv}`（`MovieObject.bdmv`
-  以 `MOBJ0200` 开头，满足 mpv 的 `check_bdmv`）→
-  `DvDisc: BDMV 目录：...`，路由 `蓝光原盘（BDMV 目录），交 mpv/libbluray`，
-  mpv 收到普通路径后尝试按 BDMV 打开，最终 `unrecognized file format`
-  （合成结构没有真实播放列表，符合预期）。
-- 合成 UDF 镜像 `fake-bd.iso`（`BEA01` + `BDMV`）→
-  `DvDisc: ISO 原盘：...`，路由 `蓝光原盘（ISO 镜像）`，mpv 以同一路径加载。
-- **真实原盘播放仍未验**：需要至少一张未加密的 ISO / BDMV 目录样片，才可能
-  看到 libbluray 选主播放列表、章节与 PGS。这一步记为阻塞项。
+### 7.8 VFS（A9）
 
-VFS 第一刀：WebDAV 浏览（A9 第一步，2026-11-27）：`:core` 新增
-`com.dvplayer.core.vfs`。
+**WebDAV**：`DavVfs` 用 OkHttp（`HttpURLConnection` 不允许 `PROPFIND`），
+`Depth: 1` + Basic 认证，解析 `207 Multi-Status`，`HttpUrl.resolve` 处理绝对 /
+相对 `href`，目录名 URL 解码。播放时 mpv 设
+`http-header-fields=Authorization: Basic ...`；Manifest 的
+`network_security_config` 放开局域网明文，HTTPS 仍只信系统 CA。
+验证环境：`tests/android/dav_server.py` + `adb reverse tcp:8099`。实测中文目录、
+`seek_to 4000` 后 `position=5600 → 7600`、错误密码返回 401 不静默。
 
-- `Vfs` / `VfsEntry`：UI 与播放器只认这两个类型。`VfsEntry.path` 是可以直接
-  交给内核算的地址（WebDAV 是 `http(s)://`），所以播放不需要再写一层
-  DataSource。
-- `DavVfs`：`PROPFIND` + `Depth: 1` + Basic 认证，解析 `207 Multi-Status`
-  （`resourcetype` / `getcontentlength` / `getlastmodified`），用
-  `HttpUrl.resolve` 处理绝对 / 相对 `href`，目录名 URL 解码（中文正常）。
-  **用 OkHttp 而不是 `HttpURLConnection`**：Android 的实现只允许
-  标准方法，`setRequestMethod("PROPFIND")` 会抛 `ProtocolException`。
-- 播放：mpv 的 HTTP 层不认 Android 的 cleartext 策略，但要自己带认证头，
-  验证页在 `--es vfs_user` 存在时设
-  `http-header-fields=Authorization: Basic ...`。Manifest 加
-  `network_security_config` 放开明文（局域网 NAS 的 WebDAV 常见是 http），
-  HTTPS 仍只信任系统 CA。
-- 验证环境：`tests/android/dav_server.py`（最小 PROPFIND + Range GET + Basic
-  认证），`adb reverse tcp:8099 tcp:8099` 让设备访问
-  `http://127.0.0.1:8099/dav/`。
+**SMB**：`SmbVfs` 用 smbj 0.13.0（SMB2/3，不支持 SMB1），一个连接 + 一个会话，
+按共享名复用 `DiskShare`。路径手工拆分 + 每段 `Uri.encode`（`java.net.URI` 拒绝
+空格 / `[ ]` / `!`），实测 `Shippuu! Iron Leaguer Blu-ray BOX [BIXA-9069]`、
+`[DVDISO]ポケットモンスター…`、`Sailor Moon` 都能进出。
 
-实测（日志，不依赖屏幕）：
+播放不走 SMB：mpv 与 Media3 都不认 `smb://`。`VfsHttpBridge` 把 `VfsFile` 通过
+`127.0.0.1:<随机端口>` 暴露成 HTTP，只做 GET / HEAD / `Range`，读块 256KB，
+必须 keep-alive（4K 每秒几十次读）；连接线程里的异常只结束当前连接。实测：
 
-- 根目录：`VFS 列表 2 项` → `VFS D 剧集 .../%E5%89%A7%E9%9B%86/`、
-  `VFS F dv-test.mp4 size=11894722`。
-- 子目录：`VFS 列表 1 项` → `VFS F 测试.srt size=39`（中文文件名正常）。
-- 播放：同一个 URL 交给 mpv → `HTTP 认证头 -> ok`、
-  `file loaded ... hwdec=mediacodec-copy`；`--es seek_to 4000` 后 media
-  session `position=5600 → 7600`（HTTP 上 seek / 播放正常）。
-- 错误密码：`PROPFIND ... -> HTTP 401` 以异常抛出，不会静默当成空目录。
-- Media3 侧：`DefaultHttpDataSource.Factory().setDefaultRequestProperties`
-  挂 Basic 认证（验证页 `--es vfs_user/vfs_pass`）。实测
-  `Media3 HTTP 认证已设置` → `video format ... 1280×720 30.0` →
-  `first frame rendered`，`--es seek_to 4000` 后 `pos 5152ms`，drops 0。
+| 项 | 结果 |
+| --- | --- |
+| 浏览 | `影视` 根 20 项；`Bomberman Jetters JP BDMV` 9 项；`乐高幻影忍者合集.S01` 280 项；`大风车` 579 项；BDMV 目录全部可进出，中文 / 空格正常 |
+| mpv + 桥接 | `Lovesick S01E01`（9.36GB，DV）→ `seek_to 15000` 后 `pos 15140ms`；cache 1.5s → 27.9s，读速 ~4.5MB/s |
+| Media3 + 桥接 | `乐高…S01E22`（3.28GB，SDR HEVC）→ `first frame rendered`，seek 发 `bytes=` → 206，`drops 0` |
 
-VFS 第二刀：SMB + 本地 HTTP 桥接（A9 第二步，2026-11-27）：
+`Range` 语义：mpv 先读尾部 moov（`bytes=<size-170K>-`），再按 seek 位置要
+`bytes=<offset>-`；Media3 seek 同样发 `bytes=`。两者都走这条路径，没有额外
+DataSource。
 
-- `Vfs` 增加随机读契约 `VfsFile`（`size` + `read(offset, buffer, count)`），
-  WebDAV / SMB 都实现它。播放器不能把 4K 原盘读进内存，浏览和播放共用一套
-  目录抽象。
-- `SmbVfs` 用 smbj 0.13.0（SMB2/3，**不支持 SMB1**）：一个连接 + 一个会话，
-  按共享名复用 `DiskShare`。路径 `smb://host/share/a/b`。
-- 路径编码：`java.net.URI` 会拒绝带空格 / `[ ]` / `!` 的目录名，NAS 上这类
-  名字很常见。改为手工拆 URL，每段 `Uri.encode`，解析时 `Uri.decode`；
-  实测 `Shippuu! Iron Leaguer Blu-ray BOX [BIXA-9069]`、
-  `[DVDISO]ポケットモンスター…`、`Sailor Moon` 都能正常进出。
-- 播放不走 SMB：mpv 与 Media3 都不认 `smb://`。`VfsHttpBridge` 把 `VfsFile`
-  通过 `127.0.0.1:<随机端口>` 的 HTTP 暴露出去，只做 GET / HEAD / `Range`。
-  必须支持 keep-alive——4K 每秒几十次读，一次一个 TCP 连接会直接卡死；读块
-  256KB，`Content-Length` 与 `Content-Range` 都回全。
-- 桥接线程里任何异常都只结束当前连接：最早版本让 `Broken pipe` 冒到线程外，
-  直接把进程打成 `FATAL EXCEPTION: vfs-bridge-conn`。
-- 验证页：`--es smb <目录> --es smb_deep N` 递归列目录（日志格式
-  `SMB|D或F|size|path`）；`--es smb_play <文件>` 先建桥接再建内核，避免先拿
-  `smb://` 去起播；凭据 `--es smb_user/smb_pass/smb_domain`。
+**未做**：NFS（libnfs JNI，AUTH_SYS）；共享名枚举（SMB2 无公开接口，目前用
+`tests/android/smb-enum.py` 的 impacket `srvsvc.NetShareEnumAll` 在桌面问，App 里
+要求用户知道共享名）；`VfsEntry` 接核心虚拟源（`dv_hub_replace`）。
+**SMB 上的 BDMV 原盘还不能直接播**：桥接只服务单文件，libbluray 需要本地路径或
+可列目录的流；当前要播原盘得先下载或用 ISO。
 
-实测（NAS `10.0.0.134`，Samba「fn server」，共享 `影视` / `保种2` / `IPC$`）：
+### 7.9 手机特性（A10）
 
-- 浏览：`影视` 根 20 项；`Bomberman Jetters JP BDMV` 9 项；
-  `乐高幻影忍者合集.S01…` 280 项；`大风车…` 579 项；BDMV 目录
-  （`BDMV/BACKUP`、`CLIPINF`、`PLAYLIST`、`STREAM`）全部可进出，中文与空格
-  文件名正常。深 3 层列举时不再出现 `URISyntaxException`。
-- mpv + 桥接：`Lovesick 2026 S01E01`（9.36GB，2160p DV H.265 MKV）→
-  `open … size=9356490290`、`桥接启动 http://127.0.0.1:42065/…`，
-  `--el seek_to 15000` 后 `pos 15140ms`，随后 1x 前进；
-  `cache` 从 1.5s 涨到 27.9s，读速约 4.5MB/s，无异常。
-- Media3 + 桥接：`乐高…S01E22`（3.28GB，2160p SDR HEVC MP4）→
-  `video format 3840×2160 24.99`、`first frame rendered`，
-  `--el seek_to 15000` 后 `pos 15000ms`，桥接收到
-  `bytes=33408756-` → `206`，`drops 0`。
-- 桥接的 `Range` 语义：mpv 先读尾部 moov（`bytes=<size-170K>-`），再按
-  seek 位置要 `bytes=<offset>-`；Media3 seek 时同样发 `bytes=`。两者都靠
-  这条路径，没有额外 DataSource。
-- 踩到的坑（都已在脚本里规避）：`seek_to` 是 long extra，`am` 要用 `--el`；
-  `adb shell` 对含空格的参数转义不可靠，空格之后的内容会被截断，脚本先把
-  空格换成 `%20`（客户端解码）；带空格的参数之后再加 `--es` 也会丢，所以
-  凭据放前面、路径放最后。
+- **PiP**：按钮与按 Home 都能进画中画，Surface 缩到 787×443 时 mpv 重建
+  `EGLSurface`。重建时置 `force_render`，即使没有新帧也把上一帧重画进新 buffer，
+  否则 PiP 窗口是黑的。
+- **前台服务**：`PlaybackForegroundService` 把那条 MediaStyle 通知提升为前台
+  （id 1001，`foregroundServiceType="mediaPlayback"`）。实测
+  `isForeground=true foregroundId=1001`，按 Home 后 position 继续增长
+  （2.0s → 14.1s），进程 60 秒后仍存活，`dispatch pause/play` 正常。
+- **下载**：`MediaDownloader` 落 `filesDir/downloads`（Android 11+ 的 external
+  专属目录部分 ROM 上 adb / 播放器读不到），先写 `.part`，用
+  `Range: bytes=<已下载>-` 续传，服务器不回 206 就从头下，完成后改名。实测 11.9MB
+  全新下载、5MB 断点续传后 `md5sum` 一致、离线播放正常。
+- **边界**：无音轨的片源按 Home 后 Surface 被销毁，mpv 以显示为时钟不再推进，
+  position 停住（带音轨不受影响）。播放器还没搬进服务——正式页要把
+  MediaSession 与引擎一起搬进去，否则 Activity 被回收时播放会停。
+  `Surface.setFrameRate` 在 Surface 已释放时会抛 `IllegalStateException`，统一走
+  `setSurfaceFrameRate()`（先查 `isValid` + `runCatching`）。
 
-还没做：NFS（libnfs JNI，AUTH_SYS）、共享名枚举、把 `VfsEntry` 接到核心的
-虚拟源（`dv_hub_replace`）。另外 SMB 上的原盘目录（BDMV）还不能直接播：
-桥接只服务单个文件，libbluray 需要本地路径或可列目录的流；当前要播原盘，
-先下载或用 ISO。共享名枚举也没有进 App——SMB2 没有公开的列共享接口，这次
-是用 `tests/android/smb-enum.py`（impacket `srvsvc.NetShareEnumAll`）在桌面
-问出来的；App 里暂时要求用户知道共享名。
+## 8. 设备与验证
 
-自动重试（A7 第四步，2026-11-27）：`PlayerEngine.Listener` 的 `Error` 事件现在
-接到验证页：Media3 起播失败时把当前 `positionMs` 放进新 Intent，换 mpv 重开
-同一个片源（`fallback=1` 标记，两个内核最多互相换一次，避免来回踢皮球）。
-只在 Media3 上触发——mpv 失败一般是文件真的打不开。
+| 设备 | 用途 | 必测 |
+| --- | --- | --- |
+| arm64 真机 / 模拟器 | 逻辑与 UI 回归 | JNI / JSON、导航、ViewModel |
+| OnePlus NE2210（Android 16 / 骁龙 8 Gen 1） | 手机主验 | HDR10 / HDR10+、120Hz 帧率匹配、DV P5、AV1 软解 |
+| HBY 5502（Android 9 / MT6765） | 低端降级 | SDR、软 / 硬解回退、无直通时 PCM 下混 |
+| 低端 Android 9 盒子（Amlogic） | TV 冒烟 | 起播、焦点、4K 掉帧、直通 |
+| DV 电视 / 支持 DV 的盒子 | DV / HDR / 直通 | P5 / P8、HDR10、HDR10+、TrueHD 直通 |
 
-实测用一个 Media3 不支持的容器 `rv20.rm`（FFmpeg `rv20` 编码的 RealMedia，
-mpv 能解）：强制 `--es engine media3` 起播 → `DvMedia3: playback error /
-ExoPlaybackException: Source error` → 同一进程内 `engine=mpv` 重新加载同一路径，
-`切换后恢复：0ms`，`file loaded`，5 秒片源正常播到 `reason=0`（EOF）。
+**OnePlus NE2210**（JSON：[devices/oneplus-ne2210.json](devices/oneplus-ne2210.json)）：
+1440×3216，1080p/1440p × 60/90/120Hz；HDR `hdr10`/`hlg`/`hdr10_plus`，峰值 540nit，
+**没有 DV**；AVC/HEVC/VP9 有 `qcom` 硬解，AV1 只有 `c2.android.av1-dav1d` 软解；
+音频只有 `pcm_16`、无 HDMI 直通；页大小 4096（16KB 兼容靠静态校验）；有 PiP。
 
-契约对齐（A6 第二步）：`Media3Player` 实现同一份 `PlayerEngine`，验证页
-`--es engine media3` 即可切换。暂停 / seek / 倍速 / 切音轨 / 切字幕 / 外部字幕
-都跑通；外部字幕用 `MediaItem.SubtitleConfiguration`（按扩展名给 MIME），
-reload 时记住位置与当前音轨，`onTracksChanged` 之后再恢复（否则会回落默认
-音轨）。内嵌字幕（`mov_text`）能识别、能切。章节由 `Mp4Chapters` 解析
-`moov/udta/chpl` 补上。
+**HBY 5502**（JSON：[devices/hby-5502.json](devices/hby-5502.json)）：720×1280 单模式
+57.5Hz；`supportedHdrTypes` 为空（连 HDR10 都不支持，用来验 SDR 降级）；无 AV1；
+无 DV；音频只有 `pcm_16`/`pcm_float`、**没有任何直通**；GLES 3.2；有 PiP。它适合验
+「按设备能力兜底」：没有 HDR / 直通 / AV1，路由应全落到 SDR + PCM + mpv / 软解。
 
-音频与 tunneling（A6 第三步，2026-11-27）：`DeviceCapabilities` 补了
-`audioCodecs` 与 `tunneling` 两项采集（`MediaCodecList` + `FEATURE_TunneledPlayback`）。
-OnePlus 的结果是：
+**测试约定**（踩过的坑）：
 
-- 音频解码 mime 里有 `audio/ffmpeg`（`OMX.ffmpeg.vtrial.decoder`），DTS 与
-  TrueHD 都能直接交给 Media3：10 秒 DTS 5.1 样片（从 `p7-fel.mkv` 抽的）与
-  8 秒 TrueHD 5.1 样片都播到 `pos 7.0s · 播放`，mpv 侧同样正常。所以在
-  **这台机器上不需要自建 FFmpeg 音频扩展**；只有缺 `audio/ffmpeg` 的设备
-  （低端盒子上常见）才需要，A7 的路由按 `DeviceProfile.audioCodecs` 判断。
-- `tunneling：不支持`——手机的 `MediaCodec` 没有 `FEATURE_TunneledPlayback`。
-  这项要等 TV / 盒子（B3 / A11）验，手机侧只用普通渲染路径。
-- PGS 字幕：内嵌 PGS 能显示——Media3 的 `PgsParser` 生成位图 cue，验证页用
-  `SubtitleView` 渲染，截图里样片的「This text should be red, not blue」正常出现。
-- **外部 `.sup` 已修好**：Media3 自带的 `PgsParser` 只认 Matroska 里的载荷
-  （从分段类型字节开始），裸 `.sup` 每段前面还有 `PG` + PTS/DTS + 类型 + 长度
-  共 13 字节，整文件喂进去第一段就越界，所以轨道在、cue 一个都没有。
-  新增 `SupSubtitleParser`：按 `.sup` 分段格式拆开，复用 PCS/ODS/PDS/END 的
-  解析，按显示集 PTS 输出带时长的 cue（最后一段 5 秒兜底），再通过
-  `DefaultMediaSourceFactory.setSubtitleParserFactory` 挂进 ExoPlayer。
-  无 `PG` 头的数据（内嵌 Matroska）原样交给 `PgsParser`，内嵌 PGS 行为不变
-  （回归实测仍出图）。裸 `.sup` 实测 `cue 1 位图 1`，画面出现红字；
-  位置按 PCS 的 `object_x/object_y`（`299/656`，1280×720 平面）正确落位。
-- 外挂字幕选中：内嵌 PGS 与外部 PGS 的 MIME 相同，ExoPlayer 的 `Format.id`
-  又不填，reload 后内嵌轨会抢回默认选中。现在给 `SubtitleConfiguration`
-  设 `label=文件名`，在 `onTracksChanged` 里按 label 找回外挂轨并强制选中，
-  同时把同类型的其它文本 group 置空。
-- 顺带修正：Media3 的 PGS MIME 是 `MimeTypes.APPLICATION_PGS`
-  （`application/pgs`），不是 `application/x-pgs`；写错时外部字幕会被当成 SRT
-  静默丢掉。
-- **mpv 侧字幕补齐验证**（2026-11-27，截图确认）：
+- `am start` 不会亮屏。先 `input keyevent KEYCODE_WAKEUP`、
+  `wm dismiss-keyguard`、`svc power stayon true`，否则 Surface 不可见、mpv 不出帧。
+- `seek_to` / `shot_at` 是 long extra，`am` 必须用 `--el`；含空格的参数先换
+  `%20`，凭据放前面、路径放最后（空格之后的 `--es` 会丢）。
+- 续播会干扰测试：不传 `seek_to` 时会跳到上次位置。
+- Android 16 上 `/sdcard/Android/data/<pkg>/files/` 的文件 mpv 用路径打不开
+  （`loading failed`），放进内部 `filesDir` 正常；下载缓存因此落内部目录。
+- Android 16 强制 edge-to-edge，状态栏会压画面，UI 按 inset 处理。
 
-  | 场景 | 轨道 | 画面 |
-  | --- | --- | --- |
-  | 内嵌 PGS（`pgs-only.mkv`，去掉同名 `.sup`） | `sub:字幕 1*` | 红色「This text should be red, not blue」 |
-  | 外部 `.sup`（`--es sub .../pgs-sample.sup`） | `sub:sup*`（内嵌不再选中） | 同上，按 PCS 的 object 坐标落位 |
-  | 外部 `.ass`（`--es sub .../test.ass`） | `sub:test.ass*` | libass：`DVPlayer A4` 带 `\pos` / 颜色 / 字号，`ASS subtitle via libass` 正常 |
+```bash
+./gradlew :app-phone:assembleDebug
+scripts/android/build-mpv.sh --arch arm64 --stage   # 首次或换 mpv 版本
+cargo ndk -t arm64-v8a -o core/src/main/jniLibs build -p dvplayer-media-jni --release
+adb install -r apps/android/app-phone/build/outputs/apk/debug/app-phone-debug.apk
+adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
+```
 
-- **修外挂字幕的时序**：`loadfile` 之后立刻 `sub-add` 会赶在文件打开之前，
-  mpv 拒绝（没有 file），验证页传 `--es sub` 时字幕就悄悄没了。`MpvPlayer`
-  现在在「还没拿到 duration」时把字幕挂起，`pollLoop` 看到片长再补
-  `sub-add ... select`；播放中再调用仍然立即生效。
-- mpv 的 `sub-auto` 默认会加载同名外挂字幕（`pgs-sample.mkv` 旁的
-  `pgs-sample.sup` 会被自动选中），验证内嵌轨时要么改名要么去掉同名文件。
+## 9. 风险与未决
 
-A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
-`MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +
-摘要），手机壳首页直接显示，日志 tag 是 `DvCaps`。六项结论里只有「后台 / PiP」
-能在 HBY 5502 上验；HDR10 掉帧、DV P8 / P5、直通、24p 都需要一台支持
-HDR + HDMI 输出的设备，仍挂在 A1 门禁上。
+风险登记在 [PLAN.md](PLAN.md) §7，与 Android 直接相关的：
 
-### M2-B TV
+1. **libmpv 构建链**：本地已通，剩下把产物接进 CI 缓存，避免每次全量重编。
+2. **TV / 盒子的 HDR 与 tunneling**：手机侧已验，盒子合成器只认 tunneled HDR 时
+   要 Media3 补。
+3. **mpv 的音频直通**：`ao_audiotrack` 的 IEC61937 支持未验证；不支持就路由 Media3。
+
+| 未决项 | 待定 |
+| --- | --- |
+| TLS | vendored OpenSSL vs rustls + 平台校验 + 源级「允许自签名」开关 |
+| applicationId | `com.dvplayer.app` / `com.dvplayer.app.tv` 两个商店条目 |
+| 下载 | 手机 v1 是否必须；TV 明确不做 |
+| NAS 原盘 | v1「先下载到缓存」是否可接受；边读边播排 B5 |
+| 投屏 | Cast 明确列为非目标 |
+| Android 16 | 本地网络访问限制，待 SDK 文档确认权限声明 |
+
+## 10. M2-B TV
 
 | # | 阶段 | 内容 |
 | --- | --- | --- |
@@ -788,80 +569,3 @@ HDR + HDMI 输出的设备，仍挂在 A1 门禁上。
 | B3 | 兼容矩阵 | tunneling 取舍、HDMI → AVR 直通、老盒子降级、TV 默认内核最终值 |
 | B4 | 交付 | 侧载 APK（含更新检查）、Play TV 材料 |
 | B5 | 原盘边读边播（可选） | libbluray 自定义 stream + 缓存 |
-
-## 8. 验证与设备
-
-| 设备 | 用途 | 必测 |
-| --- | --- | --- |
-| arm64 真机 / 模拟器 | 逻辑与 UI 回归 | JNI / JSON、导航、ViewModel |
-| OnePlus 10 Pro（Android 16 / 骁龙 8 Gen 1） | 手机主验 | HDR10 / HDR10+ 输出、120Hz 帧率匹配、AV1 软解、Android 16 行为 |
-| HBY 5502（Android 9 / MT6765） | 低端降级路径 | SDR 输出、软/硬解回退、无直通时的 PCM 下混 |
-| Android 12+ 真机 | 手机 Alpha 主验 | 两个引擎、DV P5、ASS、PiP、VFS |
-| 低端 Android 9 盒子（Amlogic） | TV 冒烟 | 起播、焦点、4K 掉帧、直通 |
-| DV 电视 / 支持 DV 的盒子 | DV / HDR / 直通 | P5 / P8、HDR10、HDR10+、TrueHD 直通 |
-
-HBY 5502 的实测能力（2026-11-27，完整 JSON 见
-[devices/hby-5502.json](devices/hby-5502.json)，由 `:core` 的
-`Capabilities.collect()` 采集）：
-
-| 项 | 结果 |
-| --- | --- |
-| 屏幕 | 720×1280，只有一个模式 57.5Hz，`wideColorGamut=false` |
-| HDR | `supportedHdrTypes` 为空——这台机器连 HDR10 都不支持，A5 的降级路径在这里验 |
-| 解码 | AVC / HEVC / VP8 / VP9 / MPEG2 / MPEG4 / H263 / VC1(WMV) / DivX；**无 AV1** |
-| DV | 没有 DV 解码器，P5 / P8 在这台上只能走 mpv 整形到 SDR |
-| 音频输出 | 只有 earpiece / speaker / telephony，编码只有 `pcm_16` / `pcm_float`——**没有任何直通** |
-| PiP | 有 |
-| GLES | 3.2 |
-
-它适合验「按设备能力兜底」这条主线：没有 HDR、没有直通、没有 AV1，路由应该全部
-落到 SDR + PCM + mpv/软解。
-
-OnePlus 10 Pro 的实测能力（2026-11-27，JSON 见
-[devices/oneplus-ne2210.json](devices/oneplus-ne2210.json)）：
-
-| 项 | 结果 |
-| --- | --- |
-| 屏幕 | 1440×3216，支持 1080p/1440p × 60/90/120Hz 六种模式；`wideColorGamut=true` |
-| HDR | `hdr10` / `hlg` / `hdr10_plus`，最大亮度 540 nit；**没有 Dolby Vision** |
-| 解码 | AVC / HEVC / VP9 有 `qcom` 硬解（含 secure、low_latency）；AV1 只有 `c2.android.av1-dav1d` 软解 |
-| 音频输出 | speaker / earpiece / telephony，只有 `pcm_16`，无 HDMI 直通 |
-| 页大小 | 4096——不是 16KB 设备，16KB 兼容仍靠静态校验（`zipalign -P 16` + ELF LOAD） |
-| PiP | 有 |
-
-这台补上了 HDR 与多刷新率两块：A5 的 HDR10 / HDR10+ 输出和 24p 帧率匹配可以在
-它上面验。DV 仍然缺设备（P5 / P8 没有解码器，也没有 DV 显示）。
-
-Android 16 上还踩到一个存储问题：`/sdcard/Android/data/<pkg>/files/` 里的文件，
-mpv 用路径直接打开会 `loading failed`；同一个文件放进 app 内部 `filesDir`
-（`/data/user/0/<pkg>/files/`）就正常。A9 的下载缓存因此应该落在内部目录，
-不要落 external 的 app 专属目录。Android 16 强制 edge-to-edge 也让状态栏压在
-画面上，UI 侧要按 inset 处理。
-
-```bash
-./gradlew :app-phone:assembleDebug
-cargo ndk -t arm64-v8a -o core/src/main/jniLibs build -p dvplayer-media-jni --release
-adb install -r app-phone-debug.apk
-adb shell dumpsys media.codec | head -80
-adb logcat -s DvPlayer:D MPV:D MediaCodec:D
-```
-
-## 9. 风险
-
-风险登记在 [PLAN.md](PLAN.md) §7，前三条与 Android 直接相关：
-
-1. **libmpv 的 Android 构建链**——头号排期风险，CI 全量编译会拖死迭代。
-   本地链路已通（2026-11-26），剩下的是把产物接进 CI 缓存，避免每次全量重编。
-2. **mpv 的 HDR 输出**——默认内核可能是 SDR；盒子合成器只认 tunneled HDR 时补不齐。
-3. **mpv 的音频直通**——`ao_audiotrack` 的 IEC61937 支持未验证；不支持就路由 Media3。
-
-## 10. 未决
-
-| 项 | 待定 |
-| --- | --- |
-| TLS | vendored OpenSSL vs rustls + 平台校验 + 源级「允许自签名」开关 |
-| applicationId | `com.dvplayer.app` / `com.dvplayer.app.tv` 两个商店条目 |
-| 下载 | 手机 v1 是否必须；TV 明确不做 |
-| NAS 原盘 | v1「先下载到缓存」是否可接受；边读边播排 B5 |
-| 投屏 | Cast 明确列为非目标 |
-| Android 16 | 本地网络访问限制，待 SDK 文档确认权限声明 |

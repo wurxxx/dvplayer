@@ -115,8 +115,10 @@ Android 侧是 `libdvplayer_media_jni.so`（crate `dvplayer-media-jni`），
 [ADR-0016](../../docs/adr/0016-android-player-native.md)：
 
 - libmpv 的 render API 是 C 接口，EGL/GLES 头由 NDK 提供，C++ 直接 include 就能用；
-- `include/mpv/` 里的 `client.h` / `render.h` / `render_gl.h` 是 mpv 0.42.0 的原样拷贝
-  （LGPL-2.1+），这样 CMake 不依赖 `build/android-mpv/` 里的头文件；
+- `include/mpv/` 里的 `client.h` / `render.h` / `render_gl.h` 是 mpv `1eb941f`
+  （v0.42.0-226，与桌面端同一 commit）的原样拷贝（LGPL-2.1+），由
+  `build-mpv.sh --stage` 自动同步——升级 mpv 时不要手改，否则会缺新枚举
+  （比如 `MPV_RENDER_PARAM_RENDERER`）；
 - 渲染线程独占 EGLDisplay / EGLContext / EGLSurface 与 `mpv_render_context`，
   `attach` / `detach` 只投递 Surface，避免跨线程 `eglMakeCurrent`；
 - 一个容易踩的坑：**GL 就绪前 `loadfile`，mpv 会认为没有视频输出、只播音频**，
