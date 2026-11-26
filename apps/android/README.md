@@ -19,6 +19,9 @@ OnePlus 10 Pro（Android 16）上都以 720p H.264 + `mediacodec-copy` 出画，
 刷新）且稳定态不掉帧。PQ 的静态 HDR 元数据（SMPTE2086 / CTA861_3）通过 EGL
 surface 扩展挂到 buffer 上，SurfaceFlinger 层显示 `hdr metadata types=1`。
 HDR10+ 动态元数据只有 Media3 内核能做（mpv 软解能读、但平台没有公开的写入接口），
+`:player-media3` 用 ExoPlayer + `Hdr10PlusProbe` 验到解码器输出格式里的
+`hdr10-plus-info`，SurfaceFlinger 层 `hdr metadata types=4`（HDR10PLUS）。
+验证页可用 `--es engine mpv|media3|codec` 切换内核，
 见 [`docs/M2-ANDROID.md`](../../docs/M2-ANDROID.md)。样片生成器见
 [`scripts/android/gen-hdr-sample.py`](../../scripts/android/gen-hdr-sample.py)，
 HDR10+ SEI 注入见
@@ -27,7 +30,7 @@ HDR10+ SEI 注入见
 
 ## 模块
 
-已经建好的七个模块（其余按 A3+ 补）：
+已经建好的八个模块（其余按 A3+ 补）：
 
 ```
 app-phone/      手机入口、权限、PiP        applicationId com.dvplayer.app
@@ -37,10 +40,11 @@ ui-tv/          TV 屏幕（tv-material）
 design/         色板 / 圆角 / Theme（两个壳共用）
 core/           设备能力采集 + JNI 声明（version() 自检）
 player-mpv/     libmpv 渲染层（C++ / CMake / EGL）
+player-media3/  Media3 内核（ExoPlayer + HDR10+ 探针）
 build-logic/    约定插件：compileSdk / minSdk / JDK 17 / Compose / ABI 过滤
 ```
 
-后续：`feature/`、`player/`、`player-media3/`、`player-disc/`、`data/`。
+后续：`feature/`、`player/`、`player-disc/`、`data/`。
 
 ## 构建
 

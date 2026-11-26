@@ -11,7 +11,8 @@
 > SurfaceFlinger 侧已是 `BT2020_PQ` / `BT2020_HLG` 且 HWC 直出）；PQ 的静态
 > HDR 元数据（SMPTE2086 / CTA861_3）经 EGL surface 扩展进 buffer layer；24p → 120Hz
 > 的整数倍帧率匹配也已验证；HDR10+（ST2094-40）已用注入样片验到 mpv 软解能读，
-> 但平台无公开写入接口，动态元数据归 Media3 内核。
+> 但平台无公开写入接口，动态元数据归 Media3 内核——`:player-media3` 已用
+> ExoPlayer 与 MediaCodec 探针验通（SF 层 `hdr metadata types=4`）。
 > 双壳 + 双内核，手机先行。决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）、
@@ -328,11 +329,33 @@ Surface 不可见、mpv 不出帧，`screencap` 也是黑的。先
   真 HDR 亮度效果最终还得靠仪器或人眼在真实片源上确认。
 - **HDR10+ 动态元数据只在 Media3 内核**：mpv 侧软解能读出 ST2094-40（`scene-max-*`），
   硬解 `mediacodec-copy` 拿不到，且平台没有公开的写入接口，动态元数据进不了显示端。
-  mpv 下 HDR10+ 片源按 HDR10 静态元数据播放，等 A6 的 Media3 路径验证。
+  mpv 下 HDR10+ 片源按 HDR10 静态元数据播放；Media3 路径已验通（见下）。
 - **HLG 静态元数据没写**：目前只对 PQ 写 SMPTE2086 / CTA861_3，HLG 只切 dataspace。
 - **SDR tone mapping 回退**：显示器不支持 HDR 时的 `tone-mapping` 选项还没接。
 - **帧率匹配目前只在验证页**：正式实现要挪到播放器控制器，并在暂停 / 切轨 /
   退出时恢复默认模式；可变帧率（VFR）片源还没处理。
+
+Media3 内核与 HDR10+（A6 第一步，2026-11-27）：新增 `:player-media3` 模块，
+`Media3Player` 是 ExoPlayer 的最小封装（SurfaceView + 播放 + 格式回调），
+`Hdr10PlusProbe` 直连 `MediaExtractor` + `MediaCodec`，专门看解码器的**输出格式**。
+验证页加 `--es engine mpv|media3|codec`，三条路径在同一台 OnePlus 上的实测：
+
+| 路径 | dataspace | SF 层 `hdr metadata types` | 说明 |
+| --- | --- | --- | --- |
+| mpv 软解 | `BT2020_PQ` | `1` | SMPTE2086 静态元数据（EGL 扩展写入） |
+| Media3 / 硬解，真 HDR10 | `BT2020_ITU_PQ` | `1` | 平台解码器带 `hdr-static-info`（25 字节） |
+| Media3 / 硬解，HDR10+ | `BT2020_ITU_PQ` | `4` | 平台解码器带 `hdr10-plus-info`（64 字节） |
+
+`4` 就是 `HDR10PLUS_SEI`（`android::HdrMetadata` 的位标志：SMPTE2086=1、
+CTA861_3=2、HDR10PLUS=4）。`codec` 探针的输出格式同时给出
+`color-standard=6`（BT.2020）、`color-transfer=6`（ST 2084）、
+`hdr-static-info`（25 字节）、`hdr10-plus-info`（64 字节）。对照很干净：
+同一份 PQ 片源去掉 ST2094-40 后 `types` 从 `4` 回落到 `1`，说明这个字段确实反映
+动态元数据有没有被解码器识别，不是误报。
+
+结论：**HDR10+ 只能走 Media3 / MediaCodec**。A7 的路由规则据此定为「片源是
+HDR10+ 且设备支持时自动切 Media3；否则默认 mpv」。mpv 内核继续负责原盘、
+DV P5/P8 与 EGL 渲染路径。
 
 A1 的静态部分已落地（2026-11-27）：`:core` 的 `Capabilities.collect()` 用
 `MediaCodecList` / `Display` / `AudioManager` 采一份 `DeviceProfile`（JSON +

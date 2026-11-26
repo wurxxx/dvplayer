@@ -14,50 +14,77 @@ import android.view.SurfaceView
 import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import com.dvplayer.player.media3.Hdr10PlusProbe
+import com.dvplayer.player.media3.Media3Player
 import com.dvplayer.player.mpv.MpvPlayer
 import kotlin.math.abs
 import kotlin.math.round
 
 /**
- * A4 / A5 的验证页：SurfaceView → [MpvPlayer] → mpv render API。
+ * A4 / A5 / A6 的验证页：SurfaceView → 播放内核。
  *
  * 用 adb 直接起：
  *   adb shell am start -n com.dvplayer.app/.PlayerTestActivity \
- *       --es url /data/user/0/com.dvplayer.app/files/dv-test.mp4
+ *       --es url /data/user/0/com.dvplayer.app/files/dv-test.mp4 \
+ *       --es engine mpv|media3|codec
  *
- * 页面会每秒刷一次 mpv 的视频参数（primaries / gamma / sig-peak / 丢帧），
- * A5 验 HDR 时主要看这几项。
+ * `mpv`（默认）走 mpv render API，`media3` 走 ExoPlayer，`codec` 是直连
+ * MediaCodec 的 HDR10+ 探针（看 output format 里有没有 `hdr10-plus-info`）。
  */
+@OptIn(UnstableApi::class)
 class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
 
-    private lateinit var player: MpvPlayer
+    private var player: MpvPlayer? = null
+    private var media3: Media3Player? = null
     private lateinit var surfaceView: SurfaceView
     private lateinit var status: TextView
     private var started = false
     private var matchedFps = 0.0
+    private var probeResult: String? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private val url: String
         get() = intent.getStringExtra("url") ?: DEFAULT_URL
 
+    private val engine: String
+        get() = intent.getStringExtra("engine") ?: "mpv"
+
     private val refresh = object : Runnable {
         override fun run() {
-            maybeMatchFrameRate()
-            status.text = statusLine()
+            status.text = when (engine) {
+                "media3" -> media3Status()
+                "codec" -> probeResult ?: "解码中…"
+                else -> {
+                    maybeMatchFrameRate()
+                    statusLine()
+                }
+            }
             handler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        player = MpvPlayer()
-        if (!player.isValid) {
-            finish()
-            return
-        }
-        // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
-        intent.getStringExtra("hwdec")?.let {
-            Log.i(TAG, "hwdec -> $it ${player.setProperty("hwdec", it) ?: "ok"}")
+        when (engine) {
+            "media3" -> {
+                media3 = Media3Player(this)
+            }
+            "codec" -> Unit  // 只做 MediaCodec 探针
+            else -> {
+                val mpv = MpvPlayer()
+                if (!mpv.isValid) {
+                    finish()
+                    return
+                }
+                player = mpv
+                // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
+                intent.getStringExtra("hwdec")?.let {
+                    Log.i(TAG, "hwdec -> $it ${mpv.setProperty("hwdec", it) ?: "ok"}")
+                }
+                Log.i(TAG, "mpv version: ${mpv.getProperty("mpv-version")}")
+            }
         }
 
         surfaceView = SurfaceView(this)
@@ -91,7 +118,7 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
             }
         }
 
-        Log.i(TAG, "mpv version: ${player.getProperty("mpv-version")}")
+        Log.i(TAG, "engine=$engine url=$url")
     }
 
     override fun onResume() {
@@ -110,27 +137,79 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
         attach(holder)
 
     private fun attach(holder: SurfaceHolder) {
-        val frame = holder.surfaceFrame
-        player.attach(holder.surface, frame.width(), frame.height())
-        if (!started) {
-            started = true
-            // Surface 的 GL 初始化在渲染线程里异步做；mpv 会自己排队。
-            player.play(url)
+        when (engine) {
+            "media3" -> {
+                media3?.attach(surfaceView)
+                if (!started) {
+                    started = true
+                    media3?.play(url)
+                }
+            }
+            "codec" -> {
+                if (!started) {
+                    started = true
+                    runProbe(holder.surface)
+                }
+            }
+            else -> {
+                val mpv = player ?: return
+                val frame = holder.surfaceFrame
+                mpv.attach(holder.surface, frame.width(), frame.height())
+                if (!started) {
+                    started = true
+                    // Surface 的 GL 初始化在渲染线程里异步做；mpv 会自己排队。
+                    mpv.play(url)
+                }
+            }
         }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        player.detach()
+        player?.detach()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(refresh)
-        player.close()
+        player?.close()
+        media3?.close()
         super.onDestroy()
     }
 
+    /** 直连 MediaCodec 的 HDR10+ 探针，顺带把帧送到 SurfaceView。 */
+    private fun runProbe(surface: Surface) {
+        Thread({
+            val result = Hdr10PlusProbe.probe(url, surface)
+            probeResult = if (result == null) {
+                "探针失败"
+            } else {
+                buildString {
+                    appendLine("codec ${result.mime} · ${result.frames} 帧")
+                    appendLine("HDR10+ ${if (result.hasHdr10Plus) "有" else "无"}（${result.hdr10PlusBytes} 字节）")
+                    appendLine(result.outputFormat)
+                    append(url)
+                }
+            }
+            handler.post { status.text = probeResult }
+        }, "hdr10plus-probe").start()
+    }
+
+    private fun media3Status(): String {
+        val p = media3 ?: return "media3 未初始化"
+        val format = p.videoFormat
+        return buildString {
+            appendLine("engine media3 · ${p.videoSize()} · playing ${p.isPlaying()}")
+            if (format != null) {
+                appendLine("codec ${format.codecs} · ${format.width}×${format.height}")
+                appendLine("color ${format.colorInfo}")
+            }
+            appendLine("pos ${p.currentPositionMs()}ms")
+            append(url)
+        }
+    }
+
     private fun statusLine(): String {
-        fun p(name: String) = player.getProperty(name) ?: "-"
+        val mpv = player ?: return "mpv 未初始化"
+        fun p(name: String) = mpv.getProperty(name) ?: "-"
         val mode = currentDisplay.mode
         return buildString {
             appendLine("${p("width")}×${p("height")} · ${p("video-params/pixelformat")} · hwdec ${p("hwdec-current")}")
@@ -151,8 +230,9 @@ class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
      * 找不到整数倍时退回最高刷新率。
      */
     private fun maybeMatchFrameRate() {
+        val mpv = player ?: return
         val fps = listOf("container-fps", "estimated-vf-fps")
-            .mapNotNull { player.getProperty(it)?.toDoubleOrNull() }
+            .mapNotNull { mpv.getProperty(it)?.toDoubleOrNull() }
             .firstOrNull { it > 1.0 } ?: return
         if (matchedFps > 0 && abs(fps - matchedFps) < 0.01) return
 
