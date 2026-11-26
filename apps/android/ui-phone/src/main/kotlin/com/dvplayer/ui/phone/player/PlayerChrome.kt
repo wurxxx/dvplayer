@@ -29,7 +29,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -92,12 +91,7 @@ fun PlayerTopBar(
         modifier = modifier
             .fillMaxWidth()
             .height(PlayerDimens.TopBar)
-            // 半透明压在画面上；纯黑会把画面「切」成上下两段。
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xD9000000), Color(0x66000000)),
-                ),
-            )
+            // 透明：只留图标，不铺底色。
             .padding(start = 6.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -290,22 +284,8 @@ fun PlayerBottomChrome(
     val titleSize = if (overlay) 12.sp else 14.sp
     val timeSize = if (overlay) 10.sp else 11.sp
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(
-                if (overlay) {
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.4f to Color(0x99000000),
-                        1f to Color(0xE6000000),
-                    )
-                } else {
-                    // 竖屏和页面底色完全一致，避免出现「控制层 / 简介」两块色差。
-                    SolidColor(Color.Black)
-                },
-            ),
-    ) {
+    // 透明：横屏直接压在画面上，竖屏露出页面底色。
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
