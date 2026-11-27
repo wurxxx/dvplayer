@@ -69,6 +69,14 @@
               </StackPanel>
             </ListBoxItem>
 
+            <ListBoxItem Tag="daily">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}" FontSize="15"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="每日推荐" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" />
+              </StackPanel>
+            </ListBoxItem>
+
             <ListBoxItem Tag="records">
               <StackPanel Orientation="Horizontal">
                 <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="15"

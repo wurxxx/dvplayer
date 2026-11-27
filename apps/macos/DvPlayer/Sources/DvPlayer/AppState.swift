@@ -10,6 +10,7 @@ final class AppState: ObservableObject {
     enum Page: Hashable {
         case home(String)      // 某个源的首屏（媒体库页）
         case sources
+        case daily
         case records
         case search
         case settings
@@ -93,6 +94,10 @@ final class AppState: ObservableObject {
         // 启动顺手查一次更新，和连接并行；有结果才在左下角提示，不打扰启动流程。
         Task { await refreshUpdateAvailability() }
 
+        // 每日推荐：当天已有缓存就只补匹配，不再请求 TMDB / 豆瓣。
+        // 先把抓取发出去（不必等连接），连上源后再调一次补匹配。
+        DailyStore.shared.refreshIfNeeded(core: nil, settings: settings)
+
         guard hasSources else {
             page = .sources
             return
@@ -124,6 +129,8 @@ final class AppState: ObservableObject {
             page = .home(last)
         }
 
+        DailyStore.shared.refreshIfNeeded(core: core, settings: settings)
+
         let env = ProcessInfo.processInfo.environment
         debugDetail = env["DVPLAYER_DETAIL"]
         debugLibrary = env["DVPLAYER_LIBRARY"]
@@ -131,6 +138,7 @@ final class AppState: ObservableObject {
         switch env["DVPLAYER_PAGE"] {
         case "home":
             if let last = settings.lastSourceId { page = .home(last) }
+        case "daily": page = .daily
         case "records": page = .records
         case "search": page = .search
         case "settings": page = .settings

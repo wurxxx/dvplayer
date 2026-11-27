@@ -185,6 +185,9 @@ public partial class MainWindow : FluentWindow
         // 启动页都是真实菜单项：选中哪一项，右边就是哪一页。
         SelectNav(start);
 
+        // 每日推荐：当天已有缓存就只补匹配，不重复请求 TMDB / 豆瓣。
+        _ = DailyService.RefreshIfNeededAsync();
+
         // 顺手查一次更新：不挡启动，有结果才在左下角版本号下面提示。
         UpdateService.AvailabilityChanged -= OnUpdateAvailabilityChanged;
         UpdateService.AvailabilityChanged += OnUpdateAvailabilityChanged;
@@ -1370,7 +1373,7 @@ public partial class MainWindow : FluentWindow
         var page = AppServices.Instance.Settings.StartPage;
         // 老配置里的 "libraries"（服务器首页）现在统一落到「服务器」页：
         // 菜单选中哪一项，右边就该是哪一页，不能选中「服务器」却显示某个源的首页。
-        return page is "records" or "search" or "settings" ? page : "sources";
+        return page is "daily" or "records" or "search" or "settings" ? page : "sources";
     }
 
     private bool _syncingSources;
@@ -1406,7 +1409,7 @@ public partial class MainWindow : FluentWindow
     {
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, "--screenshot");
-        var known = new[] { "libraries", "sources", "records", "search", "settings" };
+        var known = new[] { "libraries", "sources", "daily", "records", "search", "settings" };
         if (index < 0 || index + 2 >= args.Length)
         {
             return known;
@@ -1605,7 +1608,8 @@ public partial class MainWindow : FluentWindow
             SelectNav(tag);
 
             // 搜索页第一次要跨库拉索引，媒体库首页要等 Hero 大图，都比别的页慢。
-            await Task.Delay((tag == "search" ? 15000 : tag == "libraries" ? 9000 : 5000)
+            await Task.Delay((tag == "search" ? 15000 : tag == "daily" ? 18000
+                : tag == "libraries" ? 9000 : 5000)
                              + extraDelay * 1000);
 
             // --settings-tab play：设置页直接停在「播放」分组（核对缓冲大小这种项）。
@@ -1819,6 +1823,7 @@ public partial class MainWindow : FluentWindow
         var alreadyOnPage = tag switch
         {
             "sources" => ContentFrame.Content is SourcesPage,
+            "daily" => ContentFrame.Content is DailyPage,
             "records" => ContentFrame.Content is RecordsPage,
             "search" => ContentFrame.Content is SearchPage,
             "settings" => ContentFrame.Content is SettingsPage,
@@ -1862,6 +1867,9 @@ public partial class MainWindow : FluentWindow
     {
         var (ok, error) = await AppServices.Instance.ConnectSavedAsync();
         RefreshSourceStatus();
+
+        // 源连上后再匹配一遍：启动时先抓到的推荐可能还没法查库。
+        _ = DailyService.MatchAllAsync();
 
         // 左下角只放版本；连不上的原因在「服务器」页看，这里只记一条日志。
         if (!ok && error is not null)
@@ -2500,6 +2508,7 @@ public partial class MainWindow : FluentWindow
         {
             "libraries" => new LibrariesPage(),
             "sources" => new SourcesPage(),
+            "daily" => new DailyPage(),
             "records" => new RecordsPage(),
             "search" => new SearchPage(),
             "settings" => new SettingsPage(),

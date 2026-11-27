@@ -205,6 +205,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // 自检：`DVPLAYER_DAILY_SUBSCRIBE=<片名>` 等推荐抓完后推一条到 MoviePilot，
+        // 打印服务端返回；验证订阅接口、请求体和失败提示。
+        if let wanted = ProcessInfo.processInfo.environment["DVPLAYER_DAILY_SUBSCRIBE"],
+           !wanted.isEmpty {
+            Task { @MainActor in
+                let env = ProcessInfo.processInfo.environment
+                for _ in 0..<40 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    if let item = DailyStore.shared.items.first(where: { $0.title.contains(wanted) }) {
+                        let message = await DailyStore.shared.subscribe(
+                            item, settings: AppState.shared.settings)
+                        NSLog("[DailyTest] %@ -> %@", item.title, message)
+                        if env["DVPLAYER_EXIT"] == "1" { NSApp.terminate(nil) }
+                        return
+                    }
+                }
+                NSLog("[DailyTest] 没找到条目：%@", wanted)
+                if env["DVPLAYER_EXIT"] == "1" { NSApp.terminate(nil) }
+            }
+        }
+
         // 自检：`DVPLAYER_LOCAL=<文件>` 直接播一个本地文件（DV 色彩验证用）。
         if let path = ProcessInfo.processInfo.environment["DVPLAYER_LOCAL"], !path.isEmpty {
             Task { @MainActor in

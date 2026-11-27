@@ -57,6 +57,18 @@ public struct AppSettings: Codable, Sendable {
     public var openSubtitlesPassword: String?
     public var subtitleLanguages: String?
 
+    /// 每日推荐：TMDB v3 API Key。留空 = 只显示豆瓣热门。
+    public var tmdbApiKey: String?
+
+    /// TMDB 专用代理（如 `http://127.0.0.1:7897`）。留空跟随系统代理；
+    /// 只影响 TMDB 的 API 与海报，豆瓣 / MoviePilot 不走它。
+    public var tmdbProxy: String?
+
+    /// MoviePilot 地址（如 https://moviepilot.example.com）与 API Token。
+    /// 没匹配到媒体源的推荐条目可以一键推到 MoviePilot 订阅。
+    public var moviePilotUrl: String?
+    public var moviePilotToken: String?
+
     public init() {}
 
     /// 缺字段一律回退默认值：Swift 合成的 Decodable 不会用属性默认值补键，
@@ -86,6 +98,10 @@ public struct AppSettings: Codable, Sendable {
         openSubtitlesUsername = try c.decodeIfPresent(String.self, forKey: .openSubtitlesUsername)
         openSubtitlesPassword = try c.decodeIfPresent(String.self, forKey: .openSubtitlesPassword)
         subtitleLanguages = try c.decodeIfPresent(String.self, forKey: .subtitleLanguages)
+        tmdbApiKey = try c.decodeIfPresent(String.self, forKey: .tmdbApiKey)
+        tmdbProxy = try c.decodeIfPresent(String.self, forKey: .tmdbProxy)
+        moviePilotUrl = try c.decodeIfPresent(String.self, forKey: .moviePilotUrl)
+        moviePilotToken = try c.decodeIfPresent(String.self, forKey: .moviePilotToken)
     }
 
     public static var directory: URL {

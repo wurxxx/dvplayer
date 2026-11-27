@@ -90,6 +90,7 @@
                           Style="{StaticResource Select}" VerticalAlignment="Center"
                           SelectionChanged="OnSettingChanged">
                   <ComboBoxItem Content="服务器" Tag="sources" />
+                  <ComboBoxItem Content="每日推荐" Tag="daily" />
                   <ComboBoxItem Content="记录" Tag="records" />
                   <ComboBoxItem Content="搜索" Tag="search" />
                 </ComboBox>
@@ -112,6 +113,49 @@
                       Padding="14,7" FontSize="12.5" VerticalAlignment="Center"
                       Click="OnManageSourcesClick" />
             </Grid>
+          </Border>
+
+          <Border Style="{StaticResource PanelCard}">
+            <StackPanel>
+              <TextBlock Text="每日推荐" Style="{StaticResource SectionTitle}" FontSize="14" />
+              <TextBlock Text="打开应用时取 TMDB 和豆瓣的热门。媒体源里有的点开直接进详情，没有的可以一键推到 MoviePilot 订阅。"
+                         FontSize="12.5" Foreground="{StaticResource FaintBrush}"
+                         TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="18" />
+
+              <TextBlock Text="TMDB API Key（可选）" Style="{StaticResource FieldLabel}" />
+              <PasswordBox x:Name="TmdbKeyBox" Style="{StaticResource InputPassword}"
+                           PasswordChanged="OnSettingPasswordChanged" />
+              <TextBlock Text="在 themoviedb.org 免费申请 v3 API Key；填了才会显示 TMDB 趋势榜。"
+                         FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                         Margin="0,6,0,0" TextWrapping="Wrap" />
+
+              <TextBlock Text="TMDB 代理（可选）" Style="{StaticResource FieldLabel}" />
+              <TextBox x:Name="TmdbProxyBox" Style="{StaticResource Input}"
+                       TextChanged="OnSettingTextChanged" />
+              <TextBlock Text="留空跟随系统代理。只影响 TMDB 的 API 和海报，豆瓣 / MoviePilot 不走。"
+                         FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                         Margin="0,6,0,0" TextWrapping="Wrap" />
+
+              <TextBlock Text="MoviePilot 地址" Style="{StaticResource FieldLabel}" />
+              <TextBox x:Name="MoviePilotUrlBox" Style="{StaticResource Input}"
+                       TextChanged="OnSettingTextChanged" />
+
+              <TextBlock Text="MoviePilot API Token" Style="{StaticResource FieldLabel}" />
+              <PasswordBox x:Name="MoviePilotTokenBox" Style="{StaticResource InputPassword}"
+                           PasswordChanged="OnSettingPasswordChanged" />
+
+              <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                <Button Content="测试连接" Style="{StaticResource GhostButton}"
+                        Padding="14,7" FontSize="12.5" Click="OnTestPilotClick" />
+                <TextBlock x:Name="PilotStatusText" Style="{StaticResource Caption}"
+                           VerticalAlignment="Center" Margin="12,0,0,0"
+                           TextWrapping="Wrap" MaxWidth="420" />
+              </StackPanel>
+
+              <TextBlock Text="MoviePilot「设置 → API」里可以拿到 Token；豆瓣条目没有 TMDB id，按标题识别，识别不到时会提示。"
+                         FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                         Margin="0,12,0,0" TextWrapping="Wrap" />
+            </StackPanel>
           </Border>
         </StackPanel>
 
