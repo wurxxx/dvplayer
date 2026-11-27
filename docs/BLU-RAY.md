@@ -272,14 +272,20 @@ mpv 0.42 自带 HDMV 菜单引擎，不用自己渲染：
 | 起播 | `--bluray-device=<iso>` + `--disc-menu` + `bd://` | 同上（先 `set_property bluray-device` / `disc-menu`，再 `loadfile bd://`） |
 | 键鼠转发 | `OnKeyDown` / `OnMouseMove` → `discnav` | `handleKey` / `onContinuousHover` → `discnav` |
 
-libbluray / libudfread 用 meson 编（源码在 `build/android-mpv/src/`）：
+**macOS 不用手动编**：`scripts/build-deps-macos.sh` 会先编 libudfread 1.2.0 +
+libbluray 1.5.0（tarball 从 download.videolan.org 取，`-Dbdj_jar=disabled`、
+元数据 / 字体全关），再带 `-Dlibbluray=enabled` 编 mpv。`.mpv-disc-menu`
+标记文件记着这份 mpv 带导航；老 prefix 里没这个标记（v0.1.6 之前的构建）
+会自动重编，不会静默用到没菜单的 mpv。
+
+要单独排查时，两条库也可以手编：
 
 ```bash
 meson setup build-udfread src/libudfread --prefix=<prefix> --default-library=shared
 ninja -C build-udfread install
 meson setup build-libbluray src/libbluray --prefix=<prefix> --default-library=shared \
   -Dbdj_jar=disabled -Dlibxml2=disabled -Dfreetype=disabled -Dfontconfig=disabled \
-  -Denable_tools=false -Denable_examples=false
+  -Denable_tools=false -Denable_examples=false -Denable_docs=false
 ninja -C build-libbluray install
 # mpv 这边
 meson configure build/src/mpv/_build -Dlibbluray=enabled

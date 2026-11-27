@@ -55,6 +55,22 @@ need curl
 
 step() { printf '\n== %s ==\n' "$*"; }
 
+# 大件一律用干净 tarball：解出来的目录里记着包名，换版本就重解，
+# 避免拿旧源码编出新标记。
+ensure_tar() { # name tarball url
+  local name=$1 tarball=$2 url=$3
+  if [ -d "$SRC/$name" ]; then
+    [ "$(cat "$SRC/$name/.tarball" 2>/dev/null)" = "$tarball" ] && return 0
+    echo "源码包变了（${tarball}），重新解压 $name" >&2
+    rm -rf "$SRC/$name"
+  fi
+  mkdir -p "$SRC/.dl"
+  [ -f "$SRC/.dl/$tarball" ] || curl -sSL "$url" -o "$SRC/.dl/$tarball"
+  mkdir -p "$SRC/$name"
+  tar -xf "$SRC/.dl/$tarball" -C "$SRC/$name" --strip-components=1
+  printf '%s' "$tarball" >"$SRC/$name/.tarball"
+}
+
 # ---------------------------------------------------------------- FFmpeg 9.0.2
 if [ -f "$PREFIX/lib/pkgconfig/libavcodec.pc" ]; then
   step "FFmpeg 已安装，跳过"
@@ -135,6 +151,46 @@ else
   make install
 fi
 
+# --------------------------------------------------- libudfread / libbluray
+# 原盘（ISO）的 UDF 读取和 HDMV 菜单导航都由 libbluray 提供；
+# mpv 用 `--disc-menu` + `discnav` 驱动盘里自带的菜单（见 docs/BLU-RAY.md §5.4）。
+# 不编 BD-J（要 JVM + jar），-Dbdj_jar=disabled；BD-J 盘 mpv 会自己回退到
+# 直接播正片。libbluray 的元数据 / 字体全关，只留 ISO 读取和 HDMV 导航。
+LIBUDFREAD_VER=1.2.0
+LIBBLURAY_VER=1.5.0
+if [ -f "$PREFIX/lib/pkgconfig/libbluray.pc" ]; then
+  step "libbluray 已安装，跳过"
+else
+  step "libudfread $LIBUDFREAD_VER"
+  ensure_tar libudfread "libudfread-${LIBUDFREAD_VER}.tar.xz" \
+    "https://download.videolan.org/pub/videolan/libudfread/libudfread-${LIBUDFREAD_VER}.tar.xz"
+  rm -rf "$SRC/libudfread/_build"
+  meson setup "$SRC/libudfread/_build" "$SRC/libudfread" \
+    --prefix="$PREFIX" \
+    --buildtype=release \
+    --default-library=shared
+  meson compile -C "$SRC/libudfread/_build"
+  meson install -C "$SRC/libudfread/_build"
+
+  step "libbluray $LIBBLURAY_VER"
+  ensure_tar libbluray "libbluray-${LIBBLURAY_VER}.tar.xz" \
+    "https://download.videolan.org/pub/videolan/libbluray/${LIBBLURAY_VER}/libbluray-${LIBBLURAY_VER}.tar.xz"
+  rm -rf "$SRC/libbluray/_build"
+  meson setup "$SRC/libbluray/_build" "$SRC/libbluray" \
+    --prefix="$PREFIX" \
+    --buildtype=release \
+    --default-library=shared \
+    -Dbdj_jar=disabled \
+    -Dlibxml2=disabled \
+    -Dfreetype=disabled \
+    -Dfontconfig=disabled \
+    -Denable_tools=false \
+    -Denable_examples=false \
+    -Denable_docs=false
+  meson compile -C "$SRC/libbluray/_build"
+  meson install -C "$SRC/libbluray/_build"
+fi
+
 # ------------------------------------------------------------------ mpv
 # 必须是 2026-11-22 之后的 master：render API 从那时起才有 gpu-next 后端
 # （`ad9d850` add gpu-next render backend / `eb565a2` add renderer selection）。
@@ -142,7 +198,12 @@ fi
 # 画面发紫（framebuffer 实测 meanDiff 30–54）。
 MPV_COMMIT=${MPV_COMMIT:-1eb941f}
 MPV_STAMP="$PREFIX/lib/libmpv.2.dylib"
-if [ -f "$MPV_STAMP" ] && [ "$(cat "$PREFIX/.mpv-commit" 2>/dev/null)" = "$MPV_COMMIT" ]; then
+# `.mpv-disc-menu` 记着「这份 mpv 是带 libbluray 编的」。老 prefix 里已经有
+# mpv 但没开 libbluray 时（v0.1.6 之前的包），这里必须重编，否则 `--disc-menu`
+# 和 `discnav` 都不存在，原盘只能直接播正片。
+if [ -f "$MPV_STAMP" ] \
+  && [ "$(cat "$PREFIX/.mpv-commit" 2>/dev/null)" = "$MPV_COMMIT" ] \
+  && [ "$(cat "$PREFIX/.mpv-disc-menu" 2>/dev/null)" = "1" ]; then
   step "mpv 已安装（${MPV_COMMIT}），跳过"
 else
   step "mpv $MPV_COMMIT"
@@ -169,6 +230,7 @@ else
     -Dcaca=disabled \
     -Ddrm=disabled \
     -Dgl=enabled \
+    -Dlibbluray=enabled \
     -Dvulkan=disabled \
     -Djavascript=disabled \
     -Dlua=disabled \
@@ -184,6 +246,7 @@ else
   meson compile -C "$SRC/mpv/_build"
   meson install -C "$SRC/mpv/_build"
   echo "$MPV_COMMIT" > "$PREFIX/.mpv-commit"
+  echo 1 > "$PREFIX/.mpv-disc-menu"
 fi
 
 step "done"
