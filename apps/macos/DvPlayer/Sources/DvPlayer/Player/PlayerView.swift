@@ -28,14 +28,29 @@ struct PlayerView: View {
                         session.toggleFullscreen()
                     }
                 }
-                .onTapGesture {
+                .onTapGesture { location in
+                    // 盘内菜单在显示：点击归菜单按钮（discnav mouse-click），
+                    // 不是「暂停」。菜单收起后才恢复单击暂停。
+                    if session.discMenuActive {
+                        session.clickDiscMenu(
+                            x: location.x / max(1, viewWidth),
+                            y: location.y / max(1, viewHeight))
+                        return
+                    }
                     if !session.loading && session.error == nil {
                         session.togglePause()
                     }
                 }
                 .onContinuousHover { phase in
-                    if case .active = phase {
-                        session.showChrome()
+                    if case .active(let point) = phase {
+                        if session.discMenuActive {
+                            // 菜单按钮高亮跟着鼠标走，别再叫壳的控制条。
+                            session.moveDiscMenuMouse(
+                                x: point.x / max(1, viewWidth),
+                                y: point.y / max(1, viewHeight))
+                        } else {
+                            session.showChrome()
+                        }
                     }
                 }
 
@@ -73,7 +88,8 @@ struct PlayerView: View {
                 errorPanel(error)
             }
 
-            if !session.loading && session.error == nil
+            // 盘内菜单期间只留盘自己的界面：片名 / 置顶 / 截图 / 选集按钮都收掉。
+            if !session.loading && session.error == nil && !session.discMenuActive
                 && (session.chromeVisible || session.panel != .none) {
                 topBar
                     .frame(maxHeight: .infinity, alignment: .top)
@@ -87,6 +103,9 @@ struct PlayerView: View {
 
             // 红绿灯放在 topBar **之后**：topBar 顶部那条黑色渐变会盖住
             // 先画的东西，按钮被压暗（截图里三个点发灰发暗就是这个）。
+            //
+            // 盘内菜单期间也保留：红绿灯是窗口装饰，不是播放控件。菜单里想
+            // 关窗 / 最大化，不能只剩 Esc。
             if session.isFullscreen == false {
                 windowDots
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -97,21 +116,21 @@ struct PlayerView: View {
                     .frame(maxHeight: .infinity, alignment: .bottom)
             }
 
-            if session.panel == .episodes {
+            if session.panel == .episodes && !session.discMenuActive {
                 episodesPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 74)
                     .padding(.vertical, panelInsetV)
             }
 
-            if session.panel == .info {
+            if session.panel == .info && !session.discMenuActive {
                 infoPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 74)
                     .padding(.vertical, panelInsetV)
             }
 
-            if session.panel == .subtitles {
+            if session.panel == .subtitles && !session.discMenuActive {
                 subtitlesPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 74)

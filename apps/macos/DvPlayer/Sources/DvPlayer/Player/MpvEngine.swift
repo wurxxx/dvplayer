@@ -47,6 +47,8 @@ final class MpvEngine {
     /// VO 真正显示出第一帧（mpv 的 `video-frame-info` 出现）。
     var onFirstFrame: (() -> Void)?
     var onEOF: (() -> Void)?
+    /// 盘内菜单显示 / 收起（`disc-menu-active` 变了）。
+    var onDiscMenu: (() -> Void)?
     var onTracks: (([RawTrack], [RawTrack], Int64, Int64) -> Void)?
     var onSpeed: ((Double) -> Void)?
     var onVolume: ((Double, Bool) -> Void)?
@@ -143,7 +145,7 @@ final class MpvEngine {
         "paused-for-cache",
         "width", "height", "estimated-vf-fps", "video-bitrate",
         "audio-device-list", "audio-device", "audio-spdif", "target-colorspace-hint",
-        "decoder-frame-drop-count", "vo-drop-frame-count",
+        "decoder-frame-drop-count", "vo-drop-frame-count", "disc-menu-active",
     ]
 
     init?(frame: NSRect, startSeconds: Double?) {
@@ -320,6 +322,33 @@ final class MpvEngine {
     }
 
     // MARK: - 播放控制
+
+    /// 盘内菜单（HDMV）：`bluray-device` 指向 ISO、`disc-menu` 打开
+    /// libbluray 的导航模式，菜单画面由 mpv 的 IG overlay 渲染。
+    /// 关掉时两个选项都清空，切回普通文件 / EDL 播放不受影响。
+    func setDiscMenu(device: String?, enabled: Bool) {
+        client.command(["set_property", "bluray-device", device ?? ""])
+        client.command(["set_property", "disc-menu", enabled ? "yes" : "no"])
+        discMenu = enabled
+    }
+
+    /// 盘内菜单在显示（mpv 的 `disc-menu-active`）：这时方向键 / 回车归菜单。
+    private(set) var discMenuActive = false
+
+    /// 这次加载是盘内菜单（`bd://` + `disc-menu`）。
+    private(set) var discMenu = false
+
+    /// 把一次按键交给 libbluray 的按钮导航（mpv 的 `discnav`）。
+    func discNav(_ action: String) {
+        client.command(["discnav", action])
+    }
+
+    /// 菜单上的鼠标位置 / 点击：坐标是 0..1 的画面相对位置。
+    func discNav(_ action: String, x: Double, y: Double) {
+        client.command(["discnav", action,
+                        String(format: "%.4f", max(0, min(1, x))),
+                        String(format: "%.4f", max(0, min(1, y)))])
+    }
 
     func loadURL(_ url: String, headers: [String: String], start: Double, proxy: String? = nil) {
         guard !shuttingDown else { return }
@@ -780,6 +809,13 @@ final class MpvEngine {
             case "target-colorspace-hint":
                 hdrPassthrough = (data as? Bool) ?? ((data as? Int) == 1)
                 onAudioConfig?()
+            case "disc-menu-active":
+                let value = (data as? Bool) ?? ((data as? Int) == 1)
+                if discMenuActive != value {
+                    discMenuActive = value
+                    NSLog("[Play] disc menu active=\(value)")
+                    onDiscMenu?()
+                }
             case "pause":
                 let value = (data as? Bool) ?? ((data as? Int) == 1)
                 paused = value

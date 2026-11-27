@@ -320,6 +320,52 @@ final class PlayerLauncher {
 
     /// 播蓝光原盘：视频是挂载 ISO 里的 m2ts（EDL 拼接），关窗时卸载。
     /// 默认标题之外，同盘的其它标题作为右侧「标题」面板随播放器一起打开。
+    /// 打开原盘的盘内菜单：`bd://` + `--disc-menu`，菜单由 mpv 自己画。
+    /// 点按钮后 mpv 自己切标题，这里不用再重启播放器。
+    func playDiscMenu(_ disc: DiscPlayback) {
+        if let existing = controller {
+            existing.close()
+            controller = nil
+        }
+
+        let local = disc.menu()
+        let playlist = disc.disc.titles.count > 1 ? disc.playlist() : []
+        let frame = PlayerWindowController.preferredFrame()
+
+        guard let session = PlayerSession(itemId: local.itemId,
+                                          startSeconds: nil,
+                                          playlist: playlist,
+                                          seriesTitle: nil,
+                                          hintTitle: local.title,
+                                          frame: frame,
+                                          local: local,
+                                          disc: disc) else {
+            disc.disc.detach()
+            AppState.shared.showToast("播放器启动失败，检查 mpv 是否随包带上了")
+            return
+        }
+
+        NSLog("[Play] disc menu open \(local.itemId) titles=\(playlist.count)")
+
+        let window = PlayerWindowController(session: session, frame: frame) { [weak self] in
+            self?.controller = nil
+            disc.disc.detach()
+        }
+        session.onClose = { [weak window] in window?.closePlayer() }
+
+        controller = window
+        window.window?.alphaValue = 0
+        window.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window.window?.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.window?.animator().alphaValue = 1
+        }
+        Task { await session.start() }
+    }
+
     func playDisc(_ disc: DiscPlayback, title: BluRayTitle, start: Double? = nil) {
         if let existing = controller {
             existing.close()
@@ -700,6 +746,11 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             return false
         }
 
+        // 盘内菜单在显示：方向键 / 回车归 libbluray 的按钮导航。
+        if session.discMenuActive, forwardDiscMenuKey(key) {
+            return true
+        }
+
         let shift = flags.contains(.shift)
 
         switch key {
@@ -743,6 +794,25 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
             default:
                 return false
         }
+    }
+
+    /// 把方向键 / 回车交给盘内菜单（mpv 的 `discnav`）。
+    /// 返回 true 表示这次按键已经被菜单吃掉。
+    private func forwardDiscMenuKey(_ key: UInt16) -> Bool {
+        let action: String?
+        switch key {
+            case 126: action = "up"
+            case 125: action = "down"
+            case 123: action = "left"
+            case 124: action = "right"
+            case 36, 76: action = "select"
+            case 53: action = "prev"
+            default: action = nil
+        }
+
+        guard let action else { return false }
+        session.mpv.discNav(action)
+        return true
     }
 
     /// 焦点是不是在能自己用空格 / 方向键的控件上。

@@ -54,7 +54,7 @@
 
       <!-- 顶部：片名居中，右边是缓存速度 / 静音 / 窗口按钮。整条压在画面上，不要实底 -->
       <Grid x:Name="TopBar" VerticalAlignment="Top" Height="48" Opacity="1">
-        <Border Height="100" VerticalAlignment="Top" IsHitTestVisible="False">
+        <Border x:Name="TopScrim" Height="100" VerticalAlignment="Top" IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
               <GradientStop Color="#99000000" Offset="0" />
@@ -63,17 +63,24 @@
           </Border.Background>
         </Border>
 
-        <TextBlock x:Name="TopTitle" HorizontalAlignment="Center" VerticalAlignment="Center"
-                   Margin="0,0,0,1" FontSize="14" FontWeight="SemiBold"
-                   Foreground="#F2FFFFFF" TextTrimming="CharacterEllipsis" MaxWidth="560" />
+        <!-- 片名 + 播放状态：盘内菜单期间收掉（那是壳的 UI，菜单自己有标题）。 -->
+        <StackPanel x:Name="TopInfo" Orientation="Horizontal" HorizontalAlignment="Center"
+                    VerticalAlignment="Center" Margin="0,0,0,1">
+          <TextBlock x:Name="TopTitle" VerticalAlignment="Center"
+                     FontSize="14" FontWeight="SemiBold"
+                     Foreground="#F2FFFFFF" TextTrimming="CharacterEllipsis" MaxWidth="560" />
+        </StackPanel>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
                     Margin="0,0,12,0">
-          <TextBlock x:Name="SpeedText" FontSize="12" Foreground="#D9FFFFFF"
-                     VerticalAlignment="Center" Margin="0,0,12,0" />
-          <TextBlock x:Name="TopMuteGlyph" Text="&#xE74F;" FontFamily="{StaticResource IconFont}"
-                     FontSize="14" Foreground="#E6FFFFFF" VerticalAlignment="Center"
-                     Margin="0,0,10,0" Visibility="Collapsed" />
+          <!-- 缓存速度 / 静音：和片名一样，菜单期间收掉。 -->
+          <StackPanel x:Name="TopStatus" Orientation="Horizontal" VerticalAlignment="Center">
+            <TextBlock x:Name="SpeedText" FontSize="12" Foreground="#D9FFFFFF"
+                       VerticalAlignment="Center" Margin="0,0,12,0" />
+            <TextBlock x:Name="TopMuteGlyph" Text="&#xE74F;" FontFamily="{StaticResource IconFont}"
+                       FontSize="14" Foreground="#E6FFFFFF" VerticalAlignment="Center"
+                       Margin="0,0,10,0" Visibility="Collapsed" />
+          </StackPanel>
 
           <Button x:Name="MinimizeButton" Style="{StaticResource PlayerCaptionButton}"
                   Click="OnMinimizeClick" ToolTip="最小化">

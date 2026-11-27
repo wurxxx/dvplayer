@@ -79,6 +79,8 @@ struct LocalPlayback {
     var coreItemId: String?
     /// 起播点：本地源已经在核心那边存了续播点。
     var startSeconds: Double?
+    /// 盘内菜单：`url` 是 `bd://`，要带 `bluray-device` + `disc-menu`。
+    var discMenuIso: String?
 }
 
 /// 一张挂载中的原盘：播放器右侧「标题」面板靠它切标题。
@@ -111,6 +113,18 @@ struct DiscPlayback {
 
     func title(for itemId: String) -> BluRayTitle? {
         disc.titles.first { self.itemId(for: $0) == itemId }
+    }
+
+    /// 盘内菜单的播放源：`bd://` + `--disc-menu`，菜单由 mpv 自己画。
+    /// 点按钮后 mpv 自己切标题，壳不用重新生成 EDL。
+    func menu() -> LocalPlayback {
+        LocalPlayback(itemId: "iso:\(isoName):menu",
+                      title: displayName,
+                      url: "bd://",
+                      duration: disc.titles.map(\.duration).max() ?? 0,
+                      coreItemId: coreItemId,
+                      startSeconds: 0,
+                      discMenuIso: disc.isoPath)
     }
 
     /// 为一个标题生成播放源（EDL 写到临时目录）。
@@ -202,6 +216,13 @@ final class PlayerSession: ObservableObject {
 
     // —— mpv（子进程 + IPC，视频在 mpv 自己的窗口里） ——
     private(set) var mpv: MpvEngine!
+
+    /// 盘内菜单正在显示：方向键 / 回车要转发给 libbluray 的按钮导航，
+    /// 播放页自己的快捷键（左右 seek、回车全屏）先让路。
+    private(set) var discMenuActive = false
+
+    /// 菜单收起去抖：换页时的瞬时 `disc-menu-active=false` 不算收起。
+    private var discMenuLeaveTask: Task<Void, Never>?
     /// 起 mpv 时用的 frame：进程退出后重试要按同一个形状重开。
     private let engineFrame: NSRect
     /// 上次打开失败的参数：错误面板「重试」照原样再跑一次。
@@ -426,6 +447,27 @@ final class PlayerSession: ObservableObject {
         engine.onBuffering = { [weak self] value in
             self?.buffering = value
         }
+        engine.onDiscMenu = { [weak self, weak engine] in
+            // 盘内菜单显示 / 收起：收起说明按钮点完了，正片开始。
+            guard let self, let engine, self.mpv === engine else { return }
+            self.discMenuActive = engine.discMenuActive
+            NSLog("[Play] disc menu active=\(self.discMenuActive)")
+            self.discMenuLeaveTask?.cancel()
+            if engine.discMenuActive {
+                // 菜单出来了：把壳的控件全部收掉，只留盘自己的界面。
+                self.chromeVisible = false
+                self.hideTask?.cancel()
+            } else {
+                // 菜单换页（一级 → 二级）时 mpv 会瞬间报一次 false 再报 true
+                // （实测只隔 20～40ms）。等 false 稳住才算真的进正片。
+                self.discMenuLeaveTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                    guard !Task.isCancelled, let self, !self.discMenuActive else { return }
+                    self.showChrome()
+                    self.bindPlayingDiscTitle()
+                }
+            }
+        }
         engine.onLoaded = { [weak self] duration in
             guard let self else { return }
             // 这里只代表文件头拿到了，不代表已经出了第一帧（慢网络下还会继续缓冲）。
@@ -514,6 +556,41 @@ final class PlayerSession: ObservableObject {
         await begin(itemId: itemId, startSeconds: initialStart)
     }
 
+    /// 菜单收起后 mpv 已经切到正片：把条目 id 从 `iso:<盘>:menu` 换成这条
+    /// 正片的 `iso:<盘>:mpls<N>`。否则续播点记在菜单上（时长几分钟），
+    /// 下次从菜单重开时进度对不上。
+    ///
+    /// 判定靠时长：菜单期是菜单 playlist（几分钟），切到正片后变成该标题
+    /// 的时长，和 `DiscPlayback.disc.titles` 里的编号对得上。
+    private func bindPlayingDiscTitle() {
+        guard let discSource, localSource?.discMenuIso != nil else { return }
+        let item = itemId
+        // 菜单本身也是一个 playlist（这张盘是 30 分钟的版本选择循环）。
+        // 菜单收起后可能还有一级子菜单在放同一段循环，duration 没变，
+        // 那时不能绑——所以只在时长离开菜单期时长之后才认。
+        let menuDuration = duration
+        Task { @MainActor [weak self] in
+            for _ in 0..<12 {
+                // 切标题后 mpv 要重开 demuxer，duration 晚一点才更新。
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, self.itemId == item, self.duration > 0 else { return }
+                guard abs(self.duration - menuDuration) > 5 else { continue }
+                guard let matched = discSource.disc.titles
+                    .min(by: { abs($0.duration - self.duration) < abs($1.duration - self.duration) }),
+                    abs(matched.duration - self.duration) <= 5
+                else { continue }
+
+                let bound = discSource.itemId(for: matched)
+                guard bound != self.itemId else { return }
+                NSLog("[Play] disc title bind \(self.itemId) -> \(bound) "
+                      + "mpls=\(matched.id) dur=\(Int(self.duration))")
+                self.itemId = bound
+                return
+            }
+            NSLog("[Play] disc title bind none (menu dur=\(Int(menuDuration)))")
+        }
+    }
+
     /// 本地播放：不取核心播放源、不拉媒体信息，续播点读本地文件。
     private func beginLocal(_ local: LocalPlayback) async {
         // 点开本地文件后、真正开始前窗口可能已经关了。
@@ -572,6 +649,16 @@ final class PlayerSession: ObservableObject {
 
         NSLog("[Play] local load \(local.itemId) from=\(String(format: "%.1f", start)) " +
               "dur=\(Int(local.duration))")
+        if let iso = local.discMenuIso {
+            // 盘内菜单：libbluray 的 HDMV 导航，菜单由 mpv 的 IG overlay 渲染。
+            NSLog("[Play] disc menu iso=\((iso as NSString).lastPathComponent)")
+            mpv.setDiscMenu(device: iso, enabled: true)
+            discMenuActive = true
+        } else {
+            mpv.setDiscMenu(device: nil, enabled: false)
+            discMenuActive = false
+        }
+
         mpv.loadURL(local.url, headers: [:], start: start)
         startReporting()
         startLoadTimeout(token: token)
@@ -1410,7 +1497,28 @@ final class PlayerSession: ObservableObject {
 
     // MARK: - 浮层 / 面板
 
+    /// 盘内菜单上的鼠标移动 / 点击：坐标是 0..1 的画面相对位置，
+    /// 交给 libbluray 的 IG 命中（`discnav mouse-move` / `mouse-click`）。
+    func moveDiscMenuMouse(x: Double, y: Double) {
+        guard discMenuActive else { return }
+        mpv.discNav("mouse-move", x: x, y: y)
+    }
+
+    func clickDiscMenu(x: Double, y: Double) {
+        guard discMenuActive else { return }
+        mpv.discNav("mouse-click", x: x, y: y)
+    }
+
+    /// 盘内菜单在显示：控制条 / 顶栏 / 右侧按钮全部收掉。
+    ///
+    /// 菜单是盘自己的界面（按钮、高亮、章节页），壳的控制条叠上去就是两层 UI，
+    /// 鼠标还要用来点菜单按钮。菜单收起（按钮点完进正片）后才恢复。
+    var chromeSuppressed: Bool { discMenuActive }
+
     func showChrome() {
+        // 盘内菜单期间鼠标移动是「指向菜单按钮」，不能把壳的控制条叫出来。
+        guard !chromeSuppressed else { return }
+
         // @Published 不判等：鼠标每动一下就赋值会让整个播放页 body 重算。
         if !chromeVisible {
             chromeVisible = true

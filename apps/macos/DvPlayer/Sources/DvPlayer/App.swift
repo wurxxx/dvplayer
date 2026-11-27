@@ -108,6 +108,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     waited += 1
                 }
 
+                // 自检：盘内菜单按几下再回车，验证「菜单 → 正片」这条链路。
+                // `DVPLAYER_DISC_MENU_KEYS=down,down,select` 逗号分隔。
+                // 必须等 `disc-menu-active=true`（菜单真画出来了）再按：
+                // loadfile 之后立刻发的 discnav 会被 libbluray 丢掉。
+                if let keys = env["DVPLAYER_DISC_MENU_KEYS"], !keys.isEmpty {
+                    var waitedMenu = 0
+                    while PlayerLauncher.shared.current?.mpv.discMenuActive != true
+                          && waitedMenu < 40 {
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        waitedMenu += 1
+                    }
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    for key in keys.split(separator: ",") {
+                        PlayerLauncher.shared.current?.mpv.discNav(String(key))
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    }
+                }
+
                 let wait = Double(env["DVPLAYER_PLAY_SECONDS"] ?? "") ?? 6
                 try? await Task.sleep(nanoseconds: UInt64(max(0.5, wait) * 1_000_000_000))
                 if let spec = env["DVPLAYER_PLAY_UI"] {
@@ -652,6 +670,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               + "audio=\(session.audioTracks.count)/aid=\(session.selectedAudioId) "
               + "subs=\(session.subtitleTracks.count)/sid=\(session.selectedSubtitleId) "
               + "playlist=\(session.playlist.count) fullscreen=\(session.isFullscreen) "
+              + "discMenu=\(session.discMenuActive) chrome=\(session.chromeVisible) "
               + "aspect=\(session.aspect.rawValue) sleep=\(session.sleepLabel ?? "-") "
               + "intro=\(session.markers.introEnd.map { Int($0) } ?? -1) "
               + "outro=\(session.markers.outroStart.map { Int($0) } ?? -1) "

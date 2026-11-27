@@ -303,7 +303,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        // --disc-menu <iso> --disc-shot <目录>：截原盘菜单（标题 + 章节）。
+        // --disc-menu <iso> --disc-shot <目录>：进盘内菜单，截菜单画面并试按键。
         if (ArgumentAfter("--disc-menu") is { Length: > 0 } discMenuIso &&
             ArgumentAfter("--disc-shot") is { Length: > 0 } discMenuDir)
         {
@@ -642,7 +642,10 @@ public partial class MainWindow : FluentWindow
         double? startOverride = null, bool silent = false)
         => PlayWindow.OpenDiscAsync(this, isoPath, titleNumber, startOverride, null, silent);
 
-    /// <summary>自检：截原盘菜单，确认标题 / 章节都读出来了。</summary>
+    /// <summary>
+    /// 自检：进盘内菜单（libbluray HDMV 导航 + mpv 的 IG overlay），
+    /// 截菜单画面，再按方向键 / 回车看菜单是否响应。
+    /// </summary>
     private async Task CaptureDiscMenuAsync(string isoPath, string dir)
     {
         Directory.CreateDirectory(dir);
@@ -656,40 +659,58 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        var window = DiscMenuWindow.ForShot(this, probe, isoPath);
-        window.Show();
-        // 章节是懒加载的：等第一个标题读完再截。
-        await Task.Delay(5000);
-        Trace.Write("disc menu " + window.DescribeForShot());
-        // 截窗口本体：截 Content 会带上 Margin 的偏移，右边和下边各切掉 24px。
-        UiCapture.Save(window, Path.Combine(dir, "disc-menu.png"));
+        var player = PlayWindow.OpenDiscMenu(this, isoPath, probe);
+        // 菜单要等 libbluray 起 VM、IG overlay 出来。
+        await Task.Delay(8000);
+        Trace.Write("disc menu " + player.DescribeDiscMenu());
+        // 画面是 mpv 的子窗口，WPF 截不到，让 mpv 自己截。
+        player.ScreenshotForShot(Path.Combine(dir, "disc-menu.png"));
+        await Task.Delay(1500);
 
-        // `--disc-menu-play <秒>`：走一遍「菜单点章节 → 播放」，
-        // 不是绕过菜单直接开标题。
-        if (double.TryParse(ArgumentAfter("--disc-menu-play"), out var pickedAt))
+        // 晃一下鼠标：菜单期间控制条不能冒出来（菜单自己就是界面）。
+        Trace.Write("disc menu after-mousemove " + player.MouseMoveForShot());
+        player.ScreenshotForShot(Path.Combine(dir, "disc-menu-mousemove.png"));
+        await Task.Delay(1200);
+
+        // 按方向键下移，看按钮高亮是否跟着变；再回车看是否切到正片。
+        player.DiscNavForShot("down");
+        await Task.Delay(1500);
+        Trace.Write("disc menu after-down " + player.DescribeDiscMenu());
+        player.ScreenshotForShot(Path.Combine(dir, "disc-menu-down.png"));
+        await Task.Delay(1500);
+
+        // `--disc-menu-keys=select,right,right,select` 走完整菜单路径；
+        // `--disc-menu-select` 是它的简写（只按一次回车）。
+        var menuKeys = ArgumentAfter("--disc-menu-keys");
+        if (string.IsNullOrEmpty(menuKeys) &&
+            Environment.GetCommandLineArgs().Contains("--disc-menu-select"))
         {
-            var picked = window.SimulatePick(pickedAt);
-            Trace.Write(picked is null
-                ? "disc menu pick none"
-                : $"disc menu pick title={picked.Value.Title.TitleNumber} " +
-                  $"mpls={picked.Value.Title.Mpls} start={picked.Value.Start:0}");
+            menuKeys = "select";
+        }
 
-            if (picked is not null)
+        if (!string.IsNullOrEmpty(menuKeys))
+        {
+            var shot = 0;
+            foreach (var key in menuKeys.Split(',', StringSplitOptions.RemoveEmptyEntries))
             {
-                var player = await OpenDiscAsync(isoPath, picked.Value.Title.TitleNumber,
-                    picked.Value.Start, silent: true);
-                if (player is not null)
+                player.DiscNavForShot(key.Trim());
+                await Task.Delay(1500);
+                Trace.Write($"disc menu key={key} " + player.DescribeDiscMenu());
+                if (++shot == menuKeys.Split(',').Length)
                 {
-                    await RunPlayCheckAsync(null, dir, player);
-                    player.Close();
+                    player.ScreenshotForShot(Path.Combine(dir, "disc-menu-play.png"));
+                    await Task.Delay(1500);
                 }
             }
 
-            Application.Current.Shutdown();
-            return;
+            // 菜单收起后 mpv 已切到正片：等绑定把条目 id 换成正片标题。
+            await Task.Delay(6000);
+            Trace.Write("disc menu final " + player.DescribeDiscMenu());
+            player.ScreenshotForShot(Path.Combine(dir, "disc-menu-final.png"));
+            await Task.Delay(1500);
         }
 
-        window.Close();
+        player.Close();
         Application.Current.Shutdown();
     }
 
@@ -1077,6 +1098,15 @@ public partial class MainWindow : FluentWindow
     private static string? ArgumentAfter(string flag)
     {
         var args = Environment.GetCommandLineArgs();
+
+        // `--flag=value` 这种写法（自检脚本里传逗号列表时更顺手）。
+        var inline = args.FirstOrDefault(
+            item => item.StartsWith(flag + "=", StringComparison.Ordinal));
+        if (inline is not null)
+        {
+            return inline[(flag.Length + 1)..];
+        }
+
         var index = Array.IndexOf(args, flag);
         if (index < 0 || index + 1 >= args.Length)
         {
