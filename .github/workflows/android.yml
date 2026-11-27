@@ -103,7 +103,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build autoconf automake libtool pkg-config bzip2 xz-utils
+            ninja-build autoconf automake libtool pkg-config bzip2 xz-utils \
+            gperf
           pip3 install --user meson
 
       - uses: actions/cache@v4
