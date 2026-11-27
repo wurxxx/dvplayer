@@ -90,7 +90,7 @@ MPV_EXTRA='vf=format:colormatrix=bt.2020-ncl' ./m0-render samples/p5.mkv 15
 
 ```bash
 cd apps/macos/DvPlayer && ./build.sh
-DVPLAYER_LOCAL=../../samples/p5.mkv ./build/DvPlayer.app/Contents/MacOS/DvPlayer
+DVPLAYER_LOCAL=../../samples/p5.mkv "./build/DV Player.app/Contents/MacOS/DV Player"
 ```
 
 P7/P8.1 的 DV 整形同样在 gpu-next 上验（`fel-ab.sh`，或 Windows 的 A4）。

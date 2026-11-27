@@ -258,7 +258,7 @@ jobs:
           APP="$MP/DV Player.app"
 
           echo "--- 主程序"
-          lipo -archs "$APP/Contents/MacOS/DvPlayer"
+          lipo -archs "$APP/Contents/MacOS/DV Player"
 
           echo "--- Frameworks"
           for f in "$APP/Contents/Frameworks/"*.dylib; do
@@ -267,7 +267,7 @@ jobs:
 
           # 任何一个不是目标架构就让构建失败，别把混架构的包发出去。
           BAD=0
-          for f in "$APP/Contents/MacOS/DvPlayer" "$APP/Contents/Frameworks/"*.dylib; do
+          for f in "$APP/Contents/MacOS/DV Player" "$APP/Contents/Frameworks/"*.dylib; do
             if ! lipo -archs "$f" | grep -qw "${{ matrix.arch }}"; then
               echo "::error file=$f::不是 ${{ matrix.arch }}（$(lipo -archs "$f")）"
               BAD=1
@@ -293,7 +293,7 @@ jobs:
           DVPLAYER_SHOT="$OUT" \
           DVPLAYER_SHOT_DELAY=12 \
           DVPLAYER_EXIT=1 \
-            "$APP/Contents/MacOS/DvPlayer" 2>&1 | tee "$RUNNER_TEMP/smoke.log" || true
+            "$APP/Contents/MacOS/DV Player" 2>&1 | tee "$RUNNER_TEMP/smoke.log" || true
 
           hdiutil detach "$MP" -force || true
 

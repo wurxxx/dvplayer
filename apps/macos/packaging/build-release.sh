@@ -23,7 +23,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 APPDIR="$(cd .. && pwd)"          # apps/macos
 ROOT="$(cd ../../.. && pwd)"
-APP="$APPDIR/DvPlayer/build/DvPlayer.app"
+APP="$APPDIR/DvPlayer/build/DV Player.app"
 PLIST="$APPDIR/DvPlayer/Info.plist"
 
 SKIP_BUILD=0

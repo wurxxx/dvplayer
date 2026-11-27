@@ -36,7 +36,7 @@ samples/p7-fel.mkv
 >
 > ```bash
 > cd apps/macos/DvPlayer && ./build.sh
-> DVPLAYER_LOCAL=../../samples/p5.mkv ./build/DvPlayer.app/Contents/MacOS/DvPlayer
+> DVPLAYER_LOCAL=../../samples/p5.mkv "./build/DV Player.app/Contents/MacOS/DV Player"
 > ```
 >
 > 颜色回归仍建议用 P8.1（NAS 上的 `F1` / `Zootopia 2`），P5 用来冒烟 P5 路径本身。

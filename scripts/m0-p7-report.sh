@@ -125,7 +125,7 @@ say
 say "## 3. A2 增强层是否被重建"
 say
 
-APP="$ROOT/apps/macos/DvPlayer/build/DvPlayer.app/Contents/MacOS/DvPlayer"
+APP="$ROOT/apps/macos/DvPlayer/build/DV Player.app/Contents/MacOS/DV Player"
 
 # A2 的取样点：默认 60s，短片（比如 P5 冒烟样本）取 40%
 DUR=$("$ROOT/prefix/bin/ffprobe" -v error -show_entries format=duration \

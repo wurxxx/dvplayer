@@ -14,7 +14,8 @@ cd "$(dirname "$0")"
 ROOT="$(cd ../../.. && pwd)"
 CORE_LIB="$ROOT/core/target/release/libdvplayer_media.dylib"
 PREFIX_LIB="$ROOT/prefix/lib"
-APP="$PWD/build/DvPlayer.app"
+APP="$PWD/build/DV Player.app"
+EXE="$APP/Contents/MacOS/DV Player"
 FRAMEWORKS="$APP/Contents/Frameworks"
 
 if [[ ! -f "$CORE_LIB" ]]; then
@@ -50,7 +51,7 @@ BIN="$(swift build -c "$CONFIG" --show-bin-path)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$FRAMEWORKS" "$APP/Contents/Resources"
 
-cp "$BIN/DvPlayer" "$APP/Contents/MacOS/DvPlayer"
+cp "$BIN/DvPlayer" "$EXE"
 cp Info.plist "$APP/Contents/Info.plist"
 
 # 弹幕（弹弹play）凭据：打包时注入 Info.plist，仓库和 settings.json 里都不放。
@@ -125,7 +126,7 @@ CORE_ID="$(otool -D "$CORE_LIB" | tail -1)"
 install_name_tool -id @rpath/libdvplayer_media.dylib \
     "$FRAMEWORKS/libdvplayer_media.dylib"
 install_name_tool -change "$CORE_ID" @rpath/libdvplayer_media.dylib \
-    "$APP/Contents/MacOS/DvPlayer"
+    "$EXE"
 
 # libmpv 和它的依赖。
 # prefix/lib 里只拷真实文件（`libavcodec.63.dylib` 是软链，真实文件带完整版本号）。
@@ -253,7 +254,7 @@ real_name() {
     echo "$base"
 }
 
-for file in "$FRAMEWORKS"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
+for file in "$FRAMEWORKS"/*.dylib "$EXE"; do
     install_name_tool -id "@rpath/$(basename "$file")" "$file" 2>/dev/null || true
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$file" 2>/dev/null || true
 
@@ -273,7 +274,7 @@ done
 # 而这种错误只在冒烟测试（或用户那边）才暴露，日志里只有一句 dyld 报错。
 # 这里提前失败，并指出是谁依赖它。
 missing=0
-for file in "$FRAMEWORKS"/*.dylib "$APP/Contents/MacOS/DvPlayer"; do
+for file in "$FRAMEWORKS"/*.dylib "$EXE"; do
     while read -r dep; do
         [[ -z "$dep" ]] && continue
         case "$dep" in
@@ -298,7 +299,7 @@ if [[ $missing -ne 0 ]]; then
 fi
 
 # 签名：必须自内向外——先 Frameworks 里的 dylib，再整个 .app。
-# 直接 `codesign DvPlayer.app` 会报 `code object is not signed at all`
+# 直接 `codesign "DV Player.app"` 会报 `code object is not signed at all`
 # （内层 dylib 还没签），以前用 `|| true` 吞掉了，结果成品其实没签。
 IDENTITY="${SIGN_IDENTITY:--}"
 echo "-- 签名：${IDENTITY}"

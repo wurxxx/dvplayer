@@ -261,7 +261,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 
 | 脚本 | 产物 | 用途 |
 | --- | --- | --- |
-| `apps/macos/DvPlayer/build.sh` | `build/DvPlayer.app` | 日常开发，编完就地能双击跑 |
+| `apps/macos/DvPlayer/build.sh` | `build/DV Player.app` | 日常开发，编完就地能双击跑 |
 | `apps/macos/packaging/build-release.sh` | `out/release/DvPlayer-<版本>-macos-<arch>.{dmg,zip}` | 发布：DMG 安装镜像 + 便携 zip |
 
 `build.sh` 往 `.app` 里带的东西：
