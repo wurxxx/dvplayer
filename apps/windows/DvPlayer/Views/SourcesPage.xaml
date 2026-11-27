@@ -41,8 +41,19 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Border Width="320" Background="{StaticResource SurfaceBrush}" CornerRadius="12"
-                      Padding="16" Margin="0,0,16,16">
+              <Border Width="320" CornerRadius="12" Padding="16" Margin="0,0,16,16"
+                      Cursor="Hand">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+                    <Style.Triggers>
+                      <!-- 整张卡片可点：悬停提亮提示能点进去 -->
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+                      </Trigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
                 <StackPanel>
                   <Grid>
                     <Grid.ColumnDefinitions>

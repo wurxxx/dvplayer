@@ -266,6 +266,9 @@ public partial class SourcesPage : Page
         {
             _sourceDragging = true;
             Cursor = Cursors.SizeAll;
+            // 卡片本身是 Hand 光标，拖动时用 ForceCursor 让整个网格压过子元素的设置。
+            SourceGrid.Cursor = Cursors.SizeAll;
+            SourceGrid.ForceCursor = true;
 
             // 捕获鼠标：拖到卡片网格外松手也要收到 MouseUp，
             // 否则 ghost、半透明卡片和 SizeAll 光标都会留在界面上。
@@ -424,6 +427,8 @@ public partial class SourcesPage : Page
         _sourceDragging = false;
         _sourceDragCard = null;
         _cardSlots = null;
+        SourceGrid.ForceCursor = false;
+        SourceGrid.Cursor = null;
         Cursor = Cursors.Arrow;
 
         if (SourceGrid.IsMouseCaptured)
@@ -437,7 +442,18 @@ public partial class SourcesPage : Page
         _dragHoverCardVisual = null;
         HideDragGhost();
 
-        if (!dragging || source is null)
+        // 没拖动就是单击：整张卡片都能进这个源的媒体首页（编辑 / 删除按钮除外）。
+        if (!dragging)
+        {
+            if (source is not null && !IsInsideButton(e.OriginalSource as DependencyObject))
+            {
+                (Window.GetWindow(this) as MainWindow)?.OpenSourceById(source.Id);
+                e.Handled = true;
+            }
+            return;
+        }
+
+        if (source is null)
         {
             return;
         }
@@ -452,6 +468,19 @@ public partial class SourcesPage : Page
         e.Handled = true;
     }
 
+    /// <summary>点击落在这张卡片自己的编辑 / 删除按钮上时，交给按钮处理。</summary>
+    private static bool IsInsideButton(DependencyObject? node)
+    {
+        for (; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is System.Windows.Controls.Primitives.ButtonBase)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>捕获被系统抢走（Alt+Tab、弹窗）时按取消处理，别留下 ghost。</summary>
     private void OnSourceGridLostCapture(object sender, MouseEventArgs e)
     {
@@ -463,6 +492,8 @@ public partial class SourcesPage : Page
         _sourceDragging = false;
         _sourceDragCard = null;
         _cardSlots = null;
+        SourceGrid.ForceCursor = false;
+        SourceGrid.Cursor = null;
         Cursor = Cursors.Arrow;
         RestoreCardVisual(_dragSourceCardVisual);
         RestoreCardVisual(_dragHoverCardVisual);
