@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Media;
 
@@ -15,6 +16,7 @@ public abstract class CardVisual : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    [JsonIgnore]
     public Brush Background
     {
         get => _background;
@@ -26,6 +28,7 @@ public abstract class CardVisual : INotifyPropertyChanged
     }
 
     /// <summary>没有海报时显示首字占位。</summary>
+    [JsonIgnore]
     public Visibility PlaceholderVisibility
     {
         get => _placeholderVisibility;

@@ -90,8 +90,9 @@
   输入框保留上次关键词（`settings.searchKeyword`），切页 / 重启回来自动再搜一次；
   输入防抖会取消上一条待执行的搜索，不会每敲一个字并发一次请求。
 - 每日推荐：侧栏新页，打开应用时抓 TMDB（要 API Key）/ 豆瓣热门，按天缓存
-  `daily.json`；用 `Core.search` + 标题归一化匹配媒体源，命中的点开进详情，
-  没命中的点一下推到 MoviePilot 订阅。设置页有 TMDB Key / TMDB 专用代理 /
+  `daily.json`；用 `Core.search` + 标题归一化匹配媒体源，命中的点开进媒体详情，
+  没命中的打开豆瓣 / TMDB 资料页（简介、评分、演职人员），在资料页里点
+  「添加订阅」推到 MoviePilot。设置页有 TMDB Key / TMDB 专用代理 /
   MoviePilot 地址与 Token 和「测试连接」，详见 [DAILY.md](DAILY.md)。
 - 记录页：「观看」的播放按钮直接 `PlayerLauncher.play(record:)`，收藏卡片进详情
 - 续播点合并：电影 / 视频按整片百分比比「资源」里其它源与 Trakt 的 playback，

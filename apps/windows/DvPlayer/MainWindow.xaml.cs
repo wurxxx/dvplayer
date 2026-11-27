@@ -1612,6 +1612,21 @@ public partial class MainWindow : FluentWindow
                 : tag == "libraries" ? 9000 : 5000)
                              + extraDelay * 1000);
 
+            // --daily-detail <片名>：打开推荐里那条的资料页（媒体源里没有的条目）。
+            if (ArgumentAfter("--daily-detail") is { Length: > 0 } dailyDetail
+                && ContentFrame.Content is DailyPage)
+            {
+                var hit = DailyService.Items.FirstOrDefault(item =>
+                    item.Title.Contains(dailyDetail, StringComparison.Ordinal) && !item.InLibrary);
+                Trace.Write($"daily detail {dailyDetail} -> {hit?.Title ?? "(none)"}");
+                if (hit is not null)
+                {
+                    ContentFrame.Navigate(new DailyDetailPage(hit));
+                    await Task.Delay(6000);
+                    UiCapture.Save(this, Path.Combine(dir, "daily-detail.png"));
+                }
+            }
+
             // --settings-tab play：设置页直接停在「播放」分组（核对缓冲大小这种项）。
             if (tag == "settings" && ArgumentAfter("--settings-tab") is { Length: > 0 } settingsTab &&
                 ContentFrame.Content is SettingsPage tabbedSettings)
