@@ -14,11 +14,13 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 | 片头片尾 | `Services/SkipMarkers.cs` | `%LOCALAPPDATA%\dvplayer\skip-markers.json`，按剧名（电影按条目 id）存 `introEnd` / `outroStart`，和 macOS 同格式 |
 | 弹幕 | `Player/Danmaku.cs` | 弹弹play v2 签名（`Base64(SHA256(AppId+Timestamp+Path+AppSecret))`）→ JSON / XML 解析 → 写 ASS → `sub-add` + `secondary-sid`；电影没有集号时按片名找 `type == "movie"` 的条目 |
 | 在线字幕 | `Player/OpenSubtitles.cs` | OpenSubtitles REST v1：搜索 → `/downloads` 取临时链接 → 存缓存 → `sub-add select` |
+| 每日推荐 | `Services/DailyService.cs`、`Views/DailyPage.xaml` | 启动时抓 TMDB（要 API Key）/ 豆瓣热门，按天缓存 `daily.json`；`MediaCore.Search` + 标题归一化匹配本地源，命中的点开进 `SeriesPage`，没命中的推到 MoviePilot（`POST /api/v1/subscribe/?apikey=`；不要带 Bearer，会被当成登录令牌校验）。TMDB 可单独填代理（只影响 TMDB），设置页在「通用 → 每日推荐」，详见 [DAILY.md](DAILY.md) |
 | Trakt | `Player/TraktClient.cs`、`Views/SettingsPage.xaml` | 设备码登录；token 存 `settings.json` 的 `traktAccessToken` / `traktRefreshToken` / `traktExpiresAt`（DPAPI 密封）；scrobble 挂在 `time-pos` / `pause` / EOF / 关窗上，按顺序串行发送；匹配优先用 `MediaDetailDto.TmdbId` / `ImdbId`（Emby / Jellyfin 的 `ProviderIds`），没有才回落标题 + 年份；库页直接起播的电影用条目标题 + 详情元数据兜底；详情页「Trakt」菜单做评分 / 收藏 / 待看。打包时内置 Client ID，设置页只剩连接 / 开关 |
 
 配置项都在 `Services/AppSettings.cs`：`videoAspect`、`danmakuEnabled`、
 `openSubtitlesApiKey` / `openSubtitlesUsername` / `openSubtitlesPassword`、
-`subtitleLanguages`、`traktEnabled` / `traktClientId` / `traktClientSecret`。弹幕凭据不在设置里：打包时由
+`subtitleLanguages`、`traktEnabled` / `traktClientId` / `traktClientSecret`、
+`tmdbApiKey` / `moviePilotUrl` / `moviePilotToken`（后两个凭据落盘时 DPAPI 密封）。弹幕凭据不在设置里：打包时由
 `packaging/build-release.ps1` 从本地密钥文件读出来，以程序集元数据写进 exe
 （详见 [SECRETS.md](SECRETS.md)）。
 

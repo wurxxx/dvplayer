@@ -31,7 +31,7 @@ public sealed class AppSettings
     /// <summary>启动时自动连接所有源。</summary>
     public bool AutoConnect { get; set; } = true;
 
-    /// <summary>启动后先打开哪一页：sources / records / search / settings。</summary>
+    /// <summary>启动后先打开哪一页：sources / daily / records / search / settings。</summary>
     public string StartPage { get; set; } = "sources";
 
     /// <summary>搜索页上次的查询词：切到别的页再回来、重启应用都还在。</summary>
@@ -90,6 +90,19 @@ public sealed class AppSettings
     public string? OpenSubtitlesUsername { get; set; }
     public string? OpenSubtitlesPassword { get; set; }
     public string? SubtitleLanguages { get; set; }
+
+    /// <summary>每日推荐：TMDB v3 API Key。留空 = 只显示豆瓣热门。</summary>
+    public string? TmdbApiKey { get; set; }
+
+    /// <summary>TMDB 专用代理（如 http://127.0.0.1:7897）。留空跟随系统代理；
+    /// 只影响 TMDB 的 API 与海报，豆瓣 / MoviePilot 不走它。</summary>
+    public string? TmdbProxy { get; set; }
+
+    /// <summary>MoviePilot 地址（如 https://moviepilot.example.com）。</summary>
+    public string? MoviePilotUrl { get; set; }
+
+    /// <summary>MoviePilot API Token；媒体源里没有的推荐条目用它订阅。</summary>
+    public string? MoviePilotToken { get; set; }
 
     public static string FilePath
     {
@@ -173,6 +186,8 @@ public sealed class AppSettings
         copy.TraktClientSecret = Seal(TraktClientSecret);
         copy.TraktAccessToken = Seal(TraktAccessToken);
         copy.TraktRefreshToken = Seal(TraktRefreshToken);
+        copy.TmdbApiKey = Seal(TmdbApiKey);
+        copy.MoviePilotToken = Seal(MoviePilotToken);
         return copy;
     }
 
@@ -187,6 +202,8 @@ public sealed class AppSettings
         TraktClientSecret = Unseal(TraktClientSecret);
         TraktAccessToken = Unseal(TraktAccessToken);
         TraktRefreshToken = Unseal(TraktRefreshToken);
+        TmdbApiKey = Unseal(TmdbApiKey);
+        MoviePilotToken = Unseal(MoviePilotToken);
     }
 
     private static string Seal(string? value)

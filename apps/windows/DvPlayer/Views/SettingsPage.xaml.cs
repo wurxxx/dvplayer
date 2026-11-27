@@ -86,6 +86,10 @@ public partial class SettingsPage : Page
         SubtitleUserBox.Text = settings.OpenSubtitlesUsername ?? "";
         SubtitlePassBox.Password = settings.OpenSubtitlesPassword ?? "";
         SubtitleLangBox.Text = settings.SubtitleLanguages ?? "";
+        TmdbKeyBox.Password = settings.TmdbApiKey ?? "";
+        TmdbProxyBox.Text = settings.TmdbProxy ?? "";
+        MoviePilotUrlBox.Text = settings.MoviePilotUrl ?? "";
+        MoviePilotTokenBox.Password = settings.MoviePilotToken ?? "";
         SubtitleLangBox.ToolTip = "默认 zh-cn,zh-tw,en";
 
         _ready = true;
@@ -332,17 +336,49 @@ public partial class SettingsPage : Page
         }
 
         var settings = AppServices.Instance.Settings;
+        var oldTmdbKey = settings.TmdbApiKey ?? "";
         settings.OpenSubtitlesApiKey = NullIfEmpty(SubtitleKeyBox.Password);
         settings.OpenSubtitlesUsername = NullIfEmpty(SubtitleUserBox.Text);
         settings.OpenSubtitlesPassword = NullIfEmpty(SubtitlePassBox.Password);
         settings.SubtitleLanguages = NullIfEmpty(SubtitleLangBox.Text);
         settings.TraktClientId = NullIfEmpty(TraktIdBox.Text);
         settings.TraktClientSecret = NullIfEmpty(TraktSecretBox.Password);
+        settings.TmdbApiKey = NullIfEmpty(TmdbKeyBox.Password);
+        settings.TmdbProxy = NullIfEmpty(TmdbProxyBox.Text);
+        settings.MoviePilotUrl = NullIfEmpty(MoviePilotUrlBox.Text);
+        settings.MoviePilotToken = NullIfEmpty(MoviePilotTokenBox.Password);
         settings.Save();
+
+        // Key 填上 / 清空后重抓一次：当天缓存里可能只有豆瓣，
+        // 不重抓的话回到推荐页会以为 Key 没生效。
+        if (string.IsNullOrEmpty(oldTmdbKey) != string.IsNullOrEmpty(settings.TmdbApiKey))
+        {
+            _ = DailyService.RefreshAsync(force: true);
+        }
 
         RefreshExtrasHints();
         RefreshTraktState();
         StatusText.Text = "已保存";
+    }
+
+    /// <summary>MoviePilot 连通性自检：只发一个只读请求，不会真的订阅。</summary>
+    private async void OnTestPilotClick(object sender, RoutedEventArgs e)
+    {
+        PilotStatusText.Foreground = (Brush)FindResource("FaintBrush");
+        PilotStatusText.Text = "正在连接…";
+
+        try
+        {
+            var message = await DailyService.CheckPilotAsync(
+                MoviePilotUrlBox.Text, MoviePilotTokenBox.Password);
+            PilotStatusText.Foreground = (Brush)FindResource("SuccessBrush");
+            PilotStatusText.Text = message;
+        }
+        catch (Exception ex)
+        {
+            PilotStatusText.Foreground = (Brush)FindResource("DangerBrush");
+            PilotStatusText.Text = ex.Message;
+        }
     }
 
     private void RefreshExtrasHints()

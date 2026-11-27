@@ -18,7 +18,7 @@ public abstract class CardVisual : INotifyPropertyChanged
     public Brush Background
     {
         get => _background;
-        private set
+        protected set
         {
             _background = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Background)));
@@ -29,7 +29,7 @@ public abstract class CardVisual : INotifyPropertyChanged
     public Visibility PlaceholderVisibility
     {
         get => _placeholderVisibility;
-        private set
+        protected set
         {
             _placeholderVisibility = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaceholderVisibility)));

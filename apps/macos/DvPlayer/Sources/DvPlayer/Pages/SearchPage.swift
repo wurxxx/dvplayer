@@ -298,6 +298,8 @@ struct SettingsPage: View {
                         }
                     }
 
+                    DailySettingsCard()
+
                     TraktSettingsCard()
 
                     SurfaceCard(padding: 18) {

@@ -93,6 +93,8 @@ struct ShellView: View {
             LibrariesPage(sourceId: sourceId)
         case .sources:
             SourcesPage()
+        case .daily:
+            DailyPage()
         case .records:
             RecordsPage()
         case .search:
@@ -182,6 +184,11 @@ private struct SidebarView: View {
             SidebarItem(icon: "server.rack", title: "服务器",
                         selected: state.page == .sources) {
                 state.page = .sources
+            }
+
+            SidebarItem(icon: "sparkles", title: "每日推荐",
+                        selected: state.page == .daily) {
+                state.page = .daily
             }
 
             SidebarItem(icon: "clock.arrow.circlepath", title: "记录",
