@@ -53,11 +53,12 @@ enum DiscUI {
                         return
                     }
 
-                    // 默认停在菜单：选标题 / 章节再起播。
-                    NSLog("[Disc] menu titles=\(session.titles.count) "
+                    // 默认进盘里的菜单（libbluray HDMV 导航 + mpv 的 IG overlay
+                    // 渲染）。点按钮后 mpv 自己切标题，壳不用重新生成 EDL。
+                    NSLog("[Disc] menu titles=\(session.titles.count) hdmv=true "
                           + session.titles.map { "\($0.id):\($0.chapters.count)" }
                             .joined(separator: ","))
-                    DiscMenuLauncher.present(disc: disc)
+                    PlayerLauncher.shared.playDiscMenu(disc)
                 }
             } catch {
                 DispatchQueue.main.async {

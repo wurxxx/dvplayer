@@ -80,6 +80,14 @@ public partial class PlayWindow : Window
     /// <summary>从媒体库点开的本地原盘：条目在核心里，进度要回写核心。</summary>
     private readonly string? _coreItemId;
 
+    /// <summary>
+    /// 这次起的是盘内菜单（`bd://` + `--disc-menu`）：键鼠要转发给 mpv 的
+    /// `discnav`，播放页自己的快捷键（空格 / 方向键 / 回车）先让路。
+    /// 菜单点完按钮，mpv 自己切到正片，`disc-menu-active` 变 false 后恢复。
+    /// </summary>
+    private bool _discMenu;
+    private bool _discMenuKeyForward;
+
     private MediaInfoDto? _mediaInfo;
     /// <summary>媒体信息请求已经结束（成功与否），字幕自动选择不用再等它。</summary>
     private bool _mediaInfoLoaded;
@@ -521,21 +529,13 @@ public partial class PlayWindow : Window
             ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted)
             : null;
 
-        // 从媒体库点开的原盘：先停在菜单选标题 / 章节。
-        // 自检（silent）和 `--play-iso-title` 指定了标题时仍直接播，回归脚本不用点菜单。
+        // 从媒体库点开的原盘：直接进盘里的菜单（libbluray HDMV 导航 + mpv 的
+        // IG overlay 渲染）。菜单里选完标题，mpv 自己切，壳不用重开播放器。
+        // 自检（silent）和 `--play-iso-title` 指定了标题时仍直接播指定标题，
+        // 回归脚本不用点菜单。
         if (title is null && !silent)
         {
-            var picked = DiscMenuWindow.ShowMenu(owner, probe, isoPath, startOverride);
-            if (picked is null)
-            {
-                Trace.Write($"disc menu cancelled iso={Path.GetFileName(isoPath)}");
-                return null;
-            }
-
-            title = picked.Value.Title;
-            startOverride = picked.Value.Start;
-            Trace.Write($"disc menu picked title={title.TitleNumber} mpls={title.Mpls} " +
-                        $"start={startOverride:0}");
+            return OpenDiscMenu(owner, isoPath, probe, coreItemId);
         }
 
         title ??= DefaultDiscTitle(probe);
@@ -567,6 +567,33 @@ public partial class PlayWindow : Window
     /// <summary>原盘标题的条目 id：每个标题各存一份本地进度。</summary>
     public static string DiscItemId(string isoPath, BluRayTitle title) =>
         $"iso:{Path.GetFileNameWithoutExtension(isoPath)}:mpls{title.Mpls}";
+
+    /// <summary>
+    /// 盘内菜单的播放源：URL 是 `bd://`（不带 mpls），mpv 加 `--disc-menu`
+    /// 后进 libbluray 的 HDMV 导航，菜单画面由 mpv 自己画。
+    /// </summary>
+    public static PlaySourceDto DiscMenuSource(string isoPath, string display, double duration) => new(
+        $"iso:{Path.GetFileNameWithoutExtension(isoPath)}:menu",
+        display,
+        "bd://",
+        new List<HttpHeaderDto>(),
+        true,
+        false,
+        string.Empty,
+        null,
+        null,
+        null,
+        0L,
+        (long)Math.Max(0, duration),
+        null,
+        null,
+        null,
+        null,
+        false,
+        null,
+        null,
+        new List<AudioTrackDto>(),
+        new List<SubtitleTrackDto>());
 
     /// <summary>拼一个原盘标题的播放源（URL 是 `bd://mpls/&lt;n&gt;`）。</summary>
     public static PlaySourceDto DiscSource(string isoPath, BluRayTitle title, string display,
@@ -616,6 +643,40 @@ public partial class PlayWindow : Window
                 null,
                 $"{display} · 标题 {item.TitleNumber}"))
             .ToList();
+    }
+
+    /// <summary>
+    /// 打开原盘的盘内菜单：URL 是 `bd://`，mpv 带 `--disc-menu` 进 libbluray
+    /// 的 HDMV 导航，菜单（背景 + 按钮高亮）由 mpv 的 IG overlay 渲染。
+    /// 点按钮后 mpv 自己切标题，壳不用重新起播放器。
+    /// </summary>
+    public static PlayWindow OpenDiscMenu(
+        Window? owner,
+        string isoPath,
+        BluRayProbe probe,
+        string? coreItemId = null)
+    {
+        var display = string.IsNullOrWhiteSpace(probe.DiscName)
+            ? Path.GetFileNameWithoutExtension(isoPath)
+            : probe.DiscName!;
+        var duration = probe.Titles.Count > 0
+            ? probe.Titles.Max(item => item.DurationSeconds)
+            : 0;
+
+        var source = DiscMenuSource(isoPath, display, duration);
+        var playlist = probe.Titles.Count > 1 ? DiscPlaylist(isoPath, probe) : null;
+
+        Trace.Write($"disc menu open iso={Path.GetFileName(isoPath)} " +
+                    $"titles={probe.Titles.Count} hdmv=true");
+
+        var window = new PlayWindow(source, 0, playlist, null,
+            localDisc: true, discIsoPath: isoPath, coreItemId: coreItemId,
+            discTitles: probe.Titles, discDisplayName: display);
+        window._started = true;
+        window.AttachSurface(owner);
+        window.Show();
+        window.BeginPlayback(source, 0);
+        return window;
     }
 
     /// <summary>
@@ -1293,6 +1354,17 @@ public partial class PlayWindow : Window
             return;
         }
 
+        // 盘内菜单：单击是在点菜单按钮，不是「暂停画面」。
+        if (_discMenuKeyForward)
+        {
+            var hit = e.GetPosition(this);
+            _ipc.Command("discnav", "mouse-click",
+                hit.X / Math.Max(1, ActualWidth),
+                hit.Y / Math.Max(1, ActualHeight));
+            e.Handled = true;
+            return;
+        }
+
         TogglePause();
         _clickToggledPause = true;
         ShowChrome();
@@ -1511,14 +1583,36 @@ public partial class PlayWindow : Window
             return;
         }
         var launch = Playback.ToLaunch(source, startSeconds);
+        // 盘内菜单：URL 是 `bd://`（不带 mpls）才算，必须在拼 ExtraArgs 之前定。
+        _discMenu = _isLocalDisc && source.Url.StartsWith("bd://", StringComparison.OrdinalIgnoreCase)
+                    && !source.Url.Contains("mpls/", StringComparison.OrdinalIgnoreCase);
+        _discMenuKeyForward = _discMenu;
+        _discMenuSeen = false;
+        // 起播时 mpv 会先推一次 `disc-menu-active=false`（属性初值），
+        // 那时菜单还没画出来，不能因此把转发关掉（见 OnDiscMenuActiveChanged）。
+
         if (_isLocalDisc)
         {
+            var extra = new List<string>();
+            if (_discIsoPath is { Length: > 0 } isoPath)
+            {
+                extra.Add($"--bluray-device={isoPath}");
+                // 盘内菜单：libbluray 的 HDMV 导航 + mpv 自己的 IG overlay 渲染
+                // （`discnav` 命令驱动）。菜单里选完，mpv 自己切到正片。
+                if (_discMenu)
+                {
+                    extra.Add("--disc-menu");
+                    // 快捷键要留给 discnav：上下左右 / 回车都是菜单导航，
+                    // 壳自己的 OnKeyDown 会在这期间让路（见 _discMenuKeyForward）。
+                    extra.Add("--input-default-bindings=yes");
+                    extra.Add("--input-vo-keyboard=yes");
+                }
+            }
+
             launch = launch with
             {
                 IsDisc = true,
-                ExtraArgs = _discIsoPath is { Length: > 0 } isoPath
-                    ? new[] { $"--bluray-device={isoPath}" }
-                    : Array.Empty<string>(),
+                ExtraArgs = extra,
             };
         }
         // 同目录外挂字幕：mpv 只认完全相同的文件名，片名是字幕名前缀时
@@ -1685,7 +1779,7 @@ public partial class PlayWindow : Window
                      "audio-device-list", "audio-device", "audio-spdif",
                      "target-colorspace-hint", "current-tracks/video", "video-params",
                      "vo-configured", "video-frame-info", "estimated-vf-fps", "video-bitrate",
-                     "paused-for-cache",
+                     "paused-for-cache", "disc-menu-active",
                  })
         {
             ipc.Observe(name);
@@ -1816,6 +1910,11 @@ public partial class PlayWindow : Window
                                 ? transfer.GetString() ?? ""
                                 : "";
                     UpdateChips();
+                    break;
+
+                case "disc-menu-active":
+                    // 盘内菜单的显示 / 收起：收起后把快捷键还给壳。
+                    OnDiscMenuActiveChanged(value.ValueKind == JsonValueKind.True);
                     break;
 
                 case "pause" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
@@ -4767,6 +4866,13 @@ public partial class PlayWindow : Window
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
+        // 盘内菜单：方向键 / 回车 / 鼠标都归 libbluray 的按钮导航，
+        // 壳的快捷键（空格暂停、左右 seek、回车全屏）在这期间全部让路。
+        if (_discMenuKeyForward && ForwardDiscMenuKey(e))
+        {
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Space:
@@ -4835,6 +4941,156 @@ public partial class PlayWindow : Window
         ShowChrome();
     }
 
+    /// <summary>
+    /// 把一次按键交给 mpv 的 `discnav`（libbluray 的 HDMV 按钮导航）。
+    /// 返回 true 表示这次按键已经被菜单吃掉，壳不要再处理。
+    /// </summary>
+    private bool ForwardDiscMenuKey(KeyEventArgs e)
+    {
+        var action = e.Key switch
+        {
+            Key.Up => "up",
+            Key.Down => "down",
+            Key.Left => "left",
+            Key.Right => "right",
+            Key.Enter => "select",
+            Key.Escape => "prev",
+            Key.Back => "prev",
+            _ => null,
+        };
+
+        if (action is null)
+        {
+            return false;
+        }
+
+        _ipc?.Command("discnav", action);
+        e.Handled = true;
+        ShowChrome();
+        return true;
+    }
+
+    /// <summary>
+    /// 菜单状态变了：`disc-menu-active` 由 mpv 在 IG overlay 显示 / 收起时通知。
+    ///
+    /// 起播那一刻 mpv 会先推一次 false（属性初始值），不能因此把转发关掉，
+    /// 否则菜单还没画出来键盘就已经归壳了。所以只在**见过 true 之后**的
+    /// false 才认作「菜单收起、切到正片了」。
+    /// </summary>
+    private void OnDiscMenuActiveChanged(bool active)
+    {
+        _discMenuActiveForShot = active;
+        if (!_discMenu)
+        {
+            return;
+        }
+
+        if (active)
+        {
+            _discMenuSeen = true;
+            _discMenuLeaveGate?.Stop();
+            if (!_discMenuKeyForward)
+            {
+                _discMenuKeyForward = true;
+                Trace.Write("disc menu active=true");
+            }
+
+            // 菜单出来了：壳的控件全收掉，只留盘自己的界面。
+            _hideTimer.Stop();
+            _chromeVisible = false;
+            SetChromeOpacity(0);
+            return;
+        }
+
+        if (!_discMenuSeen || !_discMenuKeyForward)
+        {
+            return;
+        }
+
+        // 菜单换页（一级 → 二级）时 mpv 会瞬间报一次 false 再报 true
+        // （实测只隔 20～40ms）。这时不能恢复控制条，否则会闪一下。
+        // 只有 false 持续一段时间，才算真的收起、进正片了。
+        _discMenuLeaveGate ??= new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(700),
+        };
+        _discMenuLeaveGate.Stop();
+        _discMenuLeaveGate.Tick -= OnDiscMenuLeaveGate;
+        _discMenuLeaveGate.Tick += OnDiscMenuLeaveGate;
+        _discMenuLeaveGate.Start();
+    }
+
+    /// <summary>`disc-menu-active=false` 稳住了：菜单确实收起，正片开始。</summary>
+    private void OnDiscMenuLeaveGate(object? sender, EventArgs e)
+    {
+        _discMenuLeaveGate?.Stop();
+        if (!_discMenuKeyForward)
+        {
+            return;
+        }
+
+        _discMenuKeyForward = false;
+        Trace.Write("disc menu active=false (菜单已收起)");
+        ShowChrome();
+        _ = BindPlayingDiscTitleAsync();
+    }
+
+    /// <summary>菜单收起去抖：换页时的瞬时 false 不算。</summary>
+    private DispatcherTimer? _discMenuLeaveGate;
+
+    /// <summary>
+    /// 菜单收起后 mpv 已经切到正片：把当前条目 id 从 `iso:&lt;盘&gt;:menu`
+    /// 换成这条正片的 `iso:&lt;盘&gt;:mpls&lt;N&gt;`，否则续播点会记在菜单上，
+    /// 下次从菜单重开时按菜单时长（几分钟）去比，进度直接失效。
+    ///
+    /// 判定靠 mpv 的 `current-edition`：菜单期是「Disc Menu」那个 edition，
+    /// 切到正片后变成该标题的 edition，和 `BluRayProbe` 里的编号对得上。
+    /// </summary>
+    private async Task BindPlayingDiscTitleAsync()
+    {
+        if (!_isLocalDisc || _discIsoPath is not { Length: > 0 } isoPath || _discTitles.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            // 切标题后 mpv 要重开 demuxer，`duration` 晚一点才更新。
+            await Task.Delay(1500);
+            var duration = _duration;
+            if (duration <= 0)
+            {
+                return;
+            }
+
+            var matched = _discTitles
+                .OrderBy(item => Math.Abs(item.DurationSeconds - duration))
+                .FirstOrDefault();
+            if (matched is null || Math.Abs(matched.DurationSeconds - duration) > 5)
+            {
+                Trace.Write($"disc title bind none dur={duration:0}");
+                return;
+            }
+
+            var bound = DiscItemId(isoPath, matched);
+            if (bound == _itemId)
+            {
+                return;
+            }
+
+            Trace.Write($"disc title bind {_itemId} -> {bound} " +
+                        $"(mpls={matched.Mpls} dur={duration:0})");
+            _itemId = bound;
+        }
+        catch (Exception ex)
+        {
+            Trace.Write("disc title bind failed: " + ex.Message);
+        }
+    }
+
+    /// <summary>菜单至少显示过一次：之后的 `disc-menu-active=false` 才是真的收起。</summary>
+    private bool _discMenuSeen;
+
     private void ChangeVolume(double delta)
     {
         var value = Math.Clamp(Volume.Value + delta, 0, 100);
@@ -4846,6 +5102,18 @@ public partial class PlayWindow : Window
     {
         if (_drag != DragKind.None)
         {
+            return;
+        }
+
+        // 盘内菜单：鼠标位置就是按钮高亮（libbluray 的 IG 命中），
+        // 不给壳的控制条。坐标系是 0..1 的画面相对位置。
+        if (_discMenuKeyForward)
+        {
+            var pos = e.GetPosition(this);
+            _ipc?.Command("discnav", "mouse-move",
+                pos.X / Math.Max(1, ActualWidth),
+                pos.Y / Math.Max(1, ActualHeight));
+            Cursor = Cursors.Arrow;
             return;
         }
 
@@ -4884,6 +5152,13 @@ public partial class PlayWindow : Window
             return;
         }
 
+        // 盘内菜单在显示：菜单是盘自己的界面，壳的控制条 / 顶栏 / 右侧按钮
+        // 叠上去就是两层 UI，鼠标还要用来点菜单按钮。
+        if (_discMenuKeyForward)
+        {
+            return;
+        }
+
         _chromeVisible = true;
         AnimateChrome(1);
         ResetHideTimer();
@@ -4915,6 +5190,9 @@ public partial class PlayWindow : Window
         // 打开 / 切集期间也保留顶栏（片名 + 右上角窗口按钮）：黑屏上总得能
         // 最小化 / 最大化 / 关窗，鼠标也有箭头可点。底部控制条仍然等首帧。
         TopBar.Opacity = 1;
+        TopScrim.Opacity = 1;
+        TopInfo.Opacity = 1;
+        TopStatus.Opacity = 1;
         Cursor = Cursors.Arrow;
     }
 
@@ -5082,7 +5360,15 @@ public partial class PlayWindow : Window
         }
     }
 
-    /// <summary>控制条淡入 / 淡出，别硬切。</summary>
+    /// <summary>
+    /// 控制条包含的控件：菜单期间这些要收掉。
+    ///
+    /// 右上角最小化 / 最大化 / 关闭**不在这里**：窗口按钮属于系统窗口装饰，
+    /// 不管播到哪一步都得能点，否则全屏菜单里想关窗只能按 Esc。
+    /// </summary>
+    private FrameworkElement[] ChromeElements =>
+        new FrameworkElement[] { TopScrim, TopInfo, TopStatus, Chrome, RightActions };
+
     private void AnimateChrome(double target)
     {
         var fade = new DoubleAnimation(target, TimeSpan.FromMilliseconds(180))
@@ -5090,24 +5376,29 @@ public partial class PlayWindow : Window
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
         };
 
-        foreach (var element in new FrameworkElement[] { TopBar, Chrome, RightActions })
+        foreach (var element in ChromeElements)
         {
             element.BeginAnimation(OpacityProperty, fade);
         }
 
-        Cursor = (target > 0 || !_ready) ? Cursors.Arrow : Cursors.None;
+        // 盘内菜单期间光标要一直看得见：用户是靠它指菜单按钮的。
+        Cursor = (target > 0 || !_ready || _discMenuKeyForward)
+            ? Cursors.Arrow
+            : Cursors.None;
     }
 
     private void SetChromeOpacity(double opacity)
     {
-        foreach (var element in new FrameworkElement[] { TopBar, Chrome, RightActions })
+        foreach (var element in ChromeElements)
         {
             // 淡入 / 淡出的动画会 HoldEnd，直接改 Opacity 会被动画压住。
             element.BeginAnimation(OpacityProperty, null);
             element.Opacity = opacity;
         }
 
-        Cursor = (opacity > 0 || !_ready) ? Cursors.Arrow : Cursors.None;
+        Cursor = (opacity > 0 || !_ready || _discMenuKeyForward)
+            ? Cursors.Arrow
+            : Cursors.None;
     }
 
     private void ResetHideTimer()
@@ -5510,6 +5801,50 @@ public partial class PlayWindow : Window
     }
 
     public void SetAspectForShot(string key) => SetAspect(PlayerAspectExtensions.Parse(key));
+
+    /// <summary>自检：盘内菜单是否在显示，以及快捷键当前是否让给菜单。</summary>
+    public string DescribeDiscMenu()
+    {
+        return $"discMenu={_discMenu} forwarding={_discMenuKeyForward} " +
+               $"url={_current.Url} pos={(int)_position} chrome={_chromeVisible} " +
+               $"menuActive={_discMenuActiveForShot}";
+    }
+
+    /// <summary>自检用：最近一次收到的 `disc-menu-active`（null = 还没收到）。</summary>
+    private bool? _discMenuActiveForShot;
+
+    /// <summary>
+    /// 自检：模拟鼠标在画面上移动（等价于用户晃鼠标），报告控制条有没有被叫出来。
+    /// 盘内菜单期间它必须是 false，否则菜单上会叠一层壳的控制条。
+    /// </summary>
+    public string MouseMoveForShot()
+    {
+        var e = new MouseEventArgs(Mouse.PrimaryDevice, 0)
+        {
+            RoutedEvent = Mouse.MouseMoveEvent,
+            Source = this,
+        };
+        OnMouseMove(this, e);
+        return DescribeDiscMenu();
+    }
+
+    /// <summary>自检：把一个按键交给 discnav（等价于用户按方向键 / 回车）。</summary>
+    public void DiscNavForShot(string action)
+    {
+        _ipc?.Command("discnav", action);
+        Trace.Write($"disc menu key {action}");
+    }
+
+    /// <summary>
+    /// 自检：让 mpv 自己截一帧（`screenshot-to-file`）。WPF 的 RenderTargetBitmap
+    /// 抓不到 mpv 的子窗口，菜单 / 视频画面只能由 mpv 截。
+    /// </summary>
+    public void ScreenshotForShot(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        _ipc?.Command("screenshot-to-file", path, "window");
+        Trace.Write("shot " + Path.GetFileName(path));
+    }
 
     /// <summary>自检用：按秒设定时关闭（菜单里是分钟）。</summary>
     public void SetSleepSecondsForShot(double seconds) => SetSleep(seconds / 60.0);
