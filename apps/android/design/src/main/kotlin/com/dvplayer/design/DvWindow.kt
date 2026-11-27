@@ -15,8 +15,8 @@ import androidx.compose.ui.unit.dp
  *
  * 取值照 Material 3 的 window size class：
  * - compact  (< 600)   手机竖屏，原来的单列布局不动；
- * - medium   (600–839) 平板竖屏 / 折叠屏展开：底部浮动 tab 换成左侧竖排胶囊；
- * - expanded (≥ 840)   平板横屏 / 大屏：详情走「左海报 + 右信息」双栏，网格加列。
+ * - medium   (600–839) 平板竖屏 / 折叠屏展开：详情改「左海报 + 右信息」、网格加列；
+ * - expanded (≥ 840)   平板横屏 / 大屏：详情海报更大，段落收进 1040dp。
  */
 object DvBreakpoints {
     val Medium = 600.dp
@@ -64,9 +64,7 @@ val LocalDvWindow = compositionLocalOf { DvWindow(360.dp, 780.dp) }
 val DvPageInset: Dp
     @Composable get() = with(LocalDvWindow.current) {
         if (medium) {
-            // 减去左侧轨道占的位置，否则内容会在「可用区」里偏右。
-            val usable = width - DvSpace.RailReserve
-            ((usable - DvBreakpoints.ReadableWidth) / 2).coerceAtLeast(DvSpace.Gutter)
+            ((width - DvBreakpoints.ReadableWidth) / 2).coerceAtLeast(DvSpace.Gutter)
         } else {
             DvSpace.Gutter
         }

@@ -156,10 +156,8 @@ object DvSpace {
     val TabHeight = 60.dp
     val TabRadius = 26.dp
     val TabInset = 11.dp
-    /** 宽屏左侧竖排胶囊的宽度，以及内容要给它让出的位置。 */
-    val RailWidth = 76.dp
-    val RailItemHeight = 56.dp
-    val RailReserve = 88.dp
+    /** 宽屏底部胶囊的最大宽度：不跟着屏幕拉满，也不会挤成一团。 */
+    val TabBarMaxWidth = 500.dp
 }
 
 object DvType {

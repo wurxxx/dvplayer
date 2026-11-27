@@ -873,8 +873,10 @@ private fun InfoCard(
             .clip(RoundedCornerShape(14.dp))
             // 照 macOS 的 MediaInfoCard：详情页整页是模糊大图，卡片用半透明，
             // 让底下的画面透一点出来；实心 surfaceAlt 会变成一块死黑的板子，
-            // 和暖色调的背景也接不上。靠亮度差分开，不套描边。
-            .background(p.surface.copy(alpha = 0.55f))
+            // 和暖色调的背景也接不上。0.8 是「能看出底下有画面、但不再透字」的厚度，
+            // 再加一道极淡的白色内边，和上面的模糊图拉开层次。
+            .background(p.surface.copy(alpha = if (p.isDark) 0.80f else 0.86f))
+            .border(1.dp, Color.White.copy(alpha = if (p.isDark) 0.07f else 0.55f), RoundedCornerShape(14.dp))
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -913,7 +915,7 @@ private fun LinkPill(label: String, onClick: () -> Unit) {
         modifier = Modifier
             .height(36.dp)
             .clip(RoundedCornerShape(percent = 50))
-            .background(p.surface.copy(alpha = if (p.isDark) 0.62f else 0.72f))
+            .background(p.surface.copy(alpha = if (p.isDark) 0.80f else 0.86f))
             .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(percent = 50))
             .clickableNoRipple(onClick)
             .padding(horizontal = 15.dp),

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBars
@@ -418,8 +419,6 @@ fun DvScaffold(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        // 宽屏换成左侧竖排胶囊：内容让出它的位置，hero 不会钻到轨道下面。
-                        .padding(start = if (window.medium) DvSpace.RailReserve else 0.dp)
                         .drawWithContent {
                             contentLayer.record {
                                 this@drawWithContent.drawContent()
@@ -430,108 +429,23 @@ fun DvScaffold(
                     content()
                 }
                 if (showTab) {
-                    if (window.medium) {
-                        DvGlassRail(
-                            tabs = tabs,
-                            selected = selectedTab,
-                            onSelect = onTab,
-                            backdrop = backdrop,
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .navigationBarsPadding()
-                                .padding(start = 12.dp),
-                        )
-                    } else {
-                        DvGlassTabBar(
-                            tabs = tabs,
-                            selected = selectedTab,
-                            onSelect = onTab,
-                            backdrop = backdrop,
-                            detached = detachedTab,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .navigationBarsPadding()
-                                .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
-                        )
-                    }
+                    DvGlassTabBar(
+                        tabs = tabs,
+                        selected = selectedTab,
+                        onSelect = onTab,
+                        backdrop = backdrop,
+                        detached = detachedTab,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            // 平板上不跟着屏幕拉满：一根 500dp 的胶囊居中就够了，
+                            // 手机（<500dp 可用宽度）还是原来的通栏。
+                            .widthIn(max = DvSpace.TabBarMaxWidth)
+                            .navigationBarsPadding()
+                            .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+                    )
                 }
             }
         }
-    }
-}
-
-/**
- * 宽屏左侧的竖排玻璃胶囊。
- *
- * 底部条在平板上会被摊成一根长条（三个页签分到屏幕两端），而且仍然浮在内容上；
- * 竖排之后只占 76dp，`TabReserve` 也随之变成一小段留白。
- */
-@Composable
-private fun DvGlassRail(
-    tabs: List<DvTab>,
-    selected: Int,
-    onSelect: (Int) -> Unit,
-    backdrop: ImageBitmap?,
-    modifier: Modifier = Modifier,
-) {
-    val p = DvTheme.palette
-    val fog = if (p.isDark) p.surfaceAlt.copy(alpha = 0.86f) else Color.White.copy(alpha = 0.82f)
-    val edge = if (p.isDark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.85f)
-
-    GlassPill(
-        backdrop = backdrop,
-        fog = fog,
-        edge = edge,
-        shape = RoundedCornerShape(percent = 50),
-        modifier = modifier.width(DvSpace.RailWidth),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            tabs.forEachIndexed { index, tab ->
-                RailItem(
-                    tab = tab,
-                    selected = index == selected,
-                    onClick = { onSelect(index) },
-                    modifier = Modifier.fillMaxWidth().height(DvSpace.RailItemHeight),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RailItem(
-    tab: DvTab,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val p = DvTheme.palette
-    val tint = if (selected) p.accent else if (p.isDark) p.subtle else p.text.copy(alpha = 0.80f)
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(percent = 50))
-            .clickableNoRipple(onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        DvGlyph(
-            glyph = tab.glyph,
-            tint = tint,
-            sizeDp = 21,
-            strokeWidth = if (selected) 0.080f else 0.060f,
-        )
-        Text(
-            text = tab.label,
-            color = tint,
-            fontSize = DvType.Micro.fontSize,
-            lineHeight = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            modifier = Modifier.padding(top = 3.dp),
-        )
     }
 }
 
@@ -540,14 +454,9 @@ private fun RailItem(
  *
  * edge-to-edge 之后 tab 还会被导航栏顶起来，所以这里要把导航栏高度算进去，
  * 否则列表最后一条会压在 tab 后面。
- * 宽屏的 tab 在左侧竖排，底部只需要一小段呼吸。
  */
 val TabReserve: Dp
-    @Composable get() = if (LocalDvWindow.current.medium) {
-        24.dp
-    } else {
-        (DvSpace.TabHeight + DvSpace.TabInset * 2 + 12.dp) +
-            with(LocalDensity.current) {
-                WindowInsets.navigationBars.getBottom(this).toDp()
-            }
-    }
+    @Composable get() = (DvSpace.TabHeight + DvSpace.TabInset * 2 + 12.dp) +
+        with(LocalDensity.current) {
+            WindowInsets.navigationBars.getBottom(this).toDp()
+        }
