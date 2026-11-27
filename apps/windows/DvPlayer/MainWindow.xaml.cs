@@ -500,9 +500,40 @@ public partial class MainWindow : FluentWindow
             itemId = playlist[0].Id;
         }
 
-        var player = await PlayWindow.OpenAsync(this, itemId, null, playlist, seriesTitle);
+        // --play-start 0：自检时强制从头上放，别接上次看过的位置（快播完时会把
+        // 截图时间点撞到 EOF）。和 --play-check 用同一个参数。
+        double? startOverride = null;
+        if (double.TryParse(ArgumentAfter("--play-start"), out var startAt))
+        {
+            startOverride = Math.Max(0, startAt);
+        }
+
+        var player = await PlayWindow.OpenAsync(this, itemId, startOverride, playlist, seriesTitle);
         if (player is null)
         {
+            return;
+        }
+
+        // --play-keys：真实键盘事件验证左右键快进 / Shift ±30 秒。
+        if (Environment.GetCommandLineArgs().Contains("--play-keys"))
+        {
+            await Task.Delay(9000);
+            player.Activate();
+            await Task.Delay(600);
+            await player.RunKeyboardTestAsync();
+            player.Close();
+            return;
+        }
+
+        // --play-pin：真实鼠标点图钉，验证置顶落在两层窗口上、状态写进设置。
+        if (Environment.GetCommandLineArgs().Contains("--play-pin"))
+        {
+            await Task.Delay(7000);
+            player.Activate();
+            await Task.Delay(600);
+            await player.RunPinTestAsync(dir);
+            UiCapture.SaveDesktop(Path.Combine(dir, "desktop-pin.png"));
+            player.Close();
             return;
         }
 

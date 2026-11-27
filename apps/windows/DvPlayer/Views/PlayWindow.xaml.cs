@@ -238,6 +238,8 @@ public partial class PlayWindow : Window
     private PlayerSurfaceWindow? _surface;
 
     private bool _fullscreen;
+    /// <summary>播放窗置顶（右上角图钉），跨会话保留在设置里。</summary>
+    private bool _alwaysOnTop;
     private bool _maximized;
     private Rect _windowedBounds;
     private Rect _maximizedFrom;
@@ -307,6 +309,7 @@ public partial class PlayWindow : Window
         _hdrPassthrough = settings.HdrPassthrough;
         _hdrPeakNits = settings.HdrPeakNits;
         _audioDevice = settings.AudioDevice ?? "";
+        _alwaysOnTop = settings.AlwaysOnTop;
         ResetMarkerKey();
 
         InitializeComponent();
@@ -957,6 +960,7 @@ public partial class PlayWindow : Window
         }
 
         HealWindowPair();
+        ApplyAlwaysOnTop();
     }
 
     private void OnMainWindowClosed(object? sender, EventArgs e) => Close();
@@ -1206,6 +1210,36 @@ public partial class PlayWindow : Window
         FitWindowToVideo();
         UpdateFullscreenGlyph();
         ShowChrome();
+    }
+
+    /// <summary>窗口置顶（右上角图钉）：和 macOS 播放页一样，切到别的 App 也盖在上面。</summary>
+    private void OnPinClick(object sender, RoutedEventArgs e)
+    {
+        _alwaysOnTop = !_alwaysOnTop;
+        ApplyAlwaysOnTop();
+
+        var settings = AppServices.Instance.Settings;
+        settings.AlwaysOnTop = _alwaysOnTop;
+        settings.Save();
+
+        ShowChrome();
+    }
+
+    /// <summary>置顶要同时落在视频层和浮层上：它们是两个独立窗口，只设一层会露馅。</summary>
+    private void ApplyAlwaysOnTop()
+    {
+        Topmost = _alwaysOnTop;
+        if (_surface is not null)
+        {
+            _surface.Topmost = _alwaysOnTop;
+        }
+
+        PinGlyph.Foreground = _alwaysOnTop
+            ? (Brush)FindResource("AccentBrush")
+            : new SolidColorBrush(Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF));
+        PinButton.ToolTip = _alwaysOnTop ? "取消置顶" : "窗口置顶";
+        Trace.Write($"always on top {(_alwaysOnTop ? "on" : "off")} " +
+                    $"topmost={Topmost} surface={_surface?.Topmost}");
     }
 
     private void OnMinimizeClick(object sender, RoutedEventArgs e)
@@ -2029,7 +2063,14 @@ public partial class PlayWindow : Window
                     // 刚起播或本地缓存时速度是 0，这时候没必要显示。
                     var megaBytes = value.GetDouble() / 1024 / 1024;
                     SpeedText.Text = $"{megaBytes:0.0} MB/s";
-                    SpeedText.Visibility = megaBytes >= 0.05
+                    var showSpeed = megaBytes >= 0.05;
+                    if (showSpeed != (SpeedText.Visibility == Visibility.Visible))
+                    {
+                        // 只在显示状态变化时记一行，不然每秒一条会把 player.log 刷满。
+                        Trace.Write($"cache speed {(showSpeed ? "show" : "hide")} {megaBytes:0.00} MB/s");
+                    }
+
+                    SpeedText.Visibility = showSpeed
                         ? Visibility.Visible
                         : Visibility.Collapsed;
                     break;
@@ -3007,6 +3048,15 @@ public partial class PlayWindow : Window
         _ = SwitchToAsync(_playlist[target].Id);
     }
 
+    /// <summary>
+    /// Shift 是否按着。`Keyboard.Modifiers` 是 WPF 自己维护的状态，注入的
+    /// Shift（keybd_event / SendInput 只发 VK 不带扫描码）有时追不到，再兜一层
+    /// 系统键盘状态；真人按 Shift 两条都是真的。
+    /// </summary>
+    private static bool ShiftHeld =>
+        Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ||
+        (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+
     private void SeekBy(double delta)
     {
         if (_ipc is null || _duration <= 0)
@@ -3016,6 +3066,7 @@ public partial class PlayWindow : Window
 
         var target = Math.Clamp(_position + delta, 0, _duration);
         _ipc.Command("set_property", "time-pos", target);
+        Trace.Write($"seek {delta:+0;-0} {_position:0.0} -> {target:0.0}");
         _position = target;
         UpdatePositionUi();
     }
@@ -4994,11 +5045,11 @@ public partial class PlayWindow : Window
                 break;
 
             case Key.Left:
-                SeekBy(-10);
+                SeekBy(ShiftHeld ? -30 : -10);
                 break;
 
             case Key.Right:
-                SeekBy(10);
+                SeekBy(ShiftHeld ? 30 : 10);
                 break;
 
             case Key.PageUp:
@@ -5860,6 +5911,88 @@ public partial class PlayWindow : Window
                     $"(target {Seek.Maximum * 0.7:0})");
     }
 
+    /// <summary>
+    /// 巡检用：真实键盘事件验证左右键快进。用 PreviewKeyDown 以前，焦点在进度条
+    /// 上时左右键会被 Slider 吃掉；这里先点一下进度条把焦点放到它上面，再发键。
+    /// Shift + 左右 = ±30 秒，和 macOS 一致。
+    /// </summary>
+    public async Task RunKeyboardTestAsync()
+    {
+        Activate();
+        await Task.Delay(400);
+
+        // 先按一下进度条，把焦点放到 Slider 上：这正是以前左右键被吃掉的场景。
+        ShowChrome();
+        await Task.Delay(400);
+        var pick = Seek.TranslatePoint(
+            new Point(Seek.ActualWidth * 0.5, Seek.ActualHeight / 2), this);
+        var spot = PointToScreen(pick);
+        SetCursorPos((int)spot.X, (int)spot.Y);
+        await Task.Delay(200);
+        Click();
+        await Task.Delay(600);
+        Trace.Write($"key test seek focused pos={_position:0.0}");
+
+        await SendKeyTestAsync(VK_RIGHT, "right");
+        await SendKeyTestAsync(VK_LEFT, "left");
+
+        // Shift 要先按下去、让消息泵跑一轮，再发右键：三次调用挤在一起时，
+        // WPF 处理到右键时 Shift 已经抬起来了，`Keyboard.Modifiers` 看不到。
+        keybd_event(VK_SHIFT, 0, 0, UIntPtr.Zero);
+        await Task.Delay(150);
+        await SendKeyTestAsync(VK_RIGHT, "shift-right");
+        await Task.Delay(150);
+        keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+    }
+
+    private async Task SendKeyTestAsync(byte key, string label)
+    {
+        var before = _position;
+        keybd_event(key, 0, 0, UIntPtr.Zero);
+        keybd_event(key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        await Task.Delay(700);
+        Trace.Write($"key test {label} {before:0.0} -> {_position:0.0} " +
+                    $"delta={_position - before:0.0}");
+    }
+
+    /// <summary>
+    /// 巡检用：真实鼠标点右上角图钉。置顶要同时落在浮层和视频层上，
+    /// 状态写进设置，关掉播放再开还保持。
+    /// </summary>
+    public async Task RunPinTestAsync(string dir)
+    {
+        Activate();
+        await Task.Delay(300);
+        ShowChrome();
+        await Task.Delay(500);
+
+        var before = _alwaysOnTop;
+        ClickPinForShot();
+        await Task.Delay(700);
+        Trace.Write($"pin test click1 {before} -> {_alwaysOnTop} " +
+                    $"saved={AppServices.Instance.Settings.AlwaysOnTop}");
+        ScreenshotForShot(Path.Combine(dir, "pin-on.png"));
+
+        ClickPinForShot();
+        await Task.Delay(900);
+        Trace.Write($"pin test click2 -> {_alwaysOnTop} saved={AppServices.Instance.Settings.AlwaysOnTop}");
+
+        // 最后留成置顶，供重启后检查「上次开着，下次开播放窗还是置顶」。
+        ClickPinForShot();
+        await Task.Delay(900);
+        Trace.Write($"pin test click3 -> {_alwaysOnTop} saved={AppServices.Instance.Settings.AlwaysOnTop}");
+        ScreenshotForShot(Path.Combine(dir, "pin-on-final.png"));
+    }
+
+    private void ClickPinForShot()
+    {
+        var pick = PinButton.TranslatePoint(
+            new Point(PinButton.ActualWidth / 2, PinButton.ActualHeight / 2), this);
+        var spot = PointToScreen(pick);
+        SetCursorPos((int)spot.X, (int)spot.Y);
+        Click();
+    }
+
     private void MoveCursor(double x, double y)
     {
         var point = ToScreen(x, y);
@@ -5879,8 +6012,16 @@ public partial class PlayWindow : Window
 
     private const int VK_LBUTTON = 0x01;
 
+    private const byte VK_SHIFT = 0x10;
+    private const byte VK_LEFT = 0x25;
+    private const byte VK_RIGHT = 0x27;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int key);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
 
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);

@@ -9,7 +9,7 @@
         ShowInTaskbar="False"
         Background="Transparent"
         Cursor="Arrow"
-        KeyDown="OnKeyDown"
+        PreviewKeyDown="OnKeyDown"
         MouseMove="OnMouseMove">
 
   <!--
@@ -65,7 +65,7 @@
 
         <!-- 片名 + 播放状态：盘内菜单期间收掉（那是壳的 UI，菜单自己有标题）。 -->
         <StackPanel x:Name="TopInfo" Orientation="Horizontal" HorizontalAlignment="Center"
-                    VerticalAlignment="Center" Margin="0,0,0,1">
+                    VerticalAlignment="Center" Margin="150,0,150,1">
           <TextBlock x:Name="TopTitle" VerticalAlignment="Center"
                      FontSize="14" FontWeight="SemiBold"
                      Foreground="#F2FFFFFF" TextTrimming="CharacterEllipsis" MaxWidth="560" />
@@ -76,12 +76,19 @@
           <!-- 缓存速度 / 静音：和片名一样，菜单期间收掉。 -->
           <StackPanel x:Name="TopStatus" Orientation="Horizontal" VerticalAlignment="Center">
             <TextBlock x:Name="SpeedText" FontSize="12" Foreground="#D9FFFFFF"
-                       VerticalAlignment="Center" Margin="0,0,12,0" />
+                       VerticalAlignment="Center" Margin="0,0,12,0"
+                       Visibility="Collapsed" />
             <TextBlock x:Name="TopMuteGlyph" Text="&#xE74F;" FontFamily="{StaticResource IconFont}"
                        FontSize="14" Foreground="#E6FFFFFF" VerticalAlignment="Center"
                        Margin="0,0,10,0" Visibility="Collapsed" />
           </StackPanel>
 
+          <!-- 窗口置顶：和 macOS 播放页的图钉一样，置顶后切到别的 App 也盖在上面 -->
+          <Button x:Name="PinButton" Style="{StaticResource PlayerCaptionButton}"
+                  Click="OnPinClick" ToolTip="窗口置顶" Margin="0,0,2,0">
+            <TextBlock x:Name="PinGlyph" Text="&#xE718;" FontFamily="{StaticResource IconFont}"
+                       FontSize="12" Foreground="#F2FFFFFF" />
+          </Button>
           <Button x:Name="MinimizeButton" Style="{StaticResource PlayerCaptionButton}"
                   Click="OnMinimizeClick" ToolTip="最小化">
             <TextBlock Text="&#xE921;" FontFamily="{StaticResource IconFont}" FontSize="12"

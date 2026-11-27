@@ -81,6 +81,17 @@ HTTP 状态码；登录请求被反代重定向（http → https）时还会追�
   位置仍交给 XAML 的 `CenterScreen`——只要尺寸不超过工作区，居中就不会算出
   负的顶边。回归：`--window-test` 会打印几组典型工作区的验算
   （`适配 1080p@150% 工作区=1280x693 → 窗口=1248x661 居中顶边=16 越界=否`）。
+- **顶栏状态与置顶**：右上角显示缓存 / 下载速度（mpv `cache-speed`，低于
+  0.05 MB/s 不显示，和 macOS 同一阈值），旁边是窗口置顶图钉：置顶时图钉换成
+  强调色，浮层和视频层两个窗口同时 `Topmost`，状态落 `settings.json` 的
+  `alwaysOnTop`，下次开播放窗还是置顶。片名左右各留 150，不让长片名压到窗口
+  按钮上（竖屏短剧 420 宽时原来会盖住图钉）。回归：`--play <id> --play-start 0
+  --play-shot <目录>` 看 `play.png`；置顶用 `--play <id> --play-pin --play-shot
+  <目录>`，日志应有 `pin test click1 … topmost=True surface=True`。
+- **键盘快进**：← / → 各 10 秒，按住 Shift 是 30 秒（和 macOS 一致）。事件用
+  `PreviewKeyDown` 挂在窗口上——以前用 `KeyDown`，点过进度条后焦点在 Slider 上，
+  左右键会被滑块自己吃掉。回归：`--play <id> --play-keys --play-shot <目录>`，
+  日志应有 `key test right … delta=10.x` / `key test shift-right … delta=30.x`。
 - **打开 / 切集遮罩**：`PlayWindow` 的 `OpeningCover` 一直是不透明黑，首帧判定看
   「播放位置真的推进」（`time-pos > 起播点 + 0.5`，片头跳过后从跳到的位置算），
   慢网络下 `time-pos` 停在续播点不会误收黑底；期间文案一直是「正在打开…」+ 转圈。
@@ -266,7 +277,9 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
   --play-start 0
 ```
 
-- `--play-start 0`：强制从头放，不接续播记录。
+- `--play-start 0`：强制从头放，不接续播记录（`--play-shot` 也认这个参数）。
+- `--play-keys` / `--play-pin`：真实键盘 / 鼠标事件验证左右键快进（含 Shift ±30）
+  和右上角图钉置顶，结果看 `player.log` 的 `key test` / `pin test` 行。
 - `mark:intro:<秒>` / `mark:outro:<秒>`：**开窗前**写进 `skip-markers.json`，
   这样起播才走得到片头跳过。
 - `--play-features` 的项：`aspect:<fit|fill|stretch|16:9|4:3>`、`sleep:<秒>`、
