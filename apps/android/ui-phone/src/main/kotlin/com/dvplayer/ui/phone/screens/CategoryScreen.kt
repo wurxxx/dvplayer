@@ -36,6 +36,7 @@ import com.dvplayer.design.DvGlyph
 import com.dvplayer.design.DvSpace
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.DvType
+import com.dvplayer.design.LocalDvWindow
 import com.dvplayer.design.TabReserve
 import com.dvplayer.design.clickableNoRipple
 import com.dvplayer.ui.phone.data.PhoneRepository
@@ -113,7 +114,7 @@ fun CategoryScreen(
 
     LazyVerticalGrid(
         // 照 macOS 的浏览页：标题 + 筛选 + 海报网格，没有大图 hero。
-        columns = GridCells.Fixed(3),
+        columns = GridCells.Fixed(LocalDvWindow.current.gridColumns()),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = DvSpace.Gutter,

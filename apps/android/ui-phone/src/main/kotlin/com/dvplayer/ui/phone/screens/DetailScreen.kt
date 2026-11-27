@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -64,6 +65,7 @@ import com.dvplayer.design.DvPalettes
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.LocalDvPalette
 import com.dvplayer.design.DvType
+import com.dvplayer.design.LocalDvWindow
 import com.dvplayer.design.TabReserve
 import com.dvplayer.design.clickableNoRipple
 import com.dvplayer.design.DvOnImage
@@ -176,7 +178,9 @@ private fun DetailBody(
         ) {
             // 背景铺满**整个内容高度**（不是一屏）：滚到哪都还是这张图的模糊版，
             // 不会滚出一片页面底色。清晰图只在上部，下面全是同源氛围色。
-            Box(modifier = Modifier.fillMaxWidth()) {
+            // 平板宽屏时内容常常比屏幕短，这里再兜一个「至少一屏」，
+            // 否则图只铺到内容底、剩下的窗口露黑底。
+            Box(modifier = Modifier.fillMaxWidth().heightIn(min = LocalDvWindow.current.height)) {
                 HeroBackdrop(
                     path = d?.backdropPath ?: d?.posterPath,
                     modifier = Modifier.matchParentSize(),
@@ -188,149 +192,177 @@ private fun DetailBody(
                     bottomFadeStart = 0.90f,
                 )
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    // 顶部固定留一段图（240dp），文字从这里往下排：
-                    // 标题位置在所有详情页都一致，不会因为简介长短忽上忽下。
-                    Box(
+                    val window = LocalDvWindow.current
+                    // 平板：左海报 + 右信息并排，标题不再孤零零地漂在大图上；
+                    // 手机（compact）保持原样：图 240dp，文字照旧往下排。
+                    val twoColumn = window.medium
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 20.dp, end = 20.dp, top = 240.dp, bottom = 26.dp),
+                            .padding(
+                                start = if (twoColumn) 32.dp else 0.dp,
+                                top = if (twoColumn) 88.dp else 0.dp,
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(if (twoColumn) 28.dp else 0.dp),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        if (d == null) {
-                            Text(
-                                error ?: "加载中…",
-                                style = DvType.Caption,
-                                color = DvOnImage.Secondary,
-                                modifier = Modifier.padding(vertical = 24.dp),
+                        if (twoColumn) {
+                            RemoteImage(
+                                path = d?.posterPath ?: d?.backdropPath,
+                                modifier = Modifier
+                                    .width(if (window.expanded) 250.dp else 200.dp)
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(14.dp)),
                             )
-                        } else {
-                            Column {
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(
+                                    start = if (twoColumn) 0.dp else 20.dp,
+                                    end = if (twoColumn) 32.dp else 20.dp,
+                                    top = if (twoColumn) 0.dp else 240.dp,
+                                    bottom = 26.dp,
+                                ),
+                        ) {
+                            // 标题位置在所有详情页都一致，不会因为简介长短忽上忽下。
+                            if (d == null) {
                                 Text(
-                                    cleanTitle(d.title),
-                                    fontSize = DvType.Display.fontSize,
-                                    lineHeight = 36.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = DvOnImage.Primary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
+                                    error ?: "加载中…",
+                                    style = DvType.Caption,
+                                    color = DvOnImage.Secondary,
+                                    modifier = Modifier.padding(vertical = 24.dp),
                                 )
-
-                                val meta = listOfNotNull(
-                                    d.releaseDate?.take(4),
-                                    runtimeLabel(d.runtimeSeconds),
-                                    d.status?.takeIf { it.isNotBlank() },
-                                    d.rating?.takeIf { it > 0 }?.let { "%.1f 分".format(it) },
-                                ).joinToString(" · ")
-                                if (meta.isNotBlank()) {
+                            } else {
+                                Column {
                                     Text(
-                                        meta,
-                                        fontSize = DvType.CardTitle.fontSize,
-                                        color = DvOnImage.Secondary,
-                                        modifier = Modifier.padding(top = 8.dp),
-                                    )
-                                }
-
-                                val chips = chipsOf(d)
-                                if (chips.isNotEmpty()) {
-                                    Row(
-                                        modifier = Modifier.padding(top = 9.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        chips.take(5).forEach { Chip(it) }
-                                    }
-                                }
-
-                                val overview = d.overview
-                                if (!overview.isNullOrBlank()) {
-                                    Text(
-                                        overview,
-                                        fontSize = DvType.CardTitle.fontSize,
-                                        lineHeight = 19.sp,
-                                        color = DvOnImage.Secondary,
+                                        cleanTitle(d.title),
+                                        fontSize = DvType.Display.fontSize,
+                                        lineHeight = 36.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = DvOnImage.Primary,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(top = 11.dp),
                                     )
-                                }
 
-                                // 播放：白色整条胶囊，位置不变；看过的带「第 N 集 01:53」。
-                                val playLabel = buildString {
-                                    append("播放")
-                                    resumeEpisode?.let { append(" 第 $it 集") }
-                                    if (resumeSeconds >= 5) {
-                                        append(" ${formatDuration(resumeSeconds)}")
-                                    }
-                                }
-                                PlayPill(
-                                    text = playLabel,
-                                    onClick = { onPlay(playTarget, itemId) },
-                                    modifier = Modifier
-                                        .align(Alignment.CenterHorizontally)
-                                        .padding(top = 16.dp),
-                                )
-
-                                // 其余操作合并成一行：每个都是圆形底 + 图标 + 小字，不再垫整条底色。
-                                // 只在有得选时才摆按钮：单音轨 / 单字幕 / 没配 Trakt 都不显示。
-                                val audios = mediaInfo?.audios.orEmpty()
-                                val subtitles = mediaInfo?.subtitles.orEmpty()
-                                val showAudio = audios.size > 1
-                                val showSubtitle = subtitles.size > 1
-                                val audioActive = audioChoice in audios.indices
-                                val subtitleActive = subtitleChoice in subtitles.indices
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    RoundAction(
-                                        glyph = if (favorite) DvGlyph.HeartFilled else DvGlyph.Heart,
-                                        label = if (favorite) "已收藏" else "收藏",
-                                        active = favorite,
-                                        onClick = {
-                                            val next = !favorite
-                                            favorite = next
-                                            scope.launch {
-                                                runCatching { repo.setFavorite(itemId, next) }.onFailure { err ->
-                                                    favorite = !next
-                                                    Toast.makeText(context, err.message ?: "收藏失败", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        },
-                                        modifier = Modifier,
-                                    )
-                                    RoundAction(
-                                        glyph = DvGlyph.CheckCircle,
-                                        label = if (watched) "已观看" else "标记已看",
-                                        active = watched,
-                                        onClick = {
-                                            val next = !watched
-                                            watched = next
-                                            scope.launch {
-                                                runCatching { repo.setWatched(itemId, next) }.onFailure { err ->
-                                                    watched = !next
-                                                    Toast.makeText(context, err.message ?: "操作失败", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        },
-                                        modifier = Modifier,
-                                    )
-                                    if (showAudio) {
-                                        RoundAction(
-                                            glyph = DvGlyph.Audio,
-                                            label = "音轨",
-                                            active = audioActive,
-                                            onClick = { pickingAudio = true },
-                                            modifier = Modifier,
+                                    val meta = listOfNotNull(
+                                        d.releaseDate?.take(4),
+                                        runtimeLabel(d.runtimeSeconds),
+                                        d.status?.takeIf { it.isNotBlank() },
+                                        d.rating?.takeIf { it > 0 }?.let { "%.1f 分".format(it) },
+                                    ).joinToString(" · ")
+                                    if (meta.isNotBlank()) {
+                                        Text(
+                                            meta,
+                                            fontSize = DvType.CardTitle.fontSize,
+                                            color = DvOnImage.Secondary,
+                                            modifier = Modifier.padding(top = 8.dp),
                                         )
                                     }
-                                    if (showSubtitle) {
+
+                                    val chips = chipsOf(d)
+                                    if (chips.isNotEmpty()) {
+                                        Row(
+                                            modifier = Modifier.padding(top = 9.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            chips.take(5).forEach { Chip(it) }
+                                        }
+                                    }
+
+                                    val overview = d.overview
+                                    if (!overview.isNullOrBlank()) {
+                                        Text(
+                                            overview,
+                                            fontSize = DvType.CardTitle.fontSize,
+                                            lineHeight = 19.sp,
+                                            color = DvOnImage.Secondary,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 11.dp),
+                                        )
+                                    }
+
+                                    // 播放：白色整条胶囊，位置不变；看过的带「第 N 集 01:53」。
+                                    val playLabel = buildString {
+                                        append("播放")
+                                        resumeEpisode?.let { append(" 第 $it 集") }
+                                        if (resumeSeconds >= 5) {
+                                            append(" ${formatDuration(resumeSeconds)}")
+                                        }
+                                    }
+                                    PlayPill(
+                                        text = playLabel,
+                                        onClick = { onPlay(playTarget, itemId) },
+                                        modifier = Modifier
+                                            .align(Alignment.CenterHorizontally)
+                                            .padding(top = 16.dp),
+                                    )
+
+                                    // 其余操作合并成一行：每个都是圆形底 + 图标 + 小字，不再垫整条底色。
+                                    // 只在有得选时才摆按钮：单音轨 / 单字幕 / 没配 Trakt 都不显示。
+                                    val audios = mediaInfo?.audios.orEmpty()
+                                    val subtitles = mediaInfo?.subtitles.orEmpty()
+                                    val showAudio = audios.size > 1
+                                    val showSubtitle = subtitles.size > 1
+                                    val audioActive = audioChoice in audios.indices
+                                    val subtitleActive = subtitleChoice in subtitles.indices
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                                        verticalAlignment = Alignment.Top,
+                                    ) {
                                         RoundAction(
-                                            glyph = DvGlyph.Subtitle,
-                                            label = if (subtitleChoice == TrackPrefs.SUBTITLE_OFF) "字幕关" else "字幕",
-                                            active = subtitleActive,
-                                            onClick = { pickingSubtitle = true },
+                                            glyph = if (favorite) DvGlyph.HeartFilled else DvGlyph.Heart,
+                                            label = if (favorite) "已收藏" else "收藏",
+                                            active = favorite,
+                                            onClick = {
+                                                val next = !favorite
+                                                favorite = next
+                                                scope.launch {
+                                                    runCatching { repo.setFavorite(itemId, next) }.onFailure { err ->
+                                                        favorite = !next
+                                                        Toast.makeText(context, err.message ?: "收藏失败", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            },
                                             modifier = Modifier,
                                         )
+                                        RoundAction(
+                                            glyph = DvGlyph.CheckCircle,
+                                            label = if (watched) "已观看" else "标记已看",
+                                            active = watched,
+                                            onClick = {
+                                                val next = !watched
+                                                watched = next
+                                                scope.launch {
+                                                    runCatching { repo.setWatched(itemId, next) }.onFailure { err ->
+                                                        watched = !next
+                                                        Toast.makeText(context, err.message ?: "操作失败", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier,
+                                        )
+                                        if (showAudio) {
+                                            RoundAction(
+                                                glyph = DvGlyph.Audio,
+                                                label = "音轨",
+                                                active = audioActive,
+                                                onClick = { pickingAudio = true },
+                                                modifier = Modifier,
+                                            )
+                                        }
+                                        if (showSubtitle) {
+                                            RoundAction(
+                                                glyph = DvGlyph.Subtitle,
+                                                label = if (subtitleChoice == TrackPrefs.SUBTITLE_OFF) "字幕关" else "字幕",
+                                                active = subtitleActive,
+                                                onClick = { pickingSubtitle = true },
+                                                modifier = Modifier,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -338,7 +370,14 @@ private fun DetailBody(
                     }
 
                     // 图下方：媒体信息和链接。它们也压在图的下半部，滚过图之后才落在底色上。
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                    // 大屏收在 1040dp 里居中：否则三条轨道卡摊在 1280dp 上，中间全是洞。
+                    Column(
+                        modifier = Modifier
+                            .widthIn(max = if (window.expanded) 1040.dp else Dp.Unspecified)
+                            .fillMaxWidth()
+                            .align(Alignment.CenterHorizontally)
+                            .padding(horizontal = if (window.medium) 32.dp else 20.dp),
+                    ) {
                         if (d != null) {
                             if (episodes.isNotEmpty()) {
                                 SectionTitle("选集", trailing = "${episodes.size} 集")

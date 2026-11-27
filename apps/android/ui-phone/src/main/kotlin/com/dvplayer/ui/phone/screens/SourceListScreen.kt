@@ -33,6 +33,7 @@ import com.dvplayer.core.MediaLibrary
 import com.dvplayer.core.SourceConfig
 import com.dvplayer.core.SourceConnection
 import com.dvplayer.design.DvGlyph
+import com.dvplayer.design.DvPageInset
 import com.dvplayer.design.DvSpace
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.DvType
@@ -63,7 +64,7 @@ fun SourceListScreen(
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         item {
-            Column(modifier = Modifier.padding(start = DvSpace.Gutter, end = DvSpace.Gutter, top = 10.dp, bottom = 3.dp)) {
+            Column(modifier = Modifier.padding(start = DvPageInset, end = DvPageInset, top = 10.dp, bottom = 3.dp)) {
                 Text("媒体库", style = DvType.PageTitle, color = p.text)
                 Text(
                     text = buildString {
@@ -97,7 +98,7 @@ fun SourceListScreen(
                 onClick = {
                     if (conn?.ok == true) onOpenSource(config.id) else onReconnect(config.id)
                 },
-                modifier = Modifier.padding(horizontal = DvSpace.Gutter),
+                modifier = Modifier.padding(horizontal = DvPageInset),
             )
         }
 
@@ -105,7 +106,7 @@ fun SourceListScreen(
             if (repo.configs.isNotEmpty()) {
                 Row(
                     modifier = Modifier
-                        .padding(horizontal = DvSpace.Gutter)
+                        .padding(horizontal = DvPageInset)
                         .padding(top = 2.dp)
                         .fillMaxWidth()
                         .height(40.dp)

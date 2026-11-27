@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dvplayer.design.DvGlyph
+import com.dvplayer.design.DvPageInset
 import com.dvplayer.design.DvSpace
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.DvType
@@ -58,8 +59,8 @@ fun SettingsScreen(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            start = DvSpace.Gutter,
-            end = DvSpace.Gutter,
+            start = DvPageInset,
+            end = DvPageInset,
             bottom = TabReserve,
         ),
     ) {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -37,6 +38,7 @@ import com.dvplayer.design.DvGlyph
 import com.dvplayer.design.DvSpace
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.DvType
+import com.dvplayer.design.LocalDvWindow
 import com.dvplayer.design.TabReserve
 import com.dvplayer.design.clickableNoRipple
 import com.dvplayer.ui.phone.data.PhoneRepository
@@ -82,7 +84,7 @@ fun SearchScreen(
     }
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
+        columns = GridCells.Fixed(LocalDvWindow.current.gridColumns()),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = DvSpace.Gutter,
@@ -98,6 +100,8 @@ fun SearchScreen(
                 Row(
                     modifier = Modifier
                         .padding(top = 11.dp)
+                        // 平板上一整条 600dp 的输入框太散，收到 560dp。
+                        .widthIn(max = 560.dp)
                         .fillMaxWidth()
                         .height(36.dp)
                         .clip(RoundedCornerShape(11.dp))

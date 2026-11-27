@@ -42,6 +42,23 @@ HDR10+ SEI 注入见
 [`scripts/android/gen-hdr10plus-sample.sh`](../../scripts/android/gen-hdr10plus-sample.sh)。
 正式播放页还没接，属于 M2-B / 后续。
 
+## 平板 / 大屏
+
+断点在 `design/DvWindow.kt`，量的是**窗口宽度**（`DvScaffold` 里的
+`BoxWithConstraints.maxWidth`，再经 `LocalDvWindow` 往下传），不是物理屏幕：
+分屏、折叠屏展开、桌面窗口拖动都会重新量。
+
+| 窗口宽度 | 布局 |
+| --- | --- |
+| < 600dp | 手机：底部浮动胶囊，详情单列（顶部 240dp 图 + 文字往下排） |
+| 600–839dp | 平板竖屏：底部胶囊换成左侧竖排，网格 4 列，详情「左海报 + 右信息」 |
+| ≥ 840dp | 平板横屏：网格 5 列，详情海报 250dp，媒体信息收在 1040dp 内 |
+| ≥ 1200dp | 网格 6 列 |
+
+列表类页面（设置 / 媒体库）在宽屏收进 760dp 居中；`TabReserve` 在宽屏缩成
+24dp（tab 跑到左边去了）。详情页的第一屏至少铺满一屏高度，内容比屏幕短时
+模糊背景不会中途露黑底。播放页是独立的 `PlaybackActivity`，视频铺满，不受影响。
+
 ## 模块
 
 已经建好的八个模块（其余按 A3+ 补）：

@@ -34,6 +34,7 @@ import com.dvplayer.core.PlayRecord
 import com.dvplayer.design.DvSpace
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.DvType
+import com.dvplayer.design.LocalDvWindow
 import com.dvplayer.design.TabReserve
 import com.dvplayer.ui.phone.data.PhoneRepository
 import com.dvplayer.ui.phone.ui.PosterCard
@@ -64,7 +65,7 @@ fun WatchScreen(
     }
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
+        columns = GridCells.Fixed(LocalDvWindow.current.gridColumns()),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = DvSpace.Gutter,

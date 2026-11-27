@@ -48,6 +48,7 @@ import com.dvplayer.design.DvGlyph
 import com.dvplayer.design.DvSpace
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.DvType
+import com.dvplayer.design.LocalDvWindow
 import com.dvplayer.design.TabReserve
 import com.dvplayer.design.clickableNoRipple
 import com.dvplayer.design.DvOnImage
@@ -120,10 +121,15 @@ fun SourceHomeScreen(
         // 顶部大图：和详情页同一套「上半清晰、往下渐模糊」，标题压在图的下沿。
         item {
             val hero = heroes.getOrNull(heroIndex) ?: heroes.firstOrNull()
+            // 手机上沿用设计定稿的 392dp；平板按宽度折算，避免 720dp 宽时
+            // 一张 16:9 图被拉成一条、或者 4:3 屏上 hero 占掉半屏。
+            val window = LocalDvWindow.current
+            val heroHeight =
+                if (window.compact) 392.dp else (window.width * 0.58f).coerceIn(340.dp, 520.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(392.dp)
+                    .height(heroHeight)
                     // 整块都能点进详情：之前只有底部那几行字挂了 clickable，
                     // 点图片中间没反应。
                     .then(
