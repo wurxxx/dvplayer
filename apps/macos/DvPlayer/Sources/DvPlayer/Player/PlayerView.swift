@@ -14,6 +14,39 @@ struct PlayerView: View {
     /// 浮层高度：右侧面板高度跟着它走，矮窗口里别被上下切掉。
     @State private var viewHeight: CGFloat = 0
 
+    /// 盘内菜单的鼠标坐标：mpv 的 `discnav` 要 0..1 相对**视频画面**，
+    /// 不是整个窗口。窗口比例和视频不一样时有黑边，直接除窗口宽高会点偏。
+    private func discPoint(_ point: CGPoint) -> (Double, Double) {
+        let w = max(1, viewWidth)
+        let h = max(1, viewHeight)
+        let aspect: CGFloat
+        switch session.aspect {
+            case .fill, .stretch:
+                // panscan / 拉伸是铺满窗口，没有黑边。
+                aspect = w / h
+            case .ratio16x9:
+                aspect = 16.0 / 9.0
+            case .ratio4x3:
+                aspect = 4.0 / 3.0
+            default:
+                let video = CGFloat(session.videoAspect)
+                aspect = video > 0.05 ? video : 16.0 / 9.0
+        }
+
+        var shownW = w
+        var shownH = w / aspect
+        if shownH > h {
+            shownH = h
+            shownW = h * aspect
+        }
+
+        let ox = (w - shownW) / 2
+        let oy = (h - shownH) / 2
+        let x = min(1, max(0, (point.x - ox) / shownW))
+        let y = min(1, max(0, (point.y - oy) / shownH))
+        return (Double(x), Double(y))
+    }
+
     var body: some View {
         ZStack {
             // 点画面：单击暂停、双击全屏；鼠标一动把控制条叫回来。
@@ -22,6 +55,10 @@ struct PlayerView: View {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) {
+                    // 盘内菜单里双击就是连点两次按钮，别顺带切全屏。
+                    if session.discMenuActive {
+                        return
+                    }
                     if session.loading || session.error != nil {
                         actions.zoom()
                     } else {
@@ -32,9 +69,8 @@ struct PlayerView: View {
                     // 盘内菜单在显示：点击归菜单按钮（discnav mouse-click），
                     // 不是「暂停」。菜单收起后才恢复单击暂停。
                     if session.discMenuActive {
-                        session.clickDiscMenu(
-                            x: location.x / max(1, viewWidth),
-                            y: location.y / max(1, viewHeight))
+                        let p = discPoint(location)
+                        session.clickDiscMenu(x: p.0, y: p.1)
                         return
                     }
                     if !session.loading && session.error == nil {
@@ -45,9 +81,8 @@ struct PlayerView: View {
                     if case .active(let point) = phase {
                         if session.discMenuActive {
                             // 菜单按钮高亮跟着鼠标走，别再叫壳的控制条。
-                            session.moveDiscMenuMouse(
-                                x: point.x / max(1, viewWidth),
-                                y: point.y / max(1, viewHeight))
+                            let p = discPoint(point)
+                            session.moveDiscMenuMouse(x: p.0, y: p.1)
                         } else {
                             session.showChrome()
                         }
@@ -55,17 +90,21 @@ struct PlayerView: View {
                 }
 
             // 无标题栏，顶栏那块按住拖窗口；打开 / 打开失败时双击同样是最大化。
-            VStack(spacing: 0) {
-                PlayerDragArea(action: actions.beginDrag,
-                               onDoubleClick: {
-                                   if session.loading || session.error != nil {
-                                       actions.zoom()
-                                   } else {
-                                       actions.toggleFullscreen()
-                                   }
-                               })
-                    .frame(height: 30)
-                Spacer(minLength: 0)
+            // 盘内菜单期间整块画面都归菜单：不做拖拽、不拦点击，菜单按钮顶上去了
+            // 也能点到（Windows 那边同样处理）。
+            if !session.discMenuActive {
+                VStack(spacing: 0) {
+                    PlayerDragArea(action: actions.beginDrag,
+                                   onDoubleClick: {
+                                       if session.loading || session.error != nil {
+                                           actions.zoom()
+                                       } else {
+                                           actions.toggleFullscreen()
+                                       }
+                                   })
+                        .frame(height: 30)
+                    Spacer(minLength: 0)
+                }
             }
 
             // 打开 / 切集 / 打开失败：浮层是透明的，视频还没出画时下面就是桌面。

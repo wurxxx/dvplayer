@@ -98,8 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let env = ProcessInfo.processInfo.environment
                 let wanted = Int(env["DVPLAYER_DISC_TITLE"] ?? "")
                 let discStart = Double(env["DVPLAYER_DISC_START"] ?? "")
+                // 自检要进菜单就强制 `--disc-menu`；正常播放由盘的类型决定
+                // （HDMV 进菜单，BD-J 直连正片，见 `DiscUI.open`）。
+                let menuKeys = env["DVPLAYER_DISC_MENU_KEYS"] ?? ""
                 DiscUI.open(path: iso, autoTitle: wanted,
-                            start: discStart.map { max(0, $0) })
+                            start: discStart.map { max(0, $0) },
+                            useMenu: !menuKeys.isEmpty)
 
                 // 挂载 + 读 mpls 要一两秒；等播放窗真的出来。
                 var waited = 0

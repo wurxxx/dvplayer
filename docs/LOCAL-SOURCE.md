@@ -52,8 +52,10 @@
   Windows 用 `mpv.com` 读 title 后 `bd://mpls/<n>`（`BLU-RAY.md` §5.1），
   macOS `hdiutil` 挂载 + `mpls` → EDL（§5.2）。
   打开先进盘里自带的菜单（`--disc-menu` + `discnav`，`BLU-RAY.md` §5.4），
-  选完按钮 mpv 自己切正片；起播后其它标题在播放器右侧「标题」面板切，
-  播完直接关窗。
+  选完按钮 mpv 自己切正片；BD-J 菜单盘（`BDMV/JAR/*.jar`）跑不了菜单，
+  直接播最长正片。起播后其它标题在播放器右侧「标题」面板切，播完直接关窗。
+  `.iso` 里是 **DVD-Video**（`VIDEO_TS`）时按 DVD 处理：Windows 进 DVD
+  菜单，macOS 按 VOB 顺序连播（§5.5）。
   续播点仍按这一集的条目 id 回写。
 
 ### 同目录外挂字幕

@@ -304,6 +304,14 @@ public partial class MainWindow : FluentWindow
         }
 
         // --disc-menu <iso> --disc-shot <目录>：进盘内菜单，截菜单画面并试按键。
+        // `--disc-menu-trace`：把 mpv 的 stream 日志提到 trace，libbluray 的
+        // GC / IG 鼠标命中细节会进 mpv 的 log-file，查「菜单点不动」用。
+        // 无值开关：`ArgumentAfter` 会把下一个 `--xxx` 当成没有，所以直接查。
+        if (Environment.GetCommandLineArgs().Contains("--disc-menu-trace"))
+        {
+            DvPlayer.Player.LibMpvProcess.TraceLibbluray = true;
+        }
+
         if (ArgumentAfter("--disc-menu") is { Length: > 0 } discMenuIso &&
             ArgumentAfter("--disc-shot") is { Length: > 0 } discMenuDir)
         {
@@ -653,15 +661,46 @@ public partial class MainWindow : FluentWindow
         var (probe, error) = await BluRayDisc.ProbeAsync(isoPath);
         Trace.Write($"disc menu iso={Path.GetFileName(isoPath)} " +
                     $"titles={probe?.Titles.Count ?? 0} err={error ?? "-"}");
+
+        PlayWindow player;
         if (probe is null)
         {
-            Application.Current.Shutdown();
-            return;
+            // DVD 镜像：mpv 的 dvdnav 进盘自己的 DVD 菜单。
+            if (!await DvdDisc.ProbeAsync(isoPath))
+            {
+                Application.Current.Shutdown();
+                return;
+            }
+
+            Trace.Write($"disc menu dvd iso={Path.GetFileName(isoPath)}");
+            player = PlayWindow.OpenDvd(this, isoPath);
+        }
+        else
+        {
+            player = PlayWindow.OpenDiscMenu(this, isoPath, probe);
         }
 
-        var player = PlayWindow.OpenDiscMenu(this, isoPath, probe);
-        // 菜单要等 libbluray 起 VM、IG overlay 出来。
-        await Task.Delay(8000);
+        // 自检窗口别落到屏幕外：计划任务起的窗口有时在任务栏下面，
+        // 注入的鼠标（真实点击）就点不到。
+        var work = SystemParameters.WorkArea;
+        if (player.Left < work.Left || player.Top < work.Top ||
+            player.Left + player.Width > work.Right ||
+            player.Top + player.Height > work.Bottom)
+        {
+            player.Left = work.Left + 40;
+            player.Top = work.Top + 40;
+        }
+
+        // 菜单要等 libbluray / libdvdnav 起菜单、overlay 出来。
+        // DVD 的「使用须知」通常要先放几十秒，`--disc-menu-delay` 可以等更久。
+        var menuDelay = 8.0;
+        if (double.TryParse(ArgumentAfter("--disc-menu-delay"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsedDelay))
+        {
+            menuDelay = Math.Clamp(parsedDelay, 0, 300);
+        }
+        await Task.Delay(TimeSpan.FromSeconds(menuDelay));
         Trace.Write("disc menu " + player.DescribeDiscMenu());
         // 画面是 mpv 的子窗口，WPF 截不到，让 mpv 自己截。
         player.ScreenshotForShot(Path.Combine(dir, "disc-menu.png"));
@@ -671,6 +710,147 @@ public partial class MainWindow : FluentWindow
         Trace.Write("disc menu after-mousemove " + player.MouseMoveForShot());
         player.ScreenshotForShot(Path.Combine(dir, "disc-menu-mousemove.png"));
         await Task.Delay(1200);
+
+        // 自检：看菜单按钮那个点上是谁在接鼠标（壳的控件应该已经让开）。
+        var hitArg = ArgumentAfter("--disc-menu-hittest");
+        if (!string.IsNullOrEmpty(hitArg))
+        {
+            foreach (var point in hitArg.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = point.Split(',');
+                if (parts.Length == 2 &&
+                    double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var hx) &&
+                    double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var hy))
+                {
+                    Trace.Write($"disc hittest {hx:0.###},{hy:0.###} " +
+                                player.HitTestForShot(hx, hy));
+                }
+            }
+        }
+
+        // `--disc-menu-realclick=0.49,0.88`：按视频画面归一化坐标注入真实左键，
+        // 验证 DiscPos 的黑边换算 + 点击转发。点完看截图的菜单有没有变。
+        // `--disc-menu-realclick2=...` 是第二次点击（二级菜单里的按钮）。
+        var clickIndex = 0;
+        foreach (var arg in new[] { "--disc-menu-realclick", "--disc-menu-realclick2" })
+        {
+            var realClick = ArgumentAfter(arg);
+            if (string.IsNullOrEmpty(realClick))
+            {
+                continue;
+            }
+
+            clickIndex++;
+            var parts = realClick.Split(',');
+            if (parts.Length == 2 &&
+                double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var cx) &&
+                double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var cy))
+            {
+                player.RealClickForShot(cx, cy);
+                await Task.Delay(2500);
+                Trace.Write($"disc menu after-realclick{clickIndex} " +
+                            player.DescribeDiscMenu());
+                player.ScreenshotForShot(Path.Combine(dir, $"disc-menu-click{clickIndex}.png"));
+                await Task.Delay(1200);
+            }
+        }
+
+            // 自检：先喂 WPF 鼠标位置再抛真实按下 / 抬起，走完整的用户点击路径。
+            var synthReal = ArgumentAfter("--disc-menu-synth-real");
+            if (!string.IsNullOrEmpty(synthReal))
+            {
+                var parts = synthReal.Split(',');
+                if (parts.Length == 2 &&
+                    double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var rx) &&
+                    double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var ry))
+                {
+                    await player.SynthRealClickForShot(rx, ry);
+                    await Task.Delay(1800);
+                    Trace.Write("disc menu synth-real-after " + player.DescribeDiscMenu());
+                    player.ScreenshotForShot(Path.Combine(dir, "disc-menu-synth-real.png"));
+                    await Task.Delay(1200);
+                }
+            }
+
+        // 自检：按顺序走多次点击，把整条菜单路径一次走完。
+        // `--disc-menu-click-mode=post` 改走真实窗口消息（命中测试 / 独立窗口
+        // 抢鼠标都按 Windows 规则来），默认是把事件直接抛给 Root。
+        var clickSeq = ArgumentAfter("--disc-menu-clicks");
+        var clickMode = ArgumentAfter("--disc-menu-click-mode") ?? "";
+        var postClicks = clickMode == "post";
+        // discnav：跳过 WPF，直接按画面归一化坐标把 hover + click 交给盘。
+        // 自检会话里鼠标位置受真实光标影响，只有这条路径坐标是确定的。
+        var discClicks = clickMode == "discnav";
+        if (!string.IsNullOrEmpty(clickSeq))
+        {
+            var index = 0;
+            foreach (var item in clickSeq.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = item.Split(',');
+                if (parts.Length != 2 ||
+                    !double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var sx0) ||
+                    !double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var sy0))
+                {
+                    continue;
+                }
+
+                if (discClicks)
+                {
+                    player.DiscMouseForShot("mouse-move", sx0, sy0);
+                    await Task.Delay(400);
+                    player.DiscMouseForShot("mouse-click", sx0, sy0);
+                }
+                else if (postClicks)
+                {
+                    await player.PostClickForShot(sx0, sy0);
+                }
+                else
+                {
+                    await player.SynthRealClickForShot(sx0, sy0);
+                }
+
+                await Task.Delay(2000);
+                Trace.Write($"disc menu seq{index} {sx0:0.###},{sy0:0.###} " +
+                            player.DescribeDiscMenu());
+                player.ScreenshotForShot(Path.Combine(dir, $"disc-menu-seq{index}.png"));
+                await Task.Delay(900);
+                index++;
+            }
+        }
+
+        // 自检：依次悬停到几个位置，看按钮高亮跟着走到哪（确认 IG 按钮的实际位置）。
+        var hoverSeq = ArgumentAfter("--disc-menu-hovers");
+        if (!string.IsNullOrEmpty(hoverSeq))
+        {
+            var index = 0;
+            foreach (var item in hoverSeq.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = item.Split(',');
+                if (parts.Length != 2 ||
+                    !double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var hx0) ||
+                    !double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var hy0))
+                {
+                    continue;
+                }
+
+                player.DiscMouseForShot("mouse-move", hx0, hy0);
+                await Task.Delay(1500);
+                Trace.Write($"disc menu hover{index} {hx0:0.###},{hy0:0.###}");
+                player.ScreenshotForShot(Path.Combine(dir, $"disc-menu-hover{index}.png"));
+                await Task.Delay(700);
+                index++;
+            }
+        }
 
         // 按方向键下移，看按钮高亮是否跟着变；再回车看是否切到正片。
         player.DiscNavForShot("down");
@@ -703,8 +883,110 @@ public partial class MainWindow : FluentWindow
                 }
             }
 
+            // 自检：直接给 discnav 发视频画面归一化坐标的悬停 / 点击，
+            // 绕开窗口堆叠和 WPF 事件，单独验证按钮命中区域。
+            foreach (var (arg, kind, shotName) in new[]
+                     {
+                         ("--disc-menu-hover-after", "mouse-move", "disc-menu-after-hover.png"),
+                         ("--disc-menu-click-after", "mouse-click", "disc-menu-after-click.png"),
+                     })
+            {
+                var value = ArgumentAfter(arg);
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                var parts = value.Split(',');
+                if (parts.Length == 2 &&
+                    double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var nx) &&
+                    double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var ny))
+                {
+                    player.DiscMouseForShot(kind, nx, ny);
+                    await Task.Delay(1800);
+                    Trace.Write($"disc menu {kind}-after {nx:0.###},{ny:0.###} " +
+                                player.DescribeDiscMenu());
+                    player.ScreenshotForShot(Path.Combine(dir, shotName));
+                    await Task.Delay(1200);
+                }
+            }
+
+            // 自检：改窗口尺寸，验证画面比例和窗口不一致（上下黑边）时的换算。
+            var winSizeArg = ArgumentAfter("--disc-menu-winsize");
+            if (!string.IsNullOrEmpty(winSizeArg))
+            {
+                var wh = winSizeArg.Split('x');
+                if (wh.Length == 2 &&
+                    double.TryParse(wh[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var ww) &&
+                    double.TryParse(wh[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var whh))
+                {
+                    player.ResizeForShot(ww, whh);
+                    await Task.Delay(800);
+                }
+            }
+
+            // 自检：合成一次 WPF 左键按下 / 抬起，验证「窗口坐标 → DiscPos → discnav」。
+            var synth = ArgumentAfter("--disc-menu-synth");
+            if (!string.IsNullOrEmpty(synth))
+            {
+                var parts = synth.Split(',');
+                if (parts.Length == 2 &&
+                    double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var sx) &&
+                    double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var sy))
+                {
+                    player.SynthClickWinForShot(sx, sy);
+                    await Task.Delay(1800);
+                    Trace.Write("disc menu synth-after " + player.DescribeDiscMenu());
+                    player.ScreenshotForShot(Path.Combine(dir, "disc-menu-synth.png"));
+                    await Task.Delay(1200);
+                }
+            }
+
             // 菜单收起后 mpv 已切到正片：等绑定把条目 id 换成正片标题。
-            await Task.Delay(6000);
+            await Task.Delay(9000);
+
+            // 自检：控制条显示时按钮要能接鼠标，自动隐藏后不能再接
+            // （否则点画面底部会命中看不见的音轨 / 字幕按钮）。
+            var hitAfter = ArgumentAfter("--disc-menu-hittest-after");
+            if (!string.IsNullOrEmpty(hitAfter))
+            {
+                player.ShowChromeForShot();
+                await Task.Delay(600);
+                foreach (var point in hitAfter.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var parts = point.Split(',');
+                    if (parts.Length == 2 &&
+                        double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var sx2) &&
+                        double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var sy2))
+                    {
+                        Trace.Write($"disc hittest-shown {sx2:0.###},{sy2:0.###} " +
+                                    player.HitTestForShot(sx2, sy2));
+                    }
+                }
+
+                await Task.Delay(6000);
+                foreach (var point in hitAfter.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var parts = point.Split(',');
+                    if (parts.Length == 2 &&
+                        double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var ax) &&
+                        double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var ay))
+                    {
+                        Trace.Write($"disc hittest-after {ax:0.###},{ay:0.###} " +
+                                    player.HitTestForShot(ax, ay));
+                    }
+                }
+            }
             Trace.Write("disc menu final " + player.DescribeDiscMenu());
             player.ScreenshotForShot(Path.Combine(dir, "disc-menu-final.png"));
             await Task.Delay(1500);
