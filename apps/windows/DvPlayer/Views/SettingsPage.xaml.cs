@@ -151,6 +151,9 @@ public partial class SettingsPage : Page
             case "extras":
                 ExtrasSegment.IsChecked = true;
                 break;
+            case "trakt":
+                TraktSegment.IsChecked = true;
+                break;
             case "about":
                 AboutSegment.IsChecked = true;
                 break;

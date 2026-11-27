@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- 本机凭据：scripts\windows\sync-secrets.ps1 把 trakt.env / danmaku.env
+       生成到 %USERPROFILE%\.config\dvplayer\windows.props，放在仓库外面，
+       本地 dotnet build / dotnet publish 也带上和发布包一样的凭据。
+       CI 走 -p:... 传参，属性名一致；没有这个文件时什么都不做。 -->
+  <Import Project="$(USERPROFILE)\.config\dvplayer\windows.props"
+          Condition="Exists('$(USERPROFILE)\.config\dvplayer\windows.props')" />
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
