@@ -66,8 +66,18 @@ chmod 600 ~/.config/dvplayer/trakt.env
 变成程序集元数据（`DvPlayer.csproj` 里的 `AssemblyAttribute`），运行时由
 `Services/DanmakuCredential.cs`、`Services/TraktCredential.cs` 反射读出。
 
-- 普通 `dotnet build` 没有这些属性：弹幕关闭；Trakt 设置页会显示 Client ID /
-  Secret 输入框，让开发者填自己的应用。想在本机像正式包一样直接用，打包时带上：
+- 本机开发构建也想和正式包一样（设置页不出现 Client ID / Secret 输入框），先跑一次：
+
+  ```powershell
+  .\scripts\windows\sync-secrets.ps1
+  ```
+
+  它把 `trakt.env` / `danmaku.env`（或 `DVPLAYER_*` 环境变量）生成到
+  `%USERPROFILE%\.config\dvplayer\windows.props`，`DvPlayer.csproj` 自动导入，
+  之后普通 `dotnet build` / `dotnet publish` 都带凭据。文件在仓库外面，不会被提交；
+  改了 env 文件重跑一次即可（没有凭据时会删掉旧 props，避免带着过期值）。
+
+- 也可以只在某一次打包时手动传参：
 
   ```powershell
   dotnet publish -c Release -p:TraktClientId=... -p:TraktClientSecret=...
