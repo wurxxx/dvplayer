@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dvplayer.design.DvColors
+import com.dvplayer.design.DvType
 
 enum class PlayerPanel { None, Audio, Subtitle, Episodes, Info }
 
@@ -51,6 +52,8 @@ private val accent = DvColors.Accent
 fun PlayerBottomSheet(
     panel: PlayerPanel,
     model: PlayerUiModel,
+    /** 横屏：选集卡片给大一号。 */
+    wide: Boolean = false,
     onDismiss: () -> Unit,
     onPickAudio: (Int) -> Unit,
     onPickSubtitle: (Int) -> Unit,
@@ -73,7 +76,10 @@ fun PlayerBottomSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 420.dp)
-                .background(card, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                .background(
+                    if (panel == PlayerPanel.Episodes) Color(0xF2101014) else card,
+                    RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+                )
                 .navigationBarsPadding()
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -95,14 +101,22 @@ fun PlayerBottomSheet(
                         else -> "选集"
                     },
                     color = text,
-                    fontSize = 14.sp,
+                    fontSize = DvType.Body.fontSize,
                     fontWeight = FontWeight.SemiBold,
                 )
+                if (panel == PlayerPanel.Episodes) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "共 ${model.episodes.size} 集",
+                        color = muted,
+                        fontSize = DvType.Micro.fontSize,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
                     text = "关闭",
                     color = muted,
-                    fontSize = 12.sp,
+                    fontSize = DvType.Caption.fontSize,
                     modifier = Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -114,7 +128,20 @@ fun PlayerBottomSheet(
             when (panel) {
                 PlayerPanel.Audio -> TrackList(model.audios, onPickAudio)
                 PlayerPanel.Subtitle -> TrackList(model.subtitles, onPickSubtitle)
-                PlayerPanel.Episodes -> EpisodeList(model.episodes, onPickEpisode)
+                PlayerPanel.Episodes -> if (model.episodes.isEmpty()) {
+                    Text(
+                        text = "这部片没有分集",
+                        color = muted,
+                        fontSize = DvType.Caption.fontSize,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                } else {
+                    EpisodeStrip(
+                        episodes = model.episodes,
+                        onPickEpisode = onPickEpisode,
+                        cardWidth = if (wide) 168.dp else 132.dp,
+                    )
+                }
                 else -> Unit
             }
             Spacer(Modifier.height(12.dp))
@@ -143,45 +170,12 @@ private fun TrackList(tracks: List<PlayerTrack>, onPick: (Int) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(track.title, color = text, fontSize = 13.sp)
-                    Text(track.detail, color = muted, fontSize = 11.sp)
+                    Text(track.title, color = text, fontSize = DvType.CardTitle.fontSize)
+                    Text(track.detail, color = muted, fontSize = DvType.Micro.fontSize)
                 }
                 if (track.selected) {
                     DvIcon(DvIcon.Check, tint = accent, sizeDp = 16)
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EpisodeList(episodes: List<PlayerEpisode>, onPick: (Int) -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 340.dp)
-            .verticalScroll(rememberScrollState()),
-    ) {
-        episodes.forEachIndexed { index, episode ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { onPick(index) },
-                    )
-                    .padding(horizontal = 16.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = episode.title,
-                    color = if (episode.current) accent else text,
-                    fontSize = 13.sp,
-                    fontWeight = if (episode.current) FontWeight.SemiBold else FontWeight.Normal,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(episode.duration, color = muted, fontSize = 11.sp)
             }
         }
     }
@@ -198,6 +192,10 @@ fun PlayerSettingsMenu(
     onRatio: () -> Unit,
     onSleep: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 当前画面比例，显示在菜单里。 */
+    ratioLabel: String = "适应",
+    /** 定时关闭剩余秒数；0 表示关。 */
+    sleepLeftSeconds: Int = 0,
 ) {
     Column(
         modifier = modifier
@@ -212,9 +210,20 @@ fun PlayerSettingsMenu(
         )
         HorizontalDivider()
         MenuRow("媒体信息", null, onInfo)
-        MenuRow("画面比例", "适应", onRatio)
-        MenuRow("选集", if (model.episodes.isEmpty()) null else "${model.episodes.size} 集", onEpisodes)
-        MenuRow("定时关闭", "关", onSleep)
+        MenuRow("画面比例", ratioLabel, onRatio)
+        // 电影没有分集，不摆这一项（和底部的选集按钮一致）。
+        if (model.episodes.isNotEmpty()) {
+            MenuRow("选集", "${model.episodes.size} 集", onEpisodes)
+        }
+        MenuRow(
+            "定时关闭",
+            when {
+                sleepLeftSeconds <= 0 -> "关"
+                sleepLeftSeconds >= 60 -> "${(sleepLeftSeconds + 59) / 60} 分钟"
+                else -> "${sleepLeftSeconds} 秒"
+            },
+            onSleep,
+        )
     }
 }
 
@@ -231,10 +240,10 @@ private fun MenuRow(label: String, value: String?, onClick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = text, fontSize = 12.sp)
+        Text(label, color = text, fontSize = DvType.Caption.fontSize)
         Spacer(Modifier.weight(1f))
         if (value != null) {
-            Text(value, color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(value, color = muted, fontSize = DvType.Micro.fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -277,7 +286,7 @@ fun PlayerInfoPanel(
             Text(
                 text = "媒体信息",
                 color = text,
-                fontSize = 14.sp,
+                fontSize = DvType.Body.fontSize,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
@@ -333,7 +342,7 @@ fun PlayerInfoPanel(
                 Text(
                     text = warning,
                     color = accent,
-                    fontSize = 11.sp,
+                    fontSize = DvType.Micro.fontSize,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp, bottom = 12.dp)
@@ -350,7 +359,7 @@ fun PlayerInfoPanel(
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-        Text(title, color = muted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(title, color = muted, fontSize = DvType.Micro.fontSize, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
         Column(
             modifier = Modifier
@@ -369,13 +378,13 @@ private fun KeyValue(label: String, value: String) {
         Text(
             text = label,
             color = muted,
-            fontSize = 11.sp,
+            fontSize = DvType.Micro.fontSize,
             modifier = Modifier.width(76.dp),
         )
         Text(
             text = value,
             color = text,
-            fontSize = 11.sp,
+            fontSize = DvType.Micro.fontSize,
             fontFamily = FontFamily.Default,
             modifier = Modifier.weight(1f),
         )
@@ -387,7 +396,7 @@ private fun EmptyRow(text: String) {
     Text(
         text = text,
         color = muted,
-        fontSize = 11.sp,
+        fontSize = DvType.Micro.fontSize,
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
     )
 }
@@ -406,8 +415,8 @@ private fun PickRow(track: PlayerTrack, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(track.title, color = text, fontSize = 12.sp)
-            Text(track.detail, color = muted, fontSize = 10.sp)
+            Text(track.title, color = text, fontSize = DvType.Caption.fontSize)
+            Text(track.detail, color = muted)
         }
         if (track.selected) {
             DvIcon(DvIcon.Check, tint = accent, sizeDp = 15)
@@ -422,6 +431,6 @@ fun PlayerLoadingOverlay(text: String) {
         modifier = Modifier.fillMaxSize().background(Color(0xE6000000)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = subtle, fontSize = 13.sp)
+        Text(text, color = subtle, fontSize = DvType.CardTitle.fontSize)
     }
 }

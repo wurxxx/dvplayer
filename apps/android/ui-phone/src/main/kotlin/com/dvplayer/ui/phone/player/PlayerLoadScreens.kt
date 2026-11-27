@@ -18,9 +18,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dvplayer.design.DvType
+import com.dvplayer.design.DvOnImage
 
 private val titleColor = Color(0xFFF5F5F8)
-private val bodyColor = Color(0xB3FFFFFF)
+private val bodyColor = DvOnImage.Secondary
 private val accentColor = Color(0xFFFFB020)
 
 /** 真实条目加载中。 */
@@ -30,7 +32,7 @@ fun PlayerLoadingScreen(text: String = "正在连接源…") {
         modifier = Modifier.fillMaxSize().background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = Color(0x99FFFFFF), fontSize = 13.sp)
+        Text(text, color = DvOnImage.Tertiary, fontSize = DvType.CardTitle.fontSize)
     }
 }
 
@@ -53,15 +55,15 @@ fun PlayerErrorScreen(message: String, onBack: () -> Unit) {
             Text(
                 text = "无法打开播放页",
                 color = titleColor,
-                fontSize = 15.sp,
+                fontSize = DvType.SectionTitle.fontSize,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(text = message, color = bodyColor, fontSize = 12.sp, lineHeight = 18.sp)
+            Text(text = message, color = bodyColor, fontSize = DvType.Caption.fontSize, lineHeight = 18.sp)
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "返回",
                 color = accentColor,
-                fontSize = 13.sp,
+                fontSize = DvType.CardTitle.fontSize,
                 modifier = Modifier
                     .clickable(onClick = onBack)
                     .padding(vertical = 8.dp),

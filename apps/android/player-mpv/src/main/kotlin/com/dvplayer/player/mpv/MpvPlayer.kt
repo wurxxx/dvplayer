@@ -158,6 +158,11 @@ class MpvPlayer(private val verbose: Boolean = false) : PlayerEngine {
         setProperty("speed", speed.toString())
     }
 
+    /** mpv 的 `volume` 是 0–100 的百分比，1f 对应 100。 */
+    override fun setVolume(scale: Float) {
+        setProperty("volume", (scale.coerceIn(0f, 1f) * 100f).toString())
+    }
+
     /**
      * 加载外部字幕。`loadfile` 之后立刻 `sub-add` 会赶在文件打开之前，mpv 会
      * 拒绝（"no file"）；所以还没拿到时长时先挂起，等 [pollLoop] 看到片长再补。
@@ -168,6 +173,19 @@ class MpvPlayer(private val verbose: Boolean = false) : PlayerEngine {
         } else {
             command("sub-add", path, "select")
         }
+    }
+
+    override fun videoSize(): Pair<Int, Int>? {
+        val w = getProperty("width")?.trim()?.toIntOrNull() ?: return null
+        val h = getProperty("height")?.trim()?.toIntOrNull() ?: return null
+        return if (w > 0 && h > 0) w to h else null
+    }
+
+    /** `hwdec-current` 是 mpv 当前真正在用的解码方式；"no" 就是软解。 */
+    override fun hardwareDecode(): Boolean? {
+        val mode = getProperty("hwdec-current")?.trim().orEmpty()
+        if (mode.isEmpty()) return null
+        return mode != "no"
     }
 
     override fun selectTrack(kind: TrackKind, trackId: String) {
@@ -249,8 +267,25 @@ class MpvPlayer(private val verbose: Boolean = false) : PlayerEngine {
     private fun pollLoop() {
         var lastState: PlaybackState? = null
         var lastTracks: List<TrackInfo> = emptyList()
+        // 每 5 秒打一条「实际解码帧 / 丢帧 / 位置」：低端机上判断软解够不够快，
+        // 只看 CPU 占用看不出是掉帧还是音画不同步。
+        var lastLogAt = 0L
+        var lastDrops = 0L
         while (running && handle != 0L) {
             val state = state()
+            val now = System.currentTimeMillis()
+            if (now - lastLogAt >= 5_000) {
+                lastLogAt = now
+                val drops = getProperty("frame-drop-count")?.toLongOrNull() ?: 0L
+                val decoded = getProperty("decoder-frame-drop-count")?.toLongOrNull() ?: 0L
+                Log.i(
+                    TAG,
+                    "pos ${state.positionMs}ms · 渲染丢帧 ${drops - lastDrops} · 解码丢帧 $decoded" +
+                        " · hwdec ${getProperty("hwdec-current") ?: "?"}" +
+                        " · ${getProperty("video-params/w")}x${getProperty("video-params/h")}",
+                )
+                lastDrops = drops
+            }
             // 文件打开后再补上起播前请求的外挂字幕。
             val pending = pendingSubtitle
             if (pending != null && state.durationMs > 0) {

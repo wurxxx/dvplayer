@@ -87,8 +87,17 @@ class Media3Player(context: Context) : PlayerEngine {
     var videoFormat: Format? = null
         private set
 
+    /** 实际选中的解码器名（`onDecoderInitialized` 回报），用来判断硬解 / 软解。 */
+    private var decoderName: String? = null
+
     /** 字幕 cue（含 PGS 位图），由 UI 交给 SubtitleView 渲染。 */
     var onCues: ((CueGroup) -> Unit)? = null
+
+    /**
+     * 视频尺寸（像素）。ExoPlayer 把解码帧铺满整个 Surface，壳层要按这个比例
+     * 收窄 SurfaceView，否则非 16:9 的片会被拉伸。
+     */
+    var onVideoSize: ((Int, Int) -> Unit)? = null
 
     /** 渲染侧累计掉帧数（调试页显示）。 */
     @Volatile
@@ -131,6 +140,12 @@ class Media3Player(context: Context) : PlayerEngine {
                 listener?.onPlayerEvent(PlayerEvent.Error(error.errorCodeName))
             }
 
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    onVideoSize?.invoke(videoSize.width, videoSize.height)
+                }
+            }
+
             override fun onCues(cueGroup: CueGroup) {
                 if (cueGroup.cues.size != lastCueCount) {
                     lastCueCount = cueGroup.cues.size
@@ -164,6 +179,16 @@ class Media3Player(context: Context) : PlayerEngine {
             ) {
                 videoFormat = format
                 Log.i(TAG, "video format: $format")
+            }
+
+            override fun onVideoDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long,
+            ) {
+                this@Media3Player.decoderName = decoderName
+                Log.i(TAG, "decoder: $decoderName")
             }
 
             override fun onRenderedFirstFrame(
@@ -238,6 +263,11 @@ class Media3Player(context: Context) : PlayerEngine {
 
     override fun seekTo(positionMs: Long) {
         player.seekTo(positionMs.coerceAtLeast(0))
+    }
+
+    /** ExoPlayer 的 `volume` 就是 0–1 的线性倍数。 */
+    override fun setVolume(scale: Float) {
+        player.volume = scale.coerceIn(0f, 1f)
     }
 
     override fun setSpeed(speed: Float) {
@@ -348,6 +378,16 @@ class Media3Player(context: Context) : PlayerEngine {
 
     /** 本地文件的章节缓存；`load` 时刷新。 */
     private var chapters: List<ChapterInfo> = emptyList()
+
+    override fun hardwareDecode(): Boolean? {
+        val name = decoderName?.lowercase() ?: return null
+        // 平台软解器一般是 OMX.google.* / c2.android.*；其余当硬解。
+        val software = name.startsWith("omx.google.") ||
+            name.startsWith("c2.android.") ||
+            name.startsWith("c2.google.") ||
+            name.contains("software")
+        return !software
+    }
 
     override fun setListener(listener: PlayerEngine.Listener?) {
         this.listener = listener

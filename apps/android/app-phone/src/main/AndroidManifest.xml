@@ -20,7 +20,8 @@
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true"
-            android:theme="@style/Theme.DvPlayer">
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.DvPlayer.Light">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

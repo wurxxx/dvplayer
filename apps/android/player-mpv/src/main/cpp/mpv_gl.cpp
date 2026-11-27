@@ -92,7 +92,7 @@ struct Player {
     std::condition_variable cv;
     ANativeWindow *pending_window = nullptr;  // 非空表示要换窗口
     bool detach_requested = false;
-    bool quit = false;
+    std::atomic<bool> quit{false};
     std::atomic<bool> redraw{false};
 
     // GL 就绪前 loadfile 会让 mpv 认为「没有视频输出」，只播音频；
@@ -301,25 +301,39 @@ bool rebuild_surface(Player *p, EGLint colorspace) {
     }
 
     EGLint used_colorspace = colorspace;
-    const EGLint attribs[] = {EGL_GL_COLORSPACE_KHR, colorspace, EGL_NONE};
-    p->surface = eglCreateWindowSurface(p->display, p->config, p->window, attribs);
-    if (p->surface == EGL_NO_SURFACE) {
-        LOGE("eglCreateWindowSurface(colorspace 0x%x) 失败: 0x%x，回退 SRGB", colorspace,
-             eglGetError());
-        used_colorspace = EGL_GL_COLORSPACE_SRGB_KHR;
-        const EGLint fallback[] = {EGL_GL_COLORSPACE_KHR, used_colorspace, EGL_NONE};
-        p->surface = eglCreateWindowSurface(p->display, p->config, p->window, fallback);
+    // 设备没有 EGL_KHR_gl_colorspace 时，EGL_GL_COLORSPACE_KHR 这个属性本身
+    // 就是非法的（EGL_BAD_ATTRIBUTE），必须一开始就无属性建面。早期版本这里
+    // 先试一次带属性的、再试一次带 SRGB 属性的，两次都失败后才无属性建面：
+    // MTK 等驱动在被拒绝两次后窗口会进入坏状态，最后连无属性创建都返回
+    // EGL_BAD_ALLOC，整条 HDR / SDR 出画路径直接断掉（HBY 5502 实测）。
+    if (!p->has_gl_colorspace) {
+        p->surface = eglCreateWindowSurface(p->display, p->config, p->window, nullptr);
         if (p->surface == EGL_NO_SURFACE) {
-            // 有些实现（模拟器的 SwiftShader、部分老盒子）整个不认识
-            // EGL_KHR_gl_colorspace：带这个属性一律 EGL_BAD_ATTRIBUTE。
-            // 再不传属性创建一次，颜色按 surface 默认来，至少有画面。
-            LOGE("回退 SRGB 也失败: 0x%x，改用无属性创建", eglGetError());
-            p->surface = eglCreateWindowSurface(p->display, p->config, p->window, nullptr);
+            LOGE("eglCreateWindowSurface(无属性) 失败: 0x%x", eglGetError());
+            return false;
+        }
+        used_colorspace = 0;
+    } else {
+        const EGLint attribs[] = {EGL_GL_COLORSPACE_KHR, colorspace, EGL_NONE};
+        p->surface = eglCreateWindowSurface(p->display, p->config, p->window, attribs);
+        if (p->surface == EGL_NO_SURFACE) {
+            const EGLint first_err = eglGetError();
+            LOGE("eglCreateWindowSurface(colorspace 0x%x) 失败: 0x%x，回退 SRGB", colorspace,
+                 first_err);
+            used_colorspace = EGL_GL_COLORSPACE_SRGB_KHR;
+            const EGLint fallback[] = {EGL_GL_COLORSPACE_KHR, used_colorspace, EGL_NONE};
+            p->surface = eglCreateWindowSurface(p->display, p->config, p->window, fallback);
             if (p->surface == EGL_NO_SURFACE) {
-                LOGE("无属性创建也失败: 0x%x", eglGetError());
-                return false;
+                // 扩展在、但驱动不认这个 colorspace（个别盒子 / 模拟器）。
+                // 无属性建面，颜色按 surface 默认来，至少有画面。
+                LOGE("回退 SRGB 也失败: 0x%x，改用无属性创建", eglGetError());
+                p->surface = eglCreateWindowSurface(p->display, p->config, p->window, nullptr);
+                if (p->surface == EGL_NO_SURFACE) {
+                    LOGE("无属性创建也失败: 0x%x", eglGetError());
+                    return false;
+                }
+                used_colorspace = 0;
             }
-            used_colorspace = 0;
         }
     }
 
@@ -589,8 +603,11 @@ void update_colorspace(Player *p) {
 }
 
 void event_loop(Player *p) {
-    while (true) {
-        mpv_event *ev = mpv_wait_event(p->mpv, -1);
+    // 不能用 -1 无限等：destroy 时 mpv_terminate_destroy 在部分驱动 / 平台上
+    // 不会唤醒阻塞中的 wait_event，join 就永远回不来（真机 MT6762 实测）。
+    // 200ms 超时 + quit 标记，最坏 200ms 就能退出。
+    while (!p->quit.load(std::memory_order_acquire)) {
+        mpv_event *ev = mpv_wait_event(p->mpv, 0.2);
         switch (ev->event_id) {
         case MPV_EVENT_NONE:
             break;
@@ -683,6 +700,10 @@ Java_com_dvplayer_player_mpv_MpvNative_create(JNIEnv *, jobject, jboolean verbos
     // 所以默认不校验，需要时用 tls-ca-file（源级开关待接）。
     set_option(p->mpv, "tls-verify", "no");
     set_option(p->mpv, "msg-level", verbose ? "all=v" : "all=warn");
+    // 控制层由 Compose 画，mpv 的 OSD（暂停 / seek 时的左上角时间码）要关掉。
+    set_option(p->mpv, "osd-level", "0");
+    set_option(p->mpv, "osd-on-seek", "no");
+    set_option(p->mpv, "osd-duration", "0");
 
     // libmpv 默认不产生日志事件；默认只要 warn（错误与告警），排障时用 verbose。
     // msg-level 是 pre-parse 选项，只能在 initialize 之前定，不能运行期改。
@@ -906,12 +927,14 @@ Java_com_dvplayer_player_mpv_MpvNative_destroy(JNIEnv *, jobject, jlong handle) 
         p->window = nullptr;
     }
 
-    LOGI("destroy: 释放 mpv");
-    mpv_terminate_destroy(p->mpv);
     LOGI("destroy: 等事件线程");
+    // 先让 wait_event 立刻返回，再 join；事件线程退出后才真正销毁 mpv 句柄。
+    mpv_wakeup(p->mpv);
     if (p->event_thread.joinable()) {
         p->event_thread.join();
     }
+    LOGI("destroy: 释放 mpv");
+    mpv_terminate_destroy(p->mpv);
     LOGI("destroy: 完成");
     delete p;
 }

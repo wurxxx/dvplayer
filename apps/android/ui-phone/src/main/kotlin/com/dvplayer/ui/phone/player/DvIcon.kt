@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 
@@ -24,7 +25,7 @@ import androidx.compose.ui.unit.dp
  */
 enum class DvIcon {
     Close, Play, Pause, Rewind, Forward, Next, Lock, Volume, Pip,
-    Fullscreen, Subtitle, Audio, Speed, Gear, More, Check,
+    Fullscreen, Subtitle, Audio, Speed, Gear, More, Check, Rotate, Episodes,
 }
 
 @Composable
@@ -174,19 +175,19 @@ fun DvIcon(
                 line(tint, u, 0.28f, 0.46f, 0.72f, 0.46f, stroke)
                 line(tint, u, 0.28f, 0.58f, 0.58f, 0.58f, stroke)
             }
-            // 音符：符头 + 符干 + 符尾，比同心圆更像「音轨」。
+            // 均衡器竖条：和其余线性图标同一套笔触，比音符更贴合「音轨」。
             DvIcon.Audio -> {
-                drawCircle(color = tint, center = Offset(u * 0.34f, u * 0.70f), radius = u * 0.105f)
-                line(tint, u, 0.445f, 0.70f, 0.445f, 0.26f, stroke)
-                val flag = Path().apply {
-                    moveTo(u * 0.445f, u * 0.26f)
-                    cubicTo(
-                        u * 0.60f, u * 0.30f,
-                        u * 0.72f, u * 0.36f,
-                        u * 0.70f, u * 0.50f,
+                val barWidth = u * 0.09f
+                val heights = listOf(0.30f, 0.58f, 0.40f, 0.64f)
+                heights.forEachIndexed { index, h ->
+                    val x = u * (0.20f + index * 0.20f)
+                    drawRoundRect(
+                        color = tint,
+                        topLeft = Offset(x - barWidth / 2f, u * (0.5f - h / 2f)),
+                        size = Size(barWidth, u * h),
+                        cornerRadius = CornerRadius(barWidth / 2f),
                     )
                 }
-                drawPath(flag, tint, style = stroke)
             }
             DvIcon.Speed -> {
                 drawCircle(color = tint, radius = u * 0.30f, style = stroke)
@@ -213,6 +214,79 @@ fun DvIcon(
             DvIcon.More -> {
                 for (x in listOf(0.30f, 0.50f, 0.70f)) {
                     drawCircle(color = tint, radius = u * 0.055f, center = Offset(u * x, u * 0.5f))
+                }
+            }
+            DvIcon.Rotate -> {
+                // 倾斜的手机 + 对角双箭头：横竖屏切换（Material screen_rotation 风格）。
+                // 小尺寸下“弧线 + 箭头”容易糊成锁或刷新，加一部手机兜住语义。
+                val thin = Stroke(
+                    width = u * 0.075f,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                )
+                rotate(degrees = 40f, pivot = center) {
+                    drawRoundRect(
+                        color = tint,
+                        topLeft = Offset(u * 0.39f, u * 0.28f),
+                        size = Size(u * 0.22f, u * 0.44f),
+                        cornerRadius = CornerRadius(u * 0.055f),
+                        style = thin,
+                    )
+                }
+                val r = 0.42f
+                drawArc(
+                    color = tint,
+                    startAngle = 196f,
+                    sweepAngle = 56f,
+                    useCenter = false,
+                    topLeft = Offset(u * (0.5f - r), u * (0.5f - r)),
+                    size = Size(u * 2 * r, u * 2 * r),
+                    style = thin,
+                )
+                drawArc(
+                    color = tint,
+                    startAngle = 16f,
+                    sweepAngle = 56f,
+                    useCenter = false,
+                    topLeft = Offset(u * (0.5f - r), u * (0.5f - r)),
+                    size = Size(u * 2 * r, u * 2 * r),
+                    style = thin,
+                )
+                // 弧末端的实心箭头，沿切线方向。
+                fun head(deg: Float) {
+                    val a = Math.toRadians(deg.toDouble())
+                    val cx = u * (0.5f + r * Math.cos(a).toFloat())
+                    val cy = u * (0.5f + r * Math.sin(a).toFloat())
+                    val t = Math.toRadians((deg + 90f).toDouble())
+                    val dx = Math.cos(t).toFloat()
+                    val dy = Math.sin(t).toFloat()
+                    val half = u * 0.095f
+                    val len = u * 0.20f
+                    drawPath(
+                        Path().apply {
+                            moveTo(cx + dx * len, cy + dy * len)
+                            lineTo(cx - dy * half, cy + dx * half)
+                            lineTo(cx + dy * half, cy - dx * half)
+                            close()
+                        },
+                        tint,
+                    )
+                }
+                head(252f)
+                head(72f)
+            }
+            // 列表：每行一个点 + 一条线。
+            DvIcon.Episodes -> {
+                for (i in 0 until 3) {
+                    val y = u * (0.28f + i * 0.22f)
+                    drawCircle(color = tint, radius = u * 0.055f, center = Offset(u * 0.22f, y))
+                    drawLine(
+                        color = tint,
+                        start = Offset(u * 0.40f, y),
+                        end = Offset(u * 0.80f, y),
+                        strokeWidth = stroke.width * 0.9f,
+                        cap = StrokeCap.Round,
+                    )
                 }
             }
             DvIcon.Check -> {

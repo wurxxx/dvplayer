@@ -9,11 +9,63 @@ package com.dvplayer.ui.phone.player
  */
 data class PlayerChip(val text: String, val accent: Boolean = false)
 
+/**
+ * 画面比例模式。
+ *
+ * - [Fit]：按视频自身比例放进屏幕，多出的留黑（默认，横屏片上下留黑）
+ * - [Fill]：裁边铺满屏幕（短剧竖屏用）
+ * - [Stretch]：拉伸铺满，不裁边（变形画面 / 老片）
+ * - [Ratio16x9] / [Ratio4x3]：强制某个比例
+ */
+enum class PlayerAspect(val label: String) {
+    Fit("适应"),
+    Fill("填充"),
+    Stretch("拉伸"),
+    Ratio16x9("16:9"),
+    Ratio4x3("4:3");
+
+    /** 该模式下视频区的目标宽高比；null 表示跟随视频自身。 */
+    val forcedAspect: Float?
+        get() = when (this) {
+            Fit, Fill -> null
+            Stretch -> null
+            Ratio16x9 -> 16f / 9f
+            Ratio4x3 -> 4f / 3f
+        }
+
+    fun next(): PlayerAspect = entries[(ordinal + 1) % entries.size]
+}
+
 /** 一条音轨 / 字幕。 */
 data class PlayerTrack(
     val title: String,
     val detail: String,
     val selected: Boolean = false,
+    /** 内核轨道 id（mpv 的 aid / Media3 的轨道 id）；空表示只有展示数据。 */
+    val id: String = "",
+)
+
+/**
+ * 真内核推给界面的播放状态。
+ *
+ * 传 null 时播放页用 [PlayerUiModel] 里的静态值（预览 / 截图）；
+ * 传入后位置、时长、暂停、倍速都以这里为准。
+ */
+data class PlayerPlaybackState(
+    val positionMs: Long,
+    val durationMs: Long,
+    val paused: Boolean,
+    val speed: Float = 1f,
+    val ended: Boolean = false,
+    val bufferedMs: Long = 0,
+    /** 内核名（mpv / Media3），覆盖规格行第一个 chip。 */
+    val engine: String? = null,
+    /** 是不是硬解；内核还没报时为 null（规格行不显示 HW/SW）。 */
+    val hardwareDecode: Boolean? = null,
+    /** 视频编码（hevc / h264 …），规格行接在内核后面。 */
+    val videoCodec: String? = null,
+    val audios: List<PlayerTrack> = emptyList(),
+    val subtitles: List<PlayerTrack> = emptyList(),
 )
 
 /** 媒体信息面板的「视频」一页。 */
@@ -39,9 +91,19 @@ data class SourceSheet(
 )
 
 data class PlayerEpisode(
+    /** 条目 id：选集时用它换片；预览数据里为空。 */
+    val id: String? = null,
+    /** 「第 3 集」。 */
     val title: String,
     val duration: String,
     val current: Boolean = false,
+    /** 分集名（「化天药阵」）；源没给就为空，卡片上退化成时长。 */
+    val subtitle: String? = null,
+    /**
+     * 剧照路径（核心路径，不是 URL）。播放 Activity 用
+     * `PhoneRepository.bitmap()` 换成位图；为空时卡片画一个深色占位。
+     */
+    val stillPath: String? = null,
 )
 
 data class PlayerUiModel(
@@ -143,11 +205,16 @@ object PlayerDemo {
         paused = false,
         videoAspect = 16f / 9f,
         hasNext = true,
-        episodes = (1..12).map {
+        episodes = listOf(
+            "桦林钢厂", "失踪的工人", "十八年前", "旧案重提",
+            "王响的执念", "一辆出租车", "冬天的河", "沉默的证人",
+            "破碎的时间线", "真相一角", "最后一个人", "漫长的季节",
+        ).mapIndexed { index, name ->
             PlayerEpisode(
-                title = "第 $it 集",
+                title = "第 ${index + 1} 集",
                 duration = "46 分钟",
-                current = it == 3,
+                current = index == 2,
+                subtitle = name,
             )
         },
         video = VideoSheet(
@@ -175,4 +242,18 @@ object PlayerDemo {
             resumeAtMs = 12 * 60_000L + 4_000L,
         ),
     )
+}
+
+/** 编码名压短：hevc → HEVC，avc1 → H.264（规格行放得下）。 */
+fun shortCodecName(raw: String): String {
+    val v = raw.trim().lowercase()
+    return when {
+        v.isEmpty() -> return raw
+        "hevc" in v || "h265" in v || "h.265" in v -> "HEVC"
+        "av01" in v || "av1" in v -> "AV1"
+        "vp9" in v -> "VP9"
+        "vp8" in v -> "VP8"
+        "avc" in v || "h264" in v || "h.264" in v -> "H.264"
+        else -> raw.trim().uppercase()
+    }
 }

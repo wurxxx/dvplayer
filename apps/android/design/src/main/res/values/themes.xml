@@ -8,4 +8,17 @@
         <item name="android:navigationBarColor">#141419</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!--
+      手机内容页用浅色窗口：这一层只负责启动瞬间的底色和系统栏，
+      Compose 起来后由 DvScaffold 自己铺满。播放页仍然用上面那个深色主题。
+    -->
+    <style name="Theme.DvPlayer.Light" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F5F7FB</item>
+        <item name="android:colorBackground">#F5F7FB</item>
+        <!-- edge-to-edge：系统栏透明，底色和图标颜色都由 Compose 接管。 -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>

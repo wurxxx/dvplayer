@@ -30,6 +30,7 @@ dependencies {
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
+    implementation(libs.compose.foundation)
     implementation(libs.androidx.activity.compose)
     debugImplementation(libs.compose.ui.tooling)
 }

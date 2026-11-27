@@ -33,6 +33,12 @@ interface PlayerEngine : AutoCloseable {
 
     fun setSpeed(speed: Float)
 
+    /**
+     * 内核输出音量，1f 为原始音量。只用于 duck（导航播报 / 来电时压低），
+     * 系统媒体音量仍由 AudioManager 管，两者相乘。
+     */
+    fun setVolume(scale: Float)
+
     /** 加载外部字幕并选中（mpv: sub-add；Media3: 重新装载字幕配置）。 */
     fun addSubtitle(path: String)
 
@@ -43,6 +49,18 @@ interface PlayerEngine : AutoCloseable {
     fun tracks(): List<TrackInfo>
 
     fun chapters(): List<ChapterInfo>
+
+    /**
+     * 内核报的视频尺寸（宽 x 高）；还没解出来时返回 null。
+     * 播放页拿它决定横屏 / 竖屏，Media3 自己会报，mpv 读容器属性。
+     */
+    fun videoSize(): Pair<Int, Int>? = null
+
+    /**
+     * 当前是不是硬件解码（规格行的 HW / SW）。
+     * 内核还没解出画面、或这个内核没有这个概念时返回 null。
+     */
+    fun hardwareDecode(): Boolean? = null
 
     fun setListener(listener: Listener?)
 
