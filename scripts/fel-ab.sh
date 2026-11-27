@@ -27,7 +27,7 @@ t=${2:-60}
 out=$ROOT/out/ab
 mkdir -p "$out"
 
-APP="$ROOT/apps/macos/DvPlayer/build/DvPlayer.app/Contents/MacOS/DvPlayer"
+APP="$ROOT/apps/macos/DvPlayer/build/DV Player.app/Contents/MacOS/DV Player"
 if [ ! -x "$APP" ]; then
   echo "没找到 ${APP}，先跑：cd apps/macos/DvPlayer && ./build.sh" >&2
   exit 1

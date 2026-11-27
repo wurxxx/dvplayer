@@ -15,10 +15,10 @@ SwiftUI + AppKit，业务逻辑全部来自共享核心 `core/media`（Rust，C 
 cd core && ~/.cargo/bin/cargo build -p dvplayer-media --release && cd ..
 
 # 2) 客户端
-cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
+cd apps/macos/DvPlayer && ./build.sh && open "build/DV Player.app"
 ```
 
-`build.sh` 会把 `libdvplayer_media.dylib` 一起打进 `DvPlayer.app/Contents/Frameworks`，
+`build.sh` 会把 `libdvplayer_media.dylib` 一起打进 `DV Player.app/Contents/Frameworks`，
 并把它的 install name 改成 `@rpath`（cargo 产物里记的是构建目录，运行期不存在）。
 
 依赖里现成的东西：
@@ -118,7 +118,7 @@ Gitee 官方文档说海外访问需要特殊 DNS，runner 在海外会随机失
 
 ```bash
 DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
-  ./build/DvPlayer.app/Contents/MacOS/DvPlayer
+  "./build/DV Player.app/Contents/MacOS/DV Player"
 ```
 
 | 环境变量 | 说明 |
@@ -157,7 +157,7 @@ DVPLAYER_SHOT=/tmp/home.png DVPLAYER_SHOT_DELAY=16 DVPLAYER_EXIT=1 \
 ```bash
 # 播放中（不设 DVPLAYER_EXIT，让它一直播；Ctrl+C 结束）
 DVPLAYER_LOCAL=samples/p7-fel.mkv \
-  ./build/DvPlayer.app/Contents/MacOS/DvPlayer &
+  "./build/DV Player.app/Contents/MacOS/DV Player" &
 
 pmset -g assertions | grep -E "PreventUserIdleDisplaySleep|PreventUserIdleSystemSleep"
 #   两条都应该是 1，且下面「Listed by owning process」里有两行
@@ -166,7 +166,7 @@ pmset -g assertions | grep -E "PreventUserIdleDisplaySleep|PreventUserIdleSystem
 # 暂停后应该都变回 0。剩下还有 1 的话看是哪一行：
 # bluetoothd / coreaudiod 的请求与播放器无关，不要误判。
 DVPLAYER_LOCAL=samples/p7-fel.mkv DVPLAYER_PLAY_UI="wait:6,pause" \
-  ./build/DvPlayer.app/Contents/MacOS/DvPlayer &
+  "./build/DV Player.app/Contents/MacOS/DV Player" &
 sleep 12 && pmset -g assertions | grep -E "PreventUserIdle(Display|System)Sleep"
 ```
 

@@ -114,7 +114,7 @@ cd core
 ```bash
 DVPLAYER_PLAY='smb-1:f/某部电影/某部电影.mkv' \
 DVPLAYER_PLAY_SECONDS=10 \
-apps/macos/DvPlayer/build/DvPlayer.app/Contents/MacOS/DvPlayer
+apps/macos/DvPlayer/build/DV Player.app/Contents/MacOS/DV Player
 ```
 
 ## 6. 文件协议源（SMB / NFS / WebDAV）

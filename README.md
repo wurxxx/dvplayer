@@ -74,7 +74,7 @@ cd core && ~/.cargo/bin/cargo build -p dvplayer-media --release && cd ..
 
 ./scripts/build-deps-macos.sh   # 首次：FFmpeg / libass / libplacebo / mpv 到 prefix/
 
-cd apps/macos/DvPlayer && ./build.sh && open build/DvPlayer.app
+cd apps/macos/DvPlayer && ./build.sh && open "build/DV Player.app"
 ```
 
 `build.sh` 会把 mpv、libplacebo、共享核心和它们的 Homebrew 依赖一起打进
