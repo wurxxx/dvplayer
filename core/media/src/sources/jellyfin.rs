@@ -148,6 +148,7 @@ impl JellyfinSource {
             .header("Content-Type", "application/json")
             .body(body.to_string())
             .send()?;
+        super::ensure_same_host(&response, &self.base)?;
 
         // 401 时把请求地址、状态码和最终地址一起写进错误：反代把 http 301 到
         // https 时，POST 会被改写成 GET，服务端回的就是「账号不对」。
@@ -1095,7 +1096,9 @@ impl JellyfinSource {
                 .body(body.to_string());
         }
 
-        self.read_body(request.send()?)
+        let response = request.send()?;
+        super::ensure_same_host(&response, &self.base)?;
+        self.read_body(response)
     }
 
     fn read_body(&self, response: reqwest::blocking::Response) -> Result<String> {

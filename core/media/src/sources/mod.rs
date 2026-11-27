@@ -221,6 +221,44 @@ pub(crate) fn http_client(proxy: &str) -> reqwest::blocking::Client {
         .unwrap_or_else(|_| reqwest::blocking::Client::new())
 }
 
+/// 把 `reqwest::Error` 的 source 链展开。
+///
+/// `Display` 只有一句 “error sending request for url”，到底是 DNS、拒绝连接还是
+/// 证书错误全被藏住了；排查网络问题只看这一句等于没看。
+pub(crate) fn http_error(err: reqwest::Error) -> MediaError {
+    use std::error::Error as _;
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        text.push_str(" <- ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    MediaError::Other(format!("http error: {text}"))
+}
+
+/// 确认响应真的来自服务器本身，而不是被网络准入系统劫持到了认证页。
+///
+/// 公共 WiFi、校园网、宿舍网会把未认证客户端的 HTTP 请求 307 到自己的登录页，
+/// reqwest 自动跟随之后，调用方拿到的是一段 HTML（或连接失败），用户只能看到
+/// 「error sending request」这种没法自救的提示。这里比较最终 URL 的 host：
+/// 和配置里的服务器不一样，就说明请求根本没到服务器。
+pub(crate) fn ensure_same_host(response: &reqwest::blocking::Response, base: &str) -> Result<()> {
+    let Ok(base_url) = reqwest::Url::parse(base) else {
+        return Ok(());
+    };
+    let Some(expected) = base_url.host_str() else {
+        return Ok(());
+    };
+    let actual = response.url().host_str().unwrap_or_default();
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(MediaError::Other(format!(
+            "网络需要网页认证：请求被跳转到 {actual}。先用浏览器打开任意网站登录一次，再重试"
+        )));
+    }
+    Ok(())
+}
+
 /// 代理地址允许只写 `127.0.0.1:7890`，补成 `http://`。
 pub(crate) fn normalize_proxy(raw: &str) -> Option<String> {
     let value = raw.trim();
