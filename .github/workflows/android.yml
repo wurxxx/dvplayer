@@ -115,6 +115,14 @@ jobs:
           restore-keys: |
             libmpv-${{ runner.os }}-arm64-
 
+      # libdovi（Dolby Vision RPU 解析）是 Rust：要 cbindgen 生成头文件，
+      # 还要 Android 的 std。开发机上都装着，runner 上得自己补。
+      - name: 准备 libdovi 的 Rust 工具
+        if: steps.mpv-cache.outputs.cache-hit != 'true'
+        run: |
+          rustup target add aarch64-linux-android
+          cargo install cbindgen --locked
+
       - name: 编译 libmpv（缓存未命中时）
         if: steps.mpv-cache.outputs.cache-hit != 'true'
         run: |
