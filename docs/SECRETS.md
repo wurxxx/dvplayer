@@ -66,18 +66,14 @@ chmod 600 ~/.config/dvplayer/trakt.env
 变成程序集元数据（`DvPlayer.csproj` 里的 `AssemblyAttribute`），运行时由
 `Services/DanmakuCredential.cs`、`Services/TraktCredential.cs` 反射读出。
 
-- 本机开发构建也想和正式包一样（设置页不出现 Client ID / Secret 输入框），先跑一次：
+- 本机开发构建也想和正式包一样（设置页不出现 Client ID / Secret 输入框），
+  只要把 `trakt.env` / `danmaku.env` 放到 `%USERPROFILE%\.config\dvplayer\`
+  （和 macOS 同一份文件），`DvPlayer.csproj` 在求值阶段自动读出来注入，
+  普通 `dotnet build` / `dotnet publish` 直接生效，不用先跑脚本。
+  文件在仓库外面，不会被提交；没有任何 env 文件时就回退成空凭据。
+  换过 env 内容后要 `dotnet build -t:Rebuild`（增量编译不会重写程序集属性）。
 
-  ```powershell
-  .\scripts\windows\sync-secrets.ps1
-  ```
-
-  它把 `trakt.env` / `danmaku.env`（或 `DVPLAYER_*` 环境变量）生成到
-  `%USERPROFILE%\.config\dvplayer\windows.props`，`DvPlayer.csproj` 自动导入，
-  之后普通 `dotnet build` / `dotnet publish` 都带凭据。文件在仓库外面，不会被提交；
-  改了 env 文件重跑一次即可（没有凭据时会删掉旧 props，避免带着过期值）。
-
-- 也可以只在某一次打包时手动传参：
+- 打包脚本 / CI 用 `-p:` 传值时优先级更高，会盖过 env 文件：
 
   ```powershell
   dotnet publish -c Release -p:TraktClientId=... -p:TraktClientSecret=...

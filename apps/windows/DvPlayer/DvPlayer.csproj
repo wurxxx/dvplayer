@@ -1,11 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- 本机凭据：scripts\windows\sync-secrets.ps1 把 trakt.env / danmaku.env
-       生成到 %USERPROFILE%\.config\dvplayer\windows.props，放在仓库外面，
-       本地 dotnet build / dotnet publish 也带上和发布包一样的凭据。
-       CI 走 -p:... 传参，属性名一致；没有这个文件时什么都不做。 -->
-  <Import Project="$(USERPROFILE)\.config\dvplayer\windows.props"
-          Condition="Exists('$(USERPROFILE)\.config\dvplayer\windows.props')" />
+  <!-- 本机凭据：直接读仓库外面的 env 文件，本地 dotnet build / dotnet publish
+       就和发布包一样带上凭据，不用先跑什么脚本。换了机器只要把
+       trakt.env / danmaku.env 放进 %USERPROFILE%\.config\dvplayer\ 就行。
+       打包脚本 / CI 用 -p:... 传值，全局属性优先级更高，会盖过这里。 -->
+  <PropertyGroup Condition="'$(USERPROFILE)' != '' and Exists('$(USERPROFILE)\.config\dvplayer\trakt.env')">
+    <_TraktEnvText>$([System.IO.File]::ReadAllText('$(USERPROFILE)\.config\dvplayer\trakt.env'))</_TraktEnvText>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_TraktEnvText)' != ''">
+    <TraktClientId Condition="'$(TraktClientId)' == ''">$([System.Text.RegularExpressions.Regex]::Match($(_TraktEnvText), 'TRAKT_CLIENT_ID\s*=\s*([^\r\n]+)').Groups[1].Value.Trim())</TraktClientId>
+    <TraktClientSecret Condition="'$(TraktClientSecret)' == ''">$([System.Text.RegularExpressions.Regex]::Match($(_TraktEnvText), 'TRAKT_CLIENT_SECRET\s*=\s*([^\r\n]+)').Groups[1].Value.Trim())</TraktClientSecret>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(USERPROFILE)' != '' and Exists('$(USERPROFILE)\.config\dvplayer\danmaku.env')">
+    <_DanmakuEnvText>$([System.IO.File]::ReadAllText('$(USERPROFILE)\.config\dvplayer\danmaku.env'))</_DanmakuEnvText>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_DanmakuEnvText)' != ''">
+    <DanmakuAppId Condition="'$(DanmakuAppId)' == ''">$([System.Text.RegularExpressions.Regex]::Match($(_DanmakuEnvText), 'DANMAKU_APP_ID\s*=\s*([^\r\n]+)').Groups[1].Value.Trim())</DanmakuAppId>
+    <DanmakuAppSecret Condition="'$(DanmakuAppSecret)' == ''">$([System.Text.RegularExpressions.Regex]::Match($(_DanmakuEnvText), 'DANMAKU_APP_SECRET\s*=\s*([^\r\n]+)').Groups[1].Value.Trim())</DanmakuAppSecret>
+  </PropertyGroup>
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -32,9 +44,9 @@
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
-  <!-- 弹幕（弹弹play）凭据：打包脚本从本地密钥文件读出来，用 -p: 传进来。
-       写成程序集元数据，用户不用也不能在设置里填。开发构建没有这两个属性，
-       运行时就是空字符串（弹幕关闭）。 -->
+  <!-- 弹幕（弹弹play）凭据：上面的 env 自动读取（或打包脚本用 -p: 传进来）。
+       写成程序集元数据，用户不用也不能在设置里填。两个都为空时运行时就是
+       空字符串（弹幕关闭）。 -->
   <ItemGroup Condition="'$(DanmakuAppId)' != '' and '$(DanmakuAppSecret)' != ''">
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>DvDanmakuAppId</_Parameter1>
@@ -46,7 +58,7 @@
     </AssemblyAttribute>
   </ItemGroup>
 
-  <!-- Trakt 应用凭据：和弹幕同样的注入方式（打包脚本从 trakt.env 读）。
+  <!-- Trakt 应用凭据：和弹幕同样的注入方式（env 自动读取 / 打包脚本 -p:）。
        留空时设置页会显示 Client ID / Secret 输入框，用户可以用自己的应用。 -->
   <ItemGroup Condition="'$(TraktClientId)' != ''">
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
