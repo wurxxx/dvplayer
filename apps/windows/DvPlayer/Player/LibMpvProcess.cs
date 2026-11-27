@@ -34,6 +34,12 @@ public sealed class LibMpvProcess : IMpvEngine
     private StreamWriter? _log;
     private int _logSession;
 
+    /// <summary>
+    /// 自检开关：把 libbluray 的调试位全开（mpv 的 stream 日志到 trace）。
+    /// 只有查盘内菜单问题时才打开，平时别让日志涨起来。
+    /// </summary>
+    public static bool TraceLibbluray { get; set; }
+
     /// <summary>日志路径和子进程后端一致，排查时不用记两套。</summary>
     public static string LogPath => MpvProcess.LogPath;
 
@@ -217,7 +223,11 @@ public sealed class LibMpvProcess : IMpvEngine
         // 进程内没有 stderr，不设 log-file 的话 `[el_pair]`、滤镜、
         // 解码器这类信息在真机上根本看不到（DV 回归就没法验）。
         Opt("log-file", LogPath);
-        Opt("msg-level", "all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info");
+        // 自检：libbluray 的 debug 位只在 mpv 的 trace 级别才全开，
+        // 查盘内菜单的鼠标命中 / 页面切换时用它。
+        Opt("msg-level", TraceLibbluray
+            ? "all=info,stream=trace"
+            : "all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info");
 
         if (!string.IsNullOrWhiteSpace(launch.Title))
         {

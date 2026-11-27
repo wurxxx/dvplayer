@@ -366,6 +366,71 @@ final class PlayerLauncher {
         Task { await session.start() }
     }
 
+    /// 播 DVD 镜像：主 VTS 的 VOB 拼成一份 EDL，当普通视频播。
+    ///
+    /// 没有盘内菜单 / 标题 / 章节——mac 的 libmpv 是 LGPL 构建，mpv 的 DVD
+    /// 导航要 GPL 的 libdvdnav（`-Ddvdnav` 在非 GPL 构建里直接报错）。
+    func playDvd(_ dvd: DvdSession,
+                 coreItemId: String?,
+                 hintTitle: String?,
+                 start: Double?) {
+        if let existing = controller {
+            existing.close()
+            controller = nil
+        }
+
+        guard let edl = dvd.prepare() else {
+            dvd.detach()
+            AppState.shared.showToast("读不到这张 DVD 的视频片段")
+            return
+        }
+
+        let name = URL(fileURLWithPath: dvd.isoPath).deletingPathExtension().lastPathComponent
+        let display = (hintTitle?.isEmpty == false ? hintTitle! : dvd.discName)
+        let local = LocalPlayback(itemId: "iso:\(name):dvd",
+                                  title: display,
+                                  url: edl.path,
+                                  duration: dvd.duration,
+                                  coreItemId: coreItemId,
+                                  startSeconds: start,
+                                  discMenuIso: nil)
+        let frame = PlayerWindowController.preferredFrame()
+
+        guard let session = PlayerSession(itemId: local.itemId,
+                                          startSeconds: start,
+                                          playlist: [],
+                                          seriesTitle: nil,
+                                          hintTitle: display,
+                                          frame: frame,
+                                          local: local,
+                                          disc: nil) else {
+            dvd.detach()
+            AppState.shared.showToast("播放器启动失败，检查 mpv 是否随包带上了")
+            return
+        }
+
+        NSLog("[Play] dvd open \(local.itemId) vob=\(dvd.clips.count) "
+              + "dur=\(Int(dvd.duration)) resume=\(Int(start ?? 0))")
+
+        let window = PlayerWindowController(session: session, frame: frame) { [weak self] in
+            self?.controller = nil
+            dvd.detach()
+        }
+        session.onClose = { [weak window] in window?.closePlayer() }
+
+        controller = window
+        window.window?.alphaValue = 0
+        window.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window.window?.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.window?.animator().alphaValue = 1
+        }
+        Task { await session.start() }
+    }
+
     func playDisc(_ disc: DiscPlayback, title: BluRayTitle, start: Double? = nil) {
         if let existing = controller {
             existing.close()

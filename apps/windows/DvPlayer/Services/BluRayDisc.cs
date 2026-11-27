@@ -34,8 +34,14 @@ public sealed record BluRayChapter(int Index, double Time)
     public string TimeLabel => BluRayTitle.Format(Time);
 }
 
-/// <summary>探到的整个原盘：盘名 + 标题列表。</summary>
-public sealed record BluRayProbe(string? DiscName, IReadOnlyList<BluRayTitle> Titles)
+/// <summary>
+/// 探到的整个原盘：盘名 + 标题列表 + 菜单是不是 BD-J。
+///
+/// BD-J 菜单要 Java VM 和 libbluray 的 BD-J jar；随包的 mpv 没有，
+/// libbluray 会打 "Playing without menus"，进菜单只剩背景视频。
+/// </summary>
+public sealed record BluRayProbe(
+    string? DiscName, IReadOnlyList<BluRayTitle> Titles, bool IsBDJ = false)
 {
     /// <summary>
     /// 正片：时长接近最长标题的那几个。2in1 这种双正片原盘会有两个，
@@ -70,6 +76,10 @@ public static partial class BluRayDisc
 
     [GeneratedRegex(@"^Title:\s*(?<name>.+?)\s*$", RegexOptions.Multiline)]
     private static partial Regex DiscNameLine();
+
+    /// <summary>libbluray 打开盘时打的 `HDMV Titles: N, BD-J Titles: M`。</summary>
+    [GeneratedRegex(@"BD-J Titles:\s*(?<n>\d+)", RegexOptions.CultureInvariant)]
+    private static partial Regex BdjTitlesLine();
 
     /// <summary>
     /// 读 ISO 的标题列表。mpv 用 `--frames=1` 只读元数据、不开窗。
@@ -188,9 +198,17 @@ public static partial class BluRayDisc
             .ThenBy(item => item.TitleNumber)
             .ToList();
 
+        // BD-J 盘：libbluray 没有可用的 Java VM / BD-J jar 时会明说
+        // “Playing without menus”；日志里也有 `BD-J Titles: N`。
+        var bdj = BdjTitlesLine().Match(text) is { Success: true } bdjMatch
+                  && int.TryParse(bdjMatch.Groups["n"].Value, out var bdjCount)
+                  && bdjCount > 0;
+        bdj |= text.Contains("Playing without menus", StringComparison.OrdinalIgnoreCase);
+
         return (new BluRayProbe(
             string.IsNullOrWhiteSpace(discName) ? null : discName,
-            ordered), null);
+            ordered,
+            bdj), null);
     }
 
     /// <summary>

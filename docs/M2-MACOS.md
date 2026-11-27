@@ -59,11 +59,13 @@
 - 记录页：通用（继续观看按媒体源分栏，标题是源名 +「N 条」，状态点在左；下面是视频收藏一行）/ 观看 / 收藏
 - 本地文件夹源：「服务器」页 → 添加 → 类型「本地文件夹」→ 选目录 →
   目录里的视频 / ISO 成为媒体库条目（见 `LOCAL-SOURCE.md`）；ISO 条目 `disc=true`。
-- 原盘：ISO 条目 → 进**盘里自带的菜单**（`--disc-menu` + `discnav`，见
-  `BLU-RAY.md` §5.4）：菜单画面和按钮高亮由 mpv 渲染，方向键 / 回车 / 鼠标
-  转发给 libbluray 的按钮导航；点按钮后 mpv 自己切正片，壳不重开播放器。
+- 原盘：ISO 条目 → 进**盘里自带的菜单**（HDMV，`--disc-menu` + `discnav`，
+  见 `BLU-RAY.md` §5.4）：菜单画面和按钮高亮由 mpv 渲染，方向键 / 回车 /
+  鼠标转发给 libbluray 的按钮导航；点按钮后 mpv 自己切正片，壳不重开播放器。
   菜单期间壳的控制条 / 片名 / 右侧按钮全部收掉，只留左上角红绿灯。
-  起播后其它标题仍在播放器右侧「标题」面板切（正片在前、花絮按标题号），
+  **BD-J 盘例外**（`BDMV/JAR/*.jar`）：菜单要 Java VM + libbluray 的 BD-J
+  jar，随包的 libbluray 没有，进菜单只会停在背景视频、控制条又被收掉。
+  这种盘直接播最长正片，其它标题在右侧「标题」面板切（正片在前、花絮按标题号），
   和选集同一套 UI；播完直接关窗，不自动接花絮。
   mac 随包的 mpv 必须带 libbluray（`scripts/build-deps-macos.sh` 的
   `-Dlibbluray=enabled`），`libbluray.4.dylib` / `libudfread.3.dylib`
@@ -71,11 +73,16 @@
   章节来自 mpls 的 `PlayListMark`，`mark_time_stamp` 要减 PlayItem 的 `IN_time`
   再累加前段时长才等于 playlist 时间（真实盘 IN=600 s，不减会整体偏 10 分钟）；
   片尾那条 mark 滤掉。
-  右侧「标题」面板切标题时，仍把 mpls 里的 `(m2ts, IN_time, 时长)` 拼成一份
-  mpv EDL 播（菜单走 `bd://`，切标题走 EDL，两条路并存）；切标题重新生成 EDL
-  再重启 mpv，盘不卸载；关播放窗时卸载 ISO。进度回写核心（本地源）。
-  自检：进盘内菜单 `DVPLAYER_DISC=<iso>`，
+  切标题（以及 BD-J 盘直接播标题）把 mpls 里的 `(m2ts, IN_time, 时长)`
+  拼成一份 mpv EDL 播；切标题重新生成 EDL 再重启 mpv，盘不卸载；
+  关播放窗时卸载 ISO。进度回写核心（本地源）。
+  **DVD 镜像**（`VIDEO_TS`，没有 BDMV）：mac 的 libmpv 是 LGPL 构建，
+  mpv 的 dvdnav 要 GPL 的 libdvdread / libdvdnav，所以不走 `dvdnav://`；
+  改读 `VTS_xx_0.IFO` 里最长的 PGC，按 cell 扇区把时长摊到各卷 VOB，
+  拼 EDL 一碟连播（没有 DVD 菜单 / 章节，见 `BLU-RAY.md` §5.5）。
+  自检：`DVPLAYER_DISC=<iso>` 进菜单（HDMV）或直接播正片（BD-J）；
   按菜单按钮 `DVPLAYER_DISC_MENU_KEYS=select,down,down,select`（逗号分隔）；
+  DVD 用 `DVPLAYER_PLAY_FRAME=<png>` 取帧看画面；
   直接播某个标题 `DVPLAYER_DISC=<iso> DVPLAYER_DISC_TITLE=N
   DVPLAYER_DISC_START=<秒> DVPLAYER_PLAY_SHOT=<png>`；
   `DVPLAYER_PLAY_UI=episodes,next` 切到下一个标题。

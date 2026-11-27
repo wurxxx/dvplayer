@@ -88,6 +88,12 @@ public partial class PlayWindow : Window
     private bool _discMenu;
     private bool _discMenuKeyForward;
 
+    /// <summary>
+    /// 这次播的是 DVD 镜像（`dvdnav://` + `--dvd-device`）：盘自己的 DVD 菜单，
+    /// 键鼠转发 / 控件收放和蓝光一致；没有 mpls 标题可绑定，菜单收起后不换条目 id。
+    /// </summary>
+    private bool _dvdNav;
+
     private MediaInfoDto? _mediaInfo;
     /// <summary>媒体信息请求已经结束（成功与否），字幕自动选择不用再等它。</summary>
     private bool _mediaInfoLoaded;
@@ -517,9 +523,18 @@ public partial class PlayWindow : Window
 
         if (probe is null)
         {
+            // 蓝光读不到标题：可能是 DVD 镜像（VIDEO_TS 结构）。
+            // Windows 的 mpv 带 libdvdnav，直接用 dvdnav 进 DVD 菜单。
+            if (await DvdDisc.ProbeAsync(isoPath))
+            {
+                Trace.Write($"disc is dvd iso={Path.GetFileName(isoPath)}");
+                return OpenDvd(owner, isoPath, coreItemId);
+            }
+
             if (!silent)
             {
-                ConfirmDialog.Alert(owner, "无法打开原盘", error ?? "读不到原盘标题。");
+                ConfirmDialog.Alert(owner, "无法打开原盘",
+                    error ?? "读不到原盘标题，也不是可播放的 DVD 镜像。");
             }
 
             return null;
@@ -529,13 +544,20 @@ public partial class PlayWindow : Window
             ? probe.Titles.FirstOrDefault(item => item.TitleNumber == wanted)
             : null;
 
-        // 从媒体库点开的原盘：直接进盘里的菜单（libbluray HDMV 导航 + mpv 的
-        // IG overlay 渲染）。菜单里选完标题，mpv 自己切，壳不用重开播放器。
+        // 从媒体库点开的原盘：HDMV 盘直接进盘里的菜单（libbluray HDMV 导航 +
+        // mpv 的 IG overlay 渲染）。菜单里选完标题，mpv 自己切，壳不用重开播放器。
+        // BD-J 盘点菜单只会剩菜单背景（mpv 没有 BD-J 支持），直接播正片。
         // 自检（silent）和 `--play-iso-title` 指定了标题时仍直接播指定标题，
         // 回归脚本不用点菜单。
-        if (title is null && !silent)
+        if (title is null && !silent && !probe.IsBDJ)
         {
             return OpenDiscMenu(owner, isoPath, probe, coreItemId);
+        }
+
+        if (probe.IsBDJ)
+        {
+            Trace.Write($"disc is bdj, play default title " +
+                        $"iso={Path.GetFileName(isoPath)}");
         }
 
         title ??= DefaultDiscTitle(probe);
@@ -676,6 +698,54 @@ public partial class PlayWindow : Window
         window.AttachSurface(owner);
         window.Show();
         window.BeginPlayback(source, 0);
+        return window;
+    }
+
+    /// <summary>
+    /// 打开 DVD 镜像：URL 是 `dvdnav://`，mpv 用 `--dvd-device=<iso>` 读盘，
+    /// `--disc-menu` 进盘自己的 DVD 菜单。菜单 / 键鼠转发和蓝光完全同一条路。
+    /// </summary>
+    public static PlayWindow OpenDvd(
+        Window? owner,
+        string isoPath,
+        string? coreItemId = null,
+        string? displayName = null,
+        double start = 0)
+    {
+        var name = Path.GetFileNameWithoutExtension(isoPath);
+        var display = string.IsNullOrWhiteSpace(displayName) ? name : displayName!;
+        var source = new PlaySourceDto(
+            $"iso:{name}:dvd",
+            display,
+            "dvdnav://",
+            new List<HttpHeaderDto>(),
+            true,
+            false,
+            string.Empty,
+            null,
+            null,
+            null,
+            (long)Math.Max(0, start),
+            0L,
+            null,
+            null,
+            null,
+            null,
+            false,
+            null,
+            null,
+            new List<AudioTrackDto>(),
+            new List<SubtitleTrackDto>());
+
+        Trace.Write($"dvd open iso={Path.GetFileName(isoPath)} start={start:0}");
+
+        var window = new PlayWindow(source, start > 0 ? start : 0, null, null,
+            localDisc: true, discIsoPath: isoPath, coreItemId: coreItemId,
+            discDisplayName: display);
+        window._started = true;
+        window.AttachSurface(owner);
+        window.Show();
+        window.BeginPlayback(source, start > 0 ? start : 0);
         return window;
     }
 
@@ -1273,7 +1343,8 @@ public partial class PlayWindow : Window
         var point = e.GetPosition(this);
 
         // 四边 8px：按住改窗口大小（分层窗口不吃系统的 WM_NCHITTEST，自己算）。
-        if (!_fullscreen)
+        // 盘内菜单期间整块画面都归菜单，贴边 / 顶部也是菜单按钮。
+        if (!_fullscreen && !_discMenuKeyForward)
         {
             var edge = HitEdge(point);
             if (edge != DragKind.None)
@@ -1296,7 +1367,7 @@ public partial class PlayWindow : Window
         }
 
         // 顶栏那一行按住就是拖窗口，松手也不算「点了画面」。
-        if (!_fullscreen && point.Y <= TopBarHeight)
+        if (!_fullscreen && !_discMenuKeyForward && point.Y <= TopBarHeight)
         {
             _pressInTopBar = true;
             BeginDrag(DragKind.Move, e);
@@ -1314,6 +1385,12 @@ public partial class PlayWindow : Window
     /// </summary>
     private void OnSurfaceDoubleClick()
     {
+        // 盘内菜单里双击就是连点两次按钮，别顺带切全屏。
+        if (_discMenuKeyForward)
+        {
+            return;
+        }
+
         // 双击时的第一次单击已经切过暂停，这里还原，只当全屏 / 最大化用。
         if (_clickToggledPause)
         {
@@ -1348,19 +1425,21 @@ public partial class PlayWindow : Window
             return;
         }
 
-        var delta = e.GetPosition(this) - _pressPoint;
-        if (Math.Abs(delta.X) > 4 || Math.Abs(delta.Y) > 4)
+        // 盘内菜单里只可能是点按钮：菜单期间窗口不能拖、画面也不能暂停，
+        // 所以按下 / 抬起之间动了多少都算一次点击（鼠标手一抖不该吞掉点击）。
+        if (!_discMenuKeyForward)
         {
-            return;
+            var delta = e.GetPosition(this) - _pressPoint;
+            if (Math.Abs(delta.X) > 4 || Math.Abs(delta.Y) > 4)
+            {
+                return;
+            }
         }
 
         // 盘内菜单：单击是在点菜单按钮，不是「暂停画面」。
         if (_discMenuKeyForward)
         {
-            var hit = e.GetPosition(this);
-            _ipc.Command("discnav", "mouse-click",
-                hit.X / Math.Max(1, ActualWidth),
-                hit.Y / Math.Max(1, ActualHeight));
+            ForwardDiscClick(e.GetPosition(this));
             e.Handled = true;
             return;
         }
@@ -1586,7 +1665,9 @@ public partial class PlayWindow : Window
         // 盘内菜单：URL 是 `bd://`（不带 mpls）才算，必须在拼 ExtraArgs 之前定。
         _discMenu = _isLocalDisc && source.Url.StartsWith("bd://", StringComparison.OrdinalIgnoreCase)
                     && !source.Url.Contains("mpls/", StringComparison.OrdinalIgnoreCase);
-        _discMenuKeyForward = _discMenu;
+        // DVD 镜像：`dvdnav://`，mpv 用 `--dvd-device` 打开盘自己的 DVD 菜单。
+        _dvdNav = _isLocalDisc && source.Url.StartsWith("dvdnav://", StringComparison.OrdinalIgnoreCase);
+        _discMenuKeyForward = _discMenu || _dvdNav;
         _discMenuSeen = false;
         // 起播时 mpv 会先推一次 `disc-menu-active=false`（属性初值），
         // 那时菜单还没画出来，不能因此把转发关掉（见 OnDiscMenuActiveChanged）。
@@ -1596,16 +1677,27 @@ public partial class PlayWindow : Window
             var extra = new List<string>();
             if (_discIsoPath is { Length: > 0 } isoPath)
             {
-                extra.Add($"--bluray-device={isoPath}");
-                // 盘内菜单：libbluray 的 HDMV 导航 + mpv 自己的 IG overlay 渲染
-                // （`discnav` 命令驱动）。菜单里选完，mpv 自己切到正片。
-                if (_discMenu)
+                if (_dvdNav)
                 {
+                    // DVD：libdvdnav 自己读 ISO，不用挂成盘符。
+                    extra.Add($"--dvd-device={isoPath}");
                     extra.Add("--disc-menu");
-                    // 快捷键要留给 discnav：上下左右 / 回车都是菜单导航，
-                    // 壳自己的 OnKeyDown 会在这期间让路（见 _discMenuKeyForward）。
                     extra.Add("--input-default-bindings=yes");
                     extra.Add("--input-vo-keyboard=yes");
+                }
+                else
+                {
+                    extra.Add($"--bluray-device={isoPath}");
+                    // 盘内菜单：libbluray 的 HDMV 导航 + mpv 自己的 IG overlay 渲染
+                    // （`discnav` 命令驱动）。菜单里选完，mpv 自己切到正片。
+                    if (_discMenu)
+                    {
+                        extra.Add("--disc-menu");
+                        // 快捷键要留给 discnav：上下左右 / 回车都是菜单导航，
+                        // 壳自己的 OnKeyDown 会在这期间让路（见 _discMenuKeyForward）。
+                        extra.Add("--input-default-bindings=yes");
+                        extra.Add("--input-vo-keyboard=yes");
+                    }
                 }
             }
 
@@ -2958,6 +3050,14 @@ public partial class PlayWindow : Window
 
     private void OnSliderPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // 控制条藏着（自动隐藏 / 盘内菜单）时不该响应鼠标。SliderAt 是按几何
+        // 范围算的，不看 IsHitTestVisible：盘内菜单的按钮就压在这一行上，
+        // 点 PLAY / CHAPTERS / SETUP 会先被进度条吃掉（还会顺手跳进度）。
+        if (!Chrome.IsHitTestVisible)
+        {
+            return;
+        }
+
         if (e.ChangedButton != MouseButton.Left ||
             SliderAt(e) is not { } slider ||
             IsThumbHit(e.OriginalSource as DependencyObject))
@@ -3624,6 +3724,9 @@ public partial class PlayWindow : Window
         FrameworkElement anchor,
         IEnumerable<(string Label, bool Selected, Action Action)> choices)
     {
+        // 同一时间只留一个壳菜单，也方便盘内菜单期间统一收掉。
+        _openMenu?.IsOpen = false;
+
         var menu = new ContextMenu
         {
             Style = (Style)FindResource("DarkContextMenu"),
@@ -3665,9 +3768,20 @@ public partial class PlayWindow : Window
             menu.Items.Add(item);
         }
 
+        _openMenu = menu;
+        menu.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_openMenu, menu))
+            {
+                _openMenu = null;
+            }
+        };
         menu.IsOpen = true;
         return menu;
     }
+
+    /// <summary>当前打开的壳菜单（字幕 / 音轨 / 倍速…），没开就是 null。</summary>
+    private ContextMenu? _openMenu;
 
     private async void ShowToast(string message)
     {
@@ -4980,7 +5094,7 @@ public partial class PlayWindow : Window
     private void OnDiscMenuActiveChanged(bool active)
     {
         _discMenuActiveForShot = active;
-        if (!_discMenu)
+        if (!_discMenu && !_dvdNav)
         {
             return;
         }
@@ -4999,6 +5113,16 @@ public partial class PlayWindow : Window
             _hideTimer.Stop();
             _chromeVisible = false;
             SetChromeOpacity(0);
+
+            // 透明不等于点不到：WPF 里 Opacity=0 的元素照样参与命中测试。
+            // 底部控制条就压在盘的菜单条上，点 CHAPTERS / SETUP 会命中
+            // 看不见的字幕按钮，菜单反而收不到这次点击。
+            SetChromeHitTest(false);
+            // 已经弹出来的壳菜单（字幕 / 音轨）也收掉，菜单期间点不掉它。
+            _openMenu?.IsOpen = false;
+            // 选集 / 媒体信息面板会浮在菜单上，而且已经点不到，一起收掉。
+            EpisodePanel.Visibility = Visibility.Collapsed;
+            MediaInfoPanel.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -5031,6 +5155,7 @@ public partial class PlayWindow : Window
 
         _discMenuKeyForward = false;
         Trace.Write("disc menu active=false (菜单已收起)");
+        SetChromeHitTest(true);
         ShowChrome();
         _ = BindPlayingDiscTitleAsync();
     }
@@ -5088,6 +5213,92 @@ public partial class PlayWindow : Window
         }
     }
 
+    /// <summary>
+    /// 菜单的鼠标坐标：mpv 的 `discnav` 要的是 0..1 相对**视频画面**，
+    /// 不是整个窗口。窗口比例和视频不一样时左右 / 上下有黑边，直接除窗口
+    /// 宽高会把按钮点偏（点 SHUSH CUT 落到别的按钮或空白）。
+    /// </summary>
+    private (double X, double Y) DiscPos(Point point)
+    {
+        var r = DiscRect();
+        var x = Math.Clamp((point.X - r.X) / r.W, 0, 1);
+        var y = Math.Clamp((point.Y - r.Y) / r.H, 0, 1);
+        return (x, y);
+    }
+
+    /// <summary>
+    /// 自检注入真实鼠标前把窗口挪进工作区：计划任务起的会话里窗口可能有一半
+    /// 在屏幕外，注入的点击就落不到窗口上。
+    /// </summary>
+    public void EnsureOnScreenForShot()
+    {
+        var work = SystemParameters.WorkArea;
+        var left = Math.Clamp(Left, work.Left, Math.Max(work.Left, work.Right - Width));
+        var top = Math.Clamp(Top, work.Top, Math.Max(work.Top, work.Bottom - Height));
+        Left = left;
+        Top = top;
+        if (_surface is not null)
+        {
+            _surface.Left = left;
+            _surface.Top = top;
+        }
+    }
+
+    /// <summary>
+    /// 把窗口里的一个点换算成盘内菜单坐标并转发给 `discnav`。
+    /// 真实点击和自检都走这里，避免两条路各算一遍。
+    /// </summary>
+    private void ForwardDiscClick(Point win)
+    {
+        var hit = DiscPos(win);
+        Trace.Write($"disc click win={win.X:0.#},{win.Y:0.#} " +
+                    $"size={ActualWidth:0}x{ActualHeight:0} -> {hit.X:0.###},{hit.Y:0.###}");
+        _ipc?.Command("discnav", "mouse-click", hit.X, hit.Y);
+    }
+
+    /// <summary>视频画面在窗口里的矩形（去黑边）：宽、高、左偏移、上偏移。</summary>
+    private (double W, double H, double X, double Y) DiscRect()
+    {
+        double w = Math.Max(1, ActualWidth);
+        double h = Math.Max(1, ActualHeight);
+
+        // Fill（panscan）和 Stretch 是铺满窗口，没有黑边。
+        double aspect = _aspect switch
+        {
+            PlayerAspect.Fill or PlayerAspect.Stretch => w / h,
+            PlayerAspect.Ratio16x9 => 16.0 / 9.0,
+            PlayerAspect.Ratio4x3 => 4.0 / 3.0,
+            _ => _videoAspect > 0.05 ? _videoAspect : 16.0 / 9.0,
+        };
+
+        double shownW = w;
+        double shownH = w / aspect;
+        if (shownH > h)
+        {
+            shownH = h;
+            shownW = h * aspect;
+        }
+
+        return (shownW, shownH, (w - shownW) / 2, (h - shownH) / 2);
+    }
+
+    /// <summary>
+    /// 自检：在**视频画面**归一化坐标处注入一次真实左键点击，走和用户一样的
+    /// WPF 事件（含 `DiscPos` 的黑边换算）。无头会话里鼠标可能移不动，
+    /// 需要可复现的结果时用 `--disc-menu-synth`。
+    /// </summary>
+    public void RealClickForShot(double nx, double ny)
+    {
+        EnsureOnScreenForShot();
+        var r = DiscRect();
+        var win = new Point(r.X + r.W * nx, r.Y + r.H * ny);
+        var p = PointToScreen(win);
+        Trace.Write($"disc realclick n={nx:0.###},{ny:0.###} screen={p.X:0},{p.Y:0}");
+        SetCursorPos((int)Math.Round(p.X), (int)Math.Round(p.Y));
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+    }
+
     /// <summary>菜单至少显示过一次：之后的 `disc-menu-active=false` 才是真的收起。</summary>
     private bool _discMenuSeen;
 
@@ -5109,10 +5320,8 @@ public partial class PlayWindow : Window
         // 不给壳的控制条。坐标系是 0..1 的画面相对位置。
         if (_discMenuKeyForward)
         {
-            var pos = e.GetPosition(this);
-            _ipc?.Command("discnav", "mouse-move",
-                pos.X / Math.Max(1, ActualWidth),
-                pos.Y / Math.Max(1, ActualHeight));
+            var pos = DiscPos(e.GetPosition(this));
+            _ipc?.Command("discnav", "mouse-move", pos.X, pos.Y);
             Cursor = Cursors.Arrow;
             return;
         }
@@ -5381,10 +5590,34 @@ public partial class PlayWindow : Window
             element.BeginAnimation(OpacityProperty, fade);
         }
 
+        // 淡出后控件看不见，但 WPF 里 Opacity=0 照样接鼠标：不收命中测试
+        // 就会出现「点画面底部反而弹出音轨 / 字幕菜单」。
+        SetChromeHitTest(target > 0);
+
         // 盘内菜单期间光标要一直看得见：用户是靠它指菜单按钮的。
         Cursor = (target > 0 || !_ready || _discMenuKeyForward)
             ? Cursors.Arrow
             : Cursors.None;
+    }
+
+    /// <summary>
+    /// 壳控件（底部控制条、右侧按钮、片名、面板）是否接受鼠标。
+    /// 盘内菜单期间要关掉：它们只是被设成透明，WPF 里照样能点到，
+    /// 会抢走菜单按钮的点击。右上角三个窗口按钮不在这个列表里。
+    /// </summary>
+    private void SetChromeHitTest(bool enabled)
+    {
+        foreach (var element in new FrameworkElement[]
+                 {
+                     Chrome, RightActions, TopInfo, TopStatus,
+                     EpisodePanel, MediaInfoPanel, SkipOutroButton,
+                 })
+        {
+            element.IsHitTestVisible = enabled;
+        }
+
+        // 顶部渐变本来就只是装饰，任何时候都不拦点击。
+        TopScrim.IsHitTestVisible = false;
     }
 
     private void SetChromeOpacity(double opacity)
@@ -5395,6 +5628,8 @@ public partial class PlayWindow : Window
             element.BeginAnimation(OpacityProperty, null);
             element.Opacity = opacity;
         }
+
+        SetChromeHitTest(opacity > 0);
 
         Cursor = (opacity > 0 || !_ready || _discMenuKeyForward)
             ? Cursors.Arrow
@@ -5826,6 +6061,147 @@ public partial class PlayWindow : Window
         };
         OnMouseMove(this, e);
         return DescribeDiscMenu();
+    }
+
+    /// <summary>
+    /// 自检：先把鼠标位置塞进 WPF 的输入状态（WM_MOUSEMOVE），再抛真实的
+    /// 按下 / 抬起。这样 `e.GetPosition()` 和用户手动点完全一致，
+    /// 可以验证「MouseDown/Up → DiscPos → discnav」整条路。
+    /// </summary>
+    public async Task SynthRealClickForShot(double wx, double wy)
+    {
+        // 自检窗口可能被别的程序压在下面，WPF 会认为鼠标不在自己身上，
+        // 连 WM_MOUSEMOVE 都不收，坐标就全错。先提到最前。
+        if (!Topmost)
+        {
+            Topmost = true;
+            Activate();
+            await Task.Delay(300);
+        }
+
+        var win = new Point(ActualWidth * wx, ActualHeight * wy);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        int cx = (int)Math.Round(win.X * dpi.DpiScaleX);
+        int cy = (int)Math.Round(win.Y * dpi.DpiScaleY);
+        var lp = (IntPtr)((cy << 16) | (cx & 0xFFFF));
+
+        PostMessage(hwnd, 0x0200 /* WM_MOUSEMOVE */, IntPtr.Zero, lp);
+        await Dispatcher.Yield(DispatcherPriority.Input);
+        await Task.Delay(120);
+
+        Trace.Write($"disc synth-real want={wx:0.###},{wy:0.###} " +
+                    $"client={cx},{cy} got={Mouse.GetPosition(this)}");
+
+        var down = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+            Source = Root,
+        };
+        Root.RaiseEvent(down);
+
+        await Task.Delay(80);
+
+        var up = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.MouseLeftButtonUpEvent,
+            Source = Root,
+        };
+        Root.RaiseEvent(up);
+    }
+
+    /// <summary>
+    /// 自检：用真正的窗口消息点一次（WM_MOUSEMOVE → WM_LBUTTONDOWN → WM_LBUTTONUP）。
+    /// 这是 WPF 自己的鼠标输入通道：命中测试、输入状态、独立窗口（Popup /
+    /// 菜单）抢鼠标都会按真实规则发生，比直接 RaiseEvent 更接近用户手点。
+    /// </summary>
+    public async Task PostClickForShot(double wx, double wy)
+    {
+        // 自检窗口可能被别的程序压在下面（计划任务会话里很常见），
+        // WPF 认为鼠标不在自己身上就不处理按键消息。先提到最前。
+        if (!Topmost)
+        {
+            Topmost = true;
+            Activate();
+            await Task.Delay(300);
+        }
+
+        var win = new Point(ActualWidth * wx, ActualHeight * wy);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        int cx = (int)Math.Round(win.X * dpi.DpiScaleX);
+        int cy = (int)Math.Round(win.Y * dpi.DpiScaleY);
+        var lp = (IntPtr)((cy << 16) | (cx & 0xFFFF));
+
+        Trace.Write($"disc post mouse-move client={cx},{cy}");
+        PostMessage(hwnd, 0x0200 /* WM_MOUSEMOVE */, IntPtr.Zero, lp);
+        await Task.Delay(160);
+        PostMessage(hwnd, 0x0201 /* WM_LBUTTONDOWN */, (IntPtr)1, lp);
+        await Task.Delay(90);
+        PostMessage(hwnd, 0x0202 /* WM_LBUTTONUP */, IntPtr.Zero, lp);
+        await Task.Delay(160);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    /// <summary>
+    /// 自检：窗口归一化坐标处到底是谁在接鼠标。盘内菜单期间应该只剩
+    /// Overlay / Root，不能是控制条里的按钮（透明度 0 也能点）。
+    /// </summary>
+    public string HitTestForShot(double wx, double wy)
+    {
+        // 必须用 InputHitTest：VisualTreeHelper.HitTest 不看 IsHitTestVisible，
+        // 看不出「透明控件还会不会吃掉点击」。
+        var current = InputHitTest(
+            new Point(ActualWidth * wx, ActualHeight * wy)) as DependencyObject;
+        var chain = new List<string>();
+        while (current is not null && chain.Count < 6)
+        {
+            var name = current is FrameworkElement fe && !string.IsNullOrEmpty(fe.Name)
+                ? "#" + fe.Name
+                : string.Empty;
+            chain.Add(current.GetType().Name + name);
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return $"chromeHit={Chrome.IsHitTestVisible} " + string.Join(" < ", chain);
+    }
+
+    /// <summary>自检：改窗口尺寸（验证画面比例和窗口不一致时的坐标换算）。</summary>
+    public void ResizeForShot(double width, double height)
+    {
+        Width = width;
+        Height = height;
+        UpdateLayout();
+        SyncSurface();
+        Trace.Write($"disc winsize {ActualWidth:0}x{ActualHeight:0}");
+    }
+
+    /// <summary>
+    /// 自检：按窗口归一化坐标合成一次 WPF 左键按下 / 抬起（先移动真实光标），
+    /// 走和用户完全一样的 `OnSurfaceMouseDown/Up` → `DiscPos` → `discnav`。
+    /// 不受屏幕窗口堆叠影响。
+    /// </summary>
+    public void SynthClickWinForShot(double wx, double wy)
+    {
+        EnsureOnScreenForShot();
+        var win = new Point(ActualWidth * wx, ActualHeight * wy);
+        var p = PointToScreen(win);
+        SetCursorPos((int)Math.Round(p.X), (int)Math.Round(p.Y));
+
+        Trace.Write($"disc synth win={wx:0.###},{wy:0.###} screen={p.X:0},{p.Y:0} " +
+                    $"size={ActualWidth:0}x{ActualHeight:0}");
+        ForwardDiscClick(win);
+    }
+
+    /// <summary>
+    /// 自检：直接把「视频画面归一化坐标」的鼠标移动 / 点击交给 discnav，
+    /// 绕开窗口堆叠与 WPF 事件，单独验证 libbluray 的按钮命中。
+    /// </summary>
+    public void DiscMouseForShot(string kind, double nx, double ny)
+    {
+        _ipc?.Command("discnav", kind, nx, ny);
     }
 
     /// <summary>自检：把一个按键交给 discnav（等价于用户按方向键 / 回车）。</summary>

@@ -328,7 +328,11 @@ public sealed class MpvProcess : IMpvEngine
         // 弹幕 ASS 走第二字幕：默认 strip 会剥掉样式（滚动 / 颜色 / 字号），
         // 弹幕会全挤在顶部中间。
         yield return "--secondary-sub-ass-override=no";
-        yield return "--msg-level=all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info";
+        // 自检：libbluray 的调试位只在 mpv 的 trace 级别才全开，查盘内菜单
+        // 的鼠标命中 / 页面切换时用它。
+        yield return LibMpvProcess.TraceLibbluray
+            ? "--msg-level=all=trace"
+            : "--msg-level=all=info,vd=v,vf=v,mkv=v,vo/gpu-next=info";
 
         if (!string.IsNullOrWhiteSpace(launch.Title))
         {

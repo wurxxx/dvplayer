@@ -196,8 +196,15 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   菜单期间壳的控制条 / 片名 / 右侧按钮全部收掉，只留右上角窗口按钮。
   菜单收起后条目 id 从 `iso:<盘>:menu` 绑到实际正片 `iso:<盘>:mpls<N>`，
   续播点才记得对。
+  **BD-J 盘例外**：probe 日志里有 `BD-J Titles: N`（N>0）或
+  `Playing without menus` 时菜单跑不起来，直接播最长正片（条目标题面板切），
+  免得停在菜单背景视频、控制条又被收掉。
+  **DVD 镜像**（`VIDEO_TS`）：蓝光探测读不到标题时，用 mpv 的
+  `--dvd-device=<iso>` + `dvdnav://` + `--disc-menu` 进盘自己的 DVD 菜单，
+  键鼠转发 / 控件收放和蓝光同一条 `discnav` 路；条目 id 是 `iso:<盘>:dvd`。
   自检：进菜单 `--disc-menu <iso> --disc-shot <目录>`，按菜单按钮
   `--disc-menu-keys=select,down,down,select`（逗号分隔）；
+  DVD 的须知页常要先放几十秒，加 `--disc-menu-delay 35`；
   直接播某个标题 `--play-iso` / `--play-iso-title` / `--play-start`；
   只截「标题」面板用 `--disc-list` / `--disc-shot`。
 - **记录页「通用」的收藏行**：继续观看下面接一行「视频收藏」（168×252 竖卡 +
