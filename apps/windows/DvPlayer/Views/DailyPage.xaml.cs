@@ -155,7 +155,7 @@ public partial class DailyPage : Page
 
         if (string.IsNullOrWhiteSpace(settings.MoviePilotUrl))
         {
-            lines.Add("没配 MoviePilot：媒体源里没有的条目暂时不能直接订阅。"
+            lines.Add("没配 MoviePilot：资料页里的「添加订阅」会提示先配置。"
                       + "在「设置 → 通用 → 每日推荐」里填地址和 API Token。");
         }
 
@@ -174,7 +174,7 @@ public partial class DailyPage : Page
         await DailyService.RefreshAsync(force: true);
     }
 
-    private async void OnCardClick(object sender, MouseButtonEventArgs e)
+    private void OnCardClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: DailyItem item })
         {
@@ -188,17 +188,7 @@ public partial class DailyPage : Page
             return;
         }
 
-        if (item.Subscribed)
-        {
-            _notice = "已经推送到 MoviePilot 了";
-            Render();
-            return;
-        }
-
-        _notice = "正在推送到 MoviePilot…";
-        Render();
-        var message = await DailyService.SubscribeAsync(item);
-        _notice = message.Length > 0 ? message : null;
-        Render();
+        // 媒体源里没有：先看豆瓣 / TMDB 的资料，订阅放进资料页里。
+        NavigationService?.Navigate(new DailyDetailPage(item));
     }
 }

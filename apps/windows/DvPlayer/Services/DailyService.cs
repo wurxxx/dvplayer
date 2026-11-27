@@ -2,6 +2,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -628,6 +629,285 @@ public static class DailyService
         return text.Length > 120 ? text[..120] : text;
     }
 
+    // MARK: - 条目详情
+
+    private static readonly Dictionary<string, DailyDetailInfo> DetailCache = new();
+    private static readonly object DetailGate = new();
+
+    /// <summary>
+    /// 拉一条推荐条目的资料。豆瓣走 rexxar 接口，TMDB 走详情接口；
+    /// 拿不到时至少把列表里已有的信息填上，详情页不会空着。
+    /// </summary>
+    public static async Task<(DailyDetailInfo Info, string? Error)> LoadDetailAsync(DailyItem item)
+    {
+        lock (DetailGate)
+        {
+            if (DetailCache.TryGetValue(item.Id, out var cached))
+            {
+                return (cached, null);
+            }
+        }
+
+        try
+        {
+            var info = item.Id.StartsWith("douban:", StringComparison.Ordinal)
+                ? await LoadDoubanDetailAsync(item)
+                : await LoadTmdbDetailAsync(item);
+            lock (DetailGate)
+            {
+                DetailCache[item.Id] = info;
+            }
+
+            return (info, null);
+        }
+        catch (Exception ex)
+        {
+            return (BaseInfo(item), ex.Message);
+        }
+    }
+
+    /// <summary>列表里已有的信息：详情接口失败时兜底。</summary>
+    public static DailyDetailInfo BaseInfo(DailyItem item) => new()
+    {
+        Title = item.Title,
+        Year = item.Year,
+        IsSeries = item.IsSeries,
+        Rating = item.Rating,
+        Overview = item.Overview,
+        PosterUrl = item.PosterUrl,
+        DoubanUrl = item.Id.StartsWith("douban:", StringComparison.Ordinal) ? item.Link : null,
+        TmdbUrl = item.TmdbId is { } tmdbId
+            ? $"https://www.themoviedb.org/{(item.IsSeries ? "tv" : "movie")}/{tmdbId}"
+            : null,
+    };
+
+    /// <summary>豆瓣移动端条目接口：和列表接口一样要带桌面 UA + Referer。</summary>
+    private static async Task<DailyDetailInfo> LoadDoubanDetailAsync(DailyItem item)
+    {
+        var parts = item.Id.Split(':');
+        if (parts.Length < 3)
+        {
+            throw new InvalidOperationException("豆瓣条目 id 不对");
+        }
+
+        var type = item.IsSeries ? "tv" : "movie";
+        var id = parts[^1];
+        var url = $"https://m.douban.com/rexxar/api/v2/{type}/{id}?ck=&for_mobile=1";
+        using var document = await GetJsonAsync(url, "https://m.douban.com/", timeoutSeconds: 12);
+        var root = document.RootElement;
+
+        var info = BaseInfo(item);
+        var title = FirstString(root, "title");
+        info.Title = title.Length > 0 ? title : item.Title;
+        info.OriginalTitle = NullIfEmpty(FirstString(root, "original_title"));
+        info.Overview = NullIfEmpty(FirstString(root, "intro")) ?? info.Overview;
+
+        if (root.TryGetProperty("year", out var year))
+        {
+            var text = year.ValueKind == JsonValueKind.String ? year.GetString() : year.ToString();
+            if (text is { Length: >= 4 } && int.TryParse(text[..4], out var parsedYear))
+            {
+                info.Year = parsedYear;
+            }
+        }
+
+        if (root.TryGetProperty("is_tv", out var isTv) && isTv.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            info.IsSeries = isTv.GetBoolean();
+        }
+
+        if (root.TryGetProperty("rating", out var rating))
+        {
+            if (rating.TryGetProperty("value", out var value)
+                && value.ValueKind == JsonValueKind.Number
+                && value.TryGetDouble(out var score) && score > 0)
+            {
+                info.Rating = score;
+            }
+
+            if (rating.TryGetProperty("count", out var count)
+                && count.ValueKind == JsonValueKind.Number
+                && count.TryGetInt32(out var votes))
+            {
+                info.RatingCount = votes;
+            }
+        }
+
+        info.Genres = Strings(root, "genres");
+        info.Countries = Strings(root, "countries");
+        var durations = Strings(root, "durations");
+        info.Runtime = durations.Count > 0 ? string.Join(" / ", durations) : null;
+
+        if (root.TryGetProperty("episodes_count", out var episodes)
+            && episodes.ValueKind == JsonValueKind.Number
+            && episodes.TryGetInt32(out var total) && total > 0)
+        {
+            info.Episodes = total;
+        }
+
+        info.Directors = Names(root, "directors");
+        info.Cast = Names(root, "actors");
+        info.PosterUrl = NullIfEmpty(FirstString(root, "cover_url")) ?? info.PosterUrl;
+        info.DoubanUrl = NullIfEmpty(FirstString(root, "url")) ?? info.DoubanUrl;
+        return info;
+    }
+
+    /// <summary>TMDB 详情：制片国家是英文名，够用；演职人员取前几位。</summary>
+    private static async Task<DailyDetailInfo> LoadTmdbDetailAsync(DailyItem item)
+    {
+        if (item.TmdbId is not { } tmdbId)
+        {
+            return BaseInfo(item);
+        }
+
+        var apiKey = AppServices.Instance.Settings.TmdbApiKey?.Trim() ?? "";
+        if (apiKey.Length == 0)
+        {
+            return BaseInfo(item);
+        }
+
+        var media = item.IsSeries ? "tv" : "movie";
+        var url = $"https://api.themoviedb.org/3/{media}/{tmdbId}"
+                  + "?api_key=" + Uri.EscapeDataString(apiKey)
+                  + "&language=zh-CN&append_to_response=credits,external_ids";
+        using var document = await GetJsonAsync(url, timeoutSeconds: 12, client: TmdbClient());
+        var root = document.RootElement;
+
+        var info = BaseInfo(item);
+        var title = FirstString(root, "title", "name");
+        info.Title = title.Length > 0 ? title : item.Title;
+        info.OriginalTitle = NullIfEmpty(FirstString(root, "original_title", "original_name"));
+        info.Overview = NullIfEmpty(FirstString(root, "overview")) ?? info.Overview;
+
+        var date = FirstString(root, "release_date", "first_air_date");
+        if (date.Length >= 4 && int.TryParse(date[..4], out var year))
+        {
+            info.Year = year;
+        }
+
+        if (root.TryGetProperty("vote_average", out var vote)
+            && vote.ValueKind == JsonValueKind.Number
+            && vote.TryGetDouble(out var score) && score > 0)
+        {
+            info.Rating = score;
+        }
+
+        if (root.TryGetProperty("vote_count", out var count)
+            && count.ValueKind == JsonValueKind.Number
+            && count.TryGetInt32(out var votes))
+        {
+            info.RatingCount = votes;
+        }
+
+        info.Genres = Names(root, "genres");
+        info.Countries = Names(root, "production_countries");
+
+        if (item.IsSeries)
+        {
+            if (root.TryGetProperty("episode_run_time", out var runTime)
+                && runTime.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entry in runTime.EnumerateArray())
+                {
+                    if (entry.ValueKind == JsonValueKind.Number
+                        && entry.TryGetInt32(out var minutes) && minutes > 0)
+                    {
+                        info.Runtime = $"{minutes} 分钟/集";
+                        break;
+                    }
+                }
+            }
+
+            if (root.TryGetProperty("number_of_episodes", out var episodes)
+                && episodes.ValueKind == JsonValueKind.Number
+                && episodes.TryGetInt32(out var total) && total > 0)
+            {
+                info.Episodes = total;
+            }
+        }
+        else if (root.TryGetProperty("runtime", out var runtime)
+                 && runtime.ValueKind == JsonValueKind.Number
+                 && runtime.TryGetInt32(out var minutes) && minutes > 0)
+        {
+            info.Runtime = $"{minutes} 分钟";
+        }
+
+        if (root.TryGetProperty("credits", out var credits))
+        {
+            info.Cast = Names(credits, "cast").Take(10).ToList();
+            if (credits.TryGetProperty("crew", out var crew) && crew.ValueKind == JsonValueKind.Array)
+            {
+                info.Directors = crew.EnumerateArray()
+                    .Where(member => member.TryGetProperty("job", out var job)
+                                     && job.ValueKind == JsonValueKind.String
+                                     && job.GetString() == "Director")
+                    .Select(member => member.TryGetProperty("name", out var name)
+                                      && name.ValueKind == JsonValueKind.String
+                        ? name.GetString() ?? ""
+                        : "")
+                    .Where(name => name.Length > 0)
+                    .Take(4)
+                    .ToList();
+            }
+        }
+
+        if (root.TryGetProperty("external_ids", out var external)
+            && external.TryGetProperty("imdb_id", out var imdb)
+            && imdb.ValueKind == JsonValueKind.String
+            && imdb.GetString() is { Length: > 0 } imdbId)
+        {
+            info.ImdbUrl = "https://www.imdb.com/title/" + imdbId + "/";
+        }
+
+        var posterPath = FirstString(root, "poster_path");
+        if (posterPath.Length > 0)
+        {
+            info.PosterUrl = "https://image.tmdb.org/t/p/w500" + posterPath;
+        }
+
+        var backdropPath = FirstString(root, "backdrop_path");
+        if (backdropPath.Length > 0)
+        {
+            info.BackdropUrl = "https://image.tmdb.org/t/p/w1280" + backdropPath;
+        }
+
+        return info;
+    }
+
+    private static string? NullIfEmpty(string text) => string.IsNullOrWhiteSpace(text) ? null : text;
+
+    /// <summary>`["剧情", "爱情"]` 这种字符串数组。</summary>
+    private static List<string> Strings(JsonElement parent, string key)
+    {
+        if (!parent.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return new List<string>();
+        }
+
+        return value.EnumerateArray()
+            .Where(entry => entry.ValueKind == JsonValueKind.String)
+            .Select(entry => entry.GetString()?.Trim() ?? "")
+            .Where(text => text.Length > 0)
+            .ToList();
+    }
+
+    /// <summary>`[{"name": "…"}]` 这种结构里的名字。</summary>
+    private static List<string> Names(JsonElement parent, string key)
+    {
+        if (!parent.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return new List<string>();
+        }
+
+        return value.EnumerateArray()
+            .Select(entry => entry.TryGetProperty("name", out var name)
+                             && name.ValueKind == JsonValueKind.String
+                ? name.GetString()?.Trim() ?? ""
+                : "")
+            .Where(text => text.Length > 0)
+            .ToList();
+    }
+
     // MARK: - 缓存 / 图片
 
     private static void SaveCache()
@@ -863,32 +1143,42 @@ public sealed class DailyItem : CardVisual
     public string? MatchedTitle { get; set; }
     public bool Subscribed { get; set; }
 
+    [JsonIgnore]
     public bool IsSeries => string.Equals(Kind, "tv", StringComparison.OrdinalIgnoreCase);
+    [JsonIgnore]
     public bool InLibrary => !string.IsNullOrEmpty(MatchedItemId);
 
     /// <summary>去重用：归一化标题 + 电影 / 剧集。</summary>
+    [JsonIgnore]
     public string MatchKey => DailyService.Normalize(Title) + (IsSeries ? "#tv" : "#movie");
 
+    [JsonIgnore]
     public string Initial => Palette.InitialOf(Title);
 
+    [JsonIgnore]
     public string RatingText => Rating is { } rating && rating > 0
         ? rating.ToString("0.0")
         : "";
 
+    [JsonIgnore]
     public System.Windows.Visibility RatingVisibility =>
         Rating is > 0 ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
-    public string StateText => InLibrary ? "在媒体源里" : Subscribed ? "已订阅" : "点按订阅";
+    [JsonIgnore]
+    public string StateText => InLibrary ? "在媒体源里" : Subscribed ? "已订阅" : "点按查看";
 
+    [JsonIgnore]
     public Brush StateBrush => InLibrary
         ? new SolidColorBrush(Color.FromRgb(0x4A, 0xDE, 0x80))
         : Subscribed
             ? new SolidColorBrush(Color.FromRgb(0xFF, 0xB0, 0x20))
             : new SolidColorBrush(Color.FromRgb(0x96, 0x96, 0xA4));
 
+    [JsonIgnore]
     public System.Windows.Visibility MatchedVisibility =>
         InLibrary ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
+    [JsonIgnore]
     public string SubText => Year is { } year ? year.ToString() : "";
 
     public void SetMatched(string itemId, string title)
@@ -922,4 +1212,32 @@ public sealed class DailyItem : CardVisual
         Background = brush;
         PlaceholderVisibility = System.Windows.Visibility.Collapsed;
     }
+}
+
+/// <summary>
+/// 推荐条目的资料。媒体源里没有的条目点开时，用豆瓣 / TMDB 的数据撑起
+/// 一个和媒体详情页同结构的页面：先看清楚，再决定要不要订阅。
+/// </summary>
+public sealed class DailyDetailInfo
+{
+    public string Title { get; set; } = "";
+    public string? OriginalTitle { get; set; }
+    public int? Year { get; set; }
+    public bool IsSeries { get; set; }
+    public double? Rating { get; set; }
+    public int? RatingCount { get; set; }
+    public List<string> Genres { get; set; } = new();
+    public List<string> Countries { get; set; } = new();
+    /// <summary>「166 分钟」「45 分钟/集」。</summary>
+    public string? Runtime { get; set; }
+    /// <summary>剧集总集数。</summary>
+    public int? Episodes { get; set; }
+    public string? Overview { get; set; }
+    public List<string> Directors { get; set; } = new();
+    public List<string> Cast { get; set; } = new();
+    public string? PosterUrl { get; set; }
+    public string? BackdropUrl { get; set; }
+    public string? DoubanUrl { get; set; }
+    public string? TmdbUrl { get; set; }
+    public string? ImdbUrl { get; set; }
 }

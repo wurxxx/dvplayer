@@ -3,16 +3,36 @@ import AppKit
 import DvCore
 
 /// 「每日推荐」页：TMDB / 豆瓣的热门，媒体源里有的点开进详情，
-/// 没有的推到 MoviePilot 订阅。
+/// 没有的打开豆瓣 / TMDB 的资料页，在资料页里再决定要不要订阅。
 struct DailyPage: View {
     @EnvironmentObject private var state: AppState
     @ObservedObject private var store = DailyStore.shared
+
+    /// 媒体源里没有的条目：点开后盖在列表上的资料页。
+    @State private var detailItem: DailyItem?
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 150, maximum: 210), spacing: 16, alignment: .top)]
     }
 
     var body: some View {
+        ZStack {
+            list
+                .allowsHitTesting(detailItem == nil)
+
+            if let detailItem {
+                // 换条目时整页重建：上一部的简介 / 演职人员不残留。
+                DailyDetailPage(item: detailItem,
+                                onBack: { self.detailItem = nil })
+                    .id(detailItem.id)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: detailItem?.id)
+    }
+
+    private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
@@ -40,7 +60,26 @@ struct DailyPage: View {
                 .padding(.bottom, 32)
             }
         }
-        .task { await firstLoad() }
+        .task {
+            await firstLoad()
+            await openDebugDetailIfRequested()
+        }
+    }
+
+    /// 自检：`DVPLAYER_DAILY_DETAIL=<片名>` 等推荐就绪后直接打开那条的资料页。
+    private func openDebugDetailIfRequested() async {
+        guard let wanted = ProcessInfo.processInfo.environment["DVPLAYER_DAILY_DETAIL"],
+              !wanted.isEmpty else { return }
+        for _ in 0..<30 {
+            if let hit = store.items.first(where: {
+                $0.title.contains(wanted) && $0.matchedItemId == nil
+            }) {
+                detailItem = hit
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        NSLog("[DailyTest] 没找到可打开详情的条目：%@", wanted)
     }
 
     // MARK: - 头部
@@ -103,7 +142,7 @@ struct DailyPage: View {
             }
 
             if (state.settings.moviePilotUrl ?? "").isEmpty {
-                note("没配 MoviePilot：媒体源里没有的条目暂时不能直接订阅。"
+                note("没配 MoviePilot：详情页里的「添加订阅」会提示先配置。"
                      + "在「设置 → 每日推荐」里填地址和 API Token。", tint: Theme.faint)
             }
         }
@@ -124,9 +163,7 @@ struct DailyPage: View {
                          trailing: "\(items.count)")
             LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
                 ForEach(items) { item in
-                    DailyCard(item: item,
-                              subscribing: store.subscribing.contains(item.id),
-                              onTap: { activate(item) })
+                    DailyCard(item: item, onTap: { activate(item) })
                 }
             }
         }
@@ -134,7 +171,8 @@ struct DailyPage: View {
 
     private var footer: some View {
         Text("推荐来自 TMDB / 豆瓣，每天打开应用时更新一次；"
-             + "在媒体源里匹配到的条目可以直接打开，其余可以一键推到 MoviePilot 订阅。")
+             + "媒体源里有的点开直接进详情页，没有的会打开豆瓣 / TMDB 的资料页，"
+             + "可以在里面「添加订阅」推到 MoviePilot。")
             .font(.system(size: 11.5))
             .foregroundStyle(Theme.faint)
             .padding(.top, 4)
@@ -171,24 +209,14 @@ struct DailyPage: View {
             return
         }
 
-        if item.subscribed == true {
-            state.showToast("已经推送到 MoviePilot 了")
-            return
-        }
-
-        Task {
-            let message = await store.subscribe(item, settings: state.settings)
-            if !message.isEmpty {
-                state.showToast(message)
-            }
-        }
+        // 媒体源里没有：先看豆瓣 / TMDB 的资料，订阅放进资料页里。
+        detailItem = item
     }
 }
 
-/// 推荐卡：海报 + 标题 + 状态。点按的语义由页面决定（进详情 / 订阅）。
+/// 推荐卡：海报 + 标题 + 状态。点按的语义由页面决定（进媒体详情 / 打开资料页）。
 private struct DailyCard: View {
     let item: DailyItem
-    let subscribing: Bool
     let onTap: () -> Void
 
     @State private var hovering = false
@@ -196,7 +224,7 @@ private struct DailyCard: View {
     private var stateText: String {
         if item.matchedItemId != nil { return "在媒体源里" }
         if item.subscribed == true { return "已订阅" }
-        return "点按订阅"
+        return "点按查看"
     }
 
     private var stateColor: Color {
@@ -224,15 +252,10 @@ private struct DailyCard: View {
 
                     if hovering {
                         Image(systemName: item.matchedItemId != nil
-                              ? "play.fill" : "plus.circle.fill")
+                              ? "play.fill" : "info.circle.fill")
                             .font(.system(size: 26, weight: .semibold))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 6)
-                    }
-
-                    if subscribing {
-                        Color.black.opacity(0.5)
-                        ProgressView().controlSize(.small)
                     }
                 }
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
@@ -312,7 +335,7 @@ private struct DailyCard: View {
         if let matched = item.matchedTitle, item.matchedItemId != nil {
             return "在媒体源里找到：\(matched)"
         }
-        if item.subscribed == true { return "已经推送到 MoviePilot" }
-        return "媒体源里没有，点按推到 MoviePilot 订阅"
+        if item.subscribed == true { return "已经推送到 MoviePilot · 点按查看资料" }
+        return "点按查看豆瓣 / TMDB 资料，在资料页里订阅"
     }
 }

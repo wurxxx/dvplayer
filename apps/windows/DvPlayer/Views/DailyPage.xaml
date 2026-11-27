@@ -128,7 +128,7 @@
                               ItemTemplate="{StaticResource DailyCardTemplate}" />
         </StackPanel>
 
-        <TextBlock Text="推荐来自 TMDB / 豆瓣，每天打开应用时更新一次；在媒体源里匹配到的条目可以直接打开，其余可以一键推到 MoviePilot 订阅。"
+        <TextBlock Text="推荐来自 TMDB / 豆瓣，每天打开应用时更新一次；媒体源里有的点开直接进详情页，没有的会打开豆瓣 / TMDB 的资料页，可以在里面「添加订阅」推到 MoviePilot。"
                    Style="{StaticResource Caption}" Margin="2,8,0,0"
                    TextWrapping="Wrap" LineHeight="18" />
       </StackPanel>

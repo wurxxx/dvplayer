@@ -70,6 +70,31 @@ enum DailyError: LocalizedError {
     }
 }
 
+/// 推荐条目的资料。媒体源里没有的条目点开时，用豆瓣 / TMDB 的数据撑起
+/// 一个和媒体详情页同结构的页面：先看清楚，再决定要不要订阅。
+struct DailyDetailInfo: Sendable, Equatable {
+    var title: String
+    var originalTitle: String?
+    var year: Int?
+    var isSeries: Bool
+    var rating: Double?
+    var ratingCount: Int?
+    var genres: [String] = []
+    var countries: [String] = []
+    /// 「166 分钟」「45 分钟/集」。
+    var runtime: String?
+    /// 剧集总集数。
+    var episodes: Int?
+    var overview: String?
+    var directors: [String] = []
+    var cast: [String] = []
+    var poster: String?
+    var backdrop: String?
+    var doubanURL: String?
+    var tmdbURL: String?
+    var imdbURL: String?
+}
+
 // MARK: - 抓取
 
 enum DailyAPI {
@@ -160,6 +185,172 @@ enum DailyAPI {
                 matchedTitle: nil,
                 subscribed: nil)
         }
+    }
+
+    // MARK: 条目详情
+
+    /// 拉一条推荐条目的资料。豆瓣走 rexxar 接口，TMDB 走详情接口；
+    /// 拿不到时至少把列表里已有的信息填上，页面不会空着。
+    static func detail(for item: DailyItem, settings: AppSettings) async throws -> DailyDetailInfo {
+        if item.id.hasPrefix("douban:") {
+            return try await doubanDetail(item)
+        }
+
+        let key = settings.tmdbApiKey?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !key.isEmpty else { return baseInfo(item) }
+        return try await tmdbDetail(item, apiKey: key, proxy: settings.tmdbProxy)
+    }
+
+    /// 列表里已有的信息：详情接口失败时兜底。
+    static func baseInfo(_ item: DailyItem) -> DailyDetailInfo {
+        DailyDetailInfo(
+            title: item.title,
+            year: item.year,
+            isSeries: item.isSeries,
+            rating: item.rating,
+            overview: item.overview,
+            poster: item.poster,
+            doubanURL: item.id.hasPrefix("douban:") ? item.link : nil,
+            tmdbURL: item.tmdbId.map {
+                "https://www.themoviedb.org/\(item.isSeries ? "tv" : "movie")/\($0)"
+            })
+    }
+
+    /// 豆瓣移动端条目接口。没公开文档，但一直能返回完整资料。
+    /// 和列表接口一样必须带桌面 UA + Referer。
+    private static func doubanDetail(_ item: DailyItem) async throws -> DailyDetailInfo {
+        let parts = item.id.split(separator: ":").map(String.init)
+        guard parts.count == 3, let id = parts.last else {
+            throw DailyError.message("豆瓣条目 id 不对")
+        }
+        let type = item.isSeries ? "tv" : "movie"
+        var components = URLComponents(
+            string: "https://m.douban.com/rexxar/api/v2/\(type)/\(id)")!
+        components.queryItems = [
+            URLQueryItem(name: "ck", value: ""),
+            URLQueryItem(name: "for_mobile", value: "1"),
+        ]
+
+        let root = try await json(components.url!,
+                                  referer: "https://m.douban.com/", timeout: 12)
+        guard let object = root as? [String: Any] else {
+            throw DailyError.message("豆瓣返回格式不对")
+        }
+
+        var info = baseInfo(item)
+        info.title = firstString(object, ["title"], fallback: item.title)
+        info.originalTitle = firstString(object, ["original_title"], fallback: "")
+        if let raw = object["year"] as? String ?? (object["year"] as? NSNumber)?.stringValue,
+           let year = Int(raw.prefix(4)) {
+            info.year = year
+        }
+        // 剧集接口里 `is_tv` 才是准的：列表接口有时会把剧当电影。
+        if let isTv = object["is_tv"] as? Bool {
+            info.isSeries = isTv
+        }
+        info.overview = firstString(object, ["intro"], fallback: info.overview ?? "")
+        if let rating = object["rating"] as? [String: Any] {
+            let value = (rating["value"] as? NSNumber)?.doubleValue ?? 0
+            info.rating = value > 0 ? value : info.rating
+            info.ratingCount = (rating["count"] as? NSNumber)?.intValue
+        }
+        info.genres = strings(object["genres"])
+        info.countries = strings(object["countries"])
+        info.runtime = strings(object["durations"]).joined(separator: " / ")
+        if info.runtime?.isEmpty == true { info.runtime = nil }
+        let episodes = (object["episodes_count"] as? NSNumber)?.intValue ?? 0
+        info.episodes = episodes > 0 ? episodes : nil
+        info.cast = names(object["actors"])
+        info.directors = names(object["directors"])
+        info.poster = firstString(object, ["cover_url"], fallback: info.poster ?? "")
+        if info.poster?.isEmpty == true { info.poster = item.poster }
+        info.doubanURL = firstString(object, ["url"], fallback: item.link ?? "")
+        if info.doubanURL?.isEmpty == true { info.doubanURL = nil }
+        return info
+    }
+
+    /// TMDB 详情：制片国家是英文名，够用；演职人员按片方排序取前几位。
+    private static func tmdbDetail(_ item: DailyItem, apiKey: String, proxy: String?)
+        async throws -> DailyDetailInfo {
+        guard let tmdbId = item.tmdbId else { return baseInfo(item) }
+        let media = item.isSeries ? "tv" : "movie"
+        var components = URLComponents(
+            string: "https://api.themoviedb.org/3/\(media)/\(tmdbId)")!
+        components.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "language", value: "zh-CN"),
+            URLQueryItem(name: "append_to_response", value: "credits,external_ids"),
+        ]
+
+        let root = try await json(components.url!, timeout: 12, proxy: proxy)
+        guard let object = root as? [String: Any] else {
+            throw DailyError.message("TMDB 返回格式不对")
+        }
+
+        var info = baseInfo(item)
+        info.title = firstString(object, ["title", "name"], fallback: item.title)
+        info.originalTitle = firstString(object, ["original_title", "original_name"],
+                                         fallback: "")
+        let date = firstString(object, ["release_date", "first_air_date"], fallback: "")
+        if let year = Int(date.prefix(4)) { info.year = year }
+        info.overview = firstString(object, ["overview"], fallback: info.overview ?? "")
+        if let vote = (object["vote_average"] as? NSNumber)?.doubleValue, vote > 0 {
+            info.rating = vote
+        }
+        info.ratingCount = (object["vote_count"] as? NSNumber)?.intValue
+        info.genres = names(object["genres"])
+        info.countries = names(object["production_countries"])
+
+        let movieRuntime = (object["runtime"] as? NSNumber)?.intValue ?? 0
+        let episodeRuntime = ((object["episode_run_time"] as? [Any])?
+            .compactMap { ($0 as? NSNumber)?.intValue } ?? []).first ?? 0
+        let episodes = (object["number_of_episodes"] as? NSNumber)?.intValue ?? 0
+        if info.isSeries {
+            if episodeRuntime > 0 { info.runtime = "\(episodeRuntime) 分钟/集" }
+            info.episodes = episodes > 0 ? episodes : nil
+        } else if movieRuntime > 0 {
+            info.runtime = "\(movieRuntime) 分钟"
+        }
+
+        if let credits = object["credits"] as? [String: Any] {
+            info.cast = Array(names(credits["cast"]).prefix(10))
+            let directors = (credits["crew"] as? [[String: Any]] ?? []).filter {
+                ($0["job"] as? String) == "Director"
+            }
+            info.directors = Array(names(directors).prefix(4))
+        }
+        if let external = object["external_ids"] as? [String: Any],
+           let imdb = external["imdb_id"] as? String, !imdb.isEmpty {
+            info.imdbURL = "https://www.imdb.com/title/\(imdb)/"
+        }
+        if let path = object["poster_path"] as? String, !path.isEmpty {
+            info.poster = "https://image.tmdb.org/t/p/w500\(path)"
+        }
+        if let path = object["backdrop_path"] as? String, !path.isEmpty {
+            info.backdrop = "https://image.tmdb.org/t/p/w1280\(path)"
+        }
+        return info
+    }
+
+    private static func strings(_ raw: Any?) -> [String] {
+        switch raw {
+        case let list as [String]:
+            return list.filter { !$0.isEmpty }
+        case let list as [Any]:
+            return list.compactMap { $0 as? String }.filter { !$0.isEmpty }
+        case let text as String:
+            return text.isEmpty ? [] : [text]
+        default:
+            return []
+        }
+    }
+
+    /// `[{"name": "…"}]` 这种结构里的名字。
+    private static func names(_ raw: Any?) -> [String] {
+        guard let list = raw as? [[String: Any]] else { return [] }
+        return list.compactMap { ($0["name"] as? String)?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     // MARK: MoviePilot
@@ -341,9 +532,28 @@ enum DailyAPI {
         }
         return ""
     }
+
+    private static func firstString(_ object: [String: Any], _ keys: [String],
+                                   fallback: String) -> String {
+        let value = firstString(object, keys)
+        return value.isEmpty ? fallback : value
+    }
 }
 
 // MARK: - 状态
+
+/// 详情按条目缓存：来回进出详情页不用反复请求。
+///
+/// 进程内内存缓存，不落盘：豆瓣 / TMDB 的资料会变，重启后重新取一次。
+actor DailyDetailCache {
+    static let shared = DailyDetailCache()
+
+    private var items: [String: DailyDetailInfo] = [:]
+
+    func value(for id: String) -> DailyDetailInfo? { items[id] }
+
+    func save(_ info: DailyDetailInfo, for id: String) { items[id] = info }
+}
 
 /// 每日推荐：抓取 → 缓存 → 匹配媒体源 → 订阅 MoviePilot。
 ///
@@ -600,6 +810,28 @@ final class DailyStore: ObservableObject {
         guard var feed else { return }
         feed.items = items
         self.feed = feed
+    }
+
+    // MARK: 详情
+
+    /// 媒体源里没有的条目点开后要的资料。成功 / 失败都返回可展示的内容。
+    func detail(for item: DailyItem, settings: AppSettings)
+        async -> (info: DailyDetailInfo, error: String?) {
+        if let cached = await DailyDetailCache.shared.value(for: item.id) {
+            return (cached, nil)
+        }
+        do {
+            let info = try await DailyAPI.detail(for: item, settings: settings)
+            await DailyDetailCache.shared.save(info, for: item.id)
+            return (info, nil)
+        } catch {
+            return (DailyAPI.baseInfo(item), error.localizedDescription)
+        }
+    }
+
+    /// 同一条推荐的最新状态（比如详情页里订阅成功后回到列表）。
+    func item(id: String) -> DailyItem? {
+        items.first { $0.id == id }
     }
 
     // MARK: 缓存

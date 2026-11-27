@@ -1,15 +1,16 @@
 # 每日推荐（TMDB / 豆瓣 → MoviePilot）
 
-打开应用时抓一份当天的热门：媒体源里已经有的，点开直接进详情；没有的可以一键推到
-MoviePilot 自动订阅。两端（macOS / Windows）功能与判定规则一致，入口都在侧栏的
-「每日推荐」页。
+打开应用时抓一份当天的热门：媒体源里已经有的，点开直接进媒体详情；没有的会打开
+一个资料页（数据来自豆瓣 / TMDB），在资料页里看清楚简介、演职人员之后再点
+「添加订阅」推到 MoviePilot。两端（macOS / Windows）功能与判定规则一致，入口都在
+侧栏的「每日推荐」页。
 
 ## 1. 数据来源
 
 | 来源 | 接口 | 说明 |
 | --- | --- | --- |
 | TMDB | `https://api.themoviedb.org/3/trending/all/day?api_key=<KEY>&language=zh-CN` | 需要设置里填 v3 API Key；不填就跳过，只显示豆瓣。可以单独配代理（见 1.1） |
-| 豆瓣 | `https://movie.douban.com/j/search_subjects?type=movie\|tv&tag=热门&page_limit=30&page_start=0` | 电影 / 剧集各 30 条；必须带桌面 UA 和 `Referer: https://movie.douban.com/`，否则返回 418 |
+| 豆瓣 | `https://movie.douban.com/j/search_subjects`（`type` 取 `movie` 或 `tv`，`tag=热门`） | 电影 / 剧集各 30 条；必须带桌面 UA 和 `Referer: https://movie.douban.com/`，否则返回 418 |
 
 豆瓣没有公开 API，这个 `j/search_subjects` 是网页自己的接口：字段少（标题、评分、
 海报、条目页），没有年份。两边抓到的条目按「归一化标题 + 电影 / 剧集」合并去重，
@@ -56,11 +57,30 @@ Windows 用 `HttpClientHandler.Proxy` 按代理地址缓存一个 `HttpClient`�
 
 | 状态 | 点击 |
 | --- | --- |
-| 已匹配 | 打开详情页（`SeriesPage(itemId)` / `AppState.openDetail`） |
-| 未匹配、未订阅 | POST 到 MoviePilot 订阅 |
-| 已订阅 | 提示「已经推送到 MoviePilot 了」 |
+| 已匹配 | 打开媒体详情页（`SeriesPage(itemId)` / `AppState.openDetail`） |
+| 未匹配（含已订阅） | 打开资料页（豆瓣 / TMDB 数据），订阅在资料页里点 |
 
-## 4. MoviePilot 订阅
+不会因为「看一眼」就订阅：卡片本身只负责打开资料页。
+
+## 4. 条目资料页
+
+媒体源里没有的条目，点开是一个和媒体详情页同结构的页面：大图 + 标题 / 年份 /
+评分 / 类型 + 简介 + 演职人员 + 链接，底部是订阅说明。数据不经过媒体源接口：
+
+| 条目 | 接口 | 说明 |
+| --- | --- | --- |
+| 豆瓣 | `https://m.douban.com/rexxar/api/v2/<movie 或 tv>/<id>?ck=&for_mobile=1` | 带桌面 UA 和 `Referer: https://m.douban.com/`；返回标题 / 原名 / 年份 / 简介 / 评分与评价人数 / 类型 / 国家 / 时长 / 导演 / 演员 / 海报 / 条目页 |
+| TMDB | `https://api.themoviedb.org/3/<movie 或 tv>/<id>?api_key=<KEY>&language=zh-CN&append_to_response=credits,external_ids` | 走 TMDB 专用代理（见 1.1）；额外给出横版图、TMDB / IMDb 链接 |
+
+- 详情接口失败时用列表里已有的字段兜底（标题、评分、海报、简介），页面顶部注明
+  「资料没取全」，订阅按钮照常可用。
+- 资料按条目缓存在进程内存里，来回进出详情页不重复请求；不落盘。
+- 豆瓣只给竖版海报：资料页左侧放一张清楚的竖版海报卡，背景只用它放大模糊做
+  氛围；TMDB 有横版图时按媒体详情页那样铺满。简介在按钮下面完整显示一份。
+- 页内的「添加订阅」和原来的订阅是同一条路（见 5）；成功后按钮变成「已订阅」，
+  卡片状态同步更新。
+
+## 5. MoviePilot 订阅
 
 设置项：**地址** + **API Token**（MoviePilot 的「设置 → API」里可以拿到）。
 
@@ -95,7 +115,7 @@ Content-Type: application/json
 - Windows：`tmdbApiKey` / `moviePilotToken` 落盘时用 DPAPI 密封（`dpapi:v1:` 前缀，
   按当前用户），`moviePilotUrl` 不加密。
 
-## 5. 自检
+## 6. 自检
 
 macOS：
 
@@ -105,6 +125,8 @@ DVPLAYER_PAGE=daily DVPLAYER_SHOT=/tmp/daily.jpg DVPLAYER_SHOT_DELAY=20 \
 ```
 
 `DVPLAYER_PAGE` 也接受 `daily`；`DVPLAYER_EXIT=1` 截完就退。
+加 `DVPLAYER_DAILY_DETAIL=<片名>` 直接打开那条的资料页（只挑媒体源里没有的），
+日志里会打一行 `[DailyTest] 详情 …` 说明取到了哪些字段。
 
 Windows：
 
@@ -113,12 +135,14 @@ DvPlayer.exe --screenshot D:\shots daily
 ```
 
 `--screenshot` 的页面列表里加了 `daily`，这一页会多等一会儿（抓取 + 匹配）。
+加 `--daily-detail <片名>` 打开那条的资料页并另存一张 `daily-detail.png`。
 
-## 6. 已知限制
+## 7. 已知限制
 
 - 豆瓣这个接口不是官方的，改版或加验证时需要跟着调；失败时页面会显示原因，
   TMDB 部分不受影响。
 - 匹配是标题 + 年份的启发式，译名差异大（港台译名 / 英文原名）时可能匹配不到；
-  这时点卡片会走订阅，不会误开别的片。
+  这时点卡片会打开资料页，不会误开别的片。
+- 豆瓣 / TMDB 的资料会变（评分、简介）；进程内缓存只在本次运行里有效，重启重新取。
 - Windows 测试机如果装了会做 TLS 中间人的代理 / 抓包工具，HTTPS 请求会因为证书
   主机名不匹配失败；这是环境问题，正常网络下不受影响，换台机器或关掉中间人即可。
