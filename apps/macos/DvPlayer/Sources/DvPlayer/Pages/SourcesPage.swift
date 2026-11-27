@@ -19,6 +19,8 @@ struct SourcesPage: View {
     @State private var dropTargetId: String?
     /// 正在拖的源。经过别的卡片时就让它让位（不是松手才换）。
     @State private var draggingId: String?
+    /// 鼠标停在哪个源上：底色变亮 + 手型光标，提示整张卡片都能点进去。
+    @State private var hoveredId: String?
 
     private var isEditing: Bool { editing != nil }
 
@@ -288,7 +290,23 @@ struct SourcesPage: View {
             .help("删除这个源")
         }
         .padding(16)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusCard))
+        .background(hoveredId == config.id ? Theme.surfaceHover : Theme.surface,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusCard))
+        // 整张卡片都能点：进这个源的媒体首页。编辑 / 删除是 Button，
+        // 子视图自己吃掉点击，不会连带打开。
+        .contentShape(RoundedRectangle(cornerRadius: Theme.radiusCard))
+        .onTapGesture { state.openSource(config.id) }
+        .onHover { inside in
+            if inside {
+                hoveredId = config.id
+                NSCursor.pointingHand.push()
+            } else {
+                if hoveredId == config.id { hoveredId = nil }
+                NSCursor.pop()
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: hoveredId)
+        .help("打开「\(config.name)」")
     }
 
     /// 连上绿点、失败红点、还在连灰点、没试过灰点。
