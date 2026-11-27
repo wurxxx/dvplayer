@@ -205,10 +205,7 @@ impl MediaHub {
     /// 直接挂一个适配器（测试与将来的「本地目录源」用）。
     pub fn add_source(&mut self, id: &str, mut source: Box<dyn MediaSource>) -> Result<()> {
         source.login()?;
-        self.entries.push(Entry {
-            id: id.to_string(),
-            source,
-        });
+        self.replace_entry(id, source);
         Ok(())
     }
 
@@ -227,10 +224,22 @@ impl MediaHub {
     /// FFI 走的是「谁连完谁先挂」：`connect_many` 每交出一个源就短暂加锁调它一次，
     /// 慢源不会再挡住其它源的 `libraries()` / `items()`。
     pub fn push_source(&mut self, id: &str, source: Box<dyn MediaSource>) {
-        self.entries.push(Entry {
-            id: id.to_string(),
-            source,
-        });
+        self.replace_entry(id, source);
+    }
+
+    /// 同 id 的源替换旧的，而不是再挂一份。
+    ///
+    /// 改配置、重连、加第二个源之后重新 `addMany`，同一个源都会被再交一次；
+    /// 如果直接 push，`libraries()` 就会返回重复的库 id，界面列表的 key 直接撞车。
+    fn replace_entry(&mut self, id: &str, source: Box<dyn MediaSource>) {
+        if let Some(slot) = self.entries.iter_mut().find(|e| e.id == id) {
+            slot.source = source;
+        } else {
+            self.entries.push(Entry {
+                id: id.to_string(),
+                source,
+            });
+        }
     }
 
     /// 并行建连多个源，不回报中间状态（一次性拿全部结果）。
@@ -1028,6 +1037,70 @@ mod tests {
         let mut group = key("same name", Some(2023), None);
         assert!(!group.absorb(&key("same name", Some(2024), None)));
         assert_eq!(group.year, Some(2023));
+    }
+
+    /// 重复交同一个源（加第二个源后整批重连、失败后重试）不能在图里留下两份，
+    /// 否则 `libraries()` 会出重复 id，界面列表的 key 直接撞车。
+    #[test]
+    fn repeated_push_replaces_instead_of_duplicating() {
+        struct Stub;
+        impl MediaSource for Stub {
+            fn kind(&self) -> &'static str {
+                "local"
+            }
+            fn name(&self) -> &str {
+                "stub"
+            }
+            fn login(&mut self) -> Result<()> {
+                Ok(())
+            }
+            fn libraries(&self) -> Result<Vec<MediaLibrary>> {
+                Ok(Vec::new())
+            }
+            fn items(
+                &self,
+                _library_id: &str,
+                page: i32,
+                page_size: i32,
+                _query: &ListQuery,
+            ) -> Result<Paged<MediaItem>> {
+                Ok(Paged::empty(page, page_size))
+            }
+            fn children(
+                &self,
+                _parent_id: &str,
+                page: i32,
+                page_size: i32,
+                _query: &ListQuery,
+            ) -> Result<Paged<MediaItem>> {
+                Ok(Paged::empty(page, page_size))
+            }
+            fn search(&self, _query: &str) -> Result<Vec<MediaItem>> {
+                Ok(Vec::new())
+            }
+            fn detail(&self, _item_id: &str) -> Result<MediaDetail> {
+                Err(MediaError::Other("stub".into()))
+            }
+            fn records(&self) -> Result<Vec<PlayRecord>> {
+                Ok(Vec::new())
+            }
+            fn report_progress(&self, _item_id: &str, _position: i64, _duration: i64) -> Result<()> {
+                Ok(())
+            }
+            fn play_source(&self, _item_id: &str) -> Result<PlaySource> {
+                Err(MediaError::Other("stub".into()))
+            }
+            fn image_source(&self, _path: &str) -> Result<ImageSource> {
+                Err(MediaError::Other("stub".into()))
+            }
+        }
+
+        let mut hub = MediaHub::new();
+        hub.push_source("local-1", Box::new(Stub));
+        hub.push_source("local-1", Box::new(Stub));
+        hub.push_source("fnos-1", Box::new(Stub));
+        assert_eq!(hub.sources().len(), 2);
+        assert_eq!(hub.sources().iter().filter(|s| s.id == "local-1").count(), 1);
     }
 
     #[test]

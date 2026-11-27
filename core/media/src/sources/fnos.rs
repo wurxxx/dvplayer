@@ -1297,7 +1297,8 @@ impl FnOsSource {
                 .body(body.to_string());
         }
 
-        let response = request.send()?;
+        let response = request.send().map_err(super::http_error)?;
+        super::ensure_same_host(&response, &self.base)?;
         let status = response.status();
         let text = response.text()?;
 

@@ -977,7 +977,9 @@ impl EmbySource {
                 .body(body.to_string());
         }
 
-        self.read_body(request.send()?)
+        let response = request.send()?;
+        super::ensure_same_host(&response, &self.base)?;
+        self.read_body(response)
     }
 
     fn read_body(&self, response: reqwest::blocking::Response) -> Result<String> {

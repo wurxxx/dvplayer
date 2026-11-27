@@ -148,6 +148,7 @@ impl JellyfinSource {
             .header("Content-Type", "application/json")
             .body(body.to_string())
             .send()?;
+        super::ensure_same_host(&response, &self.base)?;
 
         let text = self.read_body(response)?;
         let parsed: LoginDto = serde_json::from_str(&text).map_err(|e| MediaError::Api {
@@ -1072,7 +1073,9 @@ impl JellyfinSource {
                 .body(body.to_string());
         }
 
-        self.read_body(request.send()?)
+        let response = request.send()?;
+        super::ensure_same_host(&response, &self.base)?;
+        self.read_body(response)
     }
 
     fn read_body(&self, response: reqwest::blocking::Response) -> Result<String> {
