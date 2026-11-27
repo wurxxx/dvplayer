@@ -764,7 +764,7 @@ JVM 上用门控测试 `NfsLiveTest`（`NFS_LIVE=1 NFS_URL=...`）校准协议�
 | --- | --- | --- |
 | 顶栏 | 40dp，半透明渐变压在画面上 | 同左，保留状态栏 |
 | 视频 | 铺满全屏（接内核后换成 `SurfaceView`） | 宽度 × 16:9，在顶栏下 |
-| 底部控制层 | 片名 + 规格 + 时间进度 + 48dp 按钮行合成一个 `PlayerBottomChrome`，整块一层渐变从透明到黑 | 同一个控件，纯黑紧贴视频下沿 |
+| 底部控制层 | 片名 + 规格 + 时间进度 + 44dp 按钮行合成一个 `PlayerBottomChrome`，背景全透明 | 同一个控件，竖屏只留进度 + 按钮，悬浮在画面内底部 |
 | 视频下方 | — | 简介 + 选集横滑 |
 
 `PlayerBottomChrome` 把「片名 / 规格 / 时间进度 / 按钮」放在同一个 Column、
@@ -810,9 +810,59 @@ adb shell am start -n com.dvplayer.app/.PlaybackActivity \
 - 竖屏 / 横屏 / 媒体信息 / 音轨 / 字幕 / 选集 / 齿轮菜单逐张截图，控制层在两种
   方向下都不再出现「两块背景」的接缝。
 
-**还没接**：SurfaceView 与 `:player` 的内核 / 轨道 / 章节；`local` 源首播时
-`PlaySource.durationSeconds` 来自播放记录（首播为 0），接内核后要用引擎回填，
-并在退出时 `reportProgress`。
+#### 7.9.2 接内核（SurfaceView + mpv / Media3）
+
+布局定稿后播放页接到 `:player` 的 `PlayerEngine`，UI 不再模拟状态。
+
+**分层**
+
+| 层 | 职责 |
+| --- | --- |
+| `PlaybackSession`（app-phone） | 建内核、把 `PlayerEvent` 翻成 `PlayerPlaybackState`、退出写回进度 |
+| `PlayerScreen`（ui-phone） | 受控：`playback` 为 null 时用 `PlayerUiModel` 的静态值（截图 / 预览），传入后位置 / 时长 / 暂停 / 倍速 / 轨道全听内核 |
+| `PlaybackActivity` | `Load.Ready` 带上 `PlaySource` + `EngineId` + DV profile；`SurfaceView` + `AndroidView` 出画 |
+
+- 窗口 `ColorDrawable(BLACK)` + Compose 根节点 `Color.Transparent`，SurfaceView
+  才能透出来；视频按 `videoAspect` 居中，横屏片上下留黑。
+- 本地文件走 `EngineRouter`（原盘 / DV / HDR10+ 判定），`--es engine mpv|Media3` 可强制。
+- Media3 必须 `attachView(SurfaceView)`（裸 `attach(surface)` 不出画），并用
+  `onVideoSizeChanged` 回填真实比例。
+- 续播：直接读 `PlaybackMemory.position()`。**不能走 `PlaybackController.resume`**——
+  local 源首播 `durationSeconds=0` 会被它当成「时长未知」放弃续播。
+- `keep-open=yes`：播完停最后一帧，duration 不归零、画面不黑。
+- `eglCreateWindowSurface` 修复：设备没有 `EGL_KHR_gl_colorspace` 时直接无属性建面。
+  旧逻辑先试带属性两次，MTK 驱动在连续拒绝后窗口进入坏状态，连无属性创建都
+  返回 `EGL_BAD_ALLOC`（HBY 5502 实测，整条出画路径断掉）。
+- `mpv_wait_event` 用 200ms 超时 + `quit` 原子标记，不再用 `-1` 无限等：
+  `mpv_terminate_destroy` 在 MTK 上不会唤醒阻塞中的 wait_event，`join` 永远卡住，
+  退出播放页要等 ANR 超时。
+
+**真机实测**（HBY 5502 / MT6762 / Android 9 / 720×1280 / 无 HDR）
+
+| 项 | 结果 |
+| --- | --- |
+| 出画（mpv） | ✓ 修 EGL colorspace bug 后正常 |
+| 暂停 / 播放 | ✓ |
+| 进度条拖动 | ✓ 01:08 → 00:39 |
+| ±10 秒 | ✓ |
+| 倍速 1.25× | ✓ |
+| 长按 2× / 松手恢复 | ✓ |
+| 双击暂停 | ✓ |
+| 左右滑 seek | ✓ |
+| 右侧上下滑音量 | ✓ speaker 0 → 7（系统 `STREAM_MUSIC` 同步） |
+| 左侧上下滑亮度 | ✓ 窗口级 `screenBrightness` |
+| 退出重进续播 | ✓ 61.6s 记录，重进从 01:08 继续 |
+| 横竖屏切换 | ✓ 不重新 loadfile |
+| 音轨面板 / 切换 | ✓ 英语 / 日语 eac3 |
+| 字幕面板 | ✓ 真实轨道 |
+| 播完停在最后一帧 | ✓ 按钮回到「播放」，再点从头播 |
+| HDR10 → SDR tone mapping | ✓ 无 colorspace 扩展时自动降级，颜色不偏 |
+| Media3 内核 | ✓ `--es engine Media3` 出画、暂停、seek、旋转 |
+| DV P5 软解 | ✓ 出画（4K HEVC 10bit，8 线程软解，CPU 约 670%，轻微音画不同步） |
+
+**还没接**：真实选集数据（`MediaHub.children` + `imageSource` 剧照 + 切集）、
+后台播放前台服务、播完自动下一集、PiP / 全屏按钮、SMB / NFS 的桥接握手
+（现在仍需验证页 `prepareBridge`）。
 
 ### 7.10 工程化（单测 / CI / 凭据 / 控制器）
 
@@ -956,7 +1006,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 项 | 卡在哪 |
 | --- | --- |
-| 真机（OnePlus NE2210、HBY 5502） | 这次复测在开发机上只剩 x86_64 模拟器（SwiftShader 每跑几分钟就崩），§7.5 的 OnePlus 数据是之前的实测。HDR 直出、120Hz 帧率匹配、AV1 软解性能、PiP / 前台服务长跑仍需真机回归 |
+| 真机（OnePlus NE2210、HBY 5502） | HBY 5502 已完成播放页回归（§7.9.2）。仍缺：HDR 直出（该机 `HdrCapabilities` 为空）、120Hz 帧率匹配、AV1 软解性能、PiP / 前台服务长跑 |
 | DV 电视 / 支持 DV 的盒子 | P5 / P8 在真实 HDR 屏上的观感（直出 vs tone mapping）、DV 分级与徽标；模拟器只有 SDR + SwiftShader |
 | TV / 盒子 + AVR | A11 冒烟、tunneling、HDMI → AVR 直通、遥控器键位都没验 |
 | 未加密的蓝光原盘（ISO / BDMV） | A8 只验了合成结构的路由；真实播放列表、章节、无缝分支、多角度未验（§7.7） |
@@ -966,7 +1016,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 项 | 现状 |
 | --- | --- |
-| 手机 UI（`ui-phone`） | 播放页已完成（静态布局 + `PlayerUiModelFactory` 真实数据映射，§7.9.1）；还缺库 / 详情 / 搜索 / 设置，以及把播放页接到 `:player` 的内核 |
+| 手机 UI（`ui-phone`） | 播放页已完成并接上内核（§7.9.1 布局 + §7.9.2 mpv / Media3，真机回归通过）；还缺库 / 详情 / 搜索 / 设置，以及真实选集数据、后台播放、PiP |
 | TV 大屏 UI（B1 / B2） | `:ui-tv` 只有 `TvApp()` 50 行、`:app-tv` 只有 `MainActivity`，而且 `app-tv` 连 `:player` / `:core` 依赖都没有；TV 上现在跑不了播放回归 |
 | TV 兼容矩阵（B3） | TV 默认内核、tunneling 取舍、HDMI 直通策略未定（§10） |
 | 原盘边读边播（B5，可选） | SMB / NFS 上的 BDMV 不能直接播：桥接只服务单文件，libbluray 要本地路径或可列目录的流（§7.8） |
