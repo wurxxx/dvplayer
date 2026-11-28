@@ -148,7 +148,7 @@ struct DailyDetailPage: View {
             HStack(spacing: 8) {
                 Text(current.trend)
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(Color(hex: 0x1A1200))
+                    .foregroundStyle(Theme.onAccent)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Theme.accent, in: RoundedRectangle(cornerRadius: 5))
@@ -320,7 +320,7 @@ struct DailyDetailPage: View {
                 Text("还没配 MoviePilot：到「设置 → 每日推荐」填地址和 API Token 后，"
                      + "这里的「添加订阅」才能用。")
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.accent.opacity(0.9))
+                    .foregroundStyle(Theme.accentInk.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

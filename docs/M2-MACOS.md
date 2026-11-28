@@ -289,6 +289,10 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | 环境变量 | 作用 |
 | --- | --- |
 | `DVPLAYER_PAGE=records\|search\|sources\|settings` | 启动直接落在某页（见 `AppState`） |
+| `DVPLAYER_APPEARANCE=light\|dark\|system` | 这次运行强制用某个外观（不写回设置），深浅两套截图用 |
+| `DVPLAYER_APPEARANCE_SWITCH=light@8` | 启动 8 秒后切到指定外观，验证运行中换色板整窗即时重绘 |
+| `DVPLAYER_ACCENT=blue\|3B82F6` | 这次运行强制用某个主题色（预设 id 或 hex，不写回设置） |
+| `DVPLAYER_ACCENT_SWITCH=blue@8` | 启动 8 秒后换主题色，验证运行中换色整窗即时重绘（会写回 UserDefaults） |
 | `DVPLAYER_LIBRARY=<库 id>` | 直接打开某个库的网格（配合 `DVPLAYER_CAT` 截图） |
 | `DVPLAYER_CAT=全部\|剧集\|电影\|风格\|文件夹` | 网格页直接落到某个类别 |
 | `DVPLAYER_RECORD_TAB=favorites\|watch` | 记录页直接停在「收藏」/「观看」分段，截图回归用 |

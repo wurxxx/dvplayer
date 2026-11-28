@@ -146,13 +146,13 @@ struct BrowseView: View {
                             genre = nil
                         } label: {
                             Text(name)
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(category == name ? Theme.text : Theme.muted)
-                                .padding(.horizontal, 12)
+                                .font(.system(size: 13.5))
+                                .foregroundStyle(category == name ? Theme.accentInk : Theme.muted)
+                                .padding(.horizontal, 15)
                                 .padding(.vertical, 6)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 7)
-                                        .fill(category == name ? Color.white.opacity(0.09) : .clear)
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(category == name ? Theme.accentSoft : .clear)
                                 )
                         }
                         .buttonStyle(.plain)
@@ -305,10 +305,10 @@ struct FlowChips: View {
                 } label: {
                     Text(item.title)
                         .font(.system(size: 13))
-                        .foregroundStyle(active == item.id ? Theme.accent : Theme.muted)
+                        .foregroundStyle(active == item.id ? Theme.accentInk : Theme.muted)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(active == item.id ? Color(hex: 0x2E2412) : Theme.surface,
+                        .background(active == item.id ? Theme.accentSoft : Theme.surface,
                                     in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)

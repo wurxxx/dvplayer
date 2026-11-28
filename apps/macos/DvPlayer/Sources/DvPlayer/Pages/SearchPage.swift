@@ -189,6 +189,12 @@ struct SettingsPage: View {
     @State private var updateState: UpdateChecker.Result?
     @State private var checkingUpdate = false
 
+    /// 外观（跟随系统 / 深色 / 浅色）：存 UserDefaults，切换立刻生效。
+    @AppStorage(Appearance.defaultsKey) private var appearanceRaw = Appearance.system.rawValue
+
+    /// 主题色改动后 +1，强制色块行重建（选中态靠打勾，不绑 @AppStorage）。
+    @State private var accentRevision = 0
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "设置")
@@ -197,33 +203,107 @@ struct SettingsPage: View {
                 .padding(.top, 18)
 
             PageScroll {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
+                    SurfaceCard(padding: 18) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionTitle(text: "外观")
+
+                            Text("跟随系统，或固定深色 / 浅色。播放窗始终深色——视频是暗场，"
+                                 + "浅色界面不该让控制条变白。")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Theme.faint)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            // 不用系统分段控件：浅色下它的选中块是白/浅灰，
+                            // 和卡片底几乎融在一起，看着像禁用。这里和媒体库顶栏
+                            // 的分段同一套：容器亮一档，选中块用琥珀淡底 + 深琥珀字。
+                            HStack(spacing: 2) {
+                                ForEach(Appearance.allCases) { mode in
+                                    Button {
+                                        appearanceRaw = mode.rawValue
+                                        mode.apply()
+                                    } label: {
+                                        Text(mode.title)
+                                            .font(.system(size: 13.5,
+                                                          weight: appearanceRaw == mode.rawValue
+                                                              ? .semibold : .regular))
+                                            .foregroundStyle(appearanceRaw == mode.rawValue
+                                                             ? Theme.accentInk : Theme.muted)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .fill(appearanceRaw == mode.rawValue
+                                                          ? Theme.accentSoft : .clear)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(2)
+                            .background(Theme.surfaceHover, in: RoundedRectangle(cornerRadius: 9))
+
+                            HStack(spacing: 10) {
+                                Text("主题色")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(Theme.muted)
+
+                                HStack(spacing: 2) {
+                                    ForEach(AccentTheme.allCases) { theme in
+                                        presetSwatch(theme)
+                                    }
+                                }
+                                // 打勾读的是 UserDefaults，不经过 SwiftUI 的绑定；
+                                // 重建这一行让勾跟着当前色走。`.id` 只套色块，
+                                // 别把系统取色器一起重建——正在拖色时弹层会被关掉。
+                                .id(accentRevision)
+
+                                Rectangle()
+                                    .fill(Theme.line)
+                                    .frame(width: 1, height: 16)
+                                    .padding(.leading, 4)
+
+                                // 自定义：系统取色器，选完立刻生效。
+                                Text("自定义")
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(Theme.faint)
+
+                                ColorPicker("自定义主题色",
+                                            selection: customAccent,
+                                            supportsOpacity: false)
+                                    .labelsHidden()
+                                    .controlSize(.small)
+                                    .help("自定义主题色")
+                            }
+                        }
+                    }
+
                     SurfaceCard(padding: 18) {
                         VStack(alignment: .leading, spacing: 14) {
                             SectionTitle(text: "播放")
 
                             Toggle("从上次停下的位置继续", isOn: $state.settings.resumePlayback)
-                                .font(.system(size: 13.5))
+                                .font(.system(size: 14))
                                 .foregroundStyle(Theme.text)
-                                .toggleStyle(.switch)
+                                .toggleStyle(DvSwitchStyle())
 
                             Toggle("卡片上显示分辨率角标", isOn: $state.settings.showResolution)
-                                .font(.system(size: 13.5))
+                                .font(.system(size: 14))
                                 .foregroundStyle(Theme.text)
-                                .toggleStyle(.switch)
+                                .toggleStyle(DvSwitchStyle())
 
                             Toggle("启动时自动连接所有源", isOn: $state.settings.autoConnect)
-                                .font(.system(size: 13.5))
+                                .font(.system(size: 14))
                                 .foregroundStyle(Theme.text)
-                                .toggleStyle(.switch)
+                                .toggleStyle(DvSwitchStyle())
 
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("播放缓冲")
-                                        .font(.system(size: 13.5))
+                                        .font(.system(size: 14))
                                         .foregroundStyle(Theme.text)
                                     Text("mpv 最多预读多少；默认 512 MB，原盘可以调到 2 GB / 4 GB")
-                                        .font(.system(size: 11.5))
+                                        .font(.system(size: 12.5))
                                         .foregroundStyle(Theme.faint)
                                 }
                                 Spacer()
@@ -246,18 +326,18 @@ struct SettingsPage: View {
                                 HStack(spacing: 12) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text("HDR 亮度参考")
-                                            .font(.system(size: 13.5))
+                                            .font(.system(size: 14))
                                             .foregroundStyle(Theme.text)
                                         Text("HDR 片转 SDR 时的目标白点。默认自动（100 nit）。"
                                              + "觉得 HDR 片偏暗就把数值调小（画面更亮），偏亮就调大；"
                                              + "SDR 内容不受影响。")
-                                            .font(.system(size: 11.5))
+                                            .font(.system(size: 12.5))
                                             .foregroundStyle(Theme.faint)
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
                                     Spacer()
                                     Toggle("自动", isOn: hdrPeakAuto)
-                                        .toggleStyle(.switch)
+                                        .toggleStyle(DvSwitchStyle())
                                         .font(.system(size: 12))
                                 }
 
@@ -266,6 +346,9 @@ struct SettingsPage: View {
                                            onEditingChanged: { editing in
                                                if !editing { applyHdrPeakToPlayer() }
                                            })
+                                        // 默认的滑块在浅色下是整条灰，看不出「可调」；
+                                        // 用强调色填充，和 Windows 的 Slider 一致。
+                                        .tint(Theme.accent)
                                         .disabled(hdrPeakAuto.wrappedValue)
                                     Text(hdrPeakText)
                                         .font(.system(size: 12, design: .monospaced))
@@ -287,12 +370,12 @@ struct SettingsPage: View {
                                 .fixedSize(horizontal: false, vertical: true)
 
                             Toggle("打开播放页时默认开弹幕", isOn: boolBinding(\.danmakuEnabled))
-                                .font(.system(size: 13.5))
+                                .font(.system(size: 14))
                                 .foregroundStyle(Theme.text)
-                                .toggleStyle(.switch)
+                                .toggleStyle(DvSwitchStyle())
 
                             Text(danmakuHint)
-                                .font(.system(size: 11.5))
+                                .font(.system(size: 12.5))
                                 .foregroundStyle(Theme.faint)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -337,7 +420,7 @@ struct SettingsPage: View {
                             }
 
                             Text(subtitleHint)
-                                .font(.system(size: 11.5))
+                                .font(.system(size: 12.5))
                                 .foregroundStyle(Theme.faint)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -362,7 +445,7 @@ struct SettingsPage: View {
                                 } label: {
                                     Text("github.com/\(ProjectInfo.repo)")
                                         .font(.system(size: 12.5))
-                                        .foregroundStyle(Theme.accent)
+                                        .foregroundStyle(Theme.accentInk)
                                         .underline()
                                 }
                                 .buttonStyle(.plain)
@@ -381,7 +464,7 @@ struct SettingsPage: View {
                                     if checkingUpdate {
                                         ProgressView()
                                             .controlSize(.small)
-                                            .tint(Theme.accent)
+                                            .tint(Theme.accentInk)
                                     }
                                     Text(updateText)
                                         .font(.system(size: 12.5))
@@ -429,6 +512,54 @@ struct SettingsPage: View {
         }
     }
 
+    // MARK: - 主题色
+
+    /// 一个预设色块：当前选中的打勾 + 外圈。
+    private func presetSwatch(_ theme: AccentTheme) -> some View {
+        // 自检时 DVPLAYER_ACCENT 覆盖了这次运行的颜色：打勾只跟它走，
+        // 不能再把存储里那个预设也打上勾（否则一次两个勾）。
+        let selected = AccentSettings.environmentOverride.map { $0 == theme.hex }
+            ?? (AccentSettings.preset == theme)
+        return Button {
+            AccentSettings.selectPreset(theme)
+            accentRevision += 1
+            Theme.refreshWindows()
+        } label: {
+            Circle()
+                .fill(Color(nsColor: theme.fill))
+                .frame(width: 20, height: 20)
+                .overlay {
+                    if selected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color(nsColor: AccentPalette.onFill(theme.fill)))
+                    }
+                }
+                .overlay(
+                    Circle().stroke(Theme.text.opacity(selected ? 0.45 : 0), lineWidth: 1)
+                )
+                .padding(4)
+        }
+        .buttonStyle(.plain)
+        .help(theme.title)
+    }
+
+    /// 自定义色的绑定：写回 UserDefaults 并重绘整窗。
+    private var customAccent: Binding<Color> {
+        Binding(
+            get: { Color(nsColor: AccentSettings.effectiveFill) },
+            set: { color in
+                guard let ns = NSColor(color).usingColorSpace(.sRGB) else { return }
+                let hex = UInt32((ns.redComponent * 255).rounded()) << 16
+                    | UInt32((ns.greenComponent * 255).rounded()) << 8
+                    | UInt32((ns.blueComponent * 255).rounded())
+                AccentSettings.selectCustom(hex)
+                accentRevision += 1
+                Theme.refreshWindows()
+            }
+        )
+    }
+
     // MARK: - 更新检查
 
     private var updateText: String {
@@ -458,7 +589,7 @@ struct SettingsPage: View {
         case .upToDate:
             return Theme.success
         case .available:
-            return Theme.accent
+            return Theme.accentInk
         case .noRelease:
             return Theme.faint
         case .failed:

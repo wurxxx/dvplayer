@@ -314,6 +314,10 @@ public partial class PlayWindow : Window
 
         InitializeComponent();
 
+        // 播放窗固定深色，但强调色跟设置走：按深色那套把当前主题色派生到本地资源。
+        ThemeService.ApplyAccentTo(Resources);
+        ThemeService.Changed += OnThemeAccentChanged;
+
         ApplySourceToUi(source);
         SyncDanmakuButton();
         DurationText.Text = Format(source.DurationSeconds);
@@ -323,7 +327,11 @@ public partial class PlayWindow : Window
         Loaded += OnLoaded;
         Closing += OnClosing;
         // 详情页要等播放窗口真的关掉再刷新（见 SeriesPage.RefreshAfterPlaybackAsync）。
-        Closed += (_, _) => _closedSignal.TrySetResult();
+        Closed += (_, _) =>
+        {
+            ThemeService.Changed -= OnThemeAccentChanged;
+            _closedSignal.TrySetResult();
+        };
 
         // 进度条 / 音量条的点按只能挂在根节点上：点在滑块的模板 Border 上时，
         // 挂在 Slider 自己身上的预览事件收不到（MouseLeftButtonDown 是按元素重抛的）。
@@ -1012,6 +1020,9 @@ public partial class PlayWindow : Window
             }
         });
     }
+
+    /// <summary>设置里换了主题色：播放窗固定深色，按深色那套重新派生（在播也能变）。</summary>
+    private void OnThemeAccentChanged() => ThemeService.ApplyAccentTo(Resources);
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {

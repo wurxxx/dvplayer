@@ -1,0 +1,141 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    深色影院色板。和 Palette.Light.xaml 是同一套 key，切换时整本字典替换
+    （见 Services/ThemeService.cs），所以这里不要放具体控件样式。
+
+    对比度（WCAG，相对背景 #141419 / 卡片 #1F1F27）：
+      正文 F5F5F8  ≈ 16.9 / 15.0
+      次级 BDBDCB  ≈  9.9 /  8.8
+      弱化 9696A4  ≈  6.3 /  5.6（小字也过 AA 4.5）
+
+    两套色板的规则：
+    - AccentBrush 只做**填充**（进度条、播放按钮、开关轨道）；
+      强调色当文字 / 图标用 AccentInkBrush（浅色下亮琥珀在白底上读不出来）；
+      填充上的文字用 OnAccentBrush（亮底深字、暗底白字）。
+    - 这几档的默认值是琥珀；用户在设置里换了主题色后，ThemeService 会把
+      同名的 Color / Brush 覆盖到 App 资源上（按当前主色派生）。
+    - 压在图片上的文字固定用白色，不走主题（见页面里的 #F2FFFFFF 等）。
+    - 播放窗固定深色：PlayWindow 自己 merge 这本 Dark 字典，不跟主题走。
+  -->
+
+  <Color x:Key="BgColor">#141419</Color>
+  <Color x:Key="SidebarColor">#17171D</Color>
+  <Color x:Key="SurfaceColor">#1F1F27</Color>
+  <Color x:Key="SurfaceHoverColor">#2B2B35</Color>
+  <Color x:Key="LineColor">#3B3B49</Color>
+  <Color x:Key="TextColor">#F5F5F8</Color>
+  <Color x:Key="MutedColor">#BDBDCB</Color>
+  <Color x:Key="FaintColor">#9696A4</Color>
+  <Color x:Key="AccentColor">#FFB020</Color>
+  <Color x:Key="OnAccentColor">#1A1200</Color>
+  <Color x:Key="AccentInkColor">#F4AD2B</Color>
+  <Color x:Key="DangerColor">#FF6B6B</Color>
+  <Color x:Key="SuccessColor">#4ADE80</Color>
+  <Color x:Key="HeroFadeColor">#141419</Color>
+
+  <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}" />
+  <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource SidebarColor}" />
+  <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}" />
+  <SolidColorBrush x:Key="SurfaceHoverBrush" Color="{StaticResource SurfaceHoverColor}" />
+  <SolidColorBrush x:Key="LineBrush" Color="{StaticResource LineColor}" />
+  <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}" />
+  <SolidColorBrush x:Key="MutedBrush" Color="{StaticResource MutedColor}" />
+  <SolidColorBrush x:Key="FaintBrush" Color="{StaticResource FaintColor}" />
+  <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+  <SolidColorBrush x:Key="OnAccentBrush" Color="{StaticResource OnAccentColor}" />
+  <SolidColorBrush x:Key="AccentInkBrush" Color="{StaticResource AccentInkColor}" />
+  <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
+  <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
+
+  <!-- 压在图上用的绿：「在库」角标底是半透明黑，浅色的深绿读不清。 -->
+  <SolidColorBrush x:Key="SuccessOnImageBrush" Color="#4ADE80" />
+  <SolidColorBrush x:Key="NavHoverBrush" Color="#0FFFFFFF" />
+
+  <!-- 选中块（分段 / 下拉项）、发丝描边 -->
+  <SolidColorBrush x:Key="ChipBrush" Color="#2EFFFFFF" />
+  <SolidColorBrush x:Key="HairlineBrush" Color="#0FFFFFFF" />
+
+  <!-- 开关 -->
+  <SolidColorBrush x:Key="SwitchTrackBrush" Color="#3A3A46" />
+  <SolidColorBrush x:Key="SwitchKnobBrush" Color="#FFFFFF" />
+
+  <!-- 滚动条滑块 -->
+  <SolidColorBrush x:Key="ScrollThumbBrush" Color="#3DFFFFFF" />
+  <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#59FFFFFF" />
+  <SolidColorBrush x:Key="ScrollThumbDragBrush" Color="#75FFFFFF" />
+
+  <!-- 输入框 / 下拉框悬停时的描边 -->
+  <SolidColorBrush x:Key="ControlHoverLineBrush" Color="#454554" />
+
+  <!-- 图片大图往下淡出的收尾色：和页面底色一致才不会有硬边 -->
+  <SolidColorBrush x:Key="HeroFadeBrush" Color="{StaticResource HeroFadeColor}" />
+
+  <!-- 强调色的浅底块（选中段、当前季）：填充淡，文字用 AccentInkBrush -->
+  <SolidColorBrush x:Key="AccentSoftBrush" Color="#392A0E" />
+
+  <!-- 压在大图上的胶囊按钮：半透明底 + 主题文字色，浅色下换成半透明白 -->
+  <SolidColorBrush x:Key="HeroChipBrush" Color="#CC1F1F27" />
+  <SolidColorBrush x:Key="HeroChipHoverBrush" Color="#E62B2B35" />
+
+  <!-- 浮在大图上的分段控件（媒体库顶栏） -->
+  <SolidColorBrush x:Key="GlassPanelBrush" Color="#8C000000" />
+
+  <!-- 轮播圆点：压在大图淡出后的底色上，跟着主题走 -->
+  <SolidColorBrush x:Key="DotActiveBrush" Color="#F2FFFFFF" />
+  <SolidColorBrush x:Key="DotIdleBrush" Color="#59FFFFFF" />
+
+  <!-- 详情 / 每日推荐大图的压暗渐变：底部收到页面底色 -->
+<!--
+    详情页 hero 上的一层黑：有图时白字压在画面上才读得清。
+    HeroScrimBrush 只负责把底边淡到页面底色，压暗全交给这一层。
+  -->
+  <LinearGradientBrush x:Key="HeroInkVeilBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#4D000000" Offset="0" />
+    <GradientStop Color="#1F000000" Offset="0.18" />
+    <GradientStop Color="#4D000000" Offset="0.48" />
+    <GradientStop Color="#6B000000" Offset="0.62" />
+    <GradientStop Color="#80000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="HeroScrimBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#00141419" Offset="0" />
+    <GradientStop Color="#00141419" Offset="0.84" />
+    <GradientStop Color="#3D141419" Offset="0.90" />
+    <GradientStop Color="#8C141419" Offset="0.95" />
+    <GradientStop Color="#D9141419" Offset="0.98" />
+    <GradientStop Color="#FF141419" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 大图左侧再压一点，标题那列不会糊在图上 -->
+  <LinearGradientBrush x:Key="HeroSideScrimBrush" StartPoint="0,0" EndPoint="1,0">
+    <GradientStop Color="#4D141419" Offset="0" />
+    <GradientStop Color="#1F141419" Offset="0.4" />
+    <GradientStop Color="#00141419" Offset="0.68" />
+  </LinearGradientBrush>
+
+  <!-- 媒体库首页的 Hero 轮播：下沿 340px 淡到页面底色 -->
+  <LinearGradientBrush x:Key="OverviewFadeBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#00141419" Offset="0" />
+    <GradientStop Color="#3D141419" Offset="0.3" />
+    <GradientStop Color="#8C141419" Offset="0.55" />
+    <GradientStop Color="#C7141419" Offset="0.75" />
+    <GradientStop Color="#EB141419" Offset="0.88" />
+    <GradientStop Color="#FF141419" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 顶栏浮在大图上时压暗，滚动后叠一层更浓的 -->
+  <LinearGradientBrush x:Key="TopBarScrimBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#8C000000" Offset="0" />
+    <GradientStop Color="#40000000" Offset="0.55" />
+    <GradientStop Color="#00000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="TopBarScrimStrongBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#D9000000" Offset="0" />
+    <GradientStop Color="#8C000000" Offset="0.5" />
+    <GradientStop Color="#00000000" Offset="1" />
+  </LinearGradientBrush>
+
+</ResourceDictionary>

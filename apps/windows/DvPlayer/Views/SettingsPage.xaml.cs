@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using DvPlayer.Player;
 using DvPlayer.Services;
 
@@ -18,6 +19,18 @@ public partial class SettingsPage : Page
     private bool _checkingUpdate;
     private UpdateCheckResult? _updateResult;
     private CancellationTokenSource? _traktLogin;
+
+    /// <summary>自定义取色：滑块在程序里赋初值时别当成用户改动。</summary>
+    private bool _accentReady;
+
+    /// <summary>取色面板里正在预览的颜色。</summary>
+    private Color _accentDraft;
+
+    /// <summary>这次打开面板有没有拖过滑块：没拖过就关掉，不该悄悄改成自定义色。</summary>
+    private bool _accentCustomTouched;
+
+    /// <summary>取色面板的宽度，和 XAML 里 Border 的 Width 一致（右对齐时要用）。</summary>
+    private const double AccentPopupWidth = 238;
     private readonly System.Windows.Threading.DispatcherTimer _saveTimer = new()
     {
         Interval = TimeSpan.FromMilliseconds(500),
@@ -73,6 +86,19 @@ public partial class SettingsPage : Page
         ResolutionSwitch.IsChecked = settings.ShowResolution;
         ResumeSwitch.IsChecked = settings.ResumePlayback;
 
+        switch ((settings.Appearance ?? "system").ToLowerInvariant())
+        {
+            case "light":
+                AppearanceLight.IsChecked = true;
+                break;
+            case "dark":
+                AppearanceDark.IsChecked = true;
+                break;
+            default:
+                AppearanceSystem.IsChecked = true;
+                break;
+        }
+
         SelectTag(StartPageBox, settings.StartPage);
         SelectContent(PageSizeBox, settings.PageSize.ToString());
         SelectTag(BufferSizeBox, settings.BufferSizeMb.ToString());
@@ -91,6 +117,8 @@ public partial class SettingsPage : Page
         MoviePilotUrlBox.Text = settings.MoviePilotUrl ?? "";
         MoviePilotTokenBox.Password = settings.MoviePilotToken ?? "";
         SubtitleLangBox.ToolTip = "默认 zh-cn,zh-tw,en";
+
+        BuildAccentRow();
 
         _ready = true;
         RefreshExtrasHints();
@@ -235,7 +263,7 @@ public partial class SettingsPage : Page
         {
             UpdateButton.Content = "检查中…";
             UpdateStatusText.Text = "正在检查…";
-            UpdateStatusText.Foreground = (Brush)FindResource("MutedBrush");
+            UpdateStatusText.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
             return;
         }
 
@@ -244,29 +272,237 @@ public partial class SettingsPage : Page
             case UpdateCheckStatus.Available:
                 UpdateButton.Content = "下载更新";
                 UpdateStatusText.Text = _updateResult.Message;
-                UpdateStatusText.Foreground = (Brush)FindResource("AccentBrush");
+                UpdateStatusText.SetResourceReference(TextBlock.ForegroundProperty, "AccentInkBrush");
                 break;
             case UpdateCheckStatus.UpToDate:
                 UpdateButton.Content = "重新检查";
                 UpdateStatusText.Text = _updateResult.Message;
-                UpdateStatusText.Foreground = (Brush)FindResource("SuccessBrush");
+                UpdateStatusText.SetResourceReference(TextBlock.ForegroundProperty, "SuccessBrush");
                 break;
             case UpdateCheckStatus.NoRelease:
                 UpdateButton.Content = "重新检查";
                 UpdateStatusText.Text = _updateResult.Message;
-                UpdateStatusText.Foreground = (Brush)FindResource("FaintBrush");
+                UpdateStatusText.SetResourceReference(TextBlock.ForegroundProperty, "FaintBrush");
                 break;
             case UpdateCheckStatus.Failed:
                 UpdateButton.Content = "重新检查";
                 UpdateStatusText.Text = _updateResult!.Message;
-                UpdateStatusText.Foreground = (Brush)FindResource("DangerBrush");
+                UpdateStatusText.SetResourceReference(TextBlock.ForegroundProperty, "DangerBrush");
                 break;
             default:
                 UpdateButton.Content = "检查更新";
                 UpdateStatusText.Text = "还没有检查过";
-                UpdateStatusText.Foreground = (Brush)FindResource("FaintBrush");
+                UpdateStatusText.SetResourceReference(TextBlock.ForegroundProperty, "FaintBrush");
                 break;
         }
+    }
+
+    /// <summary>外观分段：跟随系统 / 深色 / 浅色，当场生效并写回设置。</summary>
+    private void OnAppearanceChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_ready)
+        {
+            return;
+        }
+
+        var mode = AppearanceLight.IsChecked == true
+            ? "light"
+            : AppearanceDark.IsChecked == true
+                ? "dark"
+                : "system";
+
+        var settings = AppServices.Instance.Settings;
+        settings.Appearance = mode;
+        settings.Save();
+        ThemeService.Apply(mode);
+        StatusText.Text = "已保存";
+    }
+
+    // —— 主题色 ——
+
+    /// <summary>
+    /// 预设色块：一行圆点，当前色打勾 + 外圈。写在代码里而不是 XAML，
+    /// 是因为选中态要跟着 <see cref="ThemeService.Accent"/>（含 --accent 自检）走。
+    /// </summary>
+    private void BuildAccentRow()
+    {
+        AccentRow.Children.Clear();
+
+        var stored = ThemeService.Accent;
+        var selectedId = AccentTheme.Preset(stored)?.Id;
+        var customColor = AccentTheme.Custom(stored);
+
+        foreach (var preset in AccentTheme.Presets)
+        {
+            var selected = preset.Id == selectedId;
+            var cell = new Grid { Width = 28, Height = 28 };
+
+            cell.Children.Add(new Ellipse
+            {
+                Width = 20,
+                Height = 20,
+                Fill = new SolidColorBrush(preset.Fill),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+
+            if (selected)
+            {
+                cell.Children.Add(new Ellipse
+                {
+                    Width = 24,
+                    Height = 24,
+                    Stroke = (Brush)FindResource("TextBrush"),
+                    StrokeThickness = 1,
+                    Opacity = 0.45,
+                });
+                cell.Children.Add(new TextBlock
+                {
+                    Text = "\uE73E",
+                    FontFamily = (FontFamily)FindResource("IconFont"),
+                    FontSize = 9.5,
+                    Foreground = new SolidColorBrush(AccentTheme.OnFill(preset.Fill)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+            }
+
+            var button = new Button
+            {
+                Content = cell,
+                Style = (Style)FindResource("SwatchButton"),
+                Tag = preset.Id,
+                ToolTip = preset.Title,
+            };
+            button.Click += OnAccentPresetClick;
+            AccentRow.Children.Add(button);
+        }
+
+        // 自定义：当前就是自定义色时，按钮前面带一个小圆点显示它。
+        if (customColor is { } custom)
+        {
+            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+            panel.Children.Add(new Ellipse
+            {
+                Width = 11,
+                Height = 11,
+                Fill = new SolidColorBrush(custom),
+                Margin = new Thickness(0, 0, 5, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "自定义",
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            AccentCustomButton.Content = panel;
+            AccentCustomButton.FontWeight = FontWeights.SemiBold;
+            AccentCustomButton.SetResourceReference(Control.ForegroundProperty, "AccentInkBrush");
+        }
+        else
+        {
+            AccentCustomButton.Content = "自定义";
+            AccentCustomButton.FontWeight = FontWeights.Normal;
+            AccentCustomButton.SetResourceReference(Control.ForegroundProperty, "TextBrush");
+        }
+    }
+
+    private void OnAccentPresetClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string id })
+        {
+            return;
+        }
+
+        var settings = AppServices.Instance.Settings;
+        settings.AccentColor = id;
+        settings.Save();
+        ThemeService.ApplyAccent(id);
+        BuildAccentRow();
+        StatusText.Text = "已保存";
+    }
+
+    /// <summary>自定义取色：从当前主色起步，拖动滑块即时生效。</summary>
+    private void OnAccentCustomClick(object sender, RoutedEventArgs e)
+    {
+        var fill = AccentTheme.Custom(AppServices.Instance.Settings.AccentColor)
+                   ?? ThemeService.AccentFill;
+
+        _accentCustomTouched = false;
+        _accentReady = false;
+        AccentRed.Value = fill.R;
+        AccentGreen.Value = fill.G;
+        AccentBlue.Value = fill.B;
+        _accentReady = true;
+
+        UpdateAccentDraft(apply: false);
+
+        // 右对齐到按钮：默认 Placement=Bottom 是左对齐，按钮本来就靠卡片右边，
+        // 弹层再往右就出窗口了（窄屏 / 窗口贴边时右边一整列点不到）。
+        AccentPopup.HorizontalOffset = AccentCustomButton.ActualWidth - AccentPopupWidth;
+        AccentPopup.IsOpen = true;
+    }
+
+    private void OnAccentSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!_accentReady)
+        {
+            return;
+        }
+
+        _accentCustomTouched = true;
+        UpdateAccentDraft(apply: true);
+    }
+
+    private void UpdateAccentDraft(bool apply)
+    {
+        _accentDraft = Color.FromRgb(
+            (byte)Math.Round(AccentRed.Value),
+            (byte)Math.Round(AccentGreen.Value),
+            (byte)Math.Round(AccentBlue.Value));
+
+        AccentPreview.Background = new SolidColorBrush(_accentDraft);
+        AccentHexText.Text = AccentTheme.HexText(_accentDraft);
+
+        if (apply)
+        {
+            ThemeService.ApplyAccent(AccentTheme.CustomValue(_accentDraft));
+        }
+    }
+
+    private void OnAccentDoneClick(object sender, RoutedEventArgs e) => AccentPopup.IsOpen = false;
+
+    /// <summary>
+    /// 取色面板收起时写回设置（点外面关掉也算选好了——面板里是即时预览，
+    /// 没有「取消」这一说）。
+    /// </summary>
+    private void OnAccentPopupClosed(object? sender, EventArgs e)
+    {
+        if (!_accentReady)
+        {
+            return;
+        }
+
+        // 只打开看了一眼、没拖滑块：回到原来的设置（可能还是预设），
+        // 别因为「点过自定义」就把预设悄悄改成一个同色的自定义色。
+        if (!_accentCustomTouched)
+        {
+            ThemeService.ApplyAccent(AppServices.Instance.Settings.AccentColor);
+            BuildAccentRow();
+            return;
+        }
+
+        var value = AccentTheme.CustomValue(_accentDraft);
+        var settings = AppServices.Instance.Settings;
+        if (AccentTheme.Normalize(settings.AccentColor) != value)
+        {
+            settings.AccentColor = value;
+            settings.Save();
+            StatusText.Text = "已保存";
+        }
+
+        ThemeService.ApplyAccent(value);
+        BuildAccentRow();
     }
 
     private void OnSettingChanged(object sender, RoutedEventArgs e)
@@ -367,19 +603,19 @@ public partial class SettingsPage : Page
     /// <summary>MoviePilot 连通性自检：只发一个只读请求，不会真的订阅。</summary>
     private async void OnTestPilotClick(object sender, RoutedEventArgs e)
     {
-        PilotStatusText.Foreground = (Brush)FindResource("FaintBrush");
+        PilotStatusText.SetResourceReference(TextBlock.ForegroundProperty, "FaintBrush");
         PilotStatusText.Text = "正在连接…";
 
         try
         {
             var message = await DailyService.CheckPilotAsync(
                 MoviePilotUrlBox.Text, MoviePilotTokenBox.Password);
-            PilotStatusText.Foreground = (Brush)FindResource("SuccessBrush");
+            PilotStatusText.SetResourceReference(TextBlock.ForegroundProperty, "SuccessBrush");
             PilotStatusText.Text = message;
         }
         catch (Exception ex)
         {
-            PilotStatusText.Foreground = (Brush)FindResource("DangerBrush");
+            PilotStatusText.SetResourceReference(TextBlock.ForegroundProperty, "DangerBrush");
             PilotStatusText.Text = ex.Message;
         }
     }

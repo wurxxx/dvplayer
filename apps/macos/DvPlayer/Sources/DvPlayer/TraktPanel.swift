@@ -100,7 +100,7 @@ struct TraktPanel: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.text)
         }
-        .toggleStyle(.switch)
+        .toggleStyle(DvSwitchStyle())
         .controlSize(.small)
         .disabled(busy)
     }

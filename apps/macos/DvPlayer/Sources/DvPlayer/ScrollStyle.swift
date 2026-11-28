@@ -213,7 +213,8 @@ private struct PageScroller: View {
                         )
 
                     Capsule()
-                        .fill(Color.white.opacity(dragging ? 0.46 : (hovering ? 0.34 : 0.22)))
+                        .fill(dragging ? Theme.scrollThumbDrag
+                              : (hovering ? Theme.scrollThumbHover : Theme.scrollThumb))
                         .frame(width: 6, height: thumb)
                         .offset(y: y)
                         .frame(maxWidth: .infinity, alignment: .trailing)

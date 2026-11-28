@@ -45,7 +45,7 @@ struct TraktSettingsCard: View {
                     Toggle("播放时自动同步观看进度", isOn: enabledBinding)
                         .font(.system(size: 13.5))
                         .foregroundStyle(Theme.text)
-                        .toggleStyle(.switch)
+                        .toggleStyle(DvSwitchStyle())
                         .onChange(of: state.settings.traktEnabled) { _ in
                             state.settings.save()
                         }

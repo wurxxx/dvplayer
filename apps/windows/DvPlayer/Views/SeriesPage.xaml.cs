@@ -120,8 +120,51 @@ public partial class SeriesPage : Page
         _initialSeason = Math.Max(0, initialSeason);
         InitializeComponent();
         Loaded += OnLoaded;
+        ThemeService.Changed += OnThemeChanged;
+        PageScroll.SizeChanged += (_, _) => UpdateHeroBackdrop();
+        Unloaded += (_, _) => ThemeService.Changed -= OnThemeChanged;
         KeyDown += OnKeyDown;
     }
+
+    /// <summary>hero 上现在有没有图（有的话文字用白字，浅色再补黑纱）。</summary>
+    private bool _heroOnImage;
+
+    private void OnThemeChanged() => SetHeroInk(_heroOnImage);
+
+    /// <summary>
+    /// 有横版图 / 海报兜底时，hero 上的文字一律白色，压在图上才读得清；
+    /// 没有图时回到主题字色（浅色下深字，深色下白字）。和 macOS 的 `heroInk` 同一套。
+    /// </summary>
+    private void SetHeroInk(bool onImage)
+    {
+        _heroOnImage = onImage;
+        // 压暗层深浅两套都要：HeroScrimBrush 现在只负责把底边淡到页面底色。
+        HeroInkVeil.Visibility = onImage ? Visibility.Visible : Visibility.Collapsed;
+
+        if (onImage)
+        {
+            TitleText.Foreground = Brushes.White;
+            OriginalTitleText.Foreground = White(0xE6);
+            RatingText.Foreground = White(0xFF);
+            MetaText.Foreground = White(0xE6);
+            OverviewText.Foreground = White(0xEB);
+        }
+        else
+        {
+            BackdropBrush.SetResourceReference(Border.BackgroundProperty, "SurfaceBrush");
+            BackdropBlur.Visibility = Visibility.Collapsed;
+            TitleText.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+            OriginalTitleText.SetResourceReference(TextBlock.ForegroundProperty, "FaintBrush");
+            RatingText.SetResourceReference(TextBlock.ForegroundProperty, "AccentInkBrush");
+            MetaText.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+            OverviewText.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+        }
+
+        BuildTags();
+    }
+
+    private static SolidColorBrush White(byte alpha) =>
+        new(Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF));
 
     /// <summary>截图巡检用：往下滚一段，把集行露出来。</summary>
     public void ScrollByForShot(double offset) => PageScroll.ScrollToVerticalOffset(offset);
@@ -171,7 +214,26 @@ public partial class SeriesPage : Page
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        UpdateHeroBackdrop();
         await LoadDetailPageAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 背景图铺满视口高度（和 macOS 一致）；底边由叠在上面的
+    /// `HeroScrimBrush` 淡到页面底色。窗口大小一变就重算。
+    /// </summary>
+    private void UpdateHeroBackdrop()
+    {
+        // ScrollViewer 自己的高度就是视口高度；布局没完成时是 0，
+        // 再退回页面高度，免得到图只有 470。
+        var viewport = PageScroll.ActualHeight;
+        if (double.IsNaN(viewport) || viewport <= 0)
+        {
+            viewport = ActualHeight;
+        }
+
+        var height = Math.Max(470, viewport);
+        HeroBackdrop.Height = height;
     }
 
     /// <summary>
@@ -776,6 +838,9 @@ public partial class SeriesPage : Page
 
     private void RenderHeader()
     {
+        // 换片 / 重进页面先按无图配色画，等背景图下载完再切白字。
+        SetHeroInk(false);
+
         var title = MediaText.Clean(_detail?.Title);
 
         TitleText.Text = title;
@@ -831,28 +896,33 @@ public partial class SeriesPage : Page
         }
     }
 
-    private async Task ApplyBlurAsync(string path)
-    {
-        var bitmap = await PosterLoader.LoadAsync(path, 1280).ConfigureAwait(true);
-        if (bitmap is null)
-        {
-            return;
-        }
+    /// <summary>
+    /// 没有横版图：拿海报清晰铺满（裁掉的部分不影响观感）。
+    /// macOS 也是 `backdropPath ?? posterPath` 直接铺，不做整块模糊。
+    /// </summary>
+    private Task ApplyBlurAsync(string path) => ApplyHeroImageAsync(path, 1280);
 
-        BackdropBlur.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
-        BackdropBlur.Visibility = Visibility.Visible;
-    }
+    private Task ApplyBackdropAsync(string path) => ApplyHeroImageAsync(path, 1920);
 
-    private async Task ApplyBackdropAsync(string path)
+    private async Task ApplyHeroImageAsync(string path, int decodeWidth)
     {
-        var bitmap = await PosterLoader.LoadAsync(path, 1920).ConfigureAwait(true);
+        var bitmap = await PosterLoader.LoadAsync(path, decodeWidth).ConfigureAwait(true);
         if (bitmap is null)
         {
             return;
         }
 
         BackdropBrush.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
-        BackdropBlur.Visibility = Visibility.Collapsed;
+
+        // 同源模糊层：只多放大一点，把模糊后发虚的边缘推出画面。
+        var blur = new ImageBrush(bitmap)
+        {
+            Stretch = Stretch.UniformToFill,
+            RelativeTransform = new ScaleTransform(1.08, 1.08, 0.5, 0.5),
+        };
+        BackdropBlur.Background = blur;
+        BackdropBlur.Visibility = Visibility.Visible;
+        SetHeroInk(true);
     }
 
     private string BuildMeta()
@@ -916,19 +986,33 @@ public partial class SeriesPage : Page
         TagBar.Children.Clear();
         foreach (var tag in tags)
         {
+            var text = new TextBlock { Text = tag, FontSize = 12 };
+            if (_heroOnImage)
+            {
+                text.Foreground = White(0xF2);
+            }
+            else
+            {
+                text.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+            }
+
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)),
                 CornerRadius = new CornerRadius(5),
                 Padding = new Thickness(8, 3, 8, 3),
                 Margin = new Thickness(0, 0, 6, 0),
-                Child = new TextBlock
-                {
-                    Text = tag,
-                    FontSize = 12,
-                    Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
-                },
+                Child = text,
             };
+            if (_heroOnImage)
+            {
+                // 压在图上的标签用白 20% 底，和 macOS 的 Chip 一样。
+                border.Background = White(0x33);
+            }
+            else
+            {
+                border.SetResourceReference(Border.BackgroundProperty, "ChipBrush");
+            }
+
             TagBar.Children.Add(border);
         }
 
@@ -1026,17 +1110,14 @@ public partial class SeriesPage : Page
     private void UpdateStateButtons()
     {
         // 图标亮起 = 已标记；文字跟着变，按钮含义一眼能看懂。
-        WatchedGlyph.Foreground = new SolidColorBrush(_watched ? Accent : IconIdle);
+        WatchedGlyph.SetResourceReference(TextBlock.ForegroundProperty, _watched ? "AccentInkBrush" : "TextBrush");
         WatchedLabel.Text = _watched ? "标记为未观看" : "标记为已观看";
         WatchedButton.ToolTip = WatchedLabel.Text;
 
-        FavoriteGlyph.Foreground = new SolidColorBrush(_favorite ? Accent : IconIdle);
+        FavoriteGlyph.SetResourceReference(TextBlock.ForegroundProperty, _favorite ? "AccentInkBrush" : "TextBrush");
         FavoriteLabel.Text = _favorite ? "已收藏" : "加入收藏";
         FavoriteButton.ToolTip = _favorite ? "取消收藏" : "加入收藏";
     }
-
-    private static readonly Color Accent = Color.FromRgb(0xFF, 0xB0, 0x20);
-    private static readonly Color IconIdle = Color.FromRgb(0xF5, 0xF5, 0xF8);
 
     private static string Clock(double seconds)
     {
@@ -1390,7 +1471,7 @@ public partial class SeriesPage : Page
                     Text = "\uE73E",
                     FontFamily = (FontFamily)FindResource("IconFont"),
                     FontSize = 12,
-                    Foreground = (Brush)FindResource("AccentBrush"),
+                    Foreground = (Brush)FindResource("AccentInkBrush"),
                 };
             }
 
@@ -1554,7 +1635,7 @@ public partial class SeriesPage : Page
                     Text = "\uE73E",
                     FontFamily = (FontFamily)FindResource("IconFont"),
                     FontSize = 12,
-                    Foreground = (Brush)FindResource("AccentBrush"),
+                    Foreground = (Brush)FindResource("AccentInkBrush"),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
@@ -1755,7 +1836,7 @@ public partial class SeriesPage : Page
 
     /// <summary>
     /// 详情页「资源」：核心用详情标题跨源找回同一部片，去重规则和搜索一样。
-    /// 只有两源以上才显示；点一张切到那个源的条目。
+    /// 单源也显示一行，用户一眼能看到这部片在哪个库；点别的卡切源。
     /// </summary>
     private async Task LoadSourcesAsync()
     {
@@ -1766,7 +1847,7 @@ public partial class SeriesPage : Page
         }
 
         var result = await Task.Run(() => core.ItemSources(_itemId)).ConfigureAwait(true);
-        if (!result.Ok || result.Data is null || result.Data.Count <= 1)
+        if (!result.Ok || result.Data is null || result.Data.Count == 0)
         {
             SourcesSection.Visibility = Visibility.Collapsed;
             return;
@@ -1796,16 +1877,21 @@ public partial class SeriesPage : Page
                 Badge = badge,
                 BadgeVisibility = badge.Length > 0 ? Visibility.Visible : Visibility.Collapsed,
                 BadgeBrush = (System.Windows.Media.Brush)FindResource(
-                    current ? "AccentBrush" : "MutedBrush"),
-                BadgeBackground = new System.Windows.Media.SolidColorBrush(current
-                    ? System.Windows.Media.Color.FromArgb(0x24, 0xFF, 0xB0, 0x20)
-                    : System.Windows.Media.Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF)),
+                    current ? "AccentInkBrush" : "MutedBrush"),
+                BadgeBackground = (System.Windows.Media.Brush)FindResource(
+                    current ? "AccentSoftBrush" : "ChipBrush"),
                 BorderBrush = (System.Windows.Media.Brush)FindResource(
-                    current ? "AccentBrush" : "LineBrush"),
+                    current ? "AccentInkBrush" : "LineBrush"),
                 BorderThickness = new Thickness(current ? 1.5 : 1),
             };
         }).ToList();
 
+        // 只有一张卡时左右箭头没意义，藏起来。
+        var scrollable = rows.Count > 1;
+        SourcesLeftButton.Visibility = scrollable ? Visibility.Visible : Visibility.Collapsed;
+        SourcesRightButton.Visibility = scrollable ? Visibility.Visible : Visibility.Collapsed;
+
+        SourcesCount.Text = $"{rows.Count} 个来源";
         SourcesSection.Visibility = Visibility.Visible;
         Trace.Write($"sources id={_itemId} count={rows.Count}");
     }

@@ -314,7 +314,7 @@ struct ProgressBar: View {
     /// 填充色；选集卡高亮时用白色，别和强调色的描边混在一起。
     var tint: Color = Theme.accent
     /// 轨道色；白条要配深一点的轨道才看得清。
-    var track: Color = Color.white.opacity(0.18)
+    var track: Color = Theme.chip
 
     var body: some View {
         GeometryReader { geo in
@@ -436,5 +436,47 @@ struct HorizontalRow<Item: Identifiable, Content: View>: View {
                 .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 开关
+
+/// 开关：和 Windows 的 `Switch` 同一套（琥珀轨道 + 白色旋钮）。
+///
+/// 不用系统的 `.switch`：它的开启色跟着系统强调色走。系统强调色设成石墨色时，
+/// 开着的开关也是灰的，看着像禁用；而且和整体的琥珀强调色不一致。
+struct DvSwitchStyle: ToggleStyle {
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.isEnabled) private var isEnabled
+
+    private var trackWidth: CGFloat { controlSize == .small ? 32 : 44 }
+    private var trackHeight: CGFloat { controlSize == .small ? 20 : 26 }
+    private var knobSize: CGFloat { controlSize == .small ? 14 : 20 }
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 10) {
+            configuration.label
+            Spacer(minLength: 12)
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                Capsule()
+                    .fill(configuration.isOn ? Theme.accent : Theme.switchTrack)
+                    .frame(width: trackWidth, height: trackHeight)
+                // 旋钮一律白色：开关的「头」在彩色轨道上要用白点，
+                // 深色圆点压在琥珀上太硬，和系统的开关观感也对不上。
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: knobSize, height: knobSize)
+                    .padding((trackHeight - knobSize) / 2)
+                    .shadow(color: .black.opacity(0.20), radius: 1.5, y: 0.5)
+            }
+            .animation(.easeOut(duration: 0.16), value: configuration.isOn)
+        }
+        // .disabled(true) 不会拦住 onTapGesture，这里自己判断一次。
+        .opacity(isEnabled ? 1 : 0.45)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isEnabled else { return }
+            configuration.isOn.toggle()
+        }
     }
 }

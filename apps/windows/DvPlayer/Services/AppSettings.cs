@@ -34,6 +34,12 @@ public sealed class AppSettings
     /// <summary>启动后先打开哪一页：sources / daily / records / search / settings。</summary>
     public string StartPage { get; set; } = "sources";
 
+    /// <summary>外观：system（跟随系统）/ dark / light。</summary>
+    public string Appearance { get; set; } = "system";
+
+    /// <summary>主题色：预设 id（amber / blue …）或 custom:RRGGBB。</summary>
+    public string AccentColor { get; set; } = "amber";
+
     /// <summary>搜索页上次的查询词：切到别的页再回来、重启应用都还在。</summary>
     public string? SearchKeyword { get; set; }
 

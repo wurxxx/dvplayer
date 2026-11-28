@@ -6,7 +6,7 @@
                  Width="1440" Height="900"
                  MinWidth="1080" MinHeight="680"
                  WindowStartupLocation="CenterScreen"
-                 Background="{StaticResource BgBrush}"
+                 Background="{DynamicResource BgBrush}"
                  ExtendsContentIntoTitleBar="True"
                  StateChanged="OnWindowStateChanged"
                  PreviewMouseLeftButtonDown="OnWindowMouseDown">
@@ -20,8 +20,8 @@
     </Grid.ColumnDefinitions>
 
     <!-- 侧栏：品牌 / 导航 / 连接状态，入口平铺 -->
-    <Border Grid.Column="0" Background="{StaticResource SidebarBrush}"
-            BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+    <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}"
+            BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,1,0">
       <DockPanel>
 
         <StackPanel DockPanel.Dock="Top" Margin="18,20,18,16">
@@ -31,8 +31,8 @@
                    RenderOptions.BitmapScalingMode="HighQuality" />
             <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
               <TextBlock Text="DV Player" FontFamily="{StaticResource DisplayFont}"
-                         FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-              <TextBlock Text="媒体库" FontSize="12" Foreground="{StaticResource FaintBrush}" Margin="0,1,0,0" />
+                         FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
+              <TextBlock Text="媒体库" FontSize="12" Foreground="{DynamicResource FaintBrush}" Margin="0,1,0,0" />
             </StackPanel>
           </StackPanel>
         </StackPanel>
@@ -41,11 +41,11 @@
              有新版本时在版本号下面加一行可点的提示 -->
         <StackPanel DockPanel.Dock="Bottom" Margin="20,0,18,18">
           <TextBlock x:Name="VersionText" Text="版本"
-                     FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+                     FontSize="11.5" Foreground="{DynamicResource FaintBrush}"
                      TextTrimming="CharacterEllipsis" />
           <TextBlock x:Name="UpdateHintText" Text="" Visibility="Collapsed"
                      FontSize="11.5" FontWeight="SemiBold"
-                     Foreground="{StaticResource AccentBrush}"
+                     Foreground="{DynamicResource AccentInkBrush}"
                      Cursor="Hand" TextTrimming="CharacterEllipsis"
                      MouseLeftButtonUp="OnVersionHintClick" />
         </StackPanel>
@@ -103,7 +103,7 @@
           </ListBox>
 
           <!-- 服务器：点一项直接进这个源的首页 -->
-          <TextBlock Text="服务器" FontSize="11.5" Foreground="{StaticResource FaintBrush}"
+          <TextBlock Text="服务器" FontSize="11.5" Foreground="{DynamicResource FaintBrush}"
                      Margin="22,20,0,6" />
           <ListBox x:Name="SourceNav"
                    Background="Transparent"
@@ -131,17 +131,17 @@
 
                     <Ellipse Width="7" Height="7" HorizontalAlignment="Right"
                              VerticalAlignment="Bottom" Margin="0,0,0,-1"
-                             Stroke="{StaticResource SidebarBrush}" StrokeThickness="1.5">
+                             Stroke="{DynamicResource SidebarBrush}" StrokeThickness="1.5">
                       <Ellipse.Style>
                         <Style TargetType="Ellipse">
-                          <Setter Property="Fill" Value="{StaticResource DangerBrush}" />
+                          <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
                           <Style.Triggers>
                             <DataTrigger Binding="{Binding Ok}" Value="True">
-                              <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                              <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
                             </DataTrigger>
                             <!-- 还在建连：灰点，别让人以为已经失败。 -->
                             <DataTrigger Binding="{Binding Pending}" Value="True">
-                              <Setter Property="Fill" Value="{StaticResource FaintBrush}" />
+                              <Setter Property="Fill" Value="{DynamicResource FaintBrush}" />
                             </DataTrigger>
                           </Style.Triggers>
                         </Style>
@@ -162,7 +162,7 @@
 
     <!-- 内容区 -->
     <Frame x:Name="ContentFrame" Grid.Column="1" NavigationUIVisibility="Hidden"
-           Background="{StaticResource BgBrush}" />
+           Background="{DynamicResource BgBrush}" />
 
     <!-- 窗口按钮：无标题栏时自己画，46×32 和系统字幕按钮同尺寸 -->
     <StackPanel x:Name="CaptionButtons" Grid.Column="1"

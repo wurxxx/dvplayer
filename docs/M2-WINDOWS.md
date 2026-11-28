@@ -273,6 +273,12 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 - `--screenshot <目录> settings --settings-tab play`：设置页直接停在「播放」分组，
   核对缓冲大小这类项；`--settings-tab about` 停在「关于」，核对版本 / 项目地址 /
   更新状态（更新检查是异步的，切换后要等结果回来再截）。
+- `--appearance light|dark|system`：这次运行强制用某个外观（不写回设置），
+  配合 `--screenshot` 每页截深浅两套；设置页「通用 → 外观」里改会当场写入
+  `settings.json` 并立刻换色板。
+- `--accent blue|7C3AED|custom:3B82F6`：这次运行强制用某个主题色（预设 id
+  或 hex，不写回设置）；设置页「通用 → 外观 → 主题色」里点色块或拖 RGB
+  滑块会当场写回配置并立刻重绘。
 - `--play-cover-shot <目录>`：抓打开遮罩。设 `DVPLAYER_OPENING_HOLD=1`（假装首帧
   不来）时，1.5 / 12 / 31 秒三张都必须是纯黑 + 片名 +「正在打开…」+ 转圈，不能透出桌面。
 - `DVPLAYER_BUFFERING_HOLD=1`：出画后强制显示中间的「正在缓冲…」小胶囊（验证播放中

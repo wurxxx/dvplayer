@@ -19,7 +19,7 @@ private struct SourceCard: View {
                         .lineLimit(1)
 
                     if current {
-                        tag("当前", color: Theme.accent)
+                        tag("当前", color: Theme.accentInk)
                     } else if best {
                         tag("推荐", color: Theme.muted)
                     }
@@ -241,7 +241,7 @@ struct DetailPage: View {
                                     HStack(spacing: 10) {
                                         ProgressView()
                                             .controlSize(.small)
-                                            .tint(Theme.accent)
+                                            .tint(Theme.accentInk)
                                         Text("正在读取选集…")
                                             .font(.system(size: 13))
                                             .foregroundStyle(Theme.faint)
@@ -254,7 +254,8 @@ struct DetailPage: View {
                                 }
 
                                 // 同一部片在多个源里都有：详情页列出来，点一下切源（详情页的「资源」）。
-                                if sources.count > 1 {
+                                // 单源也显示：用户要一眼看到这部片在哪个库。
+                                if !sources.isEmpty {
                                     sourcesBlock
                                 }
 
@@ -337,6 +338,21 @@ struct DetailPage: View {
 
     // MARK: - 顶部信息
 
+    /// 有没有能铺满的大图。没有时 header 直接压在页面底色上，
+    /// 白字会看不见——浅色外观下尤其明显（还没读完 / 条目没海报）。
+    private var hasBackdrop: Bool {
+        guard let detail else { return false }
+        return !((detail.backdropPath ?? detail.posterPath) ?? "").isEmpty
+    }
+
+    private var heroInk: Color { hasBackdrop ? .white : Theme.text }
+    private var heroMuted: Color {
+        hasBackdrop ? Color.white.opacity(0.85) : Theme.muted
+    }
+    private var heroFaint: Color {
+        hasBackdrop ? Color.white.opacity(0.72) : Theme.faint
+    }
+
     /// 顶部只放文字和按钮：大图完全交给 `backdrop`。
     ///
     /// 以前 header 自己也画一张清晰图，和背景那张模糊图铺在两个不同
@@ -346,19 +362,19 @@ struct DetailPage: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(detail?.title ?? "正在读取…")
                     .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.98))
+                    .foregroundStyle(heroInk)
                     .lineLimit(2)
 
                 if let meta = metaLine, !meta.isEmpty {
                     Text(meta)
                         .font(.system(size: 13.5))
-                        .foregroundStyle(Color.white.opacity(0.85))
+                        .foregroundStyle(heroMuted)
                 }
 
                 if !chips.isEmpty {
                     HStack(spacing: 8) {
                         ForEach(chips, id: \.self) { chip in
-                            Chip(text: chip, tint: Color.white.opacity(0.2))
+                            Chip(text: chip, tint: hasBackdrop ? Color.white.opacity(0.2) : Theme.chip)
                         }
                     }
                 }
@@ -366,7 +382,7 @@ struct DetailPage: View {
                 if let overview = detail?.overview, !overview.isEmpty {
                     Text(overview)
                         .font(.system(size: 13.5))
-                        .foregroundStyle(Color.white.opacity(0.72))
+                        .foregroundStyle(heroFaint)
                         .lineLimit(4)
                         .frame(maxWidth: 780, alignment: .leading)
                 }
@@ -504,10 +520,10 @@ struct DetailPage: View {
                 } label: {
                     Text(seasonTitle(season))
                         .font(.system(size: 12.5))
-                        .foregroundStyle(season.id == seasonId ? Theme.accent : Theme.muted)
+                        .foregroundStyle(season.id == seasonId ? Theme.accentInk : Theme.muted)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(season.id == seasonId ? Color(hex: 0x2E2412) : Theme.surface,
+                        .background(season.id == seasonId ? Theme.accentSoft : Theme.surface,
                                     in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -1574,7 +1590,7 @@ private struct EpisodeCard: View {
                 HStack(spacing: 7) {
                     Text(episode.badge)
                         .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(active ? Theme.accent : Theme.text)
+                        .foregroundStyle(active ? Theme.accentInk : Theme.text)
                     Text("·")
                         .font(.system(size: 13.5))
                         .foregroundStyle(Theme.faint)
@@ -1829,7 +1845,7 @@ private struct TrackMenuView: View {
                     HStack(alignment: .center, spacing: 8) {
                         Image(systemName: "checkmark")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.accentInk)
                             .opacity(choice.selected ? 1 : 0)
                             .frame(width: 12)
 
