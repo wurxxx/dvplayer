@@ -95,7 +95,16 @@ dlltool**，见上一节。
 powershell -ExecutionPolicy Bypass -File scripts\windows\build-core.ps1
 ```
 
+> 测试机上 `cargo` **不在 PATH**（装在 `D:\dvplayer\tools\cargo\bin`），
+> `Get-Command cargo` 找不到是正常的；`build-core.ps1` 自己设 `RUSTUP_HOME` /
+> `CARGO_HOME`。改过 `core/` 后如果 cargo 秒回 `Finished` 且 dll 时间戳没变，
+> 说明源码没同步到测试机。
+
 产物：`core\target\x86_64-pc-windows-gnu\release\dvplayer_media.dll`。
+
+共享核心版本在 `core\Cargo.toml` 的 `[workspace.package] version`，**独立于应用版本**。
+`core/` 自上一个发布 tag 起有改动时，发布前必须提升它；`sh scripts/check-core-version.sh`
+会校验（CI 打包前也跑），漏了会直接拦下发布。
 
 `apps/windows/DvPlayer/DvPlayer.csproj` 有一个 `CopyMediaCore` target，
 `dotnet build` 时会把它拷到输出目录；找不到就发一条 warning。

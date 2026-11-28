@@ -49,9 +49,11 @@ Windows 用 `HttpClientHandler.Proxy` 按代理地址缓存一个 `HttpClient`�
 - macOS：`Core.search(title)`；Windows：`MediaCore.Search(title)`。
 - 标题归一化：去掉括号里的内容（`()（）[]【】`）、`第 N 季 / 第 N 部`、空白和标点，
   全部转小写。
-- 类型过滤：推荐是剧集时只看 `series / tv / folder`，电影只看 `movie / folder`。
+- 页头按电影 / 剧集分两个 tab，只有一类有数据时不出 tab；类型过滤：推荐是剧集时
+  只看 `series / tv / folder`，电影只看 `movie / folder`。
 - 先找标题完全一致且年份相差不超过 1 的；没有再退到标题完全一致；最后允许互相包含。
-- 命中后卡片左下角显示「在库」。匹配是逐条发布的：不用等 60 条全部搜完才亮。
+- 命中后卡片显示「在库」（亮绿）；已订阅显示「已订阅」，其余不显示状态。
+  匹配是逐条发布的：不用等 60 条全部搜完才亮。
 
 点卡片的行为：
 

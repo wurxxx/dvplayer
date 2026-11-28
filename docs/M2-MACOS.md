@@ -1,8 +1,8 @@
 # M2 · macOS 客户端
 
-> 状态：壳、浏览链路、播放页都可用（2026-11-21）；播放走进程内 libmpv +
+> 状态：壳、浏览链路、播放页都可用（2026-11-28）；播放走进程内 libmpv +
 > render API（[ADR-0011](adr/0011-macos-libmpv-inprocess.md)），DV 路径与 Windows 同一条；
-> 锁屏状态下已端到端跑通，画面待解锁后目视验收。
+> 已支持浅色 / 深色 / 跟随系统与主题色；HDR 真屏目视与签名 / 公证待做。
 > 产物：`apps/macos/DvPlayer`（Swift Package + `build.sh` 出 `.app`）。
 
 ## 1. 范围
@@ -19,7 +19,9 @@
 `--wid` 在 macOS 上不可靠；render API 从 mpv 2026-11-22 起能用 gpu-next，
 所以播放页是**单窗口**：视频画进应用自己的 `NSOpenGLView`，控制浮层叠在上面。
 
-## 2. 已完成（浏览链路）
+## 2. 已完成（壳、页面与功能）
+
+### 2.1 壳与浏览
 
 - 共享核心绑定：`Sources/DvCore/Core.swift`（串行队列 + `async/await`，JSON 解成强类型）
 - 配置：`~/Library/Application Support/DvPlayer/settings.json`
@@ -43,6 +45,9 @@
   只用 `browseRefresh` 重拉已加载的页（观看进度、收藏会变），不重置筛选
 - 卡片副标题的片长用中文可读格式：「电影 · 2 小时 12 分钟」/「45 分钟」，
   和 Windows 的 `MediaText.Runtime` 一致；播放页进度 / 剩余时间仍然用时间码
+
+### 2.2 详情页与选集
+
 - 详情页：整块横版图铺满、渐变淡到页面底色、动作按钮（播放 / 重头看 / 收藏 /
   标记看过）、分季选集（296×166 横卡 + 悬停播放遮罩 + 进度条；一季超过 30 集时
   上方多一排「1-30 / 31-60 …」分段按钮，点一下滚到那一段）、
@@ -60,6 +65,9 @@
 - 记录页：通用（继续观看按媒体源分栏，标题是源名 +「N 条」，状态点在左；下面是视频收藏一行）/ 观看 / 收藏
 - 本地文件夹源：「服务器」页 → 添加 → 类型「本地文件夹」→ 选目录 →
   目录里的视频 / ISO 成为媒体库条目（见 `LOCAL-SOURCE.md`）；ISO 条目 `disc=true`。
+
+### 2.3 原盘、搜索与推荐
+
 - 原盘：ISO 条目 → 进**盘里自带的菜单**（HDMV，`--disc-menu` + `discnav`，
   见 `BLU-RAY.md` §5.4）：菜单画面和按钮高亮由 mpv 渲染，方向键 / 回车 /
   鼠标转发给 libbluray 的按钮导航；点按钮后 mpv 自己切正片，壳不重开播放器。
@@ -91,10 +99,13 @@
   输入框保留上次关键词（`settings.searchKeyword`），切页 / 重启回来自动再搜一次；
   输入防抖会取消上一条待执行的搜索，不会每敲一个字并发一次请求。
 - 每日推荐：侧栏新页，打开应用时抓 TMDB（要 API Key）/ 豆瓣热门，按天缓存
-  `daily.json`；用 `Core.search` + 标题归一化匹配媒体源，命中的点开进媒体详情，
-  没命中的打开豆瓣 / TMDB 资料页（简介、评分、演职人员），在资料页里点
-  「添加订阅」推到 MoviePilot。设置页有 TMDB Key / TMDB 专用代理 /
-  MoviePilot 地址与 Token 和「测试连接」，详见 [DAILY.md](DAILY.md)。
+  `daily.json`；电影 / 剧集两个 tab（只有一类时不出 tab），卡片只留「已订阅」与
+  「在库」（在库亮绿）。用 `Core.search` + 标题归一化匹配媒体源，命中的进媒体详情，
+  没命中的进豆瓣 / TMDB 资料页，在页内「添加订阅」推到 MoviePilot。设置页有 TMDB
+  Key / 专用代理 / MoviePilot 地址与 Token，详见 [DAILY.md](DAILY.md)。
+- 外观：浅色 / 深色 / 跟随系统（`Appearance.swift`），主题色 7 个预设 + 自定义取色
+  （`AccentTheme.swift`）；只存主色，强调 / 深字 / 淡底 / 反白按 HSL 派生，浅色对
+  `#F4F5F7`、深色对 `#1F1F27` 保 4.5:1；播放窗固定深色。
 - 记录页：「观看」的播放按钮直接 `PlayerLauncher.play(record:)`，收藏卡片进详情
 - 续播点合并：电影 / 视频按整片百分比比「资源」里其它源与 Trakt 的 playback，
   取较长的那条，用当前源片长换算成秒数；剧集按「同季同集号」到其它源找同一集
@@ -548,10 +559,15 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
 5. **签名、公证与自动更新**：`.app` 仍未签名 / 公证；更新只做到「查 GitHub
    Releases + 打开下载页」，没有 Sparkle 那种静默下载安装。
 
-## 6. 旧的下一步（已完成）
+## 6. 已完成项
+
+<details>
+<summary>早期下一步（已全部完成，点击展开）</summary>
 
 1. ~~播放页~~：`NSOpenGLView` + `mpv_render_context`，`--keep-open`、`--start`、
    音轨 / 字幕按 `aid` / `sid` 应用；浮层控件照 Windows。
 2. ~~进度回写、播完接下一集 / 关窗~~：切集一律从头、记录停在片尾的从 0 开始。
 3. ~~详情页音轨 / 字幕选择~~：`TrackPrefs` 两端同名同规则。
 4. ~~键盘~~：空格 / ←→ / 上下键 / Esc，和 Windows 对齐。
+
+</details>

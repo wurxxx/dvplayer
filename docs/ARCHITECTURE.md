@@ -135,7 +135,7 @@ C ABI 多一组 `dv_hub_*`；界面（`AppServices`）只持有一个 hub，设�
 | --- | --- | --- |
 | Windows | 起官方 `mpv.exe`：`--wid=<子窗口>`，控制走 `--input-ipc-server=<命名管道>` 的 JSON IPC，进程用 Job Object 绑在壳上 | `apps/windows/DvPlayer/Player/`（`MpvProcess` / `MpvIpc` / `MpvHost`） |
 | macOS | 进程内 libmpv（render API + gpu-next / OpenGL）画进自己的窗口，SwiftUI 控制浮层叠在同一窗口里；控制直接调 C API，单窗口（ADR-0011） | `apps/macos/DvPlayer/Sources/DvPlayer/Player/`（`MpvEngine` / `PlayerSession` / `PlayerWindow`） |
-| Android / TV | mpv 进程内（render API + EGL，默认）+ Media3（第二引擎，按能力路由，ADR-0014） | 未开始；规划 `apps/android/player-mpv/` / `player-media3/` |
+| Android / TV | mpv 进程内（render API + EGL，默认）+ Media3（第二引擎，按能力路由，ADR-0014） | 手机端已接（`:player-mpv` / `:player-media3`），TV 未接 |
 
 Windows 用子进程（[ADR-0009](adr/0009-windows-mpv-subprocess.md)）：让 mpv 自己建 VO
 和 swapchain 才拿得到 `gpu-next`（Dolby Vision 整形与 FEL 都在这里）。
@@ -192,9 +192,9 @@ macOS 的回调里直接取属性值。两端都切回 UI 线程，属性用观�
 | 环节 | 做法 | 现状 |
 | --- | --- | --- |
 | 硬解 | `hwdec=auto-safe`（D3D11VA / QSV / VideoToolbox / MediaCodec），失败自动软解，选择结果写日志 | Windows 已验 4K120 / 8K60；macOS 参数已带，画面待目视；Android 走 mpv `hwdec=mediacodec` / Media3 MediaCodec，待验 |
-| HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | Windows 开关已接、识别已验，真屏待验；macOS 还没传这个参数（默认 tone-map 到 SDR）；Android 由壳设 dataspace / colorMode，待验 |
+| HDR | `target-colorspace-hint=yes`：HDR 屏直通、SDR 屏 tone-map；元数据（HDR10 / HDR10+ / HLG）由内核识别 | Windows 开关已接、识别已验，真屏待验；macOS 开关已接（`hdrPassthrough`），真屏待验；Android 由壳设 dataspace / colorMode，待验 |
 | DV | 交给 `gpu-next`：P7 双层合成、P5/P8 整形；拿不到增强层时只播 BL | Windows P7 FEL 已验；macOS P5 目视正常、P7 FEL 同帧 A/B 已验；Android mpv 走 P5/P8 整形、P7 只播 BL，待验 |
-| 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | Windows 已接开关与设备选择（`audioDevice` / `audioPassthrough`，起 mpv 时带成参数），听感待 AVR 实测；macOS 未做；Android mpv 的 audiotrack 直通待验，Media3 走 FFmpeg 音频扩展 |
+| 音频 | 默认解码混音；设置里可切直通（`audio-spdif=ac3,eac3,dts,dts-hd,truehd`），失败回落解码 | 两端都已接开关与设备选择（`audioDevice` / `audioPassthrough`，起 mpv 时带成参数），听感待 AVR 实测；Android mpv 的 audiotrack 直通待验，Media3 走 FFmpeg 音频扩展 |
 | 字幕 | PGS / ASS / SRT 走内核；Android 由 mpv 的 libass 渲染（含 MKV 内嵌字体），Media3 侧 ASS 只显示基础文本 | ASS / SRT 两端已验证，PGS 未单独验；Android 未验 |
 
 原则：**UI 显示的是实际行为，不是文件声称的格式**。播放页要给一条「源 → 输出」的信息

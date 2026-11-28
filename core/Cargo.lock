@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "dvplayer-media"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "dolby_vision",
  "md-5",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "dvplayer-media-jni"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "dvplayer-media",
  "jni",

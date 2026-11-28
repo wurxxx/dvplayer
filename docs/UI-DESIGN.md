@@ -1,4 +1,4 @@
-# 界面规范（Windows 端）
+# 界面规范（桌面端：Windows / macOS）
 
 > 2026-11-20。四端共用同一套视觉语言，取值以 Windows 的
 > `apps/windows/DvPlayer/Themes/AppTheme.xaml` 为准。

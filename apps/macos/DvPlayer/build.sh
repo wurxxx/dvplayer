@@ -128,6 +128,15 @@ install_name_tool -id @rpath/libdvplayer_media.dylib \
 install_name_tool -change "$CORE_ID" @rpath/libdvplayer_media.dylib \
     "$EXE"
 
+# SwiftPM 会缓存上次链接时的核心路径；cargo 重建后 out/ 的 hash 目录会变，
+# 只按当前 ID 改写就对不上，按文件名再兜一次。
+while read -r dep; do
+    case "$dep" in
+        */libdvplayer_media.dylib)
+            install_name_tool -change "$dep" @rpath/libdvplayer_media.dylib "$EXE" ;;
+    esac
+done < <(otool -L "$EXE" | tail -n +2 | awk '{print $1}')
+
 # libmpv 和它的依赖。
 # prefix/lib 里只拷真实文件（`libavcodec.63.dylib` 是软链，真实文件带完整版本号）。
 for lib in "$PREFIX_LIB"/*.dylib; do

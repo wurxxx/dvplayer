@@ -5,17 +5,19 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 [UI-DESIGN.md](UI-DESIGN.md) 的「播放页」一节；这份文档只记 Windows 侧的落点和
 两端的差异。
 
-## 1. 五项功能的落点
+> 状态：0.1.7 已发布；浅色模式 / 主题色在 master 上待发布。
+
+## 1. 功能落点
 
 | 功能 | 代码 | 说明 |
 | --- | --- | --- |
-| 画面比例 | `Player/PlayerAspect.cs`、`Views/PlayWindow.xaml.cs` | `PlayerAspect` 与 macOS 的枚举一一对应，`ToMpv()` 给 `keepaspect` / `panscan` / `video-aspect-override` 三个值；比例写 `settings.json` 的 `videoAspect`。**适应窗口**另按 mpv 的 `video-params/aspect` 改窗口形状（竖屏短剧 → 竖窗口，不留黑边），全屏 / 最大化时不抢尺寸 |
+| 画面比例 | `Player/PlayerAspect.cs`、`Views/PlayWindow.xaml.cs` | `PlayerAspect` 与 macOS 一一对应，`ToMpv()` 给 `keepaspect` / `panscan` / `video-aspect-override`，值写 `videoAspect`；「适应窗口」按 `video-params/aspect` 改窗口形状（竖屏短剧不留黑边），全屏 / 最大化不抢尺寸 |
 | 定时关闭 | `Views/PlayWindow.xaml.cs` | `_sleepDeadline` / `_sleepAtEof`，`OnTick` 里的 `CheckSleep()`；到点先 toast 再关窗，进度照常回写 |
 | 片头片尾 | `Services/SkipMarkers.cs` | `%LOCALAPPDATA%\dvplayer\skip-markers.json`，按剧名（电影按条目 id）存 `introEnd` / `outroStart`，和 macOS 同格式 |
 | 弹幕 | `Player/Danmaku.cs` | 弹弹play v2 签名（`Base64(SHA256(AppId+Timestamp+Path+AppSecret))`）→ JSON / XML 解析 → 写 ASS → `sub-add` + `secondary-sid`；电影没有集号时按片名找 `type == "movie"` 的条目 |
 | 在线字幕 | `Player/OpenSubtitles.cs` | OpenSubtitles REST v1：搜索 → `/downloads` 取临时链接 → 存缓存 → `sub-add select` |
-| 每日推荐 | `Services/DailyService.cs`、`Views/DailyPage.xaml`、`Views/DailyDetailPage.xaml` | 启动时抓 TMDB（要 API Key）/ 豆瓣热门，按天缓存 `daily.json`；`MediaCore.Search` + 标题归一化匹配本地源，命中的点开进 `SeriesPage`，没命中的打开 `DailyDetailPage`（豆瓣 / TMDB 资料），在页内点「添加订阅」推到 MoviePilot（`POST /api/v1/subscribe/?apikey=`；不要带 Bearer，会被当成登录令牌校验）。TMDB 可单独填代理（只影响 TMDB），设置页在「通用 → 每日推荐」，详见 [DAILY.md](DAILY.md) |
-| Trakt | `Player/TraktClient.cs`、`Views/SettingsPage.xaml` | 设备码登录；token 存 `settings.json` 的 `traktAccessToken` / `traktRefreshToken` / `traktExpiresAt`（DPAPI 密封）；scrobble 挂在 `time-pos` / `pause` / EOF / 关窗上，按顺序串行发送；匹配优先用 `MediaDetailDto.TmdbId` / `ImdbId`（Emby / Jellyfin 的 `ProviderIds`），没有才回落标题 + 年份；库页直接起播的电影用条目标题 + 详情元数据兜底；详情页「Trakt」菜单做评分 / 收藏 / 待看。打包时内置 Client ID，设置页只剩连接 / 开关 |
+| 每日推荐 | `Services/DailyService.cs`、`Views/DailyPage.xaml`、`Views/DailyDetailPage.xaml` | 启动时抓 TMDB（要 API Key）/ 豆瓣热门，按天缓存 `daily.json`；电影 / 剧集两个 tab（只有一类时不出 tab），卡片只留「已订阅」和「在库」（在库为亮绿）；`MediaCore.Search` + 标题归一化匹配本地源，命中的点开进 `SeriesPage`，没命中的打开 `DailyDetailPage`（豆瓣 / TMDB 资料），在页内点「添加订阅」推到 MoviePilot（`POST /api/v1/subscribe/?apikey=`；不要带 Bearer，会被当成登录令牌校验）。TMDB 可单独填代理（只影响 TMDB），设置页在「通用 → 每日推荐」，详见 [DAILY.md](DAILY.md) |
+| Trakt | `Player/TraktClient.cs`、`Views/SettingsPage.xaml` | 设备码登录；token 存 `traktAccessToken` / `traktRefreshToken` / `traktExpiresAt`（DPAPI）；scrobble 挂 `time-pos` / `pause` / EOF / 关窗，串行发送；匹配优先 `TmdbId` / `ImdbId`（Emby 的 `ProviderIds`），没有才回落标题 + 年份；详情页「Trakt」菜单做评分 / 收藏 / 待看；打包内置 Client ID |
 
 配置项都在 `Services/AppSettings.cs`：`videoAspect`、`danmakuEnabled`、
 `openSubtitlesApiKey` / `openSubtitlesUsername` / `openSubtitlesPassword`、
@@ -23,6 +25,19 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 `tmdbApiKey` / `moviePilotUrl` / `moviePilotToken`（后两个凭据落盘时 DPAPI 密封）。弹幕凭据不在设置里：打包时由
 `packaging/build-release.ps1` 从本地密钥文件读出来，以程序集元数据写进 exe
 （详见 [SECRETS.md](SECRETS.md)）。
+
+### 1.1 外观与主题色
+
+- 外观三选一（跟随系统 / 深色 / 浅色），存 `AppSettings.Appearance`；`ThemeService`
+  整窗换 `Palette.Dark.xaml` / `Palette.Light.xaml`，控件走 `DynamicResource` 即时重绘。
+  播放窗固定深色，只跟主题色、不跟深浅。
+- 主题色 7 个预设 + 自定义 hex：只存主色，`AccentTheme` 按 HSL 派生强调 / 深字 /
+  淡底 / 反白四档，保证浅色对 `#F4F5F7`、深色对 `#1F1F27` 都 ≥ 4.5:1。
+- 选中态统一「主题色淡底 + 深字」，开关旋钮白色。
+- 详情页整页铺一张图（高度取 `PageScroll.ActualHeight`），同源模糊 26%→68%，
+  分档黑纱压暗，底边用 `HeroScrimBrush` 收进页面底色；有图时文字一律白色。
+  资源区只有一个来源时也显示那一行，箭头隐藏。
+- 自检：`--appearance light|dark|system`、`--accent blue|7C3AED|custom:3B82F6`，都不写回设置。
 
 ## 2. 播放后端：子进程（默认）/ 进程内 libmpv
 
@@ -40,7 +55,28 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
 （进程内后端靠 `log-file`，子进程靠重定向 stderr）；进程内后端还有
 `mpv-shell.log`，放壳侧的初始化 / 选项错误。
 
-## 3. 和 macOS 的差异
+应用自己的运行日志是 `%LOCALAPPDATA%\dvplayer\player.log`（超过 4 MB 轮转成
+`player.log.1`），时间戳带日期和毫秒。每次启动先写一行版本 / 核心 / 系统 / 源数量，
+再写配置路径；每个源建连前写一行
+
+```
+connect <名称> id=… kind=emby base=http://host:8096 user="alice" pass=set(8) proxy=-
+```
+
+建连结果写
+
+```
+source <名称> (emby) -> fail in 812 ms: api error 401: Invalid username or password.
+```
+
+口令只记有没有和多长（能看出粘贴时多带了空格 / 换行），不记原文。错误文本里带
+HTTP 状态码；登录请求被反代重定向（http → https）时还会追加最终地址和提示，
+用来区分「地址不对」和「账号真不对」。核心里的 `eprintln!` 不进 player.log，
+从 cmd / PowerShell 启动 `DvPlayer.exe` 才能在窗口里看到。
+
+## 3. Windows 侧的落点与差异
+
+### 3.1 应用与更新
 
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
   「更多」里的「画面比例」「定时关闭」是**连开一层菜单**（点完第一层再弹第二层），
@@ -62,6 +98,9 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   位置仍交给 XAML 的 `CenterScreen`——只要尺寸不超过工作区，居中就不会算出
   负的顶边。回归：`--window-test` 会打印几组典型工作区的验算
   （`适配 1080p@150% 工作区=1280x693 → 窗口=1248x661 居中顶边=16 越界=否`）。
+
+### 3.2 播放窗
+
 - **顶栏状态与置顶**：右上角显示缓存 / 下载速度（mpv `cache-speed`，低于
   0.05 MB/s 不显示，和 macOS 同一阈值），旁边是窗口置顶图钉：置顶时图钉换成
   强调色，浮层和视频层两个窗口同时 `Topmost`，状态落 `settings.json` 的
@@ -122,6 +161,9 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
   关窗时等一下这次上报（`wait: true`），否则进程退出会把后台任务带走。
   回归：播放 80 秒后关窗，`player.log` 出现 `report ok ... stopped=True`，
   服务器该条目的位置同步到 ~73 秒。
+
+### 3.3 服务器、详情与记录
+
 - **点服务器卡片直接进源首页**：卡片整块可点（悬停提亮、手型光标），单击就进这个源
   的媒体首页；卡片里的编辑 / 删除按钮不触发打开，拖动排序时（`_sourceDragging`
   为真）也不打开，松手只换位置。回归：点「公司」卡片 → 进它的媒体首页；点编辑 →

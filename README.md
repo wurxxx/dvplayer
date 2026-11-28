@@ -9,10 +9,10 @@
    统一接入、统一浏览、统一播放。
 3. **聚合搜索**：一次搜索覆盖所有已接入的源，播放记录与续播点合并展示。
 
-当前阶段：**M2 — 桌面端持续迭代**：macOS / Windows 已发布 0.1.6，浏览、播放、Trakt、
-更新检查都已可用；剩 Jellyfin 12.x 真机、Plex 适配器，以及需要 HDR 屏 /
-AVR 的目视与听感验收；Android / TV 进行中。底层能力见 [docs/M0.md](docs/M0.md)，
-产品进度与剩余工作见 [docs/PLAN.md](docs/PLAN.md) §4–§5、[docs/M1.md](docs/M1.md)。
+当前阶段：**M2 — 桌面端持续迭代**：macOS / Windows 已发布 0.1.7，浏览、播放、每日推荐、
+Trakt、更新检查都已可用；master 上还有未发布的浅色模式与主题色。剩 12.x 真机、Plex 适配器，
+以及需要 HDR 屏 / AVR 的目视与听感验收；Android / TV 进行中。底层能力见 [docs/M0.md](docs/M0.md)，
+进度与剩余工作见 [docs/PLAN.md](docs/PLAN.md) §4–§5、[docs/M1.md](docs/M1.md)。
 
 ## 能力现状
 
@@ -35,6 +35,9 @@ AVR 的目视与听感验收；Android / TV 进行中。底层能力见 [docs/M0
   Trakt 观看记录（评分 / 收藏 / 待看）、启动检查更新
 - 续播：进度回写到服务器，详情页「继续观看 第 N 集」；电影在别的源或 Trakt 上
   进度更远时，按较长的那条续播
+- 每日推荐：侧栏「每日推荐」抓 TMDB / 豆瓣热门；电影 / 剧集两个 tab，命中本地源直接进详情，
+  没有的在资料页一键订阅 MoviePilot
+- 外观：浅色 / 深色 / 跟随系统，7 个预设主题色 + 自定义取色（master 上待发布）
 - 共享核心：`core/media`（Rust + C ABI），媒体库逻辑只写一次，四端复用
 
 ## 目录
@@ -42,14 +45,14 @@ AVR 的目视与听感验收；Android / TV 进行中。底层能力见 [docs/M0
 ```
 docs/            计划、架构、ADR、M0 / M1 记录
 deps/            依赖钉版本
-scripts/         preflight / 拆层 / FEL A-B / Windows 构建与验证
+scripts/         preflight / 拆层 / FEL A-B / Windows 构建与验证 / 发布校验
 core/media/      共享媒体库核心（Rust，C ABI）
 core/mpv/        libmpv 封装（C++，已放弃：两端都改 mpv 子进程，见 ADR-0009 / 0010）
 core/dovi/       libdovi 封装（占位）：RPU / EL 类型
 apps/windows/DvPlayer/         正式壳：媒体库客户端（.NET 10 + WPF-UI）
 apps/windows/DvPlayer.Windows/ M0 验证壳：HwndHost / IPC / DV 徽标（保留参考）
 apps/macos/      SwiftUI + AppKit：正式客户端 DvPlayer + M0 验证程序 m0-render（留档）
-apps/android/    Kotlin + Compose（手机 / TV 双壳），双内核（A0/A2 骨架）
+apps/android/    Kotlin + Compose（手机 / TV 双壳），双内核（手机可用 / TV 进行中）
 samples/         测试片源（不入库）
 out/             运行产物（不入库）
 ```

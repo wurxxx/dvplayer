@@ -5,11 +5,13 @@
 # Both use the same self-contained win-x64 publish payload, including
 # dvplayer_media.dll and the bundled mpv.
 #
-# 版本号同时写在三个地方，发布时一起改：
+# 应用版本改两处（同一个值）：
 #   apps\windows\DvPlayer\DvPlayer.csproj  <Version>   （Windows 关于 / 侧栏显示）
-#   core\Cargo.toml [workspace.package] version        （共享核心，macOS 侧栏也用它）
 #   apps\macos\DvPlayer\Info.plist CFBundleShortVersionString
-# 这里传的 -Version 决定产物文件名，并覆盖程序集版本；核心版本要去改 Cargo.toml 再编。
+# 这里传的 -Version 决定产物文件名，并覆盖程序集版本。
+#
+# 共享核心版本（core\Cargo.toml [workspace.package] version）独立演进：core/ 有改动
+# 的发布必须提升，发布前跑 scripts\check-core-version.sh 校验（CI 也跑同一支）。
 #
 # Usage (PowerShell):
 #   powershell -ExecutionPolicy Bypass -File apps\windows\packaging\build-release.ps1

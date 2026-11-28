@@ -142,9 +142,22 @@ jobs:
           # Full Changelog 链接在后。
           generate_release_notes: true
 
+  # 共享核心版本独立演进：core/ 自上一个 tag 起有改动时必须提升，
+  # 漏了就不出包，避免发布后「关于」页显示旧的核心版本。
+  core-version:
+    name: 校验共享核心版本
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 要拿上一个 v* tag 做基线，浅克隆没有历史和 tag。
+          fetch-depth: 0
+      - name: core/ 有改动时核心版本必须提升
+        run: sh scripts/check-core-version.sh
+
   build:
     name: macOS ${{ matrix.arch }}
-    needs: prepare
+    needs: [prepare, core-version]
     strategy:
       # 一种架构挂了不要取消另一种：Intel 和 arm64 的依赖栈互不影响，
       # 让两边都跑完，才能一次看到全部问题。

@@ -48,6 +48,13 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
+        with:
+          # 核心版本校验要拿上一个 v* tag 做基线。
+          fetch-depth: 0
+
+      - name: 校验共享核心版本
+        shell: bash
+        run: sh scripts/check-core-version.sh
 
       - name: 装 .NET SDK
         uses: actions/setup-dotnet@v4
