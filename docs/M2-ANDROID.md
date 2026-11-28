@@ -1,7 +1,8 @@
 # M2 · Android / TV 客户端
 
-> 状态：A0–A10 主体已在真机落地（2026-11-26），手机可用；A1 的 TV / 盒子项、
-> A11（TV 冒烟）与真实原盘样片仍缺。
+> 状态：A0–A10 已在真机落地（2026-11-28），手机端可直接用——媒体库 / 首页 /
+> 详情 / 搜索 / 观看 / 设置 / 播放全部接通真实数据。还缺 A1 的 TV / 盒子项、
+> A11（TV 冒烟）、TV 大屏 UI 与真实原盘样片。
 > 决策见 [ADR-0013](adr/0013-android-two-shells.md)（双壳）、
 > [ADR-0014](adr/0014-android-dual-engine.md)（双内核）、
 > [ADR-0015](adr/0015-android-vfs.md)（存储）、
@@ -151,9 +152,9 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
 ## 6. 存储与 VFS
 
 ```
-:feature → :data → Vfs（list / stat / open / seek）
+:feature → :core 的 Vfs（list / stat / open / seek）
                     ├── SmbVfs    smbj（SMB2/3）
-                    ├── NfsVfs    libnfs（JNI，AUTH_SYS）   ← 未实现
+                    ├── NfsVfs    纯 Kotlin NFSv3（AUTH_SYS）
                     └── DavVfs    OkHttp（PROPFIND + Range）
                           │  目录树 JSON
                           ▼
@@ -224,33 +225,21 @@ DV 必须排在 HDR10+ 之前：P7 的 SEI 会被 HDR10+ 探针误认成 ST2094-
   `libc++abi.a` / `libunwind.a` 静态链进 `libmpv.so`，不额外带 `libc++_shared.so`。
 - strip 后 arm64 约 **28.0 MiB**（29,310,920 字节；含 libdovi / mbedTLS；
   x86_64 只给模拟器，平时不编），`LOAD` 对齐 `0x4000`。
-- **包体裁剪**：试过 FFmpeg `--enable-small`，产物 28.0 → 22.8 MiB
-  （−18.6%），但 4K HEVC 软解跑不动——P5 必须软解，17.5 秒掉 314 帧
-  （`-O3` 时是 1 帧），已回退。硬解片源不受影响，但 DV P5 是硬需求，
-  不能拿解码性能换体积。继续裁只能走「逐组件关 decoder/demuxer」，
-  会牺牲格式覆盖，暂不做。
-- **https**：FFmpeg 之前没编 TLS，libmpv 里直接报
-  `recompile FFmpeg with openssl...`——mpv 只能播 http。现在静态链 mbedTLS
-  3.6.4 + `--enable-mbedtls`。mbedTLS 是 Apache-2.0，FFmpeg 把它归为
-  version3，所以 **Android 这份 libmpv 按 LGPLv3 分发**（桌面端用
-  securetransport / schannel，仍是 2.1）。
-- **证书**：Android 的系统 CA 在 conscrypt 的 APEX 里，native 的 mbedTLS 既读不到
-  也没有默认路径，开校验会让所有 https 直接失败。做法是把 curl 维护的 Mozilla
-  `cacert.pem`（118 张证书，约 200KB）打进 APK：`core/src/main/assets/cacert.pem`，
-  首次用到时复制到 `filesDir/ca/`，用 `scripts/android/update-cacert.sh` 刷新。
-  默认仍是 `tls-verify=no`（自签名 NAS 很常见），需要校验时
-  `--es tls_verify 1`，没给 `--es tls_ca` 就自动用内置包。
-  实测三组（`tests/android/verify-tls.sh`）：
-
-  | 场景 | 结果 |
-  | --- | --- |
-  | 自签证书 + 校验 | `loading failed`，`mbedtls_ssl_get_verify_result ... flags: 8`「not correctly signed by the trusted CA」 |
-  | 自签证书 + 默认 | 正常起播（pos 在走） |
-  | 公网 HLS（`test-streams.mux.dev`）+ 校验 | 正常起播，`dur=634584ms`，`drops 2` |
-
-  源级「允许自签名」开关还没进 UI（现在是全局参数），见 §9。
-- **https 实测**：`tests/android/https_server.py`（自签 + Range）→ mpv
-  `Mime-type: video/mp4`、`mediacodec-copy`、Range `206`、`drops 0`、播到 EOF。
+- **包体裁剪**：试过 `--enable-small`（28.0 → 22.8 MiB），但 4K HEVC 软解 17.5
+  秒掉了 314 帧（`-O3` 时 1 帧）。P5 必须软解，已回退；继续裁只能逐组件关
+  decoder / demuxer，会牺牲格式覆盖，暂不做。
+- **https / 证书**：FFmpeg 之前没编 TLS，libmpv 直接报
+  `recompile FFmpeg with openssl...`。现在静态链 mbedTLS 3.6.4 +
+  `--enable-mbedtls`；mbedTLS 是 Apache-2.0，FFmpeg 归为 version3，所以
+  **Android 这份 libmpv 按 LGPLv3 分发**（桌面端用 securetransport / schannel，
+  仍是 2.1）。系统 CA 在 conscrypt 的 APEX 里，native mbedTLS 读不到，所以把
+  curl 维护的 Mozilla `cacert.pem`（118 张，约 200KB）打进 APK（首次用到复制到
+  `filesDir/ca/`，用 `scripts/android/update-cacert.sh` 刷新）。默认
+  `tls-verify=no`（自签名 NAS 常见），`--es tls_verify 1` 才校验、没给
+  `--es tls_ca` 就用内置包。实测（`verify-tls.sh`）：自签 + 校验被拦（flags: 8）、
+  自签 + 默认正常起播、公网 HLS + 校验正常（`drops 2`）；`https_server.py`
+  （自签 + Range）经 mpv 播到 EOF，`206`、`drops 0`。源级「允许自签名」开关还没
+  进 UI（现在是全局参数），见 §9。
 - `--stage` 同步 `libmpv.so` 与 mpv 头文件（`client.h` / `render.h` /
   `render_gl.h`）到 `player-mpv/.../include/mpv/`。
 - **换 mpv 版本时必须删** `build/android-mpv/src/mpv`、`.../arm64/build/mpv`、
@@ -394,204 +383,114 @@ load 前读容器帧率，切完模式等 400ms 再 load；mkv 的帧率在 EBML
 
 ### 7.4 Dolby Vision
 
-`:player` 的 `DolbyVisionProbe` 在文件头 1MB / 尾 2MB 找 `dvcC` / `dvvC` 与
-紧随其后的配置记录（`version_major=1`，profile 1..9）。MP4 在四字符码后 4 字节；
-MKV 的 `dvcC` 是 `BlockAddIDType`、后面还有 EBML 长度，命中后在 +4..+12 里找
-`01 00` 开头。VFS 播放拿不到路径，所以扩了随机读版本
-`probe(readAt, size)`，先用 `VfsFile` 探再起播。
+`:player` 的 `DolbyVisionProbe` 在文件头 1MB / 尾 2MB 找 `dvcC` / `dvvC` 与紧随其后的
+配置记录（`version_major=1`，profile 1..9）。MP4 在四字符码后 4 字节；MKV 的 `dvcC`
+是 `BlockAddIDType`、后面还有 EBML 长度，命中后在 +4..+12 里找 `01 00` 开头。
+VFS 拿不到路径，所以有随机读版本 `probe(readAt, size)`，先用 `VfsFile` 探再起播。
 
-**P5 发紫的四层根因**（第 4 层是「修完又紫」的真正原因）：
+**P5 发紫的三层根因**（第 2 层修完还紫，是第 3 层的构建缓存没生效）：
 
-1. **Android 的 mpv 没有 gpu-next 后端**（决定性）。此前用 v0.42.0 tarball，
-   `vo_libmpv.c` 的 `render_backends[]` 只有 `gpu` / `sw`，
-   `MPV_RENDER_PARAM_RENDERER` 还不存在。render API 落到老 `gpu`，而老 gpu 在
-   `video/out/gpu/video.c` 里一上来就 `mp_image_params_restore_dovi_mapping()`，
-   把 DV 映射连 RPU 一起剥掉，P5 的 IPTPQc2 被当成普通 BT.2020 输出 → 绿紫。
-   桌面端早就是 gpu-next，所以同一个 `samples/p5.mkv` 在 macOS 上正常、在
-   Android 上发紫。
-   修法：mpv 钉 `1eb941f`，并在 `create_render_context()` 显式传
-   `MPV_RENDER_PARAM_RENDERER="gpu-next"`。不能靠默认探测：gpu-next 失败会被
-   **静默**回退到老 gpu，必须强制并记录回退。
-2. **libplacebo 编译时把 DOVI 关了**（`-Ddovi=disabled -Dlibdovi=disabled`）。
-   即使 gpu-next 也拿不到 RPU。已补 libdovi 并全开。
-3. **mediacodec 硬解不吐 DV 元数据**：`mediacodec-copy` 的帧没有
-   `AV_FRAME_DATA_DOVI_METADATA`（实测 `pixfmt=nv12`、`trc bt.1886`、
-   `sig-peak 0`）。所以 **P5 必须软解**：`MpvPlayer.setDolbyVisionProfile()` 记住
-   探到的 profile，`load()` 前把 `hwdec` 设 `no`，libplacebo 自己从码流取 RPU。
-4. **x86_64 的 libplacebo 一直停在 `-Ddovi=disabled`**，改参数没重建。第 2 层的
-   修复只对 arm64 生效（`arm64/prefix/.done/libplacebo` 是 14:49 重建的），
-   x86_64 那份还是 07:38 用 `-Ddovi=disabled` 配的；`.done` 标记只判断「文件存在」，
-   16:09 把脚本改成 `-Ddovi=enabled` 后它仍被当成已完成。于是 x86_64 的 mpv 在
-   编译时 `PL_HAVE_DOVI` 是 undef——libplacebo 的 `utils/libav.h` 用它门控
-   `PL_HAVE_LAV_DOLBY_VISION`，而 mpv 的 `video/mp_image.c` 又用后者门控整段
-   `AV_FRAME_DATA_DOVI_METADATA → params.repr.sys/color` 的映射。结果 DV 元数据
-   在 ffmpeg 侧是好的（`Multiple Dolby Vision RPUs` 的告警照打），但 mpv 一句都
-   没往渲染器传，P5 又按 BT.2020 解 → 发紫。
+1. **Android 的 mpv 没有 gpu-next 后端**（决定性）。v0.42.0 tarball 的
+   `render_backends[]` 只有 `gpu` / `sw`，render API 落到老 `gpu`，它一上来就
+   `mp_image_params_restore_dovi_mapping()` 把 DV 映射连 RPU 剥掉，IPTPQc2 被当
+   BT.2020 输出 → 绿紫；桌面端早就是 gpu-next，所以同一张 `p5.mkv` 在 Mac 正常。
+   修法：mpv 钉含 `gpu-next render backend` 的 `1eb941f`，并在 `create_render_context()`
+   显式传 `MPV_RENDER_PARAM_RENDERER="gpu-next"`——不能靠默认探测，gpu-next 失败
+   会**静默**回退到老 gpu。
+2. **libplacebo 编译时把 DOVI 关了**（`-Ddovi=disabled -Dlibdovi=disabled`），
+   gpu-next 也拿不到 RPU。已补 libdovi 并全开。
+3. **构建缓存让修好的参数没生效**：`.done` 标记只判断「文件存在」，改成
+   `-Ddovi=enabled` 后旧标记仍算完成，x86_64 那份 libplacebo 一直是 disabled，
+   `PL_HAVE_DOVI` 未定义；libplacebo 用它门控 `PL_HAVE_LAV_DOLBY_VISION`，mpv 又
+   用后者门控 DV 元数据映射——RPU 一句都没传给渲染器，于是又紫。
+   防复发（`scripts/android/build-mpv.sh`）：`.done` 写「配方」（源码目录 +
+   configure/meson 参数），对不上就重建；`ensure_tar` 记包名，换 `MPV_COMMIT`
+   会重新解压；`verify()` 硬查 `PL_HAVE_DOVI`，缺了直接 `die`。
 
-   症状很好认：模拟器上 `[vd] Decoder format:` 是
-   `yuv420p10 **auto/auto/auto**/full/auto`，Mac 是
-   `yuv420p10 **dolbyvision/bt.2020/pq**/full/auto`。**这条日志是 DV 链路是否
-   通到渲染器的唯一开关**，比看截图快。
+**判断 DV 链路通没通只看一行日志**：`[vd] Decoder format:` 是
+`yuv420p10 dolbyvision/bt.2020/pq/...` 才对；出现 `auto/auto/auto` 就是 RPU 没
+进渲染器，比看截图快。
 
-   防复发（`scripts/android/build-mpv.sh`）：
-   - `.done` 标记改成写「配方」（源码目录 + configure/meson 参数），对不上就重建；
-     `FORCE=libplacebo,mpv` 可强制重建；
-   - `ensure_tar` 目录里记包名，换了 `MPV_COMMIT` 之类的包会重新解压，不会拿旧源码
-     编出新标记；
-   - `verify()` 硬查 `PL_HAVE_DOVI`，缺了直接 `die`（这种配置漂移不会报错，只会
-     静默发紫）。
-
+**P5 必须软解**：`mediacodec-copy` 的帧没有 `AV_FRAME_DATA_DOVI_METADATA`
+（实测 `pixfmt=nv12`、`trc bt.1886`、`sig-peak 0`）。`MpvPlayer.setDolbyVisionProfile()`
+记住探到的 profile，`load()` 前把 `hwdec` 设 `no`，libplacebo 自己从码流取 RPU。
 P7 / P8 不切软解：BL 本身就是 HDR10，硬解只少一层动态元数据，颜色不受影响。
 
 实测：
 
 | 片源 | 结果 |
 | --- | --- |
-| `samples/p5.mkv`（3840×2160 24p） | `yuv420p10 · hwdec no`、`prim bt.2020 · trc pq · sig-peak 4.929096`、`fps 24.000000`；起播窗口内有呈现丢弃（显示模式切 120Hz×5），之后 0，`decoder-frame-drop-count` 恒为 0 |
-| `samples/p7-fel.mkv` | `profile=7`，不切软解，`mediacodec-copy`、`trc pq`、23.976fps、0 丢帧 |
-| 4K HDR10（`dv-hdr10-4k-30s.mp4`） | 无 profile，`mediacodec-copy`、`prim bt.2020 · trc pq` |
-| SMB `Lovesick S01E01`（9.36GB，2160p DV P5） | 探到 `profile=5` → 自动软解；`prim bt.2020 · trc pq`；23.976fps；20s 窗口丢 19 帧全在起播 seek 阶段，之后 12s `drops` 不再增长；cache 涨到 14.1s，读速 ~4.8MB/s |
+| `samples/p5.mkv`（3840×2160 24p） | `hwdec no`、`prim bt2020 · trc pq · sig-peak 4.93`、fps 24；起播切 120Hz×5 有少量呈现丢弃，之后 0，`decoder-frame-drop-count` 恒 0 |
+| `samples/p7-fel.mkv` | `profile=7`、`mediacodec-copy`、`trc pq`、23.976fps、0 丢帧 |
+| 4K HDR10（`dv-hdr10-4k-30s.mp4`） | 无 profile、`mediacodec-copy`、`prim bt2020 · trc pq` |
+| SMB `Lovesick S01E01`（9.36GB，2160p DV P5） | 探到 `profile=5` 自动软解；20s 窗口 19 帧全在起播 seek，之后 12s 不再增长；cache 14.1s，读速 ~4.8MB/s |
 
-**颜色证据（像素）**：同一帧脸部中心区域的平均 RGB。
+**判颜色只认 mpv 自己的截图**：`screencap` 拿的是 SurfaceFlinger 合成后的输出，
+BT2020/PQ → SDR 由系统 tone mapping 负责，和 mpv 截的不是一张图（NFS 上的
+`Lovesick` 用 `screencap` 时天空明显过饱和）。同一帧与 Mac 产品播放器比：
 
-| 渲染路径 | 平均 RGB | 通道顺序 | 结论 |
-| --- | --- | --- | --- |
-| Mac 产品播放器（gpu-next，参考） | (49,42,37) | R>G>B | 暖肤色 ✓ |
-| Android gpu-next（升级后） | (41,35,31) | R>G>B | 暖肤色 ✓，与参考同比例 |
-| Mac `--vf=format:dolbyvision=no`（剥 DV） | (107,88,96) | R>B>G | 品红 ✗ |
-| Android 老 gpu（升级前） | 整屏洋红 / 紫 | — | ✗ |
+| 渲染路径 | 平均 RGB | 结论 |
+| --- | --- | --- |
+| Mac 产品播放器（gpu-next，参考） | (49,42,37) | 暖肤色 ✓ |
+| Android gpu-next（修后） | (41,35,31) | 同比例暖肤色 ✓ |
+| Mac `--vf=format:dolbyvision=no`（剥 DV） | (107,88,96) | 品红 ✗ |
+| Android 老 gpu（修前） | 整屏洋红 / 紫 | ✗ |
 
-两条正确路径的 R:G:B 比例是 1.32:1.13:1 与 1.32:1.14:1，色相一致；Android 整体低
-约 16%，是手机走 PQ 直出、截图时再转 SDR 的亮度差，不是色偏。
+修后两端的 R:G:B 比例是 1.32:1.13:1 与 1.32:1.14:1；Android 整体低约 16%，是手机
+PQ 直出、截图再转 SDR 的亮度差，不是色偏。跨端只比**色相 / 串色 / 白是否中性**，
+亮度要等真机 HDR 屏看。反过来验「mpv 的 HDR 输出本身没偏色」用合成 HDR10 彩条：
+mpv 与 Media3 两条路径 `screencap` 的六条彩条中心色几乎相同。
 
-**同一帧、整幅画面的复测（2026-11-26，修 x86_64 的 DOVI 之后）**：
-
-| 时间点 | 渲染 | 画面均值 | 亮度前 5% 均值 | R/G | B/G |
-| --- | --- | --- | --- | --- | --- |
-| 14.8s | Mac 产品 app（gpu-next，参考） | (29.1, 36.7, 36.0) | (201, 212, 210) | 0.948 | 0.991 |
-| 14.8s | Android 修前（DOVI 被编掉） | (79, 51, 59) | (238, 216, 223) | 1.10 | 1.03 |
-| 14.917s | Android 修后 | (26.6, 30.3, 30.3) | (156, 161, 160) | 0.969 | 0.994 |
-| 5.0s | Mac 参考 | (160.2, 161.3, 150.0) | (226, 226, 219) | 1.001 | 0.971 |
-| 5.375s | Android 修后 | (135.1, 135.6, 127.5) | (181, 181, 176) | 1.000 | 0.976 |
-
-修前 `R/G 1.10 · B/G 1.03` 是典型的品红；修后两个时间点的 `R/G`、`B/G` 与 Mac
-差 ≤2%（5s 那帧 ≤0.5%），色偏没了。
-
-绝对值不要跨端硬比：Android 用的 `screenshot-to-file ... video` 是**未缩放**截图，
-gpu-next 在 `video/out/gpu_next/video.c: mppl_video_screenshot()` 里对
-`!args->scaled` 固定 `target.color = pl_color_space_srgb`，和窗口实际的
-`bt.709/bt.1886 + target-peak` 不是同一条输出管线；Mac 的 `DVPLAYER_PLAY_FRAME`
-读的是应用自己的 GL framebuffer（就是屏上那份）。所以跨端只比**色相 / 串色 / 白是否
-中性**，亮度差要等真机 HDR 屏看。
-
-顺带排除了「亮度差是 tone mapping 参数不同」：在 Mac 上把参数换成 Android 的回退
-组合（`tone-mapping=auto` + `hdr-compute-peak=yes` + `target-peak=100` +
-`bt.709/bt.1886`）重抓同一帧，均值反而从 160 升到 168，不是 Android 的 135。
-
-取证：`--es shot <png> --el shot_at <ms>` 让 mpv 播到该位置时自己
-`screenshot-to-file ... video`（绕开 adb 对 HDR 的合成）。gpu-next + GLES 下偶发
-`Taking screenshot failed.`（seek 刚结束时最容易），验证页会重试 3 次。
+两个操作坑：4K 软解 seek 后要 3–10 秒才有第一帧，`shot_at` 贴着 `seek_to` 会
+「no frame」；`gpu-next + GLES` 下截图偶发 `Taking screenshot failed.`，验证页
+重试 3 次。
 
 一键回归：`tests/android/verify-dv.sh [<p5.mkv>] [-s <serial>]` —— 推片源、
-`hwdec no` 起播、断言 `Decoder format` 里有 `dolbyvision`（断了直接退出码 1），
-再打一张截图的色相统计（`R/G`、`B/G`）供人判读。上面第 4 层根因如果复发，
-这条脚本会在十几秒内报出来，不用再靠肉眼看紫不紫。
-
-截图格式不影响颜色：同一帧分别出 PNG 与 JPG，六条彩条逐像素差 ≤1（白
-`(221,221,221)` vs `(221,221,221)`、绿 `(0,214,126)` vs `(0,214,126)`），说明
-8-bit PNG 截的不是 PQ 原始值，而是渲染到 sRGB 之后的画面；PNG 里的 `sRGB/gAMA`
-标记是真的。
-
-**`adb screencap` 抓 HDR 不能用于判颜色**：它拿的是 SurfaceFlinger 合成后的输出，
-BT2020/PQ 转 SDR 由系统那套 tone mapping 负责，和 mpv 自己截的不是一张图。
-实测同一个 4K DV P5 片源（NFS 上的 `Lovesick S01E01`）：mpv 自己的截图是自然的
-暖色，`screencap` 里天空的青色明显过饱和。所以**判解码/渲染颜色一律走 mpv 截图**；
-`screencap` 只用来确认构图 / OSD，或者看「系统最终送到屏幕上的大概是什么」。
-
-反过来验证「mpv 的 HDR 输出本身没偏色」用了合成 HDR10 彩条
-（`dv-hdr10-4k-30s.mp4`）：mpv 与 Media3 两条路径各 `screencap` 一张，六条彩条
-的中心色几乎相同——
-
-| 彩条 | mpv | Media3 |
-| --- | --- | --- |
-| 红 | (231,0,6) | (221,0,5) |
-| 黄 | (247,247,0) | (252,245,0) |
-| 绿 | (1,232,1) | (0,243,0) |
-| 青 | (0,238,228) | (0,247,240) |
-| 品红 | (227,0,167) | (225,0,203) |
-| 蓝 | (6,14,222) | (1,3,220) |
-
-另一个坑：4K 软解 seek 后要 3–10 秒才有第一帧，`shot_at` 贴着 `seek_to` 会
-「no frame」失败（验证页重试 3 次也来不及），留 3–5 秒余量。
+`hwdec no` 起播、断言 `Decoder format` 里有 `dolbyvision`（断了退出码 1），再打
+一张截图的 `R/G`、`B/G` 供人判读，十几秒就能报出根因 3 复发。
 
 4K P5 软解在骁龙 8 Gen 1 上能跑满 24p，不需要「只降级不软解」的兜底；低端机以后
 按 `dumpsys media.codec` 的 DV 解码器能力再分流。
 
 ### 7.4.1 HDR 直出的设备前提（模拟器上暴露的真 bug）
 
-`target-colorspace-hint=yes` 是「把 PQ 原样交给显示端」，它要求显示端**真的接住
-PQ**。之前只要 `DeviceCapabilities` 认为设备支持 HDR 就一路开着直出，但
-EGLSurface 能不能用 `EGL_GL_COLORSPACE_BT2020_PQ_EXT` 建出来是另一个前提：
+`target-colorspace-hint=yes` 是「把 PQ 原样交给显示端」，要求显示端**真的接住
+PQ**。设备支持 HDR 只是第一个前提，EGLSurface 能不能用
+`EGL_GL_COLORSPACE_BT2020_PQ_EXT` 建出来是另一个：模拟器（SwiftShader）扩展里
+连 `EGL_KHR_gl_colorspace` 都没有，带属性建面一律 `EGL_BAD_ATTRIBUTE`，只能无属性
+创建 → surface 实际是 sRGB，而 mpv 仍按直出渲染 PQ，HDR / DV 片源整片偏色，
+SDR 片源正常。
 
-- 模拟器（`android-35;google_apis_ps16k;x86_64`，SwiftShader）扩展列表里连
-  `EGL_KHR_gl_colorspace` 都没有，带 colorspace 属性建面一律
-  `EGL_BAD_ATTRIBUTE`，只能无属性创建 → surface 实际是 sRGB；
-- 而 mpv 仍按直出渲染 PQ，`window dataspace -> 0x8810000`（SRGB）。PQ 数据被
-  当成 sRGB 解释，HDR / DV 片源整片偏色，SDR 片源看不出问题——正是「各种片源
-  色彩不大对、但有的又正常」的样子。
+修法（`mpv_gl.cpp`，命中任一处就永久关直出）：
 
-修法（`mpv_gl.cpp`，三处判断，只要命中一处就永久关直出）：
-
-1. `init_egl` 里没有 `EGL_KHR_gl_colorspace`：在**建面之前**就把
+1. `init_egl` 没有 `EGL_KHR_gl_colorspace`：在**建面之前**就设好
    `target-colorspace-hint=no / target-prim=bt.709 / target-trc=bt.1886 /
-   tone-mapping=auto` 设好，首帧就是 tone mapping 过的；
+   tone-mapping=auto`，首帧就是 tone map 过的；
 2. 带 PQ/HLG 属性建面失败、回退成 sRGB surface；
-3. 之后 Java 再调 `setHdrPassthrough(true)` 也被忽略（否则一次误调又整屏偏色）。
+3. 之后 Java 再调 `setHdrPassthrough(true)` 也忽略（否则一次误调又整屏偏色）。
 
-日志对照（同一个 `dv-hdr10-4k-30s.mp4`）：
-
-| | 修复前 | 修复后 |
-| --- | --- | --- |
-| 片源属性 | `prim bt.2020 gamma pq hdr=on` | 同左 |
-| 请求的 dataspace | `0x9c60000`（BT2020_PQ） | 不再请求 |
-| 实际 surface | `colorspace 0x3089`（SRGB） | `0x3089` |
-| window dataspace | `0x8810000` | `0x8810000` |
-| 渲染 | PQ 写进 sRGB 缓冲区 ✗ | mpv 先 tone map 到 sRGB ✓ |
-
-`EGL 无 EGL_KHR_gl_colorspace：改由 mpv 做 HDR→SDR tone mapping（err=0）` 这条
-日志出现，就说明走了回退。
-
-**模拟器上的色彩回归**（全部用 mpv 自己的截图取证）：
-
-| 片源 | mpv 输出 | 参照 | 结论 |
-| --- | --- | --- | --- |
-| 8-bit H.264 BT.709 彩条 | 青 `(14,210,185)`、绿 `(10,221,2)` | ffmpeg 解同一帧 `(12,208,183)` / `(8,219,1)` | 差 1–3，✓ |
-| 10-bit HEVC BT.709 彩条 | 75% 条 `(191,191,0)` `(0,191,190)` `(191,0,1)` | 75% 的数学值 191 | 逐条一致，✓ |
-| HDR10 PQ 400nit 彩条（SDR 回退） | 白 `(221,221,221)`、黄 `(226,221,0)`、青 `(0,216,210)`、品红 `(240,0,209)` | 白必须中性、二次色两通道相等 | 白完全中性，二次色对得上，✓ |
-| DV P5（`samples/p5.mkv`，软解） | gpu-next + libdovi，无绿/紫，SDR 回退正常出画 | — | ✓（无 DV 显示，HDR 观感待真机） |
+日志出现 `EGL 无 EGL_KHR_gl_colorspace：改由 mpv 做 HDR→SDR tone mapping`
+就是走了回退。模拟器上用 mpv 截图验过：8-bit / 10-bit BT.709 彩条与 ffmpeg 解
+同一帧差 1–3，HDR10 PQ 彩条白 `(221,221,221)` 完全中性、二次色两通道相等。
 
 HDR10 彩条里 2020 纯色映射到 709 会「变淡」（绿 `(0,214,126)`、蓝 `(0,50,170)`），
-这是 mpv 默认的 perceptual gamut mapping，不是矩阵错：把
-`--es mpv_prop "gamut-mapping-mode=clip"` 传进去，同样的三条立刻回到
-`(0,233,0)` / `(0,0,231)`，白与亮度和 perceptual 完全一致。要不要为「颜色更艳」
-换默认值，等真机/电视上对着参考片再定。
+这是 mpv 默认的 perceptual gamut mapping，不是矩阵错：`--es mpv_prop
+"gamut-mapping-mode=clip"` 下同样三条回到 `(0,233,0)` / `(0,0,231)`。要不要换
+默认值，等真机 / 电视上对参考片再定。
 
-一个容易误判的例子：`Lovesick` 晾衣绳那个镜头（NFS 310s 附近）mpv 截图整体
-偏暖，但它是逆光 + 纱帘的调色，不是渲染问题——同一帧 HDR 直出与 `force_sdr`
-两条路径的高光 R−B 都是 +50 左右；换到 317s 的拉远镜头，白衣/蓝披肩就正常。
-判「偏色」要看**白色物体是否中性**（彩条白 221/221/221），而不是看整帧的平均色。
+判「偏色」看**白色物体是否中性**，不是整帧平均色：`Lovesick` 晾衣绳那个镜头
+（NFS 310s 附近）整体偏暖是逆光 + 纱帘的调色，同一帧 HDR 直出与 `force_sdr`
+的高光 R−B 都是 +50 左右。
 
-上面的检查已经脚本化，接了新设备（真机 / 电视 / 盒子）先跑一遍：
+新设备（真机 / 电视 / 盒子）先跑一遍：
 
 ```bash
-tests/android/verify-color.sh -s <serial>            # 真机
-tests/android/verify-color.sh -s emulator-5554 --hwdec no   # 模拟器
+tests/android/verify-color.sh -s <serial>                  # 真机
+tests/android/verify-color.sh -s emulator-5554 --hwdec no  # 模拟器
 ```
 
-脚本自己生成两组片源（`build/test-media/`）、推到设备、让 mpv 截图，再按
-「白是否中性 / 主通道是否够亮 / 有没有串色 / 黑位」判，退出码非 0 即失败；
-最后打印本次的 HDR 直出降级日志。它不依赖任何「另一台机器的数值」，所以换屏幕、
-换 tone mapping 都不会误报。
+脚本自己生成片源、推设备、用 mpv 截图，按「白是否中性 / 主通道够不够亮 / 有没有
+串色 / 黑位」判，退出码非 0 即失败，最后打印本次的直出降级日志。
 
 ### 7.5 Media3（A6）
 
@@ -661,10 +560,9 @@ mpv `nv12 · mediacodec-copy`、`mode 6 @ 120Hz`，启动掉 3 帧后不再增�
   且前 4MB 出现 `BDMV` 目录名，两个条件都满足才算，避免误判普通 UDF 镜像。
 - 验证页状态行显示「原盘 BDMV 目录 / ISO 镜像」。
 
-用合成结构验过入口链路：`movie-disc/BDMV/{index.bdmv,MovieObject.bdmv}`
-（`MOBJ0200` 开头满足 mpv 的 `check_bdmv`）→ 路由正确，mpv 尝试按 BDMV 打开后
-`unrecognized file format`（合成结构没有真实播放列表，符合预期）；合成 UDF
-`fake-bd.iso` 同样路由正确。**真实原盘播放仍未验**，缺一张未加密 ISO / BDMV 样片。
+用合成结构（`movie-disc/BDMV/{index.bdmv,MovieObject.bdmv}` 与合成 UDF
+`fake-bd.iso`）验过入口链路：路由都正确，mpv 打开后报 `unrecognized file
+format`（没有真实播放列表，符合预期）。**真实原盘播放仍未验**，缺未加密样片。
 
 ### 7.8 VFS（A9）
 
@@ -696,23 +594,21 @@ mpv 播放由 mbedTLS 提供（见 7.1），Media3 侧走 OkHttp 自己的 TLS�
 `bytes=<offset>-`；Media3 seek 同样发 `bytes=`。两者都走这条路径，没有额外
 DataSource。
 
-**NFS**：纯 Kotlin 的 NFSv3 客户端（`core/vfs/nfs/`），不用 libnfs：
-XDR、ONC RPC 的记录标记、AUTH_SYS、rpcbind `GETPORT`、`MOUNT`、`LOOKUP`、
-`READDIRPLUS`（带 cookie 分页）、`READ` 全在 Kotlin 里。这样没有额外的 native
-库要编、要过 16KB 对齐，也能在 Mac 的 JVM 上直接测。
+**NFS**：纯 Kotlin 的 NFSv3 客户端（`core/vfs/nfs/`），不用 libnfs——XDR、
+ONC RPC 记录标记、AUTH_SYS、rpcbind `GETPORT`、`MOUNT`、`LOOKUP`、
+`READDIRPLUS`（cookie 分页）、`READ` 全在 Kotlin 里，没有额外 native 库要编、
+要过 16KB 对齐，也能在 Mac 的 JVM 上直接测。
 
-- 地址 `nfs://host/export/sub`。导出点只有服务器知道，`MOUNT` 从最深路径往
-  上层逐个试，成功的那层就是导出点，余下的段用 `LOOKUP` 走。
-- 只支持 AUTH_SYS（M2 的范围），uid / gid 默认 `65534`（anonymous）：
-  按 IP 放行或 all_squash 的导出直接可读，要特定身份时构造时传入。
-- 端口走 rpcbind（111）；`GETPORT` 查不到 NFS 时退回 2049。`Nfs3Client`
-  留了端口注入口，单测与「rpcbind 被墙」的固定端口场景都能用。
-- 播放和 SMB 一样经 `VfsHttpBridge` 变成 `127.0.0.1` 的 HTTP。
+- 地址 `nfs://host/export/sub`：导出点只有服务器知道，`MOUNT` 从最深路径往上
+  逐个试，成功那层就是导出点，余下段用 `LOOKUP` 走。
+- 只支持 AUTH_SYS；uid / gid 默认 `65534`（anonymous），按 IP 放行或 all_squash
+  的导出直接可读，要特定身份时构造传入。
+- 端口走 rpcbind（111），`GETPORT` 查不到时退回 2049；`Nfs3Client` 留了端口注入
+  口，单测与「rpcbind 被墙」都能用。播放和 SMB 一样经 `VfsHttpBridge`。
 
-协议层用 `FakeNfsServer`（测试源码里、只监听回环的真实 NFSv3 服务器）端到端
-验证，8 个用例覆盖：列目录与大小、导出点在更浅一层时逐级回退挂载、按偏移随机
-读、中文目录名、AUTH_SYS 把 uid/gid 送到服务端、经桥接的 `Range` 请求、找不到
-导出点时的报错、300 项目录的分页（至少两次 `READDIRPLUS`）。
+`FakeNfsServer`（测试源码里的真 NFSv3 服务器）端到端覆盖：列目录、导出点在更浅
+一层时逐级回退、按偏移随机读、中文目录名、AUTH_SYS 传 uid/gid、桥接 `Range`、
+找不到导出点的报错、300 项目录分页。
 
 真服务器：NAS 自己就开了 NFS，导出 `/fs/1000/nfs`（匿名可读）。先在 Mac 的
 JVM 上用门控测试 `NfsLiveTest`（`NFS_LIVE=1 NFS_URL=...`）校准协议，
@@ -802,13 +698,10 @@ adb shell am start -n com.dvplayer.app/.PlaybackActivity \
 源配置落在 `:core` 的 `SourceStore`（SharedPreferences + JSON；密码仍走
 `CredentialStore` 的 Keystore）。`--es config` 只用于调试，不落盘。
 
-**实测**（Genymotion Android 12 / x86_64，`samples/p5.mkv`）：
-
-- `local` 源真实 itemId `local-smoke:f/p5.mkv`；播放页显示片名 `p5`、
-  引擎 `mpv`、源「本地冒烟（local）」、直连、请求头 0；
-- 媒体信息面板 7 个视频字段全为「未提供」，底部给出「源未提供色彩范围」的提示；
-- 竖屏 / 横屏 / 媒体信息 / 音轨 / 字幕 / 选集 / 齿轮菜单逐张截图，控制层在两种
-  方向下都不再出现「两块背景」的接缝。
+**实测**（Genymotion Android 12 / x86_64，`samples/p5.mkv`）：片名 `p5`、引擎
+`mpv`、源「本地冒烟（local）」、直连、请求头 0；媒体信息面板 7 个视频字段全为
+「未提供」，底部提示「源未提供色彩范围」；竖 / 横屏与各面板逐张截图，控制层在
+两种方向下都没有「两块背景」的接缝。
 
 #### 7.9.2 接内核（SurfaceView + mpv / Media3）
 
@@ -860,9 +753,9 @@ adb shell am start -n com.dvplayer.app/.PlaybackActivity \
 | Media3 内核 | ✓ `--es engine Media3` 出画、暂停、seek、旋转 |
 | DV P5 软解 | ✓ 出画（4K HEVC 10bit，8 线程软解，CPU 约 670%，轻微音画不同步） |
 
-**还没接**：真实选集数据（`MediaHub.children` + `imageSource` 剧照 + 切集）、
-后台播放前台服务、播完自动下一集、PiP / 全屏按钮、SMB / NFS 的桥接握手
-（现在仍需验证页 `prepareBridge`）。
+**还没接**：后台播放（把引擎搬进前台服务）、播完自动下一集、SMB / NFS 的
+桥接握手（现在仍需验证页 `prepareBridge` 手动建桥）。选集已是真实数据：
+播放页的横滑列表来自 `MediaHub.children`，点一集走 `onPlayEpisode` 切集。
 
 #### 7.9.3 详情页与大屏适配（2026-11-28）
 
@@ -962,42 +855,33 @@ libmpv 缓存在 `build/android-mpv/arm64/prefix`，key 是
 - 壳层只剩建 Surface、建 Activity、调 `load`；验证页改成调用它，
   单测覆盖了上述分支。
 
-**16KB 页实测**（模拟器）：
+**16KB 页实测**（模拟器 `system-images;android-35;google_apis_ps16k;x86_64`，
+`getconf PAGE_SIZE` = 16384）：`-Pdvplayer.debugAbi=x86_64` 打包 → 起
+`PlayerTestActivity` → 加载 `libmpv.so` → DV 探测、章节、软解、出帧全正常，
+没有 `invalid ELF alignment`；单独 `dlopen(..., RTLD_NOW)` + `dlsym("mpv_create")`
+也通过。APK 由 `check-apk.sh` 校验：每个 `.so` 都 `Stored`、
+`zipalign -c -P 16` 通过、ELF 每个 `PT_LOAD` ≥ `0x4000`。
+`android-36.1` 是 pre-release，`system_server` 会反复重启，别用。
 
-- 镜像 `system-images;android-35;google_apis_ps16k;x86_64`（Android 15），
-  设备上 `getconf PAGE_SIZE` 返回 `16384`；之前试的 `android-36.1`
-  是 pre-release，`system_server` 会反复重启。
-- **APK 端到端跑通**：`-Pdvplayer.debugAbi=x86_64` 打包 → 安装 → 起
-  `PlayerTestActivity` → 应用加载 `libmpv.so`（日志 `mpv v0.42.0`）→
-  DV 探测、章节、软解、渲染出帧全部正常，没有 `invalid ELF alignment`。
-  4K DV P5 软解在模拟器上很慢（1 秒内容要十几秒），这是 CPU 软解的正常表现。
-- 单独验证过：x86_64 的 `libmpv.so` push 到 `/data/local/tmp`，NDK 探针
-  `dlopen(..., RTLD_NOW)` + `dlsym("mpv_create")` → 成功（exit 0）。
-- APK 层由 `check-apk.sh` 静态校验：每个 `.so` 都 `Stored`、
-  `zipalign -c -P 16` 通过、ELF 每个 `PT_LOAD` ≥ `0x4000`。
-- 模拟器本身不稳：swiftshader 渲染时会偶发 `bad color buffer handle`
-  把整个模拟器带崩，和页大小无关。
-- 顺带修的一个真问题：SwiftShader 不认识 `EGL_KHR_gl_colorspace`，
-  带 `EGL_GL_COLORSPACE_KHR` 一律 `EGL_BAD_ATTRIBUTE`。`rebuild_surface`
-  现在多了第三档「不传属性创建」，这类实现（模拟器、部分老盒子）不再黑屏。
+顺带修的一个真问题：SwiftShader 不认识 `EGL_KHR_gl_colorspace`，带
+`EGL_GL_COLORSPACE_KHR` 一律 `EGL_BAD_ATTRIBUTE`。`rebuild_surface` 现在多了
+第三档「不传属性创建」，这类实现（模拟器、部分老盒子）不再黑屏。
 
 **凭据实测**（`tests/android/verify-credentials.sh`）：带密码列一次目录后，
-SharedPreferences 里是 `cred:smb://10.0.0.134:445 → iv:Base64(密文)`，
-没有明文；第二次不传密码解出同一密码、仍能列出 20 项。这同时端到端验了
-「输入 → Base64 传输 → 解密 → smbj 登录」整条链路。
+SharedPreferences 里只有 `cred:smb://host:445 → iv:Base64(密文)`；第二次不传
+密码能解出同一密码、仍列出 20 项，端到端验了「输入 → Base64 传输 → 解密 →
+smbj 登录」整条链路。
 
-排查期间出现过设备侧 `Authentication failed`，最后确认是当时卡片里输入的
-密码本身少一位（Mac 上同长度也失败），不是 NTLM / Samba 签名问题。定位手段
-留在了 `SmbLiveTest`（门控，见下），以后再遇到认证问题先跑它区分
-「密码错」与「smbj 兼容性」：
+早先设备侧出现过 `Authentication failed`，最后确认是测试输入的密码少一位
+（同长度在 Mac 上也失败），不是 NTLM / Samba 签名问题。以后再遇到先跑门控的
+`SmbLiveTest` 区分「密码错」与「smbj 兼容性」：
 
 ```bash
 SMB_LIVE=1 SMB_USER=... SMB_PASS=... \
   ./gradlew :core:testDebugUnitTest --tests '*SmbLiveTest*'
 ```
 
-`SmbVfs` 的认证失败日志会打印 user / domain / 密码长度 / 异常类型，
-不打印密码本身。
+`SmbVfs` 的认证失败日志打印 user / domain / 密码长度 / 异常类型，不打印密码。
 
 ## 8. 设备与验证
 
@@ -1050,8 +934,9 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 ### 9.1 未完成项（2026-11-28 盘点）
 
-手机侧的 A0–A10 底层能力已闭环（§7），数据层 JNI 也已接通（§7.1.1），
-现在缺的是面向用户的界面。下面按「为什么还没完」分三类。
+手机侧的 A0–A10 底层能力已闭环（§7），数据层 JNI 与手机界面也已接通
+（§7.1.1、§7.9.3），剩下 TV 大屏、几处边角与需要外部条件的验证。下面按
+「为什么还没完」分三类。
 
 **缺外部条件**（代码就绪，等设备 / 素材）：
 
@@ -1067,7 +952,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 
 | 项 | 现状 |
 | --- | --- |
-| 手机 UI（`ui-phone`） | 库 / 源首页 / 分类 / 搜索 / 详情 / 观看 / 设置 / 添加源都已接通真实数据，并按窗口宽度分档做平板适配（§7.9.3）；播放页已接内核（§7.9.1–§7.9.2 真机回归通过）。还缺播放页的真实选集切集（详情页已有）、后台播放、PiP |
+| 手机 UI（`ui-phone`） | 库 / 源首页 / 分类 / 搜索 / 详情 / 观看 / 设置 / 添加源都已接通真实数据，按窗口宽度分档做平板适配（§7.9.3）；播放页接内核、选集可切集（§7.9.2）。还缺后台播放（引擎搬进前台服务）、播完自动下一集 |
 | TV 大屏 UI（B1 / B2） | `:ui-tv` 只有 `TvApp()` 50 行、`:app-tv` 只有 `MainActivity`，而且 `app-tv` 连 `:player` / `:core` 依赖都没有；TV 上现在跑不了播放回归 |
 | TV 兼容矩阵（B3） | TV 默认内核、tunneling 取舍、HDMI 直通策略未定（§10） |
 | 原盘边读边播（B5，可选） | SMB / NFS 上的 BDMV 不能直接播：桥接只服务单文件，libbluray 要本地路径或可列目录的流（§7.8） |
