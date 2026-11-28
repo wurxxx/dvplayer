@@ -13,6 +13,7 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 | --- | --- | --- |
 | 画面比例 | `Player/PlayerAspect.cs`、`Views/PlayWindow.xaml.cs` | `PlayerAspect` 与 macOS 一一对应，`ToMpv()` 给 `keepaspect` / `panscan` / `video-aspect-override`，值写 `videoAspect`；「适应窗口」按 `video-params/aspect` 改窗口形状（竖屏短剧不留黑边），全屏 / 最大化不抢尺寸 |
 | 定时关闭 | `Views/PlayWindow.xaml.cs` | `_sleepDeadline` / `_sleepAtEof`，`OnTick` 里的 `CheckSleep()`；到点先 toast 再关窗，进度照常回写 |
+| 预加载下一集 | `Services/NextEpisodePrefetch.cs`、`Views/PlayWindow.xaml.cs` | 按「距本集结束还剩多少秒」判断（设了片尾开始就按片尾起点算），剩余 ≤ 90 秒时后台取下一集播放源、读 512 KB 预热连接；切集（含播完自动接下一集）命中缓存就省掉一次取地址，失败退回普通切集。设置 → 播放可关；`DVPLAYER_PREFETCH_TEST=1` 放大阈值自检 |
 | 片头片尾 | `Services/SkipMarkers.cs` | `%LOCALAPPDATA%\dvplayer\skip-markers.json`，按剧名（电影按条目 id）存 `introEnd` / `outroStart`，和 macOS 同格式 |
 | 弹幕 | `Player/Danmaku.cs` | 弹弹play v2 签名（`Base64(SHA256(AppId+Timestamp+Path+AppSecret))`）→ JSON / XML 解析 → 写 ASS → `sub-add` + `secondary-sid`；电影没有集号时按片名找 `type == "movie"` 的条目 |
 | 在线字幕 | `Player/OpenSubtitles.cs` | OpenSubtitles REST v1：搜索 → `/downloads` 取临时链接 → 存缓存 → `sub-add select` |
@@ -280,6 +281,14 @@ HTTP 状态码；登录请求被反代重定向（http → https）时还会追�
   只画滑块的 `SeekBarHit` Slider；`UpdateSeekBars()` 按 `demuxer-cache-time`
   和当前进度算像素宽度。`demuxer-cache-time` 是绝对时间戳（实测缓存满时约等于
   片长：96.7 vs 96）。
+- **预加载下一集**：设置 → 播放 →「预加载下一集」，默认开。`time-pos` 按「距本集
+  结束还剩多少秒」判断：设了片尾开始（`SkipMarker.OutroStart`）就按片尾起点算
+  （到点就会跳过片尾接下一集），没设才按整片时长；剩余 ≤ 90 秒时
+  `NextEpisodePrefetch` 后台调 `Playback.ResolveAsync` 取下一集地址，
+  再用带同样请求头 / 代理的 `Range: 0-512KB` 请求把连接和服务器会话热起来；
+  `SwitchToAsync` 先 `Take` 缓存，命中就不再查核心。播完自动接下一集也走同一条缓存。
+  只预热、不预解码：预热失败或不命中就是原来的切集路径。日志
+  `[Prefetch] trigger` / `ready` / `hit`。
 - **缓冲大小可配**：设置 → 播放 →「缓冲大小」，`AppSettings.BufferSizeMb`
   默认 512，可选 256 / 512 / 1024 / 2048 / 4096；`MpvProcess` 映射成
   `--demuxer-max-bytes`（回看缓冲取一半），起播日志带 `buffer=<MB>MiB`。
@@ -301,8 +310,14 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 ```
 
 - `--play-start 0`：强制从头放，不接续播记录（`--play-shot` 也认这个参数）。
+- `--play <id> --play-series <容器 id>`：普通播放路径也会先拼选集再开窗（预加载下一集
+  只在这种形态下生效）；配 `--play-start <秒>` 把起播点挪到片尾，可验「播完自动接下一集」。
+- 带画面的验证要用 `scripts\windows\run-session2.ps1` 在交互会话里起：SSH 会话在
+  session 0，mpv 建不了 swapchain，`time-pos` 一直没数据，播放进度和预加载都不会发生。
 - `--play-keys` / `--play-pin`：真实键盘 / 鼠标事件验证左右键快进（含 Shift ±30）
   和右上角图钉置顶，结果看 `player.log` 的 `key test` / `pin test` 行。
+- `DVPLAYER_PREFETCH_TEST=1`：把「预加载下一集」的阈值放大到起播就触发，验证
+  `player.log` 里的 `[Prefetch] ready` 和切集时的 `[Prefetch] hit`。
 - `mark:intro:<秒>` / `mark:outro:<秒>`：**开窗前**写进 `skip-markers.json`，
   这样起播才走得到片头跳过。
 - `--play-features` 的项：`aspect:<fit|fill|stretch|16:9|4:3>`、`sleep:<秒>`、

@@ -12,6 +12,8 @@ public struct AppSettings: Codable, Sendable {
     public var pageSize: Int = 60
     public var showResolution: Bool = true
     public var resumePlayback: Bool = true
+    /// 剧集快播完时预加载下一集（提前取地址 + 预热连接）。
+    public var prefetchNextEpisode: Bool = true
 
     /// 播放缓冲上限（MB）。默认 512，设置页可选 256 / 512 / 1024 / 2048 / 4096。
     /// 用可选值是为了老配置（没有这个键）能直接解出来，读的时候用 `?? 512`。
@@ -83,6 +85,7 @@ public struct AppSettings: Codable, Sendable {
         pageSize = try c.decodeIfPresent(Int.self, forKey: .pageSize) ?? 60
         showResolution = try c.decodeIfPresent(Bool.self, forKey: .showResolution) ?? true
         resumePlayback = try c.decodeIfPresent(Bool.self, forKey: .resumePlayback) ?? true
+        prefetchNextEpisode = try c.decodeIfPresent(Bool.self, forKey: .prefetchNextEpisode) ?? true
         bufferSizeMb = try c.decodeIfPresent(Int.self, forKey: .bufferSizeMb)
         videoAspect = try c.decodeIfPresent(String.self, forKey: .videoAspect)
         audioDevice = try c.decodeIfPresent(String.self, forKey: .audioDevice)

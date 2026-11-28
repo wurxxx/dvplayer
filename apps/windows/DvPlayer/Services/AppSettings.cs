@@ -52,6 +52,9 @@ public sealed class AppSettings
     /// <summary>打开播放时是否从上次停下的位置继续。</summary>
     public bool ResumePlayback { get; set; } = true;
 
+    /// <summary>剧集快播完时预加载下一集（提前取地址 + 预热连接）。</summary>
+    public bool PrefetchNextEpisode { get; set; } = true;
+
     /// <summary>播放窗置顶（播放页右上角图钉）：置顶后切到别的 App 也盖在上面。</summary>
     public bool AlwaysOnTop { get; set; }
 

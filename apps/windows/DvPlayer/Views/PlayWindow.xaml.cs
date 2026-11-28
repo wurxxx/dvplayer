@@ -330,6 +330,7 @@ public partial class PlayWindow : Window
         Closed += (_, _) =>
         {
             ThemeService.Changed -= OnThemeAccentChanged;
+            NextEpisodePrefetch.Clear();
             _closedSignal.TrySetResult();
         };
 
@@ -1956,6 +1957,7 @@ public partial class PlayWindow : Window
                     UpdatePositionUi();
                     ApplyPendingIntroSkip();
                     UpdateOutroPrompt();
+                    MaybePrefetchNextEpisode();
                     break;
 
                 case "duration" when value.ValueKind == JsonValueKind.Number:
@@ -2179,6 +2181,73 @@ public partial class PlayWindow : Window
 
         AdvanceOrClose();
     }
+
+    /// <summary>
+    /// 本集快播完时把下一集的地址取好并预热连接（设置 → 播放 →「预加载下一集」）。
+    /// time-pos 每次都调，由 <see cref="NextEpisodePrefetch"/> 自己保证同一集只跑一份。
+    /// </summary>
+    private void MaybePrefetchNextEpisode()
+    {
+        if (_isLocalDisc || _eof || _sleepAtEof || _closed || _playlist.Count == 0)
+        {
+            return;
+        }
+
+        if (!AppServices.Instance.Settings.PrefetchNextEpisode)
+        {
+            return;
+        }
+
+        var total = EffectiveDuration;
+        if (total <= 0 || _position <= 0)
+        {
+            return;
+        }
+
+        // 自检：DVPLAYER_PREFETCH_TEST=1 时把阈值放大，起播就触发预取。
+        var lead = Environment.GetEnvironmentVariable("DVPLAYER_PREFETCH_TEST") == "1"
+            ? 1_000_000
+            : NextEpisodePrefetch.LeadSeconds;
+
+        // 设了「跳过片尾曲」的片尾开始时间：到点就会跳到末尾接下一集，
+        // 本集的实际剩余时长要按片尾起点算，不能按整片长。
+        var endPoint = total;
+        var hasOutro = false;
+        if (_markers.OutroStart is { } outro && outro > 1 && outro < total - 1)
+        {
+            endPoint = outro;
+            hasOutro = true;
+        }
+
+        var remaining = endPoint - _position;
+        if (remaining > lead)
+        {
+            return;
+        }
+
+        // 没有片尾标记时保留「起播前 3 秒不预取」的保护；有标记且已经播进
+        // 片尾，说明马上就会跳走，这时立刻取。
+        if (!hasOutro && remaining < 3)
+        {
+            return;
+        }
+
+        var index = _playlist.FindIndex(episode => episode.Id == _itemId);
+        if (index < 0 || index + 1 >= _playlist.Count)
+        {
+            return;
+        }
+
+        var next = _playlist[index + 1].Id;
+        if (NextEpisodePrefetch.Prefetch(next))
+        {
+            Trace.Write($"[Prefetch] trigger item={Short(next)} pos={_position:0} " +
+                        $"total={total:0} end={endPoint:0} remaining={remaining:0}");
+        }
+    }
+
+    private static string Short(string itemId) =>
+        itemId[..Math.Min(8, itemId.Length)];
 
     /// <summary>
     /// 播完：剧集接下一集；最后一集或电影（没有选集）就直接关窗口。
@@ -4886,7 +4955,16 @@ public partial class PlayWindow : Window
         }
         else
         {
-            (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
+            // 下一集可能已经预取过：直接用缓存，省掉一次取地址的往返。
+            source = NextEpisodePrefetch.Take(itemId);
+            if (source is not null)
+            {
+                Trace.Write($"[Prefetch] hit item={Short(itemId)}");
+            }
+            else
+            {
+                (source, error) = await Playback.ResolveAsync(itemId).ConfigureAwait(true);
+            }
         }
 
         // await 期间可能已经关窗，或用户又点了别的集：这一轮已经过期，丢弃结果。

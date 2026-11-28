@@ -117,7 +117,7 @@
 - Trakt（观看记录）：「设置」里用设备码登录自己的 Trakt 账号，播放时上报进度、
   详情页可评分 / 加入收藏 / 加入待看；匹配优先 TMDB / IMDb id，没有才按片名 +
   年份；发布包内置 Client ID，用户不用申请（详见 §4.6）。
-- 设置页：续播、分辨率角标、自动连接、播放缓冲、核心版本与配置路径；「关于」显示
+- 设置页：续播、预加载下一集、分辨率角标、自动连接、播放缓冲、核心版本与配置路径；「关于」显示
   应用 / 共享核心版本、项目地址（点开浏览器）和更新检查（GitHub Releases 的 latest，
   10 分钟缓存），发现新版本时按钮变成「下载更新」。应用启动时后台查一次，有新版就在
   侧栏左下角版本号下面加一行「可更新 vX」，点开「设置 → 关于」。侧栏显示应用版本
@@ -311,6 +311,7 @@ core.playSource() ──► PlaySource(url, headers, position, duration, 轨道)
 | `DVPLAYER_PLAY_CONTAINER=<剧集 id>` | 先列这一季的集，再带 playlist 打开（模拟详情页） |
 | `DVPLAYER_PLAY_RECORD=1` | 从第一条观看记录续播（模拟「继续观看」，选集由 `PlaylistLoader` 补） |
 | `DVPLAYER_PLAY_RECORD_WAIT=<秒>` | 续播时等选集补完再打印状态（飞牛 `/item/list` 慢，默认不等） |
+| `DVPLAYER_PREFETCH_TEST=1` | 把「预加载下一集」的阈值放大到起播就触发，验证 `[Prefetch]` 日志与切集命中缓存 |
 | `DVPLAYER_PLAY_SEEK=<秒>` | 起播 2.5 秒后跳转 |
 | `DVPLAYER_PLAY_UI=episodes\|info\|audio:N\|subtitle:N\|pause\|fullscreen\|close` | 拨浮层 / 切轨（N 是轨序号，字幕 -1 为关闭） |
 | `DVPLAYER_PLAY_UI=aspect:fit\|fill\|stretch\|ratio16x9\|ratio4x3` | 切画面比例 |
@@ -364,6 +365,13 @@ mpv 自己的日志**总是**写在 `NSTemporaryDirectory()/dvplayer-mpv.log`（
   `MpvEngine` 观察 `demuxer-cache-time`，`PlayerSession.bufferedPosition`
   取值（seek 后重置到目标位置）。点击 / 拖动用 `DragGesture(minimumDistance: 0)`，
   松手才 `setScrubbing(false)` 真 seek。
+- **预加载下一集**：设置 → 播放 →「预加载下一集」，默认开。`handlePosition` 里
+  按「距本集结束还剩多少秒」判断：项目设了片尾开始（`markers.outroStart`）就按
+  片尾起点算（到点就会跳过片尾接下一集），没设才按整片时长；剩余 ≤ 90 秒时
+  `NextEpisodePrefetch` 后台调 `core.playSource` 取下一集地址，
+  再用同样请求头 / 代理的 `Range: 0-512KB` 请求预热连接；`begin` 先 `take` 缓存，
+  命中就不再查核心。播完自动接下一集也走同一条缓存。只预热、不预解码，失败退回
+  普通切集；日志 `[Prefetch] trigger` / `ready` / `use cached`。
 - **缓冲大小可配**：设置 → 播放 →「播放缓冲」，`AppSettings.bufferSizeMb`
   （可选，缺省 512）映射成 `--demuxer-max-bytes`，回看缓冲取一半；
   `DVPLAYER_BUFFER_MB` 可临时覆盖（自检压到 8 看未缓冲段）。

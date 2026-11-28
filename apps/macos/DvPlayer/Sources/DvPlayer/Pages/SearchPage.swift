@@ -287,6 +287,12 @@ struct SettingsPage: View {
                                 .foregroundStyle(Theme.text)
                                 .toggleStyle(DvSwitchStyle())
 
+                            Toggle("预加载下一集", isOn: $state.settings.prefetchNextEpisode)
+                                .font(.system(size: 14))
+                                .foregroundStyle(Theme.text)
+                                .toggleStyle(DvSwitchStyle())
+                                .help("本集快播完时提前取好下一集的地址并预热连接，连播时衔接更快")
+
                             Toggle("卡片上显示分辨率角标", isOn: $state.settings.showResolution)
                                 .font(.system(size: 14))
                                 .foregroundStyle(Theme.text)
@@ -500,6 +506,7 @@ struct SettingsPage: View {
             }
         }
         .onChange(of: state.settings.resumePlayback) { _ in state.settings.save() }
+        .onChange(of: state.settings.prefetchNextEpisode) { _ in state.settings.save() }
         .onChange(of: state.settings.showResolution) { _ in state.settings.save() }
         .onChange(of: state.settings.autoConnect) { _ in state.settings.save() }
         .onChange(of: state.settings.bufferSizeMb) { _ in state.settings.save() }

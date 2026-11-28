@@ -383,6 +383,12 @@ final class PlayerSession: ObservableObject {
 
     private static let resumeThreshold = 5.0
     private static let reportEvery: TimeInterval = 10
+    /// 剧集快播完时预加载下一集（设置 → 播放）。
+    private let prefetchEnabled: Bool
+    /// 自检：`DVPLAYER_PREFETCH_TEST=1` 时把阈值放大，起播就触发预取。
+    private static let prefetchLead: Double =
+        ProcessInfo.processInfo.environment["DVPLAYER_PREFETCH_TEST"] == "1"
+        ? 1_000_000 : NextEpisodePrefetch.leadSeconds
 
     init?(itemId: String,
           startSeconds: Double?,
@@ -408,6 +414,7 @@ final class PlayerSession: ObservableObject {
         self.hintTitle = hintTitle ?? ""
         self.title = local?.title ?? hintTitle ?? "正在播放"
         let settings = AppSettings.load()
+        self.prefetchEnabled = settings.prefetchNextEpisode
         self.aspect = PlayerAspect(rawValue: settings.videoAspect ?? "") ?? .fit
         self.danmakuEnabled = settings.danmakuEnabled ?? false
         self.traktEnabled = settings.traktEnabled ?? true
@@ -718,7 +725,14 @@ final class PlayerSession: ObservableObject {
         NSLog("[Play] open \(itemId) playlist=\(playlist.count) start=\(startSeconds.map { String($0) } ?? "resume")")
 
         do {
-            let source = try await core.playSource(itemId)
+            // 下一集可能已经预取过：直接用缓存，省掉一次取地址的往返。
+            let source: PlaySource
+            if let cached = NextEpisodePrefetch.shared.take(itemId) {
+                NSLog("[Prefetch] use cached \(itemId)")
+                source = cached
+            } else {
+                source = try await core.playSource(itemId)
+            }
             guard token == loadToken, !isStopped else { return }
 
             self.itemId = itemId
@@ -864,6 +878,39 @@ final class PlayerSession: ObservableObject {
         }
     }
 
+    // MARK: - 预加载下一集
+
+    /// 本集快播完时把下一集的地址取好并预热连接（设置 → 播放 →「预加载下一集」）。
+    /// 每次位置更新都会调用，由 `NextEpisodePrefetch` 自己保证同一集只跑一份。
+    private func maybePrefetchNext() {
+        guard prefetchEnabled, !isDisc, !isStopped, !eof, !sleepEndOfEpisode else { return }
+        guard let index = playlist.firstIndex(where: { $0.id == itemId }),
+              index + 1 < playlist.count else { return }
+
+        let total = duration > 1 ? duration : Double(source?.durationSeconds ?? 0)
+        guard total > 0, position > 0 else { return }
+
+        // 设了「跳过片尾曲」的片尾开始时间：到点就会跳到末尾接下一集，
+        // 本集的实际剩余时长要按片尾起点算，不能按整片长（否则快进片尾
+        // 的时候永远等不到提前量）。
+        let outro = markers.outroStart.flatMap { value in
+            value > 1 && value < total - 1 ? value : nil
+        }
+        let remaining = (outro ?? total) - position
+        guard remaining <= Self.prefetchLead else { return }
+        // 没有片尾标记时保留「起播前 3 秒不预取」的保护；有标记且已经播进
+        // 片尾，说明马上就会跳走，这时立刻取。
+        guard outro != nil || remaining >= 3 else { return }
+
+        guard let core = AppState.shared.core else { return }
+        let next = playlist[index + 1].id
+        if NextEpisodePrefetch.shared.prefetch(next, core: core) {
+            NSLog("[Prefetch] trigger item=\(next) pos=\(Int(position)) " +
+                  "total=\(Int(total)) end=\(Int(outro ?? total)) " +
+                  "remaining=\(Int(remaining))")
+        }
+    }
+
     // MARK: - mpv 回调
 
     private func handlePosition(_ position: Double, _ duration: Double) {
@@ -880,6 +927,7 @@ final class PlayerSession: ObservableObject {
         guard !isScrubbing else { return }
         self.position = position
         seekPosition = position
+        maybePrefetchNext()
 
         // Trakt：真正出画一会儿才开始算「在看」。
         if !paused { traktStartIfNeeded() }
@@ -2076,6 +2124,7 @@ final class PlayerSession: ObservableObject {
 
         // 关窗就恢复系统熄屏 / 睡眠，别让断言跟着进程活到退出。
         sleepBlocker.stop()
+        NextEpisodePrefetch.shared.clear()
         danmakuTask?.cancel()
         danmakuTask = nil
         hideTask?.cancel()

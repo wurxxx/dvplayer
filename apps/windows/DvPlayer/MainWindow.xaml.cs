@@ -458,7 +458,16 @@ public partial class MainWindow : FluentWindow
                 return;
             }
 
-            var player = await PlayWindow.OpenAsync(this, playId);
+            // 自检：带上 `--play-series <剧 id>` 才有选集，下一集预加载只在这种
+            // 形态下生效；`--play-start <秒>` 用来把起播点挪到片尾验自动接下一集。
+            var series = await BuildShotPlaylistAsync().ConfigureAwait(true);
+            var playStart = double.TryParse(ArgumentAfter("--play-start"), out var startAt)
+                ? startAt
+                : (double?)null;
+            var player = await PlayWindow.OpenAsync(this, playId,
+                startSeconds: playStart,
+                playlist: series?.Items,
+                seriesTitle: series?.Title);
 
             if (int.TryParse(ArgumentAfter("--play-seconds"), out var seconds) && seconds > 0)
             {

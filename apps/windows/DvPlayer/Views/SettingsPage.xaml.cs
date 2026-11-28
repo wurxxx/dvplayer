@@ -85,6 +85,7 @@ public partial class SettingsPage : Page
         AutoConnectSwitch.IsChecked = settings.AutoConnect;
         ResolutionSwitch.IsChecked = settings.ShowResolution;
         ResumeSwitch.IsChecked = settings.ResumePlayback;
+        PrefetchSwitch.IsChecked = settings.PrefetchNextEpisode;
 
         switch ((settings.Appearance ?? "system").ToLowerInvariant())
         {
@@ -516,6 +517,7 @@ public partial class SettingsPage : Page
         settings.AutoConnect = AutoConnectSwitch.IsChecked == true;
         settings.ShowResolution = ResolutionSwitch.IsChecked == true;
         settings.ResumePlayback = ResumeSwitch.IsChecked == true;
+        settings.PrefetchNextEpisode = PrefetchSwitch.IsChecked == true;
         settings.DanmakuEnabled = DanmakuSwitch.IsChecked == true;
         settings.TraktEnabled = TraktEnabledSwitch.IsChecked == true;
         settings.StartPage = (StartPageBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "libraries";

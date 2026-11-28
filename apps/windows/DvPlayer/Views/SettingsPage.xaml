@@ -337,6 +337,23 @@
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
+                  <TextBlock Text="预加载下一集" FontSize="14"
+                             Foreground="{DynamicResource TextBrush}" />
+                  <TextBlock Text="本集快播完时提前取好下一集的地址并预热连接，连播衔接更快"
+                             FontSize="12.5" Foreground="{DynamicResource FaintBrush}"
+                             Margin="0,4,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleButton x:Name="PrefetchSwitch" Grid.Column="1"
+                              Style="{StaticResource Switch}" VerticalAlignment="Center"
+                              Checked="OnSettingChanged" Unchecked="OnSettingChanged" />
+              </Grid>
+
+              <Grid Margin="0,20,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
                   <TextBlock Text="缓冲大小" FontSize="14"
                              Foreground="{DynamicResource TextBrush}" />
                   <TextBlock Text="mpv 最多预读多少；默认 512 MB，原盘可以调到 2 GB / 4 GB"
