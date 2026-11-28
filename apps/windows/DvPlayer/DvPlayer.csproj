@@ -33,7 +33,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <!-- 发布版本：打包脚本还会用 -p:Version 覆盖它（build-release.ps1 -Version）。
          界面上「关于」和侧栏显示的就是这个值。 -->
-    <Version>0.1.7</Version>
+    <Version>0.1.8</Version>
     <!-- 只保留中文和英文的卫星资源。不设这项时 dotnet publish 会把 .NET 自带的
          156 个语言资源 dll 全拷进来（约 8 MB，全是用不上的语言）。
          编译期就不生成，比发布后再删更干净。 -->

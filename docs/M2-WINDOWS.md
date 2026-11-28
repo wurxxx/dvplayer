@@ -5,7 +5,7 @@ Windows 壳是 WPF（`apps/windows/DvPlayer`），视频交给官方 mpv 子进�
 [UI-DESIGN.md](UI-DESIGN.md) 的「播放页」一节；这份文档只记 Windows 侧的落点和
 两端的差异。
 
-> 状态：0.1.7 已发布；浅色模式 / 主题色在 master 上待发布。
+> 状态：0.1.8 已发布（浅色模式 / 主题色、详情页整页背景、每日推荐电影 / 剧集分类、资源区单源）。
 
 ## 1. 功能落点
 

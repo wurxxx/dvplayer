@@ -1,9 +1,10 @@
 # DVPlayer 项目计划
 
-> 状态：M0 完成（仅 A6 Android 真机待设备）；M1（Windows Alpha）与 macOS 壳已发布 0.1.7，
-> 剩 12.x 真机、Plex 适配器，以及 HDR 屏 / AVR 的目视与听感验收；master 上还有未发布的
-> 浅色模式 / 主题色。Android / TV 进入 M2：底层与数据层已落地，手机端可用，TV 未做
-> （[M2-ANDROID.md](M2-ANDROID.md) §9.1）。最后更新：2026-11-28，剩余工作见 §5。
+> 状态：M0 完成（仅 A6 Android 真机待设备）；M1（Windows Alpha）与 macOS 壳已发布 0.1.8
+> （浅色模式 / 主题色、详情页整页背景、每日推荐电影 / 剧集分类），剩 12.x 真机、Plex
+> 适配器，以及 HDR 屏 / AVR 的目视与听感验收。Android / TV 进入 M2：底层与数据层已落地，
+> 手机端可用，TV 未做（[M2-ANDROID.md](M2-ANDROID.md) §9.1）。最后更新：2026-11-28，
+> 剩余工作见 §5。
 
 ## 1. 目标
 
@@ -75,9 +76,9 @@ Dolby Vision P7 FEL 仍是桌面端的硬指标（它是格式覆盖里最难的
 | 里程碑 | 范围 | 状态 |
 | --- | --- | --- |
 | M0 技术验证 | FEL 重建 / Windows `wid` / macOS render API / 解码与蓝光 | **完成**，A6（Android 真机）待设备 |
-| M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包、更新检查 | **已发布 0.1.7**：功能已落地，Emby 联调已通过，安装版 / 绿色版由 CI 出包并附到 Release，启动检查更新已接；剩 Jellyfin 12.x 真机与 Plex；清单见 [M1.md](M1.md) |
+| M1 Windows Alpha | 多源接入（飞牛 + Emby/Jellyfin + 本地/文件协议源）、聚合搜索、播放与续播、打包、更新检查 | **已发布 0.1.8**：功能已落地，Emby 联调已通过，安装版 / 绿色版由 CI 出包并附到 Release，启动检查更新已接；剩 Jellyfin 12.x 真机与 Plex；清单见 [M1.md](M1.md) |
 | M2 Android / TV | 双壳、双内核（mpv 默认 + Media3 按能力路由）、原盘、VFS、TV 焦点 | **底层已落地**：双内核路由、原盘入口、VFS（SMB / NFS / WebDAV）、DV P5 颜色闭环、数据层 JNI（41 个 `dv_*`，`verify-core.sh` 19 步）；手机端库 / 首页 / 详情 / 搜索 / 设置已接通并做了平板断点（§7.9.3），播放页已接内核，TV 界面未做，清单见 [M2-ANDROID.md](M2-ANDROID.md) §9.1 |
-| M3 macOS | 进程内 libmpv + render API 全链路、DV / HDR10 或 SDR 回退、签名公证 | **已发布 0.1.7**：浏览、播放、五项功能、Trakt、更新检查已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、签名 / 公证待做 |
+| M3 macOS | 进程内 libmpv + render API 全链路、DV / HDR10 或 SDR 回退、签名公证 | **已发布 0.1.8**：浏览、播放、五项功能、Trakt、更新检查已可用（[M2-MACOS.md](M2-MACOS.md)）；画面目视、HDR 真屏、签名 / 公证待做 |
 | M4 共性层 | 跨端播放记录同步、元数据缓存 | **部分**：本机跨源续播（电影取较长进度）与 Trakt playback 读取已完成；播放记录 / 收藏跨端合并未做 |
 
 ### 解码与呈现能力矩阵（横跨 M1–M3，不是独立里程碑）
@@ -118,7 +119,8 @@ Windows 绿色版 / Inno Setup 安装版打包（CI 出包）；更新检查（�
 已完成：飞牛 / Emby / 文件协议源接入，库 → 剧集 → 季 → 集与详情页，聚合搜索与
 「资源」选源，播放与硬解，进度回写与同季同集跨源续播，记录 / 收藏 / 图片缓存，
 音轨字幕、音频设备与直通、HDR 与全屏；0.1.6 接更新检查，0.1.7 加每日推荐、
-盘内菜单、外挂字幕与工作区尺寸适配。master 上待发布浅色模式 / 主题色。
+盘内菜单、外挂字幕与工作区尺寸适配，0.1.8 加浅色模式 / 主题色、详情页整页背景、
+每日推荐电影 / 剧集分类与资源区单源显示。
 
 - 已完成：Jellyfin 10.8.12 在两端全链路实测（Emby 另在 4.9.3 实例实测）；
 - 未完成：Jellyfin 12.x 真机（新端点分支按官方 OpenAPI 写）、Plex 适配器。

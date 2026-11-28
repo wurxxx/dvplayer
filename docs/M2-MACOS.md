@@ -1,8 +1,8 @@
 # M2 · macOS 客户端
 
-> 状态：壳、浏览链路、播放页都可用（2026-11-28）；播放走进程内 libmpv +
+> 状态：0.1.8 已发布；壳、浏览链路、播放页都可用（2026-11-28），播放走进程内 libmpv +
 > render API（[ADR-0011](adr/0011-macos-libmpv-inprocess.md)），DV 路径与 Windows 同一条；
-> 已支持浅色 / 深色 / 跟随系统与主题色；HDR 真屏目视与签名 / 公证待做。
+> 支持浅色 / 深色 / 跟随系统与主题色；HDR 真屏目视与签名 / 公证待做。
 > 产物：`apps/macos/DvPlayer`（Swift Package + `build.sh` 出 `.app`）。
 
 ## 1. 范围
