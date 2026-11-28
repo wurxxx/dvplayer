@@ -2,7 +2,7 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:controls="clr-namespace:DvPlayer.Controls"
-      Background="{StaticResource BgBrush}">
+      Background="{DynamicResource BgBrush}">
 
   <Grid Margin="32,40,32,0">
     <Grid.RowDefinitions>
@@ -51,7 +51,7 @@
                  Style="{StaticResource EmptyText}" FontSize="14" />
       <TextBlock x:Name="EmptyHint" Text="输入片名、剧名或关键词"
                  Style="{StaticResource EmptyText}" FontSize="12.5" Margin="0,6,0,0"
-                 Foreground="{StaticResource FaintBrush}" />
+                 Foreground="{DynamicResource FaintBrush}" />
     </StackPanel>
 
     <!-- 结果 -->
@@ -87,11 +87,11 @@
                 </Border>
                 <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
                            Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
-                           Foreground="{StaticResource TextBrush}"
+                           Foreground="{DynamicResource TextBrush}"
                            TextTrimming="CharacterEllipsis" />
                 <TextBlock Text="{Binding Sub}" FontSize="12"
                            Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
-                           Foreground="{StaticResource FaintBrush}"
+                           Foreground="{DynamicResource FaintBrush}"
                            Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
               </StackPanel>
             </DataTemplate>

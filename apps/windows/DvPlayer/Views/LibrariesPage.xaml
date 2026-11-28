@@ -2,7 +2,7 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:controls="clr-namespace:DvPlayer.Controls"
-      Background="{StaticResource BgBrush}">
+      Background="{DynamicResource BgBrush}">
 
   <Page.Resources>
 
@@ -90,14 +90,14 @@
                         Click="OnMenuFavorite">
                 <MenuItem.Icon>
                   <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
-                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                             FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                 </MenuItem.Icon>
               </MenuItem>
               <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
                         Click="OnMenuWatched">
                 <MenuItem.Icon>
                   <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
-                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                             FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                 </MenuItem.Icon>
               </MenuItem>
             </ContextMenu>
@@ -116,9 +116,9 @@
         </Border>
         <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
                    Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}, FallbackValue=148}"
-                   Foreground="{StaticResource TextBrush}"
+                   Foreground="{DynamicResource TextBrush}"
                    TextTrimming="CharacterEllipsis" />
-        <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{StaticResource FaintBrush}"
+        <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{DynamicResource FaintBrush}"
                    Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}, FallbackValue=148}"
                    Margin="1,2,0,0" TextTrimming="CharacterEllipsis" />
       </StackPanel>
@@ -139,7 +139,7 @@
                         Click="OnMenuPlay">
                 <MenuItem.Icon>
                   <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
-                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                             FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                 </MenuItem.Icon>
               </MenuItem>
               <Separator Style="{StaticResource DarkMenuSeparator}" />
@@ -147,21 +147,21 @@
                         Click="OnMenuFavorite">
                 <MenuItem.Icon>
                   <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
-                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                             FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                 </MenuItem.Icon>
               </MenuItem>
               <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
                         Click="OnMenuWatched">
                 <MenuItem.Icon>
                   <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
-                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                             FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                 </MenuItem.Icon>
               </MenuItem>
               <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为未观看"
                         Click="OnMenuUnwatched">
                 <MenuItem.Icon>
                   <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}"
-                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                             FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                 </MenuItem.Icon>
               </MenuItem>
               <Separator Style="{StaticResource DarkMenuSeparator}" />
@@ -169,7 +169,7 @@
                         Click="OnMenuRemoveRecord">
                 <MenuItem.Icon>
                   <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
-                             FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                             FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                 </MenuItem.Icon>
               </MenuItem>
             </ContextMenu>
@@ -195,7 +195,7 @@
                     MouseLeftButtonUp="OnContinuePlayClick" />
             <Border Height="3" VerticalAlignment="Bottom" Background="#33FFFFFF"
                     IsHitTestVisible="False">
-              <Border Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
+              <Border Background="{DynamicResource AccentBrush}" HorizontalAlignment="Left"
                       Width="{Binding BarWidth}" />
             </Border>
           </Grid>
@@ -204,9 +204,9 @@
         <StackPanel Background="Transparent" Cursor="Hand"
                     Tag="{Binding ItemId}" MouseLeftButtonUp="OnContinueBodyClick">
           <TextBlock Text="{Binding Title}" FontSize="14" Margin="2,9,0,0"
-                     Foreground="{StaticResource TextBrush}"
+                     Foreground="{DynamicResource TextBrush}"
                      TextTrimming="CharacterEllipsis" />
-          <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{StaticResource FaintBrush}"
+          <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{DynamicResource FaintBrush}"
                      Margin="2,3,0,0" TextTrimming="CharacterEllipsis" />
         </StackPanel>
       </StackPanel>
@@ -228,16 +228,16 @@
                 </Border>
                 <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True">
-                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource NavHoverBrush}" />
+                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource NavHoverBrush}" />
                   </Trigger>
                 </ControlTemplate.Triggers>
               </ControlTemplate>
             </Button.Template>
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="{Binding CountLabel}" FontSize="14"
-                         Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                         Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
               <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="12"
-                         Foreground="{StaticResource FaintBrush}" Margin="5,0,0,0"
+                         Foreground="{DynamicResource FaintBrush}" Margin="5,0,0,0"
                          VerticalAlignment="Center" />
             </StackPanel>
           </Button>
@@ -278,7 +278,7 @@
           <Grid x:Name="HeroCard" Height="560" Cursor="Hand"
                 MouseLeftButtonUp="OnHeroClick"
                 MouseEnter="OnHeroEnter" MouseLeave="OnHeroLeave">
-            <Border x:Name="HeroBackdrop" Background="{StaticResource SurfaceBrush}"
+            <Border x:Name="HeroBackdrop" Background="{DynamicResource SurfaceBrush}"
                     RenderOptions.BitmapScalingMode="HighQuality" />
             <Border x:Name="HeroFade" Opacity="0"
                     RenderOptions.BitmapScalingMode="HighQuality" />
@@ -287,26 +287,16 @@
               渐变直接淡到页面底色，别用纯黑收尾：纯黑会在横幅下沿
               切出一条比页面更黑的带子。
             -->
-            <Border VerticalAlignment="Bottom" Height="340">
-              <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                  <GradientStop Color="#00141419" Offset="0" />
-                  <GradientStop Color="#3D141419" Offset="0.3" />
-                  <GradientStop Color="#8C141419" Offset="0.55" />
-                  <GradientStop Color="#C7141419" Offset="0.75" />
-                  <GradientStop Color="#EB141419" Offset="0.88" />
-                  <GradientStop Color="#FF141419" Offset="1" />
-                </LinearGradientBrush>
-              </Border.Background>
-            </Border>
+            <Border VerticalAlignment="Bottom" Height="340"
+                    Background="{DynamicResource OverviewFadeBrush}" />
 
             <StackPanel VerticalAlignment="Bottom" Margin="24,0,24,56"
                         HorizontalAlignment="Center" Width="800">
               <TextBlock x:Name="HeroTitle" Text="正在读取…" FontSize="36"
                          FontFamily="{StaticResource DisplayFont}" FontWeight="SemiBold"
-                         Foreground="#FAFFFFFF" TextTrimming="CharacterEllipsis"
+                         Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis"
                          HorizontalAlignment="Center" TextAlignment="Center" />
-              <TextBlock x:Name="HeroMeta" FontSize="13.5" Foreground="#D9FFFFFF"
+              <TextBlock x:Name="HeroMeta" FontSize="13.5" Foreground="{DynamicResource MutedBrush}"
                          Margin="0,11,0,0" HorizontalAlignment="Center" />
               <ItemsControl x:Name="HeroChips" Margin="0,12,0,0" HorizontalAlignment="Center"
                             Visibility="Collapsed">
@@ -317,14 +307,14 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <Border Background="#2EFFFFFF" CornerRadius="5" Padding="8,3" Margin="4,0">
-                      <TextBlock Text="{Binding}" FontSize="12" Foreground="#E6FFFFFF" />
+                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="8,3" Margin="4,0">
+                      <TextBlock Text="{Binding}" FontSize="12" Foreground="{DynamicResource MutedBrush}" />
                     </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
 
-              <TextBlock x:Name="HeroOverview" FontSize="14" Foreground="#C2FFFFFF"
+              <TextBlock x:Name="HeroOverview" FontSize="14" Foreground="{DynamicResource MutedBrush}"
                          Margin="0,13,0,0" MaxHeight="66" TextTrimming="CharacterEllipsis"
                          TextWrapping="Wrap" LineHeight="22" TextAlignment="Center" />
             </StackPanel>
@@ -413,16 +403,16 @@
         <RowDefinition Height="*" />
       </Grid.RowDefinitions>
 
-      <Border Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="16,11"
+      <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="12" Padding="16,11"
               controls:SearchBoxFocus.Enabled="True">
         <Grid>
           <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="14"
-                     Foreground="{StaticResource FaintBrush}" VerticalAlignment="Center" />
+                     Foreground="{DynamicResource FaintBrush}" VerticalAlignment="Center" />
           <TextBox x:Name="InlineSearchBox" TextChanged="OnInlineSearchTextChanged"
                    Style="{StaticResource SearchBoxInput}" Padding="0"
-                   FontSize="14" Margin="30,0,8,0" CaretBrush="{StaticResource AccentBrush}" />
+                   FontSize="14" Margin="30,0,8,0" CaretBrush="{DynamicResource AccentInkBrush}" />
           <TextBlock x:Name="InlineSearchPlaceholder" Text="搜索"
-                     Foreground="{StaticResource FaintBrush}" FontSize="14"
+                     Foreground="{DynamicResource FaintBrush}" FontSize="14"
                      Margin="31,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
         </Grid>
       </Border>
@@ -435,7 +425,7 @@
                      Style="{StaticResource EmptyText}" FontSize="14" />
           <TextBlock x:Name="InlineSearchEmptyHint" Text="输入片名、剧名或关键词"
                      Style="{StaticResource EmptyText}" FontSize="12.5" Margin="0,6,0,0"
-                     Foreground="{StaticResource FaintBrush}" />
+                     Foreground="{DynamicResource FaintBrush}" />
         </StackPanel>
 
         <ScrollViewer x:Name="InlineSearchScroll" VerticalScrollBarVisibility="Hidden"
@@ -472,7 +462,7 @@
                    Style="{StaticResource EmptyText}" FontSize="14" />
         <TextBlock x:Name="FavoriteEmptyHint" Text="收藏的影片会集中在这里"
                    Style="{StaticResource EmptyText}" FontSize="12.5" Margin="0,6,0,0"
-                   Foreground="{StaticResource FaintBrush}" />
+                   Foreground="{DynamicResource FaintBrush}" />
       </StackPanel>
     </Grid>
 
@@ -560,12 +550,12 @@
                       CornerRadius="8" Padding="12,6" Margin="0,0,8,6">
                 <Border.Style>
                   <Style TargetType="Border">
-                    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-                    <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+                    <Setter Property="TextElement.Foreground" Value="{DynamicResource MutedBrush}" />
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding Active}" Value="True">
-                        <Setter Property="Background" Value="#2E2412" />
-                        <Setter Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
+                        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                        <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentInkBrush}" />
                       </DataTrigger>
                     </Style.Triggers>
                   </Style>
@@ -580,13 +570,13 @@
       <StackPanel Grid.Row="3" Margin="0,6,0,0">
         <StackPanel x:Name="Breadcrumb" Orientation="Horizontal" Visibility="Collapsed"
                     Margin="0,0,0,10">
-          <Border Background="{StaticResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
+          <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="8" Padding="12,6"
                   Cursor="Hand" MouseLeftButtonUp="OnBackClick">
             <TextBlock Text="&#xE72B;  返回上层" FontFamily="{StaticResource IconFont}"
-                       FontSize="12.5" Foreground="{StaticResource AccentBrush}" />
+                       FontSize="12.5" Foreground="{DynamicResource AccentInkBrush}" />
           </Border>
           <TextBlock x:Name="BreadcrumbText" FontSize="13"
-                     Foreground="{StaticResource MutedBrush}"
+                     Foreground="{DynamicResource MutedBrush}"
                      VerticalAlignment="Center" Margin="12,0,0,0" />
         </StackPanel>
 
@@ -603,12 +593,12 @@
                         CornerRadius="8" Padding="14,7" Margin="0,0,8,0">
                   <Border.Style>
                     <Style TargetType="Border">
-                      <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-                      <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}" />
+                      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+                      <Setter Property="TextElement.Foreground" Value="{DynamicResource MutedBrush}" />
                       <Style.Triggers>
                         <DataTrigger Binding="{Binding Active}" Value="True">
-                          <Setter Property="Background" Value="#2E2412" />
-                          <Setter Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" />
+                          <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                          <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentInkBrush}" />
                         </DataTrigger>
                       </Style.Triggers>
                     </Style>
@@ -643,14 +633,14 @@
                                   Click="OnMenuFavorite">
                           <MenuItem.Icon>
                             <TextBlock Text="&#xE734;" FontFamily="{StaticResource IconFont}"
-                                       FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                                       FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                           </MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Style="{StaticResource DarkMenuItem}" Header="标记为已观看"
                                   Click="OnMenuWatched">
                           <MenuItem.Icon>
                             <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}"
-                                       FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                                       FontSize="13" Foreground="{DynamicResource MutedBrush}" />
                           </MenuItem.Icon>
                         </MenuItem>
                       </ContextMenu>
@@ -669,9 +659,9 @@
                   </Border>
                   <TextBlock Text="{Binding Title}" FontSize="13" Margin="1,9,0,0"
                              Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
-                             Foreground="{StaticResource TextBrush}"
+                             Foreground="{DynamicResource TextBrush}"
                              TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{StaticResource FaintBrush}"
+                  <TextBlock Text="{Binding Sub}" FontSize="12" Foreground="{DynamicResource FaintBrush}"
                              Margin="1,2,0,0"
                              Width="{Binding CardWidth, RelativeSource={RelativeSource AncestorType=controls:PosterGrid}}"
                              TextTrimming="CharacterEllipsis" />
@@ -688,35 +678,21 @@
 
       <!-- 顶栏浮层：源名 / 分段 / 刷新。
            只用渐变把海报压暗，不做实底——实底会在 Hero 上切出一条黑带。 -->
-      <Border x:Name="TopBarScrim" Height="120" VerticalAlignment="Top" IsHitTestVisible="False">
-        <Border.Background>
-          <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#8C000000" Offset="0" />
-            <GradientStop Color="#40000000" Offset="0.55" />
-            <GradientStop Color="#00000000" Offset="1" />
-          </LinearGradientBrush>
-        </Border.Background>
-      </Border>
+      <Border x:Name="TopBarScrim" Height="120" VerticalAlignment="Top" IsHitTestVisible="False"
+              Background="{DynamicResource TopBarScrimBrush}" />
 
       <!-- 滚动后再叠一层更浓的渐变，随滚动距离淡入 -->
       <Border x:Name="TopBarScrimStrong" Height="150" VerticalAlignment="Top"
-              IsHitTestVisible="False" Opacity="0">
-        <Border.Background>
-          <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#D9000000" Offset="0" />
-            <GradientStop Color="#8C000000" Offset="0.5" />
-            <GradientStop Color="#00000000" Offset="1" />
-          </LinearGradientBrush>
-        </Border.Background>
-      </Border>
+              IsHitTestVisible="False" Opacity="0"
+              Background="{DynamicResource TopBarScrimStrongBrush}" />
 
       <Grid Height="72" x:Name="TopBar" Margin="32,0,32,0" VerticalAlignment="Top">
         <TextBlock x:Name="SourceTitle" Text="媒体库" FontSize="17" FontWeight="SemiBold"
-                   Foreground="#F2FFFFFF" VerticalAlignment="Center" />
+                   Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
 
         <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Center"
-                VerticalAlignment="Center" Background="#8C000000"
-                BorderBrush="#1FFFFFFF" BorderThickness="1">
+                VerticalAlignment="Center" Background="{DynamicResource GlassPanelBrush}"
+                BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
           <StackPanel Orientation="Horizontal">
             <RadioButton x:Name="MediaSegment" Content="媒体" GroupName="LibraryTab"
                          Style="{StaticResource SegmentItem}" IsChecked="True"

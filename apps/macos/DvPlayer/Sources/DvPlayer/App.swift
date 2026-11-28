@@ -9,7 +9,6 @@ struct DvPlayerApp: App {
         WindowGroup {
             ShellView()
                 .environmentObject(AppState.shared)
-                .preferredColorScheme(.dark)
                 .frame(minWidth: 1080, minHeight: 680)
                 .task { await AppState.shared.start() }
         }
@@ -31,7 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        // 外观：设置里的三选一；截图自检时 DVPLAYER_APPEARANCE 覆盖这一次运行。
+        (Appearance.fromEnvironment ?? .current).apply()
+        Appearance.scheduleSwitchFromEnvironment()
+        AccentSettings.scheduleSwitchFromEnvironment()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 

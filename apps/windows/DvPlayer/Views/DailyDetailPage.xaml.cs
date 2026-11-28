@@ -150,6 +150,9 @@ public partial class DailyDetailPage : Page
         return text;
     }
 
+    private static SolidColorBrush WhiteText(byte alpha) =>
+        new(Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF));
+
     private void BuildTags(DailyDetailInfo info)
     {
         var tags = new List<string> { info.IsSeries ? "剧集" : "电影" };
@@ -158,19 +161,18 @@ public partial class DailyDetailPage : Page
         TagBar.Children.Clear();
         foreach (var tag in tags)
         {
-            TagBar.Children.Add(new Border
+            // 标签压在 hero 图上：白字 + 白 20% 底（和详情页一致）。
+            var text = new TextBlock { Text = tag, FontSize = 12, Foreground = WhiteText(0xF2) };
+
+            var chip = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)),
                 CornerRadius = new CornerRadius(5),
                 Padding = new Thickness(8, 3, 8, 3),
                 Margin = new Thickness(0, 0, 6, 0),
-                Child = new TextBlock
-                {
-                    Text = tag,
-                    FontSize = 12,
-                    Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
-                },
-            });
+                Child = text,
+                Background = WhiteText(0x33),
+            };
+            TagBar.Children.Add(chip);
         }
     }
 

@@ -59,7 +59,7 @@ public partial class ConfirmDialog : Window
         CancelButton.Visibility = showCancel ? Visibility.Visible : Visibility.Collapsed;
         ConfirmButton.Style = (Style)FindResource(danger ? "DangerButton" : "AccentButton");
         IconGlyph.Foreground = (System.Windows.Media.Brush)FindResource(
-            danger ? "DangerBrush" : "AccentBrush");
+            danger ? "DangerBrush" : "AccentInkBrush");
         IconGlyph.Text = danger ? "\uE7BA" : "\uE946";
         IconBadge.Background = new System.Windows.Media.SolidColorBrush(
             danger

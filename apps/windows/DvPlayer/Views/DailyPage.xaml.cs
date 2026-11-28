@@ -76,6 +76,50 @@ public partial class DailyPage : Page
         }), DispatcherPriority.Background);
     }
 
+    /// <summary>只显示当前 tab 的网格；某一类为空时自动落到另一类。</summary>
+    private void ApplyTab()
+    {
+        var showSeries = SeriesTab.IsChecked == true;
+        if (showSeries && _series.Count == 0)
+        {
+            showSeries = false;
+        }
+        else if (!showSeries && _movies.Count == 0 && _series.Count > 0)
+        {
+            showSeries = true;
+        }
+
+        MovieGrid.Visibility = showSeries ? Visibility.Collapsed : Visibility.Visible;
+        SeriesGrid.Visibility = showSeries ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>截图巡检用：切到电影 / 剧集。</summary>
+    public void ShowTabForShot(string tab)
+    {
+        if (tab.StartsWith("series", StringComparison.OrdinalIgnoreCase)
+            && SeriesTab.Visibility == Visibility.Visible)
+        {
+            SeriesTab.IsChecked = true;
+        }
+        else
+        {
+            MovieTab.IsChecked = true;
+        }
+
+        ApplyTab();
+    }
+
+    private void OnTabChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        ApplyTab();
+        FeedScroll.ScrollToTop();
+    }
+
     // MARK: - 渲染
 
     private void Render()
@@ -96,10 +140,25 @@ public partial class DailyPage : Page
             SeriesGrid.ItemsSource = _series;
         }
 
-        MovieSection.Visibility = movies.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        SeriesSection.Visibility = series.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        MovieCount.Text = movies.Count > 0 ? movies.Count.ToString() : "";
-        SeriesCount.Text = series.Count > 0 ? series.Count.ToString() : "";
+        // 电影 / 剧集分两个 tab：原来上下叠着，用户根本不知道下面还有剧集。
+        var hasMovies = movies.Count > 0;
+        var hasSeries = series.Count > 0;
+        MovieTab.Content = $"电影 {movies.Count}";
+        SeriesTab.Content = $"剧集 {series.Count}";
+        MovieTab.Visibility = hasMovies ? Visibility.Visible : Visibility.Collapsed;
+        SeriesTab.Visibility = hasSeries ? Visibility.Visible : Visibility.Collapsed;
+        CategoryTabs.Visibility = hasMovies && hasSeries ? Visibility.Visible : Visibility.Collapsed;
+
+        if (hasMovies && !hasSeries)
+        {
+            MovieTab.IsChecked = true;
+        }
+        else if (!hasMovies && hasSeries)
+        {
+            SeriesTab.IsChecked = true;
+        }
+
+        ApplyTab();
 
         var hasItems = items.Count > 0;
         FeedScroll.Visibility = hasItems ? Visibility.Visible : Visibility.Collapsed;
@@ -161,9 +220,9 @@ public partial class DailyPage : Page
 
         NotesText.Text = string.Join("\n", lines);
         NotesText.Visibility = lines.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        NotesText.Foreground = DailyService.Error is { Length: > 0 }
-            ? new SolidColorBrush(Color.FromRgb(0xFF, 0x6B, 0x6B))
-            : (Brush)FindResource("FaintBrush");
+        NotesText.SetResourceReference(
+            TextBlock.ForegroundProperty,
+            DailyService.Error is { Length: > 0 } ? "DangerBrush" : "FaintBrush");
     }
 
     // MARK: - 动作

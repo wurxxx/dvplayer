@@ -27,13 +27,13 @@ struct ShellView: View {
                 // 再压一层深色：亮画面上白字也要够对比。
                 // 关键是「暗但不闷」：详情页背后是亮画面时，
                 // 侧栏是偏暖的深棕而不是灰白 —— 颜色要透，明度要低。
-                Color(hex: 0x121118).opacity(0.22)
+                Theme.sidebarVeil
                 SidebarView()
             }
             .frame(width: Theme.sidebarWidth)
             .overlay(alignment: .trailing) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(Theme.hairline)
                     .frame(width: 1)
             }
         }
@@ -162,7 +162,7 @@ private struct SidebarView: View {
                         .overlay(
                             Image(systemName: "play.rectangle.fill")
                                 .font(.system(size: 15))
-                                .foregroundStyle(Color(hex: 0x1A1200))
+                                .foregroundStyle(Theme.onAccent)
                         )
                 }
             }
@@ -257,7 +257,7 @@ private struct SidebarView: View {
                 } label: {
                     Text("可更新 v\(update.version)")
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.accentInk)
                         .lineLimit(1)
                 }
                 .buttonStyle(.plain)
@@ -315,14 +315,14 @@ private struct SidebarItem: View {
 
             Spacer(minLength: 0)
         }
-        .foregroundStyle(selected ? Theme.text : Theme.muted)
+        .foregroundStyle(selected ? Theme.accentInk : Theme.muted)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: Theme.radiusControl)
                 .fill(highlighted ? Theme.accent.opacity(0.16)
-                      : (selected ? Color.white.opacity(0.07)
-                                  : (hovering ? Color.white.opacity(0.04) : .clear)))
+                      : (selected ? Theme.accentSoft
+                                  : (hovering ? Theme.navHover : .clear)))
         )
         .overlay {
             RoundedRectangle(cornerRadius: Theme.radiusControl)
@@ -369,7 +369,7 @@ struct WindowControls: View {
                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Circle()
-                .fill(Color(hex: active ? color : 0x4A4A52))
+                .fill(active ? Color(hex: color) : Theme.iconIdle)
                 .frame(width: 12, height: 12)
                 .overlay {
                     if hovering && active {

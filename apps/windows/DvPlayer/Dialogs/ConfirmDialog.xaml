@@ -11,15 +11,15 @@
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
         FontFamily="{StaticResource AppFont}"
-        Foreground="{StaticResource TextBrush}"
+        Foreground="{DynamicResource TextBrush}"
         TextOptions.TextFormattingMode="Display"
         PreviewMouseLeftButtonDown="OnWindowMouseDown"
         FocusManager.FocusedElement="{Binding ElementName=CancelButton}">
 
   <!-- 和界面同一套深色圆角卡片：系统 MessageBox 是浅色的，在深色 app 里很扎眼。 -->
   <Grid Margin="24">
-    <Border Background="{StaticResource SurfaceBrush}"
-            BorderBrush="{StaticResource LineBrush}"
+    <Border Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource LineBrush}"
             BorderThickness="1"
             CornerRadius="16">
       <Border.Effect>
@@ -31,18 +31,18 @@
           <Border x:Name="IconBadge" Width="34" Height="34" CornerRadius="10" Background="#26FF6B6B">
             <TextBlock x:Name="IconGlyph" Text="&#xE7BA;"
                        FontFamily="{StaticResource IconFont}" FontSize="16"
-                       Foreground="{StaticResource DangerBrush}"
+                       Foreground="{DynamicResource DangerBrush}"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Border>
 
           <TextBlock x:Name="TitleText" Text="提示"
                      FontFamily="{StaticResource DisplayFont}" FontSize="17" FontWeight="SemiBold"
-                     Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"
+                     Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"
                      Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
         </StackPanel>
 
         <TextBlock x:Name="MessageText" FontSize="13.5"
-                   Foreground="{StaticResource MutedBrush}"
+                   Foreground="{DynamicResource MutedBrush}"
                    TextWrapping="Wrap" LineHeight="21" Margin="0,14,0,0" />
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">

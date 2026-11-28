@@ -128,6 +128,18 @@ public partial class LibrariesPage : Page
         _heroTimer.Stop();
         _inlineSearchDebounce?.Cancel();
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
+        ThemeService.Changed -= OnThemeChanged;
+    }
+
+    /// <summary>
+    /// 页面常驻（KeepAlive），轮播圆点是 C# 里取的色板笔刷，换外观时得自己重建一次。
+    /// </summary>
+    private void OnThemeChanged()
+    {
+        if (IsLoaded)
+        {
+            UpdateDots();
+        }
     }
 
     private void OnConnectionChanged(object? sender, EventArgs e) =>
@@ -153,6 +165,11 @@ public partial class LibrariesPage : Page
         // 冷启动时登录还没完成，连上之后靠这个事件重新拉一次。
         AppServices.Instance.ConnectionChanged -= OnConnectionChanged;
         AppServices.Instance.ConnectionChanged += OnConnectionChanged;
+
+        // 页面常驻（KeepAlive），轮播圆点是 C# 里取的色板笔刷：
+        // 每次回到本页都重新钉一次订阅，换外观时把它们重建。
+        ThemeService.Changed -= OnThemeChanged;
+        ThemeService.Changed += OnThemeChanged;
 
         Trace("OnLoaded");
 
@@ -2578,9 +2595,9 @@ public partial class LibrariesPage : Page
 
     private sealed class HeroDot
     {
-        public HeroDot(bool active) => Fill = active
-            ? new SolidColorBrush(Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF))
-            : new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
+        public HeroDot(bool active) => Fill =
+            (Application.Current?.TryFindResource(active ? "DotActiveBrush" : "DotIdleBrush") as Brush)
+            ?? Brushes.Gray;
 
         public Brush Fill { get; }
     }

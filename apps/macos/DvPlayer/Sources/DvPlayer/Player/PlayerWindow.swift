@@ -557,6 +557,9 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
+        // 播放窗固定深色：视频是暗场，浅色界面不该让控制条变白（和 Windows 一致）。
+        // 窗口级 appearance 会让 Theme 里的动态颜色在这个窗口按深色解析。
+        window.appearance = NSAppearance(named: .darkAqua)
         // 竖屏短剧要能缩成竖窗口，最小尺寸不能按 16:9 卡死。
         window.minSize = NSSize(width: 380, height: 380)
         window.center()

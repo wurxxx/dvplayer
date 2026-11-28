@@ -11,6 +11,25 @@ struct DailyPage: View {
     /// 媒体源里没有的条目：点开后盖在列表上的资料页。
     @State private var detailItem: DailyItem?
 
+    /// 电影 / 剧集分开看：原来上下叠着，用户不知道下面还有剧集。
+    private enum DailyTab: String, CaseIterable {
+        case movie = "电影"
+        case series = "剧集"
+    }
+
+    @State private var tab: DailyTab = .movie
+
+    /// 某一类为空时直接落到另一类，不留下一个空 tab。
+    private var activeTab: DailyTab {
+        if store.movies.isEmpty && !store.series.isEmpty { return .series }
+        if store.series.isEmpty && !store.movies.isEmpty { return .movie }
+        return tab
+    }
+
+    private func count(of tab: DailyTab) -> Int {
+        tab == .movie ? store.movies.count : store.series.count
+    }
+
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 150, maximum: 210), spacing: 16, alignment: .top)]
     }
@@ -35,6 +54,7 @@ struct DailyPage: View {
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            tabs
 
             PageScroll {
                 VStack(alignment: .leading, spacing: 22) {
@@ -45,11 +65,11 @@ struct DailyPage: View {
                     } else if store.items.isEmpty {
                         emptyBlock
                     } else {
-                        if !store.movies.isEmpty {
-                            section(title: "电影", items: store.movies)
+                        if activeTab == .movie && !store.movies.isEmpty {
+                            grid(store.movies)
                         }
-                        if !store.series.isEmpty {
-                            section(title: "剧集", items: store.series)
+                        if activeTab == .series && !store.series.isEmpty {
+                            grid(store.series)
                         }
                         footer
                     }
@@ -61,6 +81,10 @@ struct DailyPage: View {
             }
         }
         .task {
+            // 自检：`DVPLAYER_DAILY_TAB=series` 直接停在剧集。
+            if ProcessInfo.processInfo.environment["DVPLAYER_DAILY_TAB"] == "series" {
+                tab = .series
+            }
             await firstLoad()
             await openDebugDetailIfRequested()
         }
@@ -119,6 +143,35 @@ struct DailyPage: View {
         return formatter.string(from: date)
     }
 
+    // MARK: - 分类切换
+
+    @ViewBuilder
+    private var tabs: some View {
+        if !store.movies.isEmpty && !store.series.isEmpty {
+            HStack(spacing: 2) {
+                ForEach(DailyTab.allCases, id: \.self) { item in
+                    Button {
+                        tab = item
+                    } label: {
+                        Text("\(item.rawValue) \(count(of: item))")
+                            .font(.system(size: 13.5, weight: activeTab == item
+                                          ? .semibold : .regular))
+                            .foregroundStyle(activeTab == item ? Theme.accentInk : Theme.muted)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 8)
+                                .fill(activeTab == item ? Theme.accentSoft : .clear))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(2)
+            .background(Theme.surfaceHover, in: RoundedRectangle(cornerRadius: 9))
+            .padding(.leading, Theme.contentLeading)
+            .padding(.top, 14)
+        }
+    }
+
     // MARK: - 提示
 
     @ViewBuilder
@@ -157,14 +210,10 @@ struct DailyPage: View {
 
     // MARK: - 分组
 
-    private func section(title: String, items: [DailyItem]) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionTitle(text: title,
-                         trailing: "\(items.count)")
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
-                ForEach(items) { item in
-                    DailyCard(item: item, onTap: { activate(item) })
-                }
+    private func grid(_ items: [DailyItem]) -> some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
+            ForEach(items) { item in
+                DailyCard(item: item, onTap: { activate(item) })
             }
         }
     }
@@ -221,17 +270,8 @@ private struct DailyCard: View {
 
     @State private var hovering = false
 
-    private var stateText: String {
-        if item.matchedItemId != nil { return "在媒体源里" }
-        if item.subscribed == true { return "已订阅" }
-        return "点按查看"
-    }
-
-    private var stateColor: Color {
-        if item.matchedItemId != nil { return Theme.success }
-        if item.subscribed == true { return Theme.accent }
-        return Theme.faint
-    }
+    /// 状态只留「已订阅」：「在媒体源里」已经有绿色在库角标，「点按查看」是废话。
+    private var subscribed: Bool { item.subscribed == true }
 
     private var badge: String? {
         if let rating = item.rating, rating > 0 {
@@ -263,7 +303,7 @@ private struct DailyCard: View {
                     if let badge {
                         Text(badge)
                             .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(Color(hex: 0x1A1200))
+                            .foregroundStyle(Theme.onAccent)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 5))
@@ -283,10 +323,10 @@ private struct DailyCard: View {
                 .overlay(alignment: .bottomLeading) {
                     if item.matchedItemId != nil {
                         HStack(spacing: 4) {
-                            Circle().fill(Theme.success).frame(width: 5, height: 5)
+                            Circle().fill(Theme.successOnImage).frame(width: 5, height: 5)
                             Text("在库")
                                 .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Theme.successOnImage)
                         }
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -306,19 +346,25 @@ private struct DailyCard: View {
                     .padding(.top, 9)
 
                 HStack(spacing: 5) {
-                    Text(stateText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(stateColor)
-                        .lineLimit(1)
-                    if let year = item.year {
-                        Text("·")
+                    if subscribed {
+                        Text("已订阅")
                             .font(.system(size: 12))
-                            .foregroundStyle(Theme.faint.opacity(0.6))
+                            .foregroundStyle(Theme.accentInk)
+                            .lineLimit(1)
+                    }
+                    if let year = item.year {
+                        if subscribed {
+                            Text("·")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.faint.opacity(0.6))
+                        }
                         Text(String(year))
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.faint)
                     }
                 }
+                // 没有状态也没有年份时也占住一行，卡片高度不会忽高忽低。
+                .frame(height: 16, alignment: .leading)
                 .padding(.top, 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

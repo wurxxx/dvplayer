@@ -119,13 +119,13 @@ struct RecordsPage: View {
                         tab = item
                     } label: {
                         Text(item.rawValue)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(tab == item ? Theme.text : Theme.muted)
-                            .padding(.horizontal, 14)
+                            .font(.system(size: 13.5))
+                            .foregroundStyle(tab == item ? Theme.accentInk : Theme.muted)
+                            .padding(.horizontal, 15)
                             .padding(.vertical, 6)
                             .background(
-                                RoundedRectangle(cornerRadius: 7)
-                                    .fill(tab == item ? Color.white.opacity(0.09) : .clear)
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(tab == item ? Theme.accentSoft : .clear)
                             )
                     }
                     .buttonStyle(.plain)

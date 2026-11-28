@@ -1658,6 +1658,14 @@ public partial class MainWindow : FluentWindow
                 }
             }
 
+            // --daily-tab series：每日推荐切到剧集（核对分类切换）。
+            if (tag == "daily" && ArgumentAfter("--daily-tab") is { Length: > 0 } dailyTab
+                && ContentFrame.Content is DailyPage tabbedDaily)
+            {
+                tabbedDaily.ShowTabForShot(dailyTab);
+                await Task.Delay(600);
+            }
+
             // --settings-tab play：设置页直接停在「播放」分组（核对缓冲大小这种项）。
             if (tag == "settings" && ArgumentAfter("--settings-tab") is { Length: > 0 } settingsTab &&
                 ContentFrame.Content is SettingsPage tabbedSettings)
@@ -2709,7 +2717,7 @@ public partial class MainWindow : FluentWindow
             ResizeMode = ResizeMode.NoResize,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
             ShowInTaskbar = false,
-            Background = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x19)),
+            Background = (Brush)FindResource("BgBrush"),
         };
 
         var searchBorder = new Border
@@ -2750,7 +2758,7 @@ public partial class MainWindow : FluentWindow
         scroll.Content = new Border
         {
             Height = 1200,
-            Background = new SolidColorBrush(Color.FromRgb(0x1F, 0x1F, 0x27)),
+            Background = (Brush)FindResource("SurfaceBrush"),
         };
 
         var panel = new StackPanel { Margin = new Thickness(24) };

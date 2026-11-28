@@ -132,7 +132,7 @@ struct LibrariesPage: View {
             ZStack(alignment: .top) {
                 if tab == .media {
                     // 页签压在 Hero 上，只用渐变压暗，不做实底。
-                    LinearGradient(colors: [Color.black.opacity(0.55), .clear],
+                    LinearGradient(colors: [Theme.scrimTop, .clear],
                                    startPoint: .top, endPoint: .bottom)
                         .frame(height: 112)
                         .allowsHitTesting(false)
@@ -152,13 +152,13 @@ struct LibrariesPage: View {
                     withAnimation(.easeOut(duration: 0.16)) { tab = item }
                 } label: {
                     Text(item.rawValue)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(tab == item ? Theme.text : Color.white.opacity(0.72))
-                        .padding(.horizontal, 16)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(tab == item ? Theme.accentInk : Theme.muted)
+                        .padding(.horizontal, 15)
                         .padding(.vertical, 6)
                         .background(
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(tab == item ? Color.white.opacity(0.12) : .clear)
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(tab == item ? Theme.accentSoft : .clear)
                         )
                         .contentShape(Rectangle())
                 }
@@ -166,10 +166,10 @@ struct LibrariesPage: View {
             }
         }
         .padding(2)
-        .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+        .background(Theme.glassPanel, in: RoundedRectangle(cornerRadius: 9))
         .overlay(
             RoundedRectangle(cornerRadius: 9)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                .stroke(Theme.hairline, lineWidth: 1)
         )
     }
 
@@ -345,20 +345,20 @@ struct LibrariesPage: View {
                     VStack(spacing: 10) {
                         Text(item.title)
                             .font(.system(size: 36, weight: .semibold))
-                            .foregroundStyle(Color.white.opacity(0.98))
+                            .foregroundStyle(Theme.text)
                             .lineLimit(1)
                             .multilineTextAlignment(.center)
 
                         if !item.meta.isEmpty {
                             Text(item.meta)
                                 .font(.system(size: 13.5))
-                                .foregroundStyle(Color.white.opacity(0.85))
+                                .foregroundStyle(Theme.muted)
                         }
 
                         if !item.chips.isEmpty {
                             HStack(spacing: 8) {
                                 ForEach(item.chips, id: \.self) { chip in
-                                    Chip(text: chip, tint: Color.white.opacity(0.2))
+                                    Chip(text: chip, tint: Theme.chip)
                                 }
                             }
                         }
@@ -366,7 +366,7 @@ struct LibrariesPage: View {
                         if let overview = item.overview, !overview.isEmpty {
                             Text(overview)
                                 .font(.system(size: 14))
-                                .foregroundStyle(Color.white.opacity(0.72))
+                                .foregroundStyle(Theme.muted)
                                 .multilineTextAlignment(.center)
                                 .lineLimit(3)
                                 .frame(maxWidth: 800)
@@ -380,7 +380,7 @@ struct LibrariesPage: View {
                         HStack(spacing: 0) {
                             ForEach(heroes.indices, id: \.self) { index in
                                 Circle()
-                                    .fill(Color.white.opacity(index == heroIndex ? 0.9 : 0.35))
+                                    .fill(index == heroIndex ? Theme.dotActive : Theme.dotIdle)
                                     .frame(width: 6, height: 6)
                                     // 圆点只有 6pt，间距也是 6pt。整块 Hero 现在
                                     // 都能点进详情，点偏一点就会穿透进去，所以把

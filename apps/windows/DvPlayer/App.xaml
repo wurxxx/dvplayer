@@ -8,7 +8,9 @@
       <ResourceDictionary.MergedDictionaries>
         <ui:ThemesDictionary Theme="Dark" />
         <ui:ControlsDictionary />
-        <!-- 放在最后：覆盖 WPF-UI 的默认色，整套界面用 AppTheme 的色板。 -->
+        <!-- 色板：启动时按设置 / 系统外观换成 Palette.Light（见 ThemeService）。 -->
+        <ResourceDictionary Source="Themes/Palette.Dark.xaml" />
+        <!-- 放在最后：覆盖 WPF-UI 的默认色，整套界面用 AppTheme 的样式。 -->
         <ResourceDictionary Source="Themes/AppTheme.xaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>

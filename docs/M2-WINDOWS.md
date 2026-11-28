@@ -40,25 +40,6 @@ FEL 在进程内后端已真机验证通过，细节和实测数据见
 （进程内后端靠 `log-file`，子进程靠重定向 stderr）；进程内后端还有
 `mpv-shell.log`，放壳侧的初始化 / 选项错误。
 
-应用自己的运行日志是 `%LOCALAPPDATA%\dvplayer\player.log`（超过 4 MB 轮转成
-`player.log.1`），时间戳带日期和毫秒。每次启动先写一行版本 / 核心 / 系统 / 源数量，
-再写配置路径；每个源建连前写一行
-
-```
-connect <名称> id=… kind=emby base=http://host:8096 user="alice" pass=set(8) proxy=-
-```
-
-建连结果写
-
-```
-source <名称> (emby) -> fail in 812 ms: api error 401: Invalid username or password.
-```
-
-口令只记有没有和多长（能看出粘贴时多带了空格 / 换行），不记原文。错误文本里带
-HTTP 状态码；登录请求被反代重定向（http → https）时还会追加最终地址和提示，
-用来区分「地址不对」和「账号真不对」。核心里的 `eprintln!` 不进 player.log，
-从 cmd / PowerShell 启动 `DvPlayer.exe` 才能在窗口里看到。
-
 ## 3. 和 macOS 的差异
 
 - **菜单没有子菜单**：WPF 的 `DarkMenuItem` 模板没有 `Popup` / 箭头，所以
@@ -292,6 +273,12 @@ DvPlayer.exe --play <itemId> --play-series <剧容器 id> \
 - `--screenshot <目录> settings --settings-tab play`：设置页直接停在「播放」分组，
   核对缓冲大小这类项；`--settings-tab about` 停在「关于」，核对版本 / 项目地址 /
   更新状态（更新检查是异步的，切换后要等结果回来再截）。
+- `--appearance light|dark|system`：这次运行强制用某个外观（不写回设置），
+  配合 `--screenshot` 每页截深浅两套；设置页「通用 → 外观」里改会当场写入
+  `settings.json` 并立刻换色板。
+- `--accent blue|7C3AED|custom:3B82F6`：这次运行强制用某个主题色（预设 id
+  或 hex，不写回设置）；设置页「通用 → 外观 → 主题色」里点色块或拖 RGB
+  滑块会当场写回配置并立刻重绘。
 - `--play-cover-shot <目录>`：抓打开遮罩。设 `DVPLAYER_OPENING_HOLD=1`（假装首帧
   不来）时，1.5 / 12 / 31 秒三张都必须是纯黑 + 片名 +「正在打开…」+ 转圈，不能透出桌面。
 - `DVPLAYER_BUFFERING_HOLD=1`：出画后强制显示中间的「正在缓冲…」小胶囊（验证播放中

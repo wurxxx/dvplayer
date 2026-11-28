@@ -1165,14 +1165,9 @@ public sealed class DailyItem : CardVisual
         Rating is > 0 ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
     [JsonIgnore]
-    public string StateText => InLibrary ? "在媒体源里" : Subscribed ? "已订阅" : "点按查看";
-
-    [JsonIgnore]
-    public Brush StateBrush => InLibrary
-        ? new SolidColorBrush(Color.FromRgb(0x4A, 0xDE, 0x80))
-        : Subscribed
-            ? new SolidColorBrush(Color.FromRgb(0xFF, 0xB0, 0x20))
-            : new SolidColorBrush(Color.FromRgb(0x96, 0x96, 0xA4));
+    public System.Windows.Visibility SubscribedVisibility => Subscribed
+        ? System.Windows.Visibility.Visible
+        : System.Windows.Visibility.Collapsed;
 
     [JsonIgnore]
     public System.Windows.Visibility MatchedVisibility =>
@@ -1180,6 +1175,7 @@ public sealed class DailyItem : CardVisual
 
     [JsonIgnore]
     public string SubText => Year is { } year ? year.ToString() : "";
+
 
     public void SetMatched(string itemId, string title)
     {
@@ -1191,8 +1187,7 @@ public sealed class DailyItem : CardVisual
     public void RaiseState()
     {
         Raise(nameof(InLibrary));
-        Raise(nameof(StateText));
-        Raise(nameof(StateBrush));
+        Raise(nameof(SubscribedVisibility));
         Raise(nameof(MatchedVisibility));
         Raise(nameof(SubText));
         Raise(nameof(RatingText));

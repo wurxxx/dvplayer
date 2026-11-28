@@ -2,18 +2,89 @@ import SwiftUI
 import AppKit
 
 // 色板与字号照 docs/UI-DESIGN.md（和 Windows 的 AppTheme.xaml 同一套）。
+//
+// 深浅两套值都由 AppKit 的动态颜色提供：切 `NSApp.appearance` 之后，
+// AppKit 在下一次绘制时按当前外观重新解析，SwiftUI 不用把颜色搬进 state。
+// 播放窗固定深色（PlayerWindow 自己设 darkAqua），所以那边的颜色不跟主题走。
 enum Theme {
-    static let bg = Color(hex: 0x141419)
-    static let sidebar = Color(hex: 0x17171D)
-    static let surface = Color(hex: 0x1F1F27)
-    static let surfaceHover = Color(hex: 0x2B2B35)
-    static let line = Color(hex: 0x3B3B49)
-    static let text = Color(hex: 0xF5F5F8)
-    static let muted = Color(hex: 0xBDBDCB)
-    static let faint = Color(hex: 0x9696A4)
-    static let accent = Color(hex: 0xFFB020)
-    static let danger = Color(hex: 0xFF6B6B)
-    static let success = Color(hex: 0x4ADE80)
+    // MARK: - 色板
+
+    /// 深浅两套值。`darkAlpha` / `lightAlpha` 用来表达「白 18% / 黑 8%」这类叠层。
+    private static func dyn(_ dark: UInt32, _ light: UInt32,
+                            darkAlpha: Double = 1, lightAlpha: Double = 1) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark ? NSColor(hex: dark, alpha: darkAlpha)
+                          : NSColor(hex: light, alpha: lightAlpha)
+        })
+    }
+
+    /// 主题色是动态的：每次解析都读当前预设，换颜色后重绘就生效。
+    private static func accentColor(_ make: @escaping (NSColor, Bool) -> NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let light = appearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua
+            return make(AccentSettings.effectiveFill, light)
+        })
+    }
+
+    /// 换主题色后让已经画出来的内容重新解析动态色。
+    static func refreshWindows() {
+        for window in NSApp.windows {
+            if let content = window.contentView { markDirty(content) }
+        }
+    }
+
+    private static func markDirty(_ view: NSView) {
+        view.needsDisplay = true
+        for sub in view.subviews { markDirty(sub) }
+    }
+
+    static let bg = dyn(0x141419, 0xF4F5F7)
+    static let sidebar = dyn(0x17171D, 0xFBFBFD)
+    static let surface = dyn(0x1F1F27, 0xFFFFFF)
+    static let surfaceHover = dyn(0x2B2B35, 0xECEFF4)
+    static let line = dyn(0x3B3B49, 0xD7DBE2)
+    static let text = dyn(0xF5F5F8, 0x171A20)
+    static let muted = dyn(0xBDBDCB, 0x4B5361)
+    static let faint = dyn(0x9696A4, 0x667080)
+    /// 强调色**填充**（按钮、进度条、开关）：用户在设置里选，默认琥珀。
+    static let accent = accentColor { fill, _ in fill }
+    /// 强调色当**文字 / 图标 / 描边**：浅色下压暗，深色下提亮。
+    static let accentInk = accentColor { fill, light in AccentPalette.ink(fill, light: light) }
+    /// 强调色**填充上的文字**（按钮 / 徽章）：深字 / 白字取对比度更高的那个。
+    static let onAccent = accentColor { fill, _ in AccentPalette.onFill(fill) }
+    static let danger = dyn(0xFF6B6B, 0xC8261B)
+    static let success = dyn(0x4ADE80, 0x15803D)
+    /// 压在图上用的绿（「在库」角标）：底是半透明黑，浅色的深绿读不清，
+    /// 两套都用亮绿，和 Windows 的 `SuccessOnImageBrush` 一致。
+    static let successOnImage = dyn(0x4ADE80, 0x4ADE80)
+
+    /// 强调色的浅底块（选中段、当前季），文字配 `accentInk`。
+    static let accentSoft = accentColor { fill, light in AccentPalette.soft(fill, light: light) }
+
+    // 叠层：深色下是白 alpha，浅色下换成黑 alpha。
+    static let chip = dyn(0xFFFFFF, 0x000000, darkAlpha: 0.18, lightAlpha: 0.08)
+    static let hairline = dyn(0xFFFFFF, 0x000000, darkAlpha: 0.08, lightAlpha: 0.09)
+    /// 悬停底：比选中弱一档。选中块一律用 `accentSoft` + `accentInk`。
+    static let navHover = dyn(0xFFFFFF, 0x000000, darkAlpha: 0.04, lightAlpha: 0.055)
+    /// 开关关闭态的轨道（和 Windows 的 SwitchTrackBrush 一致）。
+    /// 旋钮一律白色，开启态用 accent 填充，见 DvSwitchStyle。
+    static let switchTrack = dyn(0x3A3A46, 0xCDD2DA)
+    /// 浮在图片上的分段条 / 胶囊底。
+    static let glassPanel = dyn(0x000000, 0xFFFFFF, darkAlpha: 0.45, lightAlpha: 0.82)
+    /// 顶栏浮在大图上时压的渐变起点。
+    static let scrimTop = dyn(0x000000, 0xFFFFFF, darkAlpha: 0.55, lightAlpha: 0.80)
+    /// 轮播圆点。
+    static let dotActive = dyn(0xFFFFFF, 0x171A20, darkAlpha: 0.90, lightAlpha: 0.85)
+    static let dotIdle = dyn(0xFFFFFF, 0x171A20, darkAlpha: 0.35, lightAlpha: 0.35)
+    /// 侧栏遮罩：深色压暗，浅色提亮（毛玻璃取到的画面偏亮时白字要能读）。
+    static let sidebarVeil = dyn(0x121118, 0xFFFFFF, darkAlpha: 0.22, lightAlpha: 0.45)
+    /// 滚动条滑块三档（静止 / 悬停 / 拖动）。
+    static let scrollThumb = dyn(0xFFFFFF, 0x000000, darkAlpha: 0.22, lightAlpha: 0.24)
+    static let scrollThumbHover = dyn(0xFFFFFF, 0x000000, darkAlpha: 0.34, lightAlpha: 0.36)
+    static let scrollThumbDrag = dyn(0xFFFFFF, 0x000000, darkAlpha: 0.46, lightAlpha: 0.48)
+    /// 顶栏 / 侧栏上的图标默认色（比 faint 再低一档）。
+    static let iconIdle = dyn(0x4A4A52, 0xB3B8C2)
 
     static let radiusCard: CGFloat = 12
     static let radiusControl: CGFloat = 9
@@ -22,6 +93,15 @@ enum Theme {
     /// 侧栏是浮在内容上的毛玻璃层（Hero 大图从窗口最左边铺到底），
     /// 正文要躲开它：左内边距 = 侧栏宽 + 常规留白。
     static let contentLeading: CGFloat = sidebarWidth + 32
+}
+
+extension NSColor {
+    convenience init(hex: UInt32, alpha: Double = 1) {
+        self.init(srgbRed: Double((hex >> 16) & 0xFF) / 255,
+                  green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255,
+                  alpha: alpha)
+    }
 }
 
 extension Color {
@@ -91,7 +171,7 @@ struct SectionTitle: View {
 
 struct Caption: View {
     let text: String
-    var size: CGFloat = 11.5
+    var size: CGFloat = 12.5
 
     var body: some View {
         Text(text)
@@ -103,7 +183,7 @@ struct Caption: View {
 /// 一行小标签（分辨率、编码、动态范围）。
 struct Chip: View {
     let text: String
-    var tint: Color = Color.white.opacity(0.18)
+    var tint: Color = Theme.chip
 
     var body: some View {
         Text(text)
@@ -133,7 +213,7 @@ struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13.5, weight: .semibold))
-            .foregroundStyle(Color(hex: 0x1A1200))
+            .foregroundStyle(Theme.onAccent)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(Theme.accent.opacity(configuration.isPressed ? 0.8 : 1),
@@ -155,7 +235,7 @@ struct SecondaryButtonStyle: ButtonStyle {
                         in: RoundedRectangle(cornerRadius: Theme.radiusControl))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radiusControl)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    .stroke(Theme.hairline, lineWidth: 1)
             )
     }
 }

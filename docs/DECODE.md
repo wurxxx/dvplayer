@@ -159,3 +159,29 @@ sh scripts/windows/wssh.sh 'schtasks /run /tn decode-render'  # C：渲染吞吐
 
 scp -i ~/.ssh/dvplayer_win -r wucl@192.168.194.3:D:/dvplayer/out/decode3 out/
 ```
+
+## 8. Android / TV（未验证）
+
+> 2026-11-25。这一节是规划口径，不是实测结果；M2 的 A1 spike 与 A5 / A6 会逐格填。
+> Android 是双内核（mpv 默认 + Media3 第二，见
+> [ADR-0014](adr/0014-android-dual-engine.md)），所以每格分两条路径记。
+
+| 能力 | mpv 路径 | Media3 路径 | 默认 |
+| --- | --- | --- | --- |
+| HEVC / H.264 硬解 | `hwdec=mediacodec` | MediaCodec | mpv |
+| HDR10 / HLG | 壳设 dataspace / colorMode，待真屏验收 | 平台原生 | Media3（设备支持时） |
+| HDR10+ | 只在 tone-map 侧消费动态元数据 | 平台透传 | Media3 |
+| DV P8 | gpu-next 整形，输出待验 | 设备 DV 直通 | 有 DV 解码器 → Media3 |
+| DV P5 | libplacebo 整形，SDR 颜色正确 | 绿紫 / 无解码器 | mpv |
+| DV P7 | 整形后输出，双层拿不到 | BL 回退 | mpv |
+| DTS / DTS-HD | FFmpeg 解码 | 需 FFmpeg 音频扩展 | mpv |
+| TrueHD | FFmpeg 解码 | 需 FFmpeg 音频扩展 | mpv（软解） |
+| Atmos | 仅直通保留对象元数据 | 仅直通 | 直通走 Media3 |
+| PGS / SRT | 自带 | 自带 | mpv |
+| ASS / SSA | 自带 + MKV 内嵌字体 | 只显示基础文本 | mpv |
+| ISO / BDMV | 原生 libbluray | 不支持 | mpv |
+| 4K60 渲染吞吐 | 待测（gpu-next + 整形） | 待测（tunneling） | 按 `DeviceProfile` |
+
+A1 spike 要在目标盒子上回答六件事：4K HDR10 的实际输出与掉帧、DV P8、DV P5 颜色、
+DTS-HD / TrueHD 直通、24p 帧率匹配、后台 / PiP 音频。结果回填到这一节和
+[M2-ANDROID.md](M2-ANDROID.md) 的能力表。

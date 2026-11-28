@@ -13,6 +13,19 @@
         MouseMove="OnMouseMove">
 
   <!--
+    播放窗固定深色：视频本身就是暗场，浅色界面不该让控制条变白。
+    在窗口级 merge 一本深色色板，窗口里的 DynamicResource 先在本地命中，
+    不跟 App 的浅色字典走（Styles 仍然来自 AppTheme）。
+  -->
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="/DvPlayer;component/Themes/Palette.Dark.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
+
+  <!--
     这一层只有控制条：视频在下面一个独立的黑窗里（PlayerSurfaceWindow）。
     WPF 的 HwndHost 总是盖住同窗口的 WPF 内容，所以视频和浮层必须分窗。
     底色用 #01000000 而不是 Transparent：分层窗口的 0 alpha 像素会让鼠标
@@ -144,7 +157,7 @@
 
           <Grid Margin="8,4,8,8">
             <TextBlock x:Name="EpisodePanelTitle" Text="选集" FontSize="14" FontWeight="SemiBold"
-                       Foreground="{StaticResource TextBrush}" />
+                       Foreground="{DynamicResource TextBrush}" />
             <TextBlock x:Name="EpisodePanelMeta" HorizontalAlignment="Right" VerticalAlignment="Center"
                        Style="{StaticResource Caption}" />
           </Grid>
@@ -174,15 +187,15 @@
                       </Border>
 
                       <Border x:Name="ActiveRing" Grid.ColumnSpan="2" Margin="-2" CornerRadius="9"
-                              BorderBrush="{StaticResource AccentBrush}" BorderThickness="2"
+                              BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2"
                               Visibility="{Binding SelectedVisibility}" />
 
                       <StackPanel Grid.Column="1" Margin="12,0,4,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Badge}" FontSize="15" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextBrush}"
+                                   Foreground="{DynamicResource TextBrush}"
                                    TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding Meta}" FontSize="12.5" Margin="0,5,0,0"
-                                   Foreground="{StaticResource FaintBrush}"
+                                   Foreground="{DynamicResource FaintBrush}"
                                    TextTrimming="CharacterEllipsis" />
                       </StackPanel>
                     </Grid>
@@ -207,7 +220,7 @@
         <StackPanel>
           <Grid Margin="0,0,0,10">
             <TextBlock Text="媒体信息" FontSize="14" FontWeight="SemiBold"
-                       Foreground="{StaticResource TextBrush}" />
+                       Foreground="{DynamicResource TextBrush}" />
             <Button Click="OnCloseMediaInfoClick" Style="{StaticResource PlayerButton}"
                     Width="30" Height="30" HorizontalAlignment="Right" ToolTip="关闭">
               <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="13"
@@ -305,7 +318,7 @@
                       Background="#A6FFFFFF" HorizontalAlignment="Left"
                       VerticalAlignment="Center" Width="0" IsHitTestVisible="False" />
               <Border x:Name="SeekPlayedBar" Height="4" CornerRadius="2"
-                      Background="{StaticResource AccentBrush}" HorizontalAlignment="Left"
+                      Background="{DynamicResource AccentBrush}" HorizontalAlignment="Left"
                       VerticalAlignment="Center" Width="0" IsHitTestVisible="False" />
 
               <Slider x:Name="Seek" Style="{StaticResource SeekBarHit}"
