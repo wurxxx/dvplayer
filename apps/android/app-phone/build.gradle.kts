@@ -8,14 +8,10 @@ android {
 
     defaultConfig {
         applicationId = "com.dvplayer.app"
-        versionCode = 1
-        versionName = "0.1.0"
-    }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-        }
+        // 手机端自己的版本线，和桌面端、TV 端都无关（见 gradle.properties）。
+        versionName = providers.gradleProperty("dvplayer.phone.versionName").getOrElse("0.1.0")
+        versionCode = providers.gradleProperty("dvplayer.phone.versionCode").orNull?.toIntOrNull() ?: 100
     }
 }
 

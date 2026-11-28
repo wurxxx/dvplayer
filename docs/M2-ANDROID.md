@@ -834,12 +834,29 @@ adb shell am start -n com.dvplayer.app/.PlaybackActivity \
 | job | 内容 |
 | --- | --- |
 | `unit-test` | JDK 17 + SDK 36，跑上面三个模块的单测 |
-| `apk` | 装 NDK r28 + Rust + `cargo-ndk`、还原/编译 libmpv、编 `arm64-v8a` 核心、编 `:app-phone` + `:app-tv`、`check-apk.sh` 校验 APK |
+| `apk` | 装 NDK r28 + Rust + `cargo-ndk`、还原/编译 libmpv、编 `arm64-v8a` 核心、编 `:app-phone` + `:app-tv`、`check-apk.sh` 校验 APK（打标签时跳过） |
+| `release` | 只在 `android-phone-v*` / `android-tv-v*` 上跑：签名后出对应端的发版 APK，附到同名 Release |
 
 libmpv 缓存在 `build/android-mpv/arm64/prefix`，key 是
 `build-mpv.sh` + `env.sh` 的哈希——改脚本才重编，日常 PR 直接命中。
 `build-mpv.sh` 的 NDK prebuilt 目录与 CPU 数已改为按宿主探测
 （darwin / linux、`sysctl` / `nproc`），否则 Linux runner 找不到 clang。
+
+**发版（侧载 APK）**：三条版本线互不看齐——桌面端 `v0.1.7`（`Info.plist` /
+`csproj`）、手机端 `android-phone-v0.1.0`、TV 端 `android-tv-v0.1.0`。
+TV 界面还没做完，可以一直停在自己的 0.1.x。
+
+| 环节 | 做法 |
+| --- | --- |
+| 版本号 | `apps/android/gradle.properties` 的 `dvplayer.phone.*` / `dvplayer.tv.*`，`versionCode = 大*10000+小*100+补丁`（0.1.0 → 100）；改版本用 `scripts/android/bump-version.sh phone 0.1.1`（TV 换成 `tv`） |
+| 标签 | `android-phone-v0.1.1` / `android-tv-v0.1.0` 各发各的；标签上只跑 `release`，不出 debug 包 |
+| 覆盖 | 标签里的版本用 `-Pdvplayer.<app>.versionName` / `.versionCode` 覆盖进对应模块的 APK，打完用 `aapt2 dump badging` 核对 |
+| 签名 | 两端共用一套密钥；Secrets：`DVPLAYER_ANDROID_KEYSTORE_BASE64` / `_STORE_PASSWORD` / `_KEY_ALIAS` / `_KEY_PASSWORD`，用 `scripts/android/make-keystore.sh` 生成。缺密钥时 job 直接失败——debug 签名每次不同，用户没法覆盖安装 |
+| 产物 | `DVPlayer-Phone-<版本>.apk` / `DVPlayer-TV-<版本>.apk`，各自附到同名 Release（标 prerelease、不抢 latest），正文在 `.github/release-notes-android-{phone,tv}.md` |
+
+本机出签名包：设好那四个 `DVPLAYER_ANDROID_*` 变量后
+`./gradlew :app-phone:assembleRelease`（TV 换成 `:app-tv`）；不设就退回 debug
+签名，方便看界面。
 
 **凭据**（`CredentialStore` / `CredentialScope`）：
 
@@ -962,7 +979,7 @@ adb logcat -s DvPlayer:D DvMpv:D DvCaps:D
 | Android 16 本地网络访问 | 权限声明待 SDK 文档确认 |
 | 播放器搬进前台服务 | 现在只有通知与 Surface 在前台服务；Activity 被回收时播放会停（§7.9 的边界） |
 | NFS 非匿名导出 | uid / gid 只能构造时传，源配置里没暴露（§7.8） |
-| 发布 | 两个 applicationId 的商店条目；手机侧下载是否 v1 必做 |
+| 发布 | 侧载 APK 已接（手机 / TV 各自打标签出包，§7.10）；还差两个 applicationId 的商店条目、手机侧下载是否 v1 必做 |
 
 **待验**：
 

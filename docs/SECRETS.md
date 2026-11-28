@@ -89,3 +89,22 @@ chmod 600 ~/.config/dvplayer/trakt.env
 立刻生效。旧版本 `settings.json` 里残留的 `danmakuAppId` / `danmakuAppSecret`
 会被忽略（解码时不再读），下一次保存就消失。Trakt 的设置页手填值仍然优先于
 内置值，方便自建应用的开发者。
+
+## Android 发版签名（仓库 Secrets）
+
+Android 的 APK 用一套固定密钥签名，存在仓库 Secrets 里（不注入产物，CI 打包时
+临时落地成文件）：
+
+| Secret | 内容 |
+| --- | --- |
+| `DVPLAYER_ANDROID_KEYSTORE_BASE64` | `keytool` 生成的 keystore 转 base64（一行） |
+| `DVPLAYER_ANDROID_STORE_PASSWORD` | keystore 密码 |
+| `DVPLAYER_ANDROID_KEY_ALIAS` | 密钥别名（默认 `dvplayer`） |
+| `DVPLAYER_ANDROID_KEY_PASSWORD` | 密钥密码（和 store 密码相同即可） |
+
+生成一次就够了，用 `scripts/android/make-keystore.sh`：密钥落在
+`~/.config/dvplayer/android-release.jks`，脚本打印上面四个值。**备份密钥和密码**——
+丢了就发不出能覆盖安装的升级包，只能让用户卸载重装。
+
+为什么不用 debug 密钥：debug keystore 每台机器 / 每次 CI 都是新生成的，签名不同，
+装上去会提示「应用未安装」或需要先卸载。手机端和 TV 端共用这一套密钥。

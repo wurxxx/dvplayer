@@ -108,6 +108,22 @@ scripts/android/check-apk.sh apps/android/app-phone/build/outputs/apk/debug/app-
 仓库就 `DVPLAYER_MAVEN_MIRROR= source scripts/android/env.sh`。`local.properties`
 里的 `sdk.dir` 不进仓库，换机器时自己建一份或依赖 `ANDROID_HOME`。
 
+## 发版
+
+APK 由标签出包（`.github/workflows/android.yml` 的 `release` job），手机端和 TV 端
+分开打、分开出：
+
+```bash
+scripts/android/bump-version.sh phone 0.1.1   # 改 apps/android/gradle.properties
+git commit -am '发布 Android 手机 0.1.1' && git push github master
+git tag android-phone-v0.1.1 && git push github android-phone-v0.1.1
+```
+
+TV 换成 `tv` 和 `android-tv-v0.1.0`。三条版本线互不相同：桌面端 `v0.1.7`、
+手机端、TV 端各走各的。签名密钥用 `scripts/android/make-keystore.sh` 生成一次，
+填到仓库 Secrets 的四个 `DVPLAYER_ANDROID_*`；密钥和密码要备份，丢了就发不出
+能覆盖安装的升级包。细节见 [docs/M2-ANDROID.md](../../docs/M2-ANDROID.md) §7.10。
+
 ## 测试
 
 ```bash
