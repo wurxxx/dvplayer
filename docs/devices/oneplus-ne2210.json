@@ -1,0 +1,189 @@
+{
+  "manufacturer": "OnePlus",
+  "model": "NE2210",
+  "device": "OP516EL1",
+  "hardware": "qcom",
+  "release": "16",
+  "sdk": 36,
+  "abi": "arm64-v8a",
+  "gles": "3.2",
+  "pip": true,
+  "display": {
+    "width": 1440,
+    "height": 3216,
+    "fps": 120,
+    "modes": [
+      {
+        "w": 1080,
+        "h": 2412,
+        "fps": 120
+      },
+      {
+        "w": 1080,
+        "h": 2412,
+        "fps": 60
+      },
+      {
+        "w": 1080,
+        "h": 2412,
+        "fps": 90
+      },
+      {
+        "w": 1440,
+        "h": 3216,
+        "fps": 60
+      },
+      {
+        "w": 1440,
+        "h": 3216,
+        "fps": 90
+      },
+      {
+        "w": 1440,
+        "h": 3216,
+        "fps": 120
+      }
+    ],
+    "hdr": [
+      "hdr10",
+      "hlg",
+      "hdr10_plus"
+    ],
+    "hdrMaxLuminance": 540,
+    "hdrMaxAverageLuminance": 270.1,
+    "wideColorGamut": true
+  },
+  "egl": {
+    "colorspace": [
+      "bt2020_pq",
+      "bt2020_hlg"
+    ],
+    "hdrMetadata": [
+      "smpte2086",
+      "cta861_3"
+    ]
+  },
+  "codecs": {
+    "video/avc": [
+      "OMX.google.h264.decoder",
+      "OMX.google.h264.encoder",
+      "OMX.qcom.video.decoder.avc",
+      "OMX.qcom.video.decoder.avc.low_latency",
+      "OMX.qcom.video.decoder.avc.secure",
+      "OMX.qcom.video.encoder.avc",
+      "c2.android.avc.decoder",
+      "c2.android.avc.encoder",
+      "c2.qti.avc.decoder",
+      "c2.qti.avc.decoder.low_latency",
+      "c2.qti.avc.decoder.secure",
+      "c2.qti.avc.encoder"
+    ],
+    "video/hevc": [
+      "OMX.google.hevc.decoder",
+      "OMX.qcom.video.decoder.hevc",
+      "OMX.qcom.video.decoder.hevc.low_latency",
+      "OMX.qcom.video.decoder.hevc.secure",
+      "OMX.qcom.video.encoder.hevc",
+      "OMX.qcom.video.encoder.hevc.cq",
+      "c2.android.hevc.decoder",
+      "c2.android.hevc.encoder",
+      "c2.qti.hevc.decoder",
+      "c2.qti.hevc.decoder.low_latency",
+      "c2.qti.hevc.decoder.secure",
+      "c2.qti.hevc.encoder",
+      "c2.qti.hevc.encoder.cq"
+    ],
+    "video/x-vnd.on2.vp9": [
+      "OMX.google.vp9.decoder",
+      "OMX.google.vp9.encoder",
+      "OMX.qcom.video.decoder.vp9",
+      "OMX.qcom.video.decoder.vp9.low_latency",
+      "OMX.qcom.video.decoder.vp9.secure",
+      "c2.android.vp9.decoder",
+      "c2.android.vp9.encoder",
+      "c2.qti.vp9.decoder",
+      "c2.qti.vp9.decoder.low_latency",
+      "c2.qti.vp9.decoder.secure"
+    ],
+    "video/apv": [
+      "c2.android.apv.decoder",
+      "c2.android.apv.encoder"
+    ],
+    "video/av01": [
+      "c2.android.av1-dav1d.decoder",
+      "c2.android.av1.decoder",
+      "c2.android.av1.encoder"
+    ],
+    "video/3gpp": [
+      "OMX.google.h263.decoder",
+      "OMX.google.h263.encoder",
+      "c2.android.h263.decoder",
+      "c2.android.h263.encoder"
+    ],
+    "video/mp4v-es": [
+      "OMX.google.mpeg4.decoder",
+      "OMX.google.mpeg4.encoder",
+      "c2.android.mpeg4.decoder",
+      "c2.android.mpeg4.encoder"
+    ],
+    "video/x-vnd.on2.vp8": [
+      "OMX.google.vp8.decoder",
+      "OMX.google.vp8.encoder",
+      "c2.android.vp8.decoder",
+      "c2.android.vp8.encoder"
+    ],
+    "video/ffmpeg": [
+      "OMX.ffmpeg.vtrial.decoder"
+    ]
+  },
+  "audio": {
+    "outputs": [
+      {
+        "type": "speaker",
+        "name": "NE2210",
+        "encodings": [
+          "pcm_16"
+        ]
+      },
+      {
+        "type": "earpiece",
+        "name": "NE2210",
+        "encodings": [
+          "pcm_16"
+        ]
+      },
+      {
+        "type": "telephony",
+        "name": "NE2210",
+        "encodings": [
+          "pcm_16"
+        ]
+      }
+    ]
+  },
+  "audioCodecs": [
+    "audio/3gpp",
+    "audio/ac3",
+    "audio/ac4",
+    "audio/alac",
+    "audio/amr-wb",
+    "audio/amr-wb-plus",
+    "audio/eac3",
+    "audio/eac3-joc",
+    "audio/evrc",
+    "audio/ffmpeg",
+    "audio/flac",
+    "audio/g711-alaw",
+    "audio/g711-mlaw",
+    "audio/gsm",
+    "audio/mp4a-latm",
+    "audio/mpeg",
+    "audio/opus",
+    "audio/qcelp",
+    "audio/raw",
+    "audio/vorbis",
+    "audio/x-ape",
+    "audio/x-ms-wma"
+  ],
+  "tunneling": false
+}

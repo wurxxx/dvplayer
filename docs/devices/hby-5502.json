@@ -1,0 +1,41 @@
+{
+  "manufacturer": "HBY",
+  "model": "5502",
+  "device": "5502",
+  "hardware": "mt6765",
+  "release": "9",
+  "sdk": 28,
+  "abi": "arm64-v8a",
+  "gles": "3.2",
+  "pip": true,
+  "display": {
+    "width": 720,
+    "height": 1280,
+    "fps": 57.5,
+    "modes": [{ "w": 720, "h": 1280, "fps": 57.5 }],
+    "hdr": [],
+    "hdrMaxLuminance": 500,
+    "hdrMaxAverageLuminance": 500,
+    "wideColorGamut": false
+  },
+  "codecs": {
+    "video/avc": ["OMX.MTK.VIDEO.DECODER.AVC", "OMX.MTK.VIDEO.ENCODER.AVC", "OMX.google.h264.decoder", "OMX.google.h264.encoder"],
+    "video/divx": ["OMX.MTK.VIDEO.DECODER.DIVX"],
+    "video/divx3": ["OMX.MTK.VIDEO.DECODER.DIVX3"],
+    "video/3gpp": ["OMX.MTK.VIDEO.DECODER.H263", "OMX.MTK.VIDEO.ENCODER.H263", "OMX.google.h263.decoder", "OMX.google.h263.encoder"],
+    "video/hevc": ["OMX.MTK.VIDEO.DECODER.HEVC", "OMX.google.hevc.decoder"],
+    "video/mpeg2": ["OMX.MTK.VIDEO.DECODER.MPEG2"],
+    "video/mp4v-es": ["OMX.MTK.VIDEO.DECODER.MPEG4", "OMX.MTK.VIDEO.ENCODER.MPEG4", "OMX.google.mpeg4.decoder", "OMX.google.mpeg4.encoder"],
+    "video/x-vnd.on2.vp8": ["OMX.MTK.VIDEO.DECODER.VPX", "OMX.google.vp8.decoder", "OMX.google.vp8.encoder"],
+    "video/x-vnd.on2.vp9": ["OMX.MTK.VIDEO.DECODER.VP9", "OMX.google.vp9.decoder"],
+    "video/x-ms-wmv": ["OMX.MTK.VIDEO.DECODER.VC1"],
+    "video/xvid": ["OMX.MTK.VIDEO.DECODER.XVID"]
+  },
+  "audio": {
+    "outputs": [
+      { "type": "earpiece", "name": "5502", "encodings": ["pcm_16", "pcm_float"] },
+      { "type": "speaker", "name": "5502", "encodings": ["pcm_16", "pcm_float"] },
+      { "type": "telephony", "name": "5502", "encodings": ["pcm_16", "pcm_float"] }
+    ]
+  }
+}

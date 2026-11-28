@@ -1,0 +1,16 @@
+[package]
+name = "dvplayer-media-jni"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Android JNI entry points for the DVPlayer shared core."
+
+[lib]
+# 不能叫 dvplayer_media：core/media 已经用了那个名字，两个 crate 会在 target/
+# 里撞同一个输出文件名。Android 侧 loadLibrary("dvplayer_media_jni")。
+name = "dvplayer_media_jni"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+dvplayer-media = { path = "../media" }

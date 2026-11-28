@@ -1,0 +1,1076 @@
+package com.dvplayer.app
+
+import android.app.Activity
+import android.app.PictureInPictureParams
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.view.Display
+import android.view.Gravity
+import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.View
+import android.view.WindowInsets
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.SubtitleView
+import com.dvplayer.player.DiscSource
+import com.dvplayer.player.EngineId
+import com.dvplayer.player.DolbyVisionProbe
+import com.dvplayer.player.EngineRouter
+import com.dvplayer.player.FrameRateMatcher
+import com.dvplayer.player.FrameRateProbe
+import com.dvplayer.player.MediaSessionController
+import com.dvplayer.player.PlaybackForegroundService
+import com.dvplayer.player.PlaybackController
+import com.dvplayer.player.PlaybackMemory
+import com.dvplayer.player.PlayerEngine
+import com.dvplayer.player.PlayerEvent
+import com.dvplayer.player.TrackKind
+import com.dvplayer.core.download.MediaDownloader
+import com.dvplayer.core.credential.Credential
+import com.dvplayer.core.credential.CredentialStore
+import com.dvplayer.core.vfs.DavVfs
+import com.dvplayer.core.vfs.NfsVfs
+import com.dvplayer.core.vfs.SmbVfs
+import com.dvplayer.core.vfs.Vfs
+import com.dvplayer.core.vfs.VfsHttpBridge
+import com.dvplayer.player.Hdr10PlusProbe
+import com.dvplayer.player.media3.Media3Player
+import com.dvplayer.player.mpv.MpvPlayer
+import kotlin.math.abs
+import kotlin.math.round
+
+/**
+ * A4 / A5 / A6 的验证页：SurfaceView → 播放内核。
+ *
+ * 用 adb 直接起：
+ *   adb shell am start -n com.dvplayer.app/.PlayerTestActivity \
+ *       --es url /data/user/0/com.dvplayer.app/files/dv-test.mp4 \
+ *       --es engine mpv|media3|codec
+ *
+ * `mpv`（默认）走 mpv render API，`media3` 走 ExoPlayer，`codec` 是直连
+ * MediaCodec 的 HDR10+ 探针（看 output format 里有没有 `hdr10-plus-info`）。
+ */
+@OptIn(UnstableApi::class)
+class PlayerTestActivity : Activity(), SurfaceHolder.Callback {
+
+    private var player: MpvPlayer? = null
+    private var media3: Media3Player? = null
+    private lateinit var surfaceView: SurfaceView
+    private lateinit var status: TextView
+    private var subtitleView: SubtitleView? = null
+    private lateinit var controlsBox: LinearLayout
+    private var started = false
+    private var matchedFps = 0.0
+    private var probeResult: String? = null
+    private var speedIndex = 0
+    private var tickCount = 0
+    private var resumeApplied = false
+    private var askedNotification = false
+    /** 已经为重播换过一次内核；避免两个内核互相踢皮球。 */
+    private var fallbackTried = false
+
+    /** 进入本页前的显示模式，退出时恢复（帧率匹配不能把系统一直锁在 120Hz）。 */
+    private var originalModeId = 0
+    private var originalRefreshRate = 0f
+    private var session: MediaSessionController? = null
+    private lateinit var memory: PlaybackMemory
+    private lateinit var playback: PlaybackController
+
+    /** 凭据：显式 intent 优先，否则从 Keystore 加密存储里取。 */
+    private lateinit var credentials: CredentialStore
+    private var smbUser = ""
+    private var smbPass = ""
+    private var smbDomain = ""
+    private var vfsUser: String? = null
+    private var vfsPassword = ""
+    private val handler = Handler(Looper.getMainLooper())
+
+    /** `--es shot <png>`：到 [shotAtMs] 时让 mpv 自己截一帧（颜色回归用）。 */
+    private var shotPath: String? = null
+    private var shotAtMs = 12_000L
+    private var shotRetry = 0
+
+    private val enginePlayer: PlayerEngine?
+        get() = player ?: media3
+
+    private val url: String
+        get() = intent.getStringExtra("url") ?: DEFAULT_URL
+
+    /** SMB 文件经本地 HTTP 桥接后的地址（A9）。 */
+    private var bridgedUrl: String? = null
+    private var smbVfs: SmbVfs? = null
+    private var nfsVfs: NfsVfs? = null
+    private var bridge: VfsHttpBridge? = null
+
+    /** DV 配置（P5 要软解）；本地与桥接都探一次。 */
+    private var dvProfile: Int? = null
+
+    /** 续播 / 记录用的片源标识：SMB 用 smb:// 地址，其余用 intent 里的 url。 */
+    private val contentKey: String
+        get() = intent.getStringExtra("smb_play")
+            ?: intent.getStringExtra("nfs_play")
+            ?: url
+
+    /** 原盘换成普通路径、SMB 换成桥接地址，其余原样。 */
+    private val playUrl: String
+        get() = bridgedUrl ?: disc?.playUrl ?: url
+
+    private val disc: DiscSource.Disc? by lazy { DiscSource.detect(url) }
+
+    /** 外部字幕路径：`--es sub /path/to.ass`，默认是内置测试 srt。 */
+    private val subtitleUrl: String
+        get() = intent.getStringExtra("sub") ?: SUBTITLE_URL
+
+    /** 实际使用的内核。手动 `--es engine` 优先；`--es auto 1` 时由 EngineRouter 决定。 */
+    private var engine: String = "mpv"
+
+    /** 自动路由的结论，显示在状态行上便于核对。 */
+    private var routeReason: String? = null
+
+    private val refresh = object : Runnable {
+        override fun run() {
+            status.text = when (engine) {
+                "media3" -> {
+                    maybeMatchFrameRate(media3?.videoFormat?.frameRate?.toDouble())
+                    media3Status()
+                }
+                "codec" -> probeResult ?: "解码中…"
+                else -> {
+                    maybeMatchFrameRate()
+                    statusLine()
+                }
+            }
+            enginePlayer?.let { player ->
+                session?.update(MediaSessionController.snapshot(player.state()))
+            }
+            maybeResume()
+            shotPath?.let { path ->
+                val pos = enginePlayer?.state()?.positionMs ?: 0L
+                if (pos >= shotAtMs) {
+                    val err = player?.command("screenshot-to-file", path, "video")
+                    if (err == null) {
+                        Log.i(TAG, "截图 $path @${pos}ms -> ok")
+                        shotPath = null
+                    } else if (++shotRetry > 3) {
+                        Log.w(TAG, "截图 $path @${pos}ms 放弃：$err（用 adb screencap 兜底）")
+                        shotPath = null
+                    } else {
+                        // gpu-next + GLES 下 seek 刚结束时偶发失败，下一 tick 再试。
+                        Log.w(TAG, "截图 $path @${pos}ms 失败，重试 $shotRetry：$err")
+                    }
+                }
+            }
+            if (++tickCount % 3 == 0) {
+                maybeSave()
+                enginePlayer?.let { p ->
+                    val st = p.state()
+                    // SMB / 桥接要看吞吐：mpv 的 demuxer 缓存时长与读速最能说明问题。
+                    val cache = if (p is MpvPlayer) {
+                        " cache=${p.getProperty("demuxer-cache-duration")}" +
+                            " bw=${p.getProperty("cache-speed")}" +
+                            " drops=${p.getProperty("frame-drop-count")}" +
+                            " fps=${p.getProperty("estimated-vf-fps")}" +
+                            " hwdec=${p.getProperty("hwdec-current")}"
+                    } else {
+                        ""
+                    }
+                    Log.i(
+                        TAG,
+                        "state $engine pos=${st.positionMs}ms dur=${st.durationMs}ms paused=${st.paused}$cache",
+                    )
+                }
+            }
+            handler.postDelayed(this, 1000)
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        credentials = CredentialStore(this)
+        resolveCredentials()
+        memory = PlaybackMemory(this)
+        playback = PlaybackController(memory) { target ->
+            EngineRouter(this@PlayerTestActivity).choose(target)
+        }
+        // SMB / NFS 播放必须先拿到桥接地址，再创建内核 / 媒体会话，否则会先拿
+        // smb:// 地址去起播。验证页在这里同步等一次（正式实现应在浏览页就完成
+        // 握手，播放页直接拿 URL）。
+        intent.getStringExtra("smb_play")?.let { source ->
+            prepareBridge(source, "SMB") {
+                SmbVfs(source, smbUser, smbPass, smbDomain).also { smbVfs = it }
+            }
+        }
+        intent.getStringExtra("nfs_play")?.let { source ->
+            prepareBridge(source, "NFS") {
+                NfsVfs(source).also { nfsVfs = it }
+            }
+        }
+        runCatching {
+            val mode = currentDisplay.mode
+            originalModeId = mode.modeId
+            originalRefreshRate = mode.refreshRate
+        }
+        engine = resolveEngine()
+        when (engine) {
+            "media3" -> {
+                val m3 = Media3Player(this)
+                // A9：WebDAV / NAS 的认证头必须在使用前挂上。
+                vfsUser?.let { user ->
+                    m3.setHttpCredentials(user, vfsPassword)
+                    Log.i(TAG, "Media3 HTTP 认证已设置")
+                }
+                media3 = m3
+            }
+            "codec" -> Unit  // 只做 MediaCodec 探针
+            else -> {
+                // --es log 1 打开 libmpv 的 v 级日志（DvMpv）。
+                val mpv = MpvPlayer(verbose = intent.hasExtra("log"))
+                if (!mpv.isValid) {
+                    finish()
+                    return
+                }
+                player = mpv
+                // mkv 的帧率只有 mpv 能读到：起播后立刻切显示模式。
+                mpv.onFrameRate = { fps -> handler.post { maybeMatchFrameRate(fps) } }
+                // 默认 tls-verify=no（自签名 NAS 很常见）；要校验就传
+                // --es tls_verify 1：没给 --es tls_ca 时用 APK 内置的 Mozilla
+                // CA 包（系统 CA 在 conscrypt 的 APEX 里，native mbedTLS 读不到）。
+                if (intent.getStringExtra("tls_verify") == "1") {
+                    val ca = intent.getStringExtra("tls_ca")
+                        ?: runCatching { com.dvplayer.core.net.SystemCa.ensure(this).absolutePath }
+                            .onFailure { Log.w(TAG, "内置 CA 包不可用", it) }
+                            .getOrNull()
+                    mpv.setTlsVerification(true, ca)
+                    Log.i(TAG, "TLS 校验：开，CA=${ca ?: "mbedTLS 默认"}")
+                }
+                // 调试用：--es hwdec no 可以走软解，验证 HDR10+ 动态元数据（硬解 copy 拿不到 SEI）。
+                intent.getStringExtra("hwdec")?.let {
+                    Log.i(TAG, "hwdec -> $it ${mpv.setProperty("hwdec", it) ?: "ok"}")
+                }
+                // 调试用：--es mpv_prop "tone-mapping-mode=hybrid,gamut-mapping-mode=relative"
+                // 用来在模拟器上 A/B 色彩相关的 mpv 属性，不影响正式播放路径。
+                intent.getStringExtra("mpv_prop")?.split(',')?.forEach { kv ->
+                    val eq = kv.indexOf('=')
+                    if (eq > 0) {
+                        val key = kv.substring(0, eq).trim()
+                        val value = kv.substring(eq + 1).trim()
+                        Log.i(TAG, "prop $key=$value -> ${mpv.setProperty(key, value) ?: "ok"}")
+                    }
+                }
+                // A9：WebDAV 需要认证时，把 Basic 头交给 mpv 的 HTTP 层。
+                vfsUser?.let { user ->
+                    val token = android.util.Base64.encodeToString(
+                        "$user:$vfsPassword".toByteArray(Charsets.UTF_8),
+                        android.util.Base64.NO_WRAP,
+                    )
+                    val err = mpv.setProperty("http-header-fields", "Authorization: Basic $token")
+                    Log.i(TAG, "HTTP 认证头 -> ${err ?: "ok"}")
+                }
+                // A5 的 SDR 回退：--es force_sdr 1 让 mpv 做 tone mapping，surface 固定 sRGB。
+                if (intent.getStringExtra("force_sdr") == "1") {
+                    mpv.setHdrPassthrough(false)
+                    routeReason = "SDR tone mapping（force_sdr）"
+                    Log.i(TAG, "force_sdr -> mpv tone mapping")
+                }
+                // 本地文件直接探；P5 的硬解会丢 RPU（绿紫），交给 MpvPlayer 切软解。
+                if (dvProfile == null && !url.contains("://")) {
+                    dvProfile = DolbyVisionProbe.probe(url)?.profile
+                }
+                mpv.setDolbyVisionProfile(dvProfile)
+                Log.i(TAG, "片源 DV profile=${dvProfile ?: "无"}")
+                Log.i(TAG, "mpv version: ${mpv.getProperty("mpv-version")}")
+            }
+        }
+
+        surfaceView = SurfaceView(this)
+        surfaceView.holder.addCallback(this)
+
+        status = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 11f
+            setBackgroundColor(0x99000000.toInt())
+            setPadding(24, 24, 24, 24)
+        }
+
+        val root = FrameLayout(this)
+        root.addView(
+            surfaceView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        // PGS 是位图字幕，必须由 SubtitleView 渲染；mpv 侧由 libass 画在画面里。
+        if (engine == "media3") {
+            subtitleView = SubtitleView(this).apply {
+                setApplyEmbeddedStyles(true)
+                setApplyEmbeddedFontSizes(true)
+            }
+            root.addView(
+                subtitleView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
+        root.addView(status, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
+        if (engine != "codec") {
+            controlsBox = controls()
+            root.addView(controlsBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END))
+        }
+        setContentView(root)
+
+        // Android 15+ 强制 edge-to-edge，状态栏会压在画面上，这里把文字让开。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            root.setOnApplyWindowInsetsListener { _, insets ->
+                val top = insets.getInsets(WindowInsets.Type.systemBars()).top
+                status.setPadding(24, 24 + top, 24, 24)
+                if (engine != "codec") controlsBox.setPadding(16, 16 + top, 16, 16)
+                insets
+            }
+        }
+
+        enginePlayer?.let { engine ->
+            engine.setListener { event ->
+                if (event is PlayerEvent.Error) {
+                    Log.w(TAG, "内核错误：${event.message}")
+                    handler.post { fallbackToMpv(event.message) }
+                }
+            }
+        }
+
+        enginePlayer?.let {
+            val controller = MediaSessionController(this, it, playUrl.substringAfterLast('/'))
+            session = controller
+            runCatching {
+                PlaybackForegroundService.start(this, controller.notification())
+            }.onFailure { e -> Log.w(TAG, "前台服务启动失败", e) }
+            Log.i(TAG, "媒体会话就绪")
+        }
+
+        // A5 颜色回归：--es shot <png> 播放到 --el shot_at（默认 12000ms）时让 mpv
+        // 自己截一帧（video = 渲染结果、不含 OSD、走 sRGB tone mapping），
+        // 绕开 adb screencap 对 HDR 的合成/色调映射。
+        shotPath = intent.getStringExtra("shot")
+        shotAtMs = intent.getLongExtra("shot_at", 12_000L)
+
+        // A9 验证钩子：--es smb <目录> 列目录（--es smb_deep N 递归 N 层）。
+        // 日志格式固定为 SMB|D或F|size|path，方便 shell 侧解析。
+        intent.getStringExtra("smb")?.let { smbUrl ->
+            val depth = intent.getStringExtra("smb_deep")?.toIntOrNull() ?: 0
+            Thread({
+                runCatching {
+                    val vfs = smbVfs ?: SmbVfs(
+                        smbUrl,
+                        smbUser,
+                        smbPass,
+                        smbDomain,
+                    ).also { smbVfs = it }
+                    listTree(vfs, smbUrl, depth, "SMB")
+                }.onFailure { Log.e(TAG, "SMB 列表失败", it) }
+            }, "smb-list").start()
+        }
+
+        // A9 验证钩子：--es nfs <目录> 列目录（--es nfs_deep N 递归 N 层）。
+        intent.getStringExtra("nfs")?.let { nfsUrl ->
+            val depth = intent.getStringExtra("nfs_deep")?.toIntOrNull() ?: 0
+            Thread({
+                runCatching {
+                    val vfs = nfsVfs ?: NfsVfs(nfsUrl).also { nfsVfs = it }
+                    listTree(vfs, nfsUrl, depth, "NFS")
+                }.onFailure { Log.e(TAG, "NFS 列表失败", it) }
+            }, "nfs-list").start()
+        }
+
+        // A9 验证钩子：--es vfs <WebDAV 目录 URL> 列一次目录并打日志，
+        // 认证用 --es vfs_user / --es vfs_pass。播放仍走 --es url。
+        intent.getStringExtra("vfs")?.let { dav ->
+            Thread({
+                runCatching {
+                    DavVfs(dav, vfsUser, vfsPassword).list(dav)
+                }.onSuccess { entries ->
+                    Log.i(TAG, "VFS 列表 ${entries.size} 项")
+                    entries.forEach {
+                        Log.i(TAG, "VFS ${if (it.isDirectory) "D" else "F"} ${it.name} size=${it.size} ${it.path}")
+                    }
+                }.onFailure { Log.e(TAG, "VFS 列表失败", it) }
+            }, "dav-list").start()
+        }
+
+        // A10 下载验证：--es download <url> 落 files/downloads/<文件名>，
+        // 认证沿用 vfs_user / vfs_pass。下载期间不阻塞播放。
+        intent.getStringExtra("download")?.let { downloadUrl ->
+            val name = intent.getStringExtra("download_name")
+                ?: downloadUrl.substringAfterLast('/')
+            val headers = vfsUser?.let { user ->
+                val token = android.util.Base64.encodeToString(
+                    "$user:$vfsPassword".toByteArray(Charsets.UTF_8),
+                    android.util.Base64.NO_WRAP,
+                )
+                mapOf("Authorization" to "Basic $token")
+            } ?: emptyMap()
+            Thread({
+                runCatching {
+                    var lastPct = -1
+                    MediaDownloader(filesDir.resolve("downloads")).download(
+                        url = downloadUrl,
+                        name = name,
+                        headers = headers,
+                        onProgress = { done, total ->
+                            val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                            if (pct != lastPct && pct % 20 == 0) {
+                                lastPct = pct
+                                Log.i(TAG, "下载进度 $done/$total（$pct%）")
+                            }
+                        },
+                    )
+                }.onSuccess { Log.i(TAG, "下载完成：${it.absolutePath} ${it.length()} 字节") }
+                    .onFailure { Log.e(TAG, "下载失败", it) }
+            }, "download").start()
+        }
+
+        Log.i(TAG, "engine=$engine url=$url")
+    }
+
+    /**
+     * 把 SMB / NFS 片源经 [VfsHttpBridge] 换成 `127.0.0.1` 的 HTTP 地址。
+     *
+     * 必须在创建内核之前完成：[playUrl] 直接取 [bridgedUrl]，晚到就只能先拿
+     * `smb://` 起播再失败。这里同步等，超时基本就是 NAS 连不上或认证失败。
+     */
+    private fun prepareBridge(source: String, label: String, open: () -> Vfs) {
+        val ready = java.util.concurrent.CountDownLatch(1)
+        Thread({
+            try {
+                val file = open().open(source)
+                // 桥接地址是 127.0.0.1，播放器没法按路径探 DV，这里先用 VfsFile 探。
+                dvProfile = DolbyVisionProbe.probe(
+                    { offset, buffer, count -> file.read(offset, buffer, count) },
+                    file.size,
+                )?.profile
+                Log.i(TAG, "$label 片源 DV profile=${dvProfile ?: "无"}")
+                val b = VfsHttpBridge(file, source.substringAfterLast('/'))
+                b.start()
+                bridge = b
+                bridgedUrl = b.url
+                Log.i(TAG, "$label 桥接：$source -> ${b.url}")
+            } catch (t: Throwable) {
+                Log.e(TAG, "$label 桥接失败", t)
+            } finally {
+                ready.countDown()
+            }
+        }, "${label.lowercase()}-bridge").start()
+        if (!ready.await(20, java.util.concurrent.TimeUnit.SECONDS)) {
+            Log.e(TAG, "$label 桥接超时")
+        }
+    }
+
+    /**
+     * 递归列目录，日志格式固定为 `<标签>|D或F|size|path`，方便 shell 侧解析。
+     */
+    private fun listTree(vfs: Vfs, root: String, depth: Int, label: String) {
+        fun walk(dir: String, level: Int) {
+            val entries = vfs.list(dir)
+            Log.i(TAG, "$label|L$level|${entries.size}|$dir")
+            entries.forEach {
+                Log.i(TAG, "$label|${if (it.isDirectory) "D" else "F"}|${it.size}|${it.path}")
+                if (it.isDirectory && level < depth) {
+                    runCatching { walk(it.path, level + 1) }
+                        .onFailure { e -> Log.w(TAG, "$label 子目录失败 ${it.path}", e) }
+                }
+            }
+        }
+        walk(root, 0)
+    }
+
+    /**
+     * A7「自动重试」：Media3 起播失败（容器 / 编码不支持、解码器初始化失败）时，
+     * 换 mpv 从当前位置重来一次。只重试一次，且只在 Media3 上触发——
+     * mpv 失败通常是真的打不开，再换回去没有意义。
+     */
+    private fun fallbackToMpv(reason: String) {
+        if (engine != "media3") return
+        val tried = fallbackTried || intent.getStringExtra("fallback") == "1"
+        val position = runCatching { media3?.state()?.positionMs ?: 0L }.getOrDefault(0L)
+        val recovery = playback.recovery(EngineId.MEDIA3, tried, position)
+        if (recovery !is PlaybackController.Recovery.FallbackToMpv) return
+        fallbackTried = true
+        Log.w(TAG, "Media3 失败（$reason），回退 mpv @ ${recovery.positionMs}ms")
+        routeReason = "Media3 起播失败，回退 mpv：$reason"
+        val next = Intent(this, PlayerTestActivity::class.java).apply {
+            putExtra("url", url)
+            putExtra("engine", "mpv")
+            putExtra("fallback", "1")
+            intent.getStringExtra("sub")?.let { putExtra("sub", it) }
+            intent.getStringExtra("hwdec")?.let { putExtra("hwdec", it) }
+            intent.getStringExtra("force_sdr")?.let { putExtra("force_sdr", it) }
+            intent.getStringExtra("smb_play")?.let { putExtra("smb_play", it) }
+            intent.getStringExtra("nfs_play")?.let { putExtra("nfs_play", it) }
+            putExtra("seek_to", recovery.positionMs)
+        }
+        startActivity(next)
+        finish()
+    }
+
+    /**
+     * 解析本次的 SMB / WebDAV 凭据。
+     *
+     * 命令行显式传了密码就顺手加密保存（下次同主机不用再传）；没传就从
+     * Keystore 里取。密码只经过这里，不写日志、不进 `Log.i` 的拼接串。
+     */
+    /**
+     * 测试钩子读一个可能含特殊字符的敏感参数。
+     *
+     * `adb shell` 会在设备端再过一次 sh，密码里的 `$` / `!` / 引号会被吃掉；
+     * 所以支持 `--es <name>_b64 <Base64>`，只含字母数字与 `+/=`，不会被解释。
+     */
+    private fun secretExtra(name: String): String? {
+        intent.getStringExtra(name)?.takeIf { it.isNotEmpty() }?.let { return it }
+        val encoded = intent.getStringExtra("${name}_b64")?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching {
+            String(android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP), Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    private fun resolveCredentials() {
+        // `smb_play` 直接起播，`smb` 只列目录；两者都可能是 SMB 源。
+        val smbUrl = intent.getStringExtra("smb_play") ?: intent.getStringExtra("smb")
+        smbUrl?.let { url ->
+            val scope = scopeOf(url, 445)
+            val explicit = secretExtra("smb_pass")
+            val saved = credentials.load(scope)
+            smbUser = intent.getStringExtra("smb_user") ?: saved?.user.orEmpty()
+            smbPass = explicit ?: saved?.password.orEmpty()
+            smbDomain = intent.getStringExtra("smb_domain").orEmpty()
+            if (explicit != null) {
+                credentials.save(scope, Credential(smbUser, smbPass))
+            }
+            Log.i(TAG, "SMB 凭据：${if (smbUser.isEmpty()) "匿名" else smbUser}")
+        }
+
+        val scope = scopeOf(playUrl, 0)
+        val explicitUser = intent.getStringExtra("vfs_user")
+        val explicitPass = secretExtra("vfs_pass")
+        val saved = credentials.load(scope)
+        vfsUser = explicitUser ?: saved?.user
+        vfsPassword = explicitPass ?: saved?.password.orEmpty()
+        if (explicitUser != null && explicitPass != null) {
+            credentials.save(scope, Credential(explicitUser, explicitPass))
+        }
+        if (vfsUser != null) Log.i(TAG, "WebDAV 凭据：$vfsUser")
+    }
+
+    /** `scheme://host:port`，不带路径；解析失败原样返回。 */
+    private fun scopeOf(url: String, defaultPort: Int): String = runCatching {
+        val parsed = java.net.URI(url)
+        val scheme = parsed.scheme ?: return@runCatching url
+        val port = if (parsed.port > 0) parsed.port else defaultPort
+        if (port > 0) "$scheme://${parsed.host}:$port" else "$scheme://${parsed.host}"
+    }.getOrDefault(url)
+
+    /**
+     * 决定这次用哪个内核。`--es engine` 明确指定时照办；`--es auto 1` 交给
+     * [PlaybackController]（路由在后台线程执行，超时回退 mpv）。
+     */
+    private fun resolveEngine(): String {
+        intent.getStringExtra("engine")?.let {
+            Log.i(TAG, "engine 由参数指定：$it")
+            return it
+        }
+        val choice = playback.chooseEngine(
+            url = url,
+            manual = null,
+            auto = intent.getStringExtra("auto") == "1",
+        )
+        routeReason = choice.reason
+        Log.i(TAG, "路由 -> ${choice.engine}：${choice.reason ?: "默认"}")
+        return if (choice.engine == EngineId.MEDIA3) "media3" else "mpv"
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!askedNotification && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            askedNotification = true
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
+        }
+        // 切换内核（startActivity + finish）时，新实例可能在旧实例退场期间
+        // 收到一次 onPause；如果在这里 removeCallbacks，状态刷新就永久停了。
+        // 验证页的轮询成本很低，暂停也不停，只在 onDestroy 里收。
+        handler.removeCallbacks(refresh)
+        handler.post(refresh)
+    }
+
+    override fun onPause() {
+        maybeSave()
+        super.onPause()
+    }
+
+    override fun onStop() {
+        // 窗口还在的时候才能改显示模式；onDestroy 里改已经晚了。
+        restoreDisplayMode()
+        super.onStop()
+    }
+
+    /** A10：PiP。验证页只做最小参数，正式播放页按片源宽高比给 aspectRatio。 */
+    private fun enterPip() {
+        if (intent.getStringExtra("no_pip") == "1") return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        val params = PictureInPictureParams.Builder().build()
+        if (!enterPictureInPictureMode(params)) {
+            Log.w(TAG, "进入 PiP 失败")
+        } else {
+            Log.i(TAG, "进入 PiP")
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        status.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        if (engine != "codec") {
+            controlsBox.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        }
+        Log.i(TAG, "PiP 模式：$isInPictureInPictureMode")
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // 按 Home 时自动进 PiP，和正式播放页的行为一致。
+        if (started) enterPip()
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) = attach(holder)
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) =
+        attach(holder)
+
+    private fun attach(holder: SurfaceHolder) {
+        when (engine) {
+            "media3" -> {
+                media3?.attachView(surfaceView)
+                media3?.onCues = { cues -> subtitleView?.setCues(cues.cues) }
+                if (!started) {
+                    started = true
+                    beginPlayback {
+                        media3?.load(playUrl)
+                        if (intent.getStringExtra("sub") != null) media3?.addSubtitle(subtitleUrl)
+                    }
+                }
+            }
+            "codec" -> {
+                if (!started) {
+                    started = true
+                    runProbe(holder.surface)
+                }
+            }
+            else -> {
+                val mpv = player ?: return
+                val frame = holder.surfaceFrame
+                mpv.attach(holder.surface, frame.width(), frame.height())
+                if (!started) {
+                    started = true
+                    // Surface 的 GL 初始化在渲染线程里异步做；mpv 会自己排队。
+                    beginPlayback {
+                        mpv.load(playUrl)
+                        // mpv 的 sub-add 走命令队列，可以和 loadfile 同拍发。
+                        if (intent.getStringExtra("sub") != null) mpv.addSubtitle(subtitleUrl)
+                        handler.postDelayed({ Log.i(TAG, "章节：${mpv.chapters()}") }, 3000)
+                    }
+                }
+            }
+        }
+    }
+
+    /** 验证用的控制条：暂停 / seek / 倍速 / 切轨 / 外部字幕。 */
+    private fun controls(): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 16, 16, 16)
+        }
+        fun add(label: String, action: () -> Unit) {
+            box.addView(
+                Button(this).apply {
+                    text = label
+                    textSize = 12f
+                    minWidth = 0
+                    minimumWidth = 0
+                    setOnClickListener { action() }
+                },
+                LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = 6 },
+            )
+        }
+        add("⏯ 播放/暂停") {
+            val player = enginePlayer ?: return@add
+            Log.i(TAG, "togglePause，之前 pause=${player.state().paused}")
+            player.togglePause()
+        }
+        add("-10s") { seekBy(-10_000) }
+        add("+10s") { seekBy(10_000) }
+        add("倍速") { cycleSpeed() }
+        add("音轨") { cycleTrack(TrackKind.AUDIO) }
+        add("字幕") { cycleTrack(TrackKind.SUB) }
+        add("载入字幕") { enginePlayer?.addSubtitle(subtitleUrl) }
+        add("下一章") { nextChapter() }
+        if (engine == "mpv" || engine == "media3") add("切内核") { switchEngine() }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        ) {
+            add("PiP") { enterPip() }
+        }
+        return box
+    }
+
+    /** 首次拿到片长后恢复位置：切内核用显式参数，正常进入用续播记录。 */
+    private fun maybeResume() {
+        if (resumeApplied) return
+        val player = enginePlayer ?: return
+        val state = player.state()
+        if (state.durationMs <= 0) return
+        resumeApplied = true
+
+        when (
+            val resume = playback.resume(
+                url = contentKey,
+                explicitMs = intent.getLongExtra("seek_to", -1L),
+                durationMs = state.durationMs,
+            )
+        ) {
+            is PlaybackController.Resume.Explicit -> {
+                player.seekTo(resume.positionMs)
+                intent.getFloatExtra("speed", 0f).takeIf { it > 0f }?.let { player.setSpeed(it) }
+                if (intent.getBooleanExtra("paused", false)) player.pause() else player.play()
+                Log.i(
+                    TAG,
+                    "切换后恢复：${resume.positionMs}ms speed=${player.state().speed} " +
+                        "paused=${player.state().paused}",
+                )
+            }
+            is PlaybackController.Resume.Saved -> {
+                player.seekTo(resume.positionMs)
+                Log.i(TAG, "续播：${resume.positionMs} ms")
+            }
+            null -> Unit
+        }
+    }
+
+    /**
+     * A7「切换不丢位置」：记下当前位置/倍速/暂停态，换一个内核重新起同一个片源。
+     * 用 startActivity + finish 而不是手动拆装，验证页的 Surface / 字幕视图
+     * 都按目标内核重建，不会残留上一个内核的状态。
+     */
+    private fun switchEngine() {
+        val from = enginePlayer ?: return
+        if (engine != "mpv" && engine != "media3") return
+        val state = from.state()
+        val current = if (engine == "media3") EngineId.MEDIA3 else EngineId.MPV
+        val target = playback.otherEngine(current)
+        val targetName = if (target == EngineId.MEDIA3) "media3" else "mpv"
+        maybeSave()
+        // 不要复制原 intent：am start 带进来的 FLAG_ACTIVITY_NEW_TASK 会让新
+        // activity 走独立任务，紧接着 finish() 会把整个任务收掉。重建一份干净的。
+        val next = Intent(this, PlayerTestActivity::class.java).apply {
+            putExtra("url", url)
+            putExtra("engine", targetName)
+            intent.getStringExtra("sub")?.let { putExtra("sub", it) }
+            intent.getStringExtra("hwdec")?.let { putExtra("hwdec", it) }
+            intent.getStringExtra("force_sdr")?.let { putExtra("force_sdr", it) }
+            putExtra("seek_to", state.positionMs)
+            putExtra("speed", state.speed)
+            putExtra("paused", state.paused)
+        }
+        Log.i(TAG, "切换内核 $engine -> $targetName @ ${state.positionMs}ms")
+        startActivity(next)
+        finish()
+    }
+
+    private fun maybeSave() {
+        val player = enginePlayer ?: return
+        val state = player.state()
+        if (state.durationMs > 0) {
+            playback.save(contentKey, state.positionMs, state.durationMs)
+        }
+    }
+
+    private fun nextChapter() {
+        val player = enginePlayer ?: return
+        val chapters = player.chapters()
+        if (chapters.isEmpty()) {
+            Log.i(TAG, "没有章节信息")
+            return
+        }
+        val position = player.state().positionMs
+        val next = chapters.firstOrNull { it.startMs > position + 500 } ?: chapters.first()
+        player.seekTo(next.startMs)
+        Log.i(TAG, "章节 -> ${next.title}（${next.startMs}ms）")
+    }
+
+    private fun seekBy(deltaMs: Long) {
+        val player = enginePlayer ?: return
+        val target = (player.state().positionMs + deltaMs).coerceAtLeast(0)
+        player.seekTo(target)
+        Log.i(TAG, "seek -> $target ms")
+    }
+
+    private fun cycleSpeed() {
+        speedIndex = (speedIndex + 1) % SPEEDS.size
+        val speed = SPEEDS[speedIndex]
+        enginePlayer?.setSpeed(speed)
+        Log.i(TAG, "speed -> $speed")
+    }
+
+    private fun cycleTrack(kind: TrackKind) {
+        val player = enginePlayer ?: return
+        val tracks = player.tracks().filter { it.kind == kind }
+        if (tracks.isEmpty()) {
+            Log.i(TAG, "没有可切换的 $kind 轨道")
+            return
+        }
+        val current = tracks.indexOfFirst { it.selected }
+        val next = tracks[(current + 1).mod(tracks.size)]
+        player.selectTrack(kind, next.id)
+        Log.i(TAG, "选择 $kind -> ${next.title}（${next.id}）")
+    }
+
+    /** 通用状态行：位置 / 时长 / 播放态 / 倍速 / 轨道。 */
+    private fun playbackLine(): String {
+        val player = enginePlayer ?: return ""
+        val state = player.state()
+        val tracks = player.tracks()
+        return buildString {
+            appendLine(
+                "pos ${state.positionMs / 1000.0}s / ${state.durationMs / 1000.0}s · " +
+                    "${if (state.paused) "暂停" else "播放"} · ${state.speed}x",
+            )
+            appendLine(
+                "轨道 " + tracks.joinToString(" · ") {
+                    val mime = it.codec?.takeIf { c -> c.contains("/") }?.let { c -> "[$c]" } ?: ""
+                    "${it.kind.name.lowercase()}:${it.title}$mime${if (it.selected) "*" else ""}"
+                },
+            )
+        }
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        player?.detach()
+        media3?.detach()
+    }
+
+    override fun onDestroy() {
+        restoreDisplayMode()
+        handler.removeCallbacks(refresh)
+        session?.release()
+        session = null
+        PlaybackForegroundService.stop(this)
+        // mpv 的 destroy 要 join 渲染线程 + 等 mpv 退出，偶尔会卡住十几秒；
+        // 放在后台线程，别把主线程（和新 activity）一起堵死。
+        val mpv = player
+        val m3 = media3
+        val b = bridge
+        val smb = smbVfs
+        val nfs = nfsVfs
+        player = null
+        media3 = null
+        bridge = null
+        smbVfs = null
+        nfsVfs = null
+        if (mpv != null || m3 != null || b != null || smb != null || nfs != null) {
+            Thread({
+                runCatching { m3?.close() }
+                runCatching { mpv?.close() }
+                runCatching { b?.close() }
+                runCatching { smb?.close() }
+                runCatching { nfs?.close() }
+                Log.i(TAG, "播放内核已释放")
+            }, "engine-close").start()
+        }
+        super.onDestroy()
+    }
+
+    /** 退出时把显示模式还给系统。 */
+    private fun restoreDisplayMode() {
+        if (matchedFps <= 0.0 || originalModeId == 0) return
+        matchedFps = 0.0
+        runCatching {
+            val attrs = window.attributes
+            // 0 = 交还给系统默认模式；设回「进入前的 mode」在 ColorOS 上不生效。
+            attrs.preferredDisplayModeId = 0
+            @Suppress("DEPRECATION")
+            attrs.preferredRefreshRate = 0f
+            window.attributes = attrs
+            setSurfaceFrameRate(0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+            Log.i(TAG, "恢复显示模式（交还系统，原 ${originalModeId} @ ${originalRefreshRate}Hz）")
+        }
+    }
+
+    /**
+     * 改动 Surface 的期望帧率。退到后台 / 进 PiP / 销毁时 Surface 可能已经被系统
+     * 释放，`setFrameRate` 会抛 `IllegalStateException: Surface has already been
+     * released`，所以先看 `isValid` 再兜一层异常——帧率提示只是锦上添花，
+     * 不能因为它把进程带崩。
+     */
+    private fun setSurfaceFrameRate(fps: Float, compatibility: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        runCatching {
+            val surface = surfaceView.holder.surface
+            if (surface != null && surface.isValid) {
+                surface.setFrameRate(fps, compatibility)
+            }
+        }.onFailure { Log.w(TAG, "setFrameRate($fps) 失败：${it.message}") }
+    }
+
+    /** 直连 MediaCodec 的 HDR10+ 探针，顺带把帧送到 SurfaceView。 */
+    private fun runProbe(surface: Surface) {
+        Thread({
+            val result = Hdr10PlusProbe.probe(url, surface)
+            probeResult = if (result == null) {
+                "探针失败"
+            } else {
+                buildString {
+                    appendLine("codec ${result.mime} · ${result.frames} 帧")
+                    appendLine("HDR10+ ${if (result.hasHdr10Plus) "有" else "无"}（${result.hdr10PlusBytes} 字节）")
+                    appendLine(result.outputFormat)
+                    append(url)
+                }
+            }
+            handler.post { status.text = probeResult }
+        }, "hdr10plus-probe").start()
+    }
+
+    private fun media3Status(): String {
+        val player = media3 ?: return "media3 未初始化"
+        val format = player.videoFormat
+        return buildString {
+            appendLine("engine media3")
+            routeReason?.let { appendLine("路由 $it") }
+            if (format != null) {
+                appendLine("codec ${format.codecs} · ${format.width}×${format.height} · drops ${player.droppedTotal}")
+                appendLine("color ${format.colorInfo}")
+            }
+            appendLine(player.debugCue)
+            append(playbackLine())
+            disc?.let { appendLine("原盘 ${it.kind.label}：${it.playUrl}") }
+            append(contentKey)
+        }
+    }
+
+    private fun statusLine(): String {
+        val mpv = player ?: return "mpv 未初始化"
+        fun p(name: String) = mpv.getProperty(name) ?: "-"
+        val mode = currentDisplay.mode
+        return buildString {
+            routeReason?.let { appendLine("路由 $it") }
+            appendLine("${p("width")}×${p("height")} · ${p("video-params/pixelformat")} · hwdec ${p("hwdec-current")}")
+            appendLine("prim ${p("video-params/primaries")} · trc ${p("video-params/gamma")} · light ${p("video-params/light")}")
+            appendLine("sig-peak ${p("video-params/sig-peak")} · min-luma ${p("video-params/min-luma")} · max-luma ${p("video-params/max-luma")}")
+            val sceneMax = p("video-params/scene-max-r")
+            if (sceneMax != "-") {
+                appendLine("HDR10+ maxRGB ${sceneMax}/${p("video-params/scene-max-g")}/${p("video-params/scene-max-b")} · avg ${p("video-params/scene-avg")}")
+            }
+            appendLine("fps ${p("estimated-vf-fps")} · drops ${p("frame-drop-count")} · mode ${mode.modeId}@${"%.2f".format(mode.refreshRate)}Hz")
+            append(playbackLine())
+            disc?.let { appendLine("原盘 ${it.kind.label}：${it.playUrl}") }
+            append(contentKey)
+        }
+    }
+
+    /**
+     * 起播前先把显示模式钉住。mpv 的 `container-fps` 要等加载后才有，那时第一帧
+     * 已经在默认刷新率上丢了；本地普通文件先用 [FrameRateProbe] 读容器元数据，
+     * 切完模式等 400ms 再 load（显示模式切换是系统异步完成的）。
+     */
+    private fun beginPlayback(start: () -> Unit) {
+        if (preMatchFrameRate()) {
+            Log.i(TAG, "起播前已请求显示模式，等 400ms 生效")
+            handler.postDelayed(start, 400)
+        } else {
+            start()
+        }
+    }
+
+    /** 返回是否真的改了显示模式。 */
+    private fun preMatchFrameRate(): Boolean {
+        val path = playUrl
+        if (path.contains("://")) return false                 // 桥接 / HTTP 交给加载后的轮询
+        if (DiscSource.detect(path) != null) return false      // 原盘没有普通视频轨
+        val fps = FrameRateProbe.probe(path) ?: return false
+        if (fps <= 1.0) return false
+        if (matchedFps > 0 && abs(fps - matchedFps) < 0.01) return false
+        Log.i(TAG, "起播前帧率：${"%.3f".format(fps)}fps")
+        val before = matchedFps
+        maybeMatchFrameRate(fps)
+        return matchedFps != before
+    }
+
+    /**
+     * 按片源帧率切显示模式：优先选「刷新率是片源帧率整数倍」的模式，且倍数最小。
+     * 24p 在 120Hz 上是 5 倍——每帧重复 5 次刷新，属于最干净的整数倍 pulldown。
+     * 找不到整数倍时退回最高刷新率。
+     */
+    private fun maybeMatchFrameRate() {
+        val mpv = player ?: return
+        val fps = listOf("container-fps", "estimated-vf-fps")
+            .mapNotNull { mpv.getProperty(it)?.toDoubleOrNull() }
+            .firstOrNull { it > 1.0 }
+        maybeMatchFrameRate(fps)
+    }
+
+    private fun maybeMatchFrameRate(fps: Double?) {
+        if (fps == null || fps <= 1.0) return
+        if (matchedFps > 0 && abs(fps - matchedFps) < 0.01) return
+
+        val display = currentDisplay
+        val sameSize = FrameRateMatcher.sameSizeModes(display)
+        if (sameSize.isEmpty()) return
+        val best = FrameRateMatcher.bestMode(sameSize, fps) ?: return
+
+        matchedFps = fps
+
+        val attrs = window.attributes
+        if (attrs.preferredDisplayModeId != best.modeId ||
+            attrs.preferredRefreshRate != best.refreshRate
+        ) {
+            attrs.preferredDisplayModeId = best.modeId
+            @Suppress("DEPRECATION")
+            attrs.preferredRefreshRate = best.refreshRate
+            window.attributes = attrs
+        }
+        setSurfaceFrameRate(fps.toFloat(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+        Log.i(
+            TAG,
+            "帧率匹配：source=${fps}fps -> mode ${best.modeId} @ ${best.refreshRate}Hz" +
+                "（×${"%.3f".format(best.refreshRate / fps)}）",
+        )
+    }
+
+    private val currentDisplay: Display
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        }
+
+    private companion object {
+        const val TAG = "DvPlayerTest"
+        const val DEFAULT_URL = "/data/user/0/com.dvplayer.app/files/dv-test.mp4"
+        const val SUBTITLE_URL = "/data/user/0/com.dvplayer.app/files/test.srt"
+        val SPEEDS = floatArrayOf(1f, 1.25f, 1.5f, 2f, 0.5f)
+    }
+}

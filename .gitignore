@@ -18,6 +18,8 @@ apps/macos/m0-render/m0-render
 # 服务器图标：两端同源，由 scripts/make-source-icons.py 生成
 !assets/sources/*.png
 !apps/windows/DvPlayer/Assets/sources/*.png
+# Android 应用图标（和桌面端同一张 256 PNG，drawable-nodpi 由系统缩放）
+!apps/android/**/res/drawable-nodpi/*.png
 # 生成时下载的官方素材缓存（飞牛 logo / Emby 图标 / Jellyfin SVG），不入库
 assets/sources/.*
 *.hevc
@@ -31,6 +33,14 @@ apps/windows/**/obj/
 
 # Rust
 core/target/
+
+# Android（Gradle / AGP）
+apps/android/**/.gradle/
+apps/android/**/.cxx/
+apps/android/**/build/
+apps/android/.kotlin/
+apps/android/local.properties
+apps/android/core/src/main/jniLibs/
 apps/windows/packages/
 
 # Swift

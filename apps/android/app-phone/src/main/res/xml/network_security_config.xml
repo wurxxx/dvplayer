@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+      局域网 NAS 的 WebDAV / HTTP 直链大多没有 TLS（http://192.168.x.x:5005）。
+      浏览与播放都要连这类地址，所以放开明文；HTTPS 仍只信任系统 CA。
+      正式版如果只走 HTTPS，可以把这里收紧。
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
