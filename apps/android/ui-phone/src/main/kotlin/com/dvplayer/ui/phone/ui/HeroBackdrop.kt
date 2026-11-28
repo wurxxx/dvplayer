@@ -6,19 +6,27 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.dvplayer.design.DvTheme
+import com.dvplayer.design.LocalDvWindow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.max
@@ -50,21 +58,78 @@ fun HeroBackdrop(
      * 最后一段交叉淡化（详情页用）。
      */
     fitWhole: Boolean = false,
+    /**
+     * 按「距容器顶部多少 dp」指定模糊起点 / 终点，优先于上面的比例参数。
+     *
+     * 详情页这种内容高度会变的页面用比例不可靠：`fitWhole` 的清晰层高度是
+     * 由图片宽高比决定的，容器一变高，按图片高度算出来的比例就飘了
+     * （平板上一整屏都不糊）。改成量容器位置，位置就跟着版式走。
+     */
+    blurStartDp: Dp = Dp.Unspecified,
+    blurEndDp: Dp = Dp.Unspecified,
+    /**
+     * 「从哪儿开始淡到页面底色」：按距容器顶部多少 dp，两个主题共用。
+     *
+     * 详情页这种内容高度会变的页面，整页比例不可靠：图的下沿、选集的位置
+     * 都由版式决定，不跟内容高度走。给了这两个值就不再看 [bottomFadeStart]。
+     */
+    fadeStartDp: Dp = Dp.Unspecified,
+    fadeEndDp: Dp = Dp.Unspecified,
+    /**
+     * 图只占它「按宽度铺满」的那个高度，原图保持清晰（不模糊、不拉伸），
+     * 只在图的下沿一段渐变里淡到页面底色，下面直接是页面底色。
+     *
+     * 参照 fnOS / iOS 的详情页：横图在竖屏里本来就只有半屏高，
+     * 与其把下面的空白拿去「延伸画面」（会变成第二张图或一块色），
+     * 不如让图干净地结束，正文排在底色上。
+     */
+    imageOnly: Boolean = false,
+    /** [imageOnly] 模式下图的实际高度，正文靠它决定从哪里开始。 */
+    onImageHeight: (Dp) -> Unit = {},
 ) {
+    if (imageOnly) {
+        ImageOnlyBackdrop(path, modifier, onImageHeight)
+        return
+    }
+
     val repo = LocalRepo.current
     val p = DvTheme.palette
     var image by remember(path) { mutableStateOf<ImageBitmap?>(null) }
+    // 图按宽度铺满后的下沿（相对容器高度），用来定位面板和文字。
+    var imageBottomRatio by remember(path) { mutableStateOf(0f) }
 
     BoxWithConstraints(modifier.background(p.surfaceAlt)) {
         val widthPx = constraints.maxWidth
         val heightPx = constraints.maxHeight
+        val density = LocalDensity.current
 
-        LaunchedEffect(path, widthPx, heightPx, blurStart, blurEnd, fitWhole) {
+        // 统一换算成「相对容器高度」的比例：清晰层和模糊层都按同一个坐标混合。
+        val startRatio = if (blurStartDp != Dp.Unspecified && heightPx > 0) {
+            with(density) { blurStartDp.toPx() } / heightPx
+        } else {
+            blurStart
+        }.coerceIn(0f, 0.98f)
+        val endRatio = if (blurEndDp != Dp.Unspecified && heightPx > 0) {
+            with(density) { blurEndDp.toPx() } / heightPx
+        } else {
+            blurEnd
+        }.coerceIn(startRatio + 0.01f, 1f)
+
+        LaunchedEffect(path, widthPx, heightPx, startRatio, endRatio, fitWhole) {
             image = null
             val raw = path?.let { repo.bitmap(it) } ?: return@LaunchedEffect
             if (widthPx <= 0 || heightPx <= 0) return@LaunchedEffect
+            val fitPx = widthPx.toFloat() * raw.height / raw.width
+            imageBottomRatio = (fitPx / heightPx).coerceIn(0.05f, 1f)
             image = withContext(Dispatchers.Default) {
-                makeBackdrop(raw, widthPx, heightPx, blurStart, blurEnd, fitWhole)
+                makeBackdrop(raw, widthPx, heightPx, startRatio, endRatio, fitWhole)
+            }
+        }
+
+        // 图的实际高度（dp）回调给正文，决定文字从哪里开始。
+        LaunchedEffect(imageBottomRatio, heightPx) {
+            if (imageBottomRatio > 0.05f && heightPx > 0) {
+                onImageHeight(with(density) { (heightPx * imageBottomRatio).toDp() })
             }
         }
 
@@ -79,40 +144,156 @@ fun HeroBackdrop(
         }
 
         // 压暗：顶部给返回按钮，中段给白字，底部继续加深。
+        // 浅色主题也一样——剧照本身要保持原样（用户要的是「图别被遮」），
+        // 变浅只发生在图的下方，靠下面那层「底边淡到页面底色」完成。
         Box(
             Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .fillMaxHeight(imageBottomRatio.coerceAtLeast(0.08f))
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Black.copy(alpha = 0.34f),
                         0.18f to Color.Black.copy(alpha = 0.14f),
-                        0.48f to Color.Black.copy(alpha = 0.28f),
-                        0.62f to Color.Black.copy(alpha = 0.38f),
-                        1f to Color.Black.copy(alpha = 0.46f),
+                        0.62f to Color.Black.copy(alpha = 0.22f),
+                        1f to Color.Black.copy(alpha = 0.34f),
                     ),
                 ),
         )
 
         // 底边淡到页面底色。必须用「背景色的透明」，Color.Transparent 是黑色透明，
         // 插值到浅色背景会先变黑再变白，看着像一条硬缝。
+        //
+        // 剧照要留着，只在「白字内容结束之后」淡到页面底色，再往下的选集 /
+        // 媒体信息就是页面底色（浅色主题白、深色主题黑）。按 dp 定位，两个主题
+        // 用同一套位置，换主题时过渡带不会上下跳。
+        val byDp = fadeStartDp != Dp.Unspecified && fadeEndDp != Dp.Unspecified
+        val fadeStartRatio = if (byDp) {
+            with(density) { fadeStartDp.toPx() } / heightPx
+        } else {
+            bottomFadeStart
+        }.coerceIn(0f, 0.98f)
+        val fadeEndRatio = if (byDp) {
+            with(density) { fadeEndDp.toPx() } / heightPx
+        } else {
+            (fadeStartRatio + (1f - fadeStartRatio) * 0.86f)
+        }.coerceIn(fadeStartRatio + 0.005f, 1f)
+
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         0f to p.background.copy(alpha = 0f),
-                        bottomFadeStart to p.background.copy(alpha = 0f),
-                        // macOS 首页 hero 的节奏：过了 0.68 就明显往底色走，0.84 之后基本是底色。
-                        (bottomFadeStart + (1f - bottomFadeStart) * 0.55f) to
-                            p.background.copy(alpha = 0.55f),
-                        (bottomFadeStart + (1f - bottomFadeStart) * 0.86f) to
-                            p.background.copy(alpha = 0.90f),
+                        fadeStartRatio to p.background.copy(alpha = 0f),
+                        // 中间一档抬得高一点：过渡段约 160dp，这一段是图的下半部，
+                        // 抬得快一点才不会拖一条长长的灰带。
+                        // 深色主题再厚一档：底色几乎是不透的黑，压下去图就退干净了；
+                        // 浅色主题留一点图，白雾太重会显得脏。
+                        (fadeStartRatio + (fadeEndRatio - fadeStartRatio) * 0.55f) to
+                            p.background.copy(
+                                alpha = when {
+                                    !byDp -> 0.55f
+                                    p.isDark -> 0.86f
+                                    else -> 0.72f
+                                },
+                            ),
+                        fadeEndRatio to
+                            p.background.copy(
+                                alpha = when {
+                                    !byDp -> 0.90f
+                                    p.isDark -> 0.98f
+                                    else -> 0.94f
+                                },
+                            ),
                         1f to p.background,
                     ),
                 ),
         )
     }
 }
+
+/**
+ * 图占顶部、下沿淡出到页面底色。
+ *
+ * 和上面那套「整页铺图 + 模糊 + 延伸」完全不同：这里不做任何模糊，
+ * 图片按宽度铺满（保留原图比例，两边不裁），高度就是它的自然高度；
+ * 下沿 50dp 渐变到页面底色，再往下全是底色。
+ */
+@Composable
+private fun ImageOnlyBackdrop(
+    path: String?,
+    modifier: Modifier,
+    onImageHeight: (Dp) -> Unit,
+) {
+    val repo = LocalRepo.current
+    val p = DvTheme.palette
+    var image by remember(path) { mutableStateOf<ImageBitmap?>(null) }
+    var aspect by remember(path) { mutableStateOf(0f) }
+    val density = LocalDensity.current
+
+    BoxWithConstraints(modifier.background(p.background)) {
+        val widthPx = constraints.maxWidth
+        val widthDp = with(density) { widthPx.toDp() }
+
+        // 图的完整高度：按宽度铺满后的自然高度（两边不裁），「显示全」靠它。
+        // 横图在竖屏里就是这个高度，没法再高——再高就必须裁左右或拉变形。
+        val fitH = if (aspect > 0f) widthDp * aspect else 0.dp
+
+        LaunchedEffect(path, widthPx) {
+            image = null
+            aspect = 0f
+            val raw = path?.let { repo.bitmap(it) } ?: return@LaunchedEffect
+            aspect = raw.height.toFloat() / raw.width
+            image = withContext(Dispatchers.Default) { raw.asImageBitmap() }
+        }
+        LaunchedEffect(fitH) { onImageHeight(fitH) }
+
+        if (fitH > 0.dp && image != null) {
+            // 按宽度铺满、完整显示，不裁两边、不拉伸。
+            Image(
+                bitmap = image!!,
+                contentDescription = null,
+                modifier = Modifier.fillMaxWidth().height(fitH),
+                contentScale = ContentScale.FillWidth,
+            )
+
+            // 图上沿完全清晰；从图内 88dp 处（离顶部够远）开始，
+            // 用一段渐变从 0 透明收到纯色（浅色白 / 深色黑），
+            // 并且正好在图的下沿收到纯色，之后一直是纯色。
+            // 终点必须落在图的下沿：若拖到图外，图的下边缘还留着一点图像、
+            // 紧接着就是纯底色，会看见「渐变没走完被纯色盖住」的那道边。
+            val containerPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+            fun at(dp: Dp) = (with(density) { dp.toPx() } / containerPx).coerceIn(0f, 1f)
+            val fadeBand = 88.dp
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to p.background.copy(alpha = 0f),
+                            at(fitH - fadeBand) to p.background.copy(alpha = 0f),
+                            at(fitH) to p.background,
+                            1f to p.background,
+                        ),
+                    ),
+            )
+
+            // 顶部只压一点点暗，给返回按钮（白箭头）留对比，图的整体亮度不动。
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.22f),
+                            1f to Color.Black.copy(alpha = 0f),
+                        ),
+                    ),
+            )
+        }
+    }
+}
+
 
 /**
  * 把源图铺成容器大小，上半清晰、下半模糊。
@@ -163,7 +344,7 @@ private fun makeBackdrop(
         return mixed.asImageBitmap()
     }
     val fit = Bitmap.createScaledBitmap(src, baseW, fitH, true)
-    val ambient = ambientBlur(src, baseW, baseH)
+    val ambient = ambientBlur(fit, baseW, baseH)
     val mixed = fitThenAmbient(fit, ambient, baseW, baseH, blurStart)
     fit.recycle()
     ambient.recycle()
@@ -174,8 +355,26 @@ private fun makeBackdrop(
  * 整张图竖直铺满容器后重度模糊：只剩这张图的颜色分布，没有任何轮廓。
  * 缩到 20 像素宽再放大，等于一个超大的双线性采样。
  */
-private fun ambientBlur(src: Bitmap, w: Int, h: Int): Bitmap {
-    val stretched = Bitmap.createScaledBitmap(src, w, h, true)
+private fun ambientBlur(fit: Bitmap, w: Int, h: Int): Bitmap {
+    // 取「图的下沿那一行」往下延伸，而不是把整张图拉长（拉长会变成第二张脸），
+    // 也不是取**原图**的底边（原图底边和上面已经糊掉的下沿色调对不上，
+    // 中间会浮出一条橙红色的带子）。
+    //
+    // 所以先按同一几何糊一遍，再取这条模糊图的底边（约 22%）纵向拉伸：
+    // 颜色和模糊程度都和上面的交界行一致，接缝就看不出来了。
+    val band = if (fit.height > 12) {
+        val blurredFit = blur(fit, w, fit.height)
+        val bandH = (fit.height * 0.22f).roundToInt().coerceIn(1, fit.height)
+        val sliced = Bitmap.createBitmap(
+            blurredFit, 0, fit.height - bandH, w, bandH,
+        )
+        blurredFit.recycle()
+        sliced
+    } else {
+        null
+    }
+    val stretched = Bitmap.createScaledBitmap(band ?: fit, w, h, true)
+    band?.recycle()
     val smallW = min(12, w)
     val smallH = (h.toFloat() * smallW / w).roundToInt().coerceAtLeast(1)
     val small = Bitmap.createScaledBitmap(stretched, smallW, smallH, true)
@@ -197,6 +396,7 @@ private fun ambientBlur(src: Bitmap, w: Int, h: Int): Bitmap {
  * 上部贴清晰图，下部贴 [ambient]；图片从 [blurStart] 开始渐变到 [ambient] 上同一
  * 位置的像素，所以两张图在拼接处颜色完全相同（看不到接缝）。
  */
+
 private fun fitThenAmbient(
     fit: Bitmap,
     ambient: Bitmap,
@@ -209,12 +409,30 @@ private fun fitThenAmbient(
     val ambPx = IntArray(w * h)
     ambient.getPixels(ambPx, 0, w, 0, 0, w, h)
 
-    // 渐变区从 `blurStart` 开始（相对图片高度），越往下越糊；到图片底边
-    // 100% 是氛围色，下面的延伸从同一行接着画，所以交界处看不出来。
-    val startRatio = blurStart.coerceIn(0.5f, 0.98f)
-    val fadeStart = (fitH * startRatio).toInt().coerceIn(0, fitH)
+    // 渐变区从 `blurStart` 开始（相对**容器**高度，和 cover 分支同一套坐标），
+    // 越往下越糊；到图片底边 100% 是氛围色，下面的延伸从同一行接着画，
+    // 所以交界处看不出来。
+    //
+    // 注意：起点可能落在图片外面。手机上清晰层只有「宽度铺满后的图高」（横图
+    // 约 240dp），而模糊起点是按版式给的（演职人员那一带，560dp）。直接
+    // coerceIn 到 fitH 会把渐变区间压成 0 长度，画面在图片底边一刀切开、
+    // 看着像「突然就糊了」。这种情况退回到图片最后 40%，保证是渐过去的。
+    val fadeStartRaw = (h * blurStart).toInt()
+    val fadeStart = if (fadeStartRaw >= fitH) {
+        (fitH * 0.6f).toInt()
+    } else {
+        fadeStartRaw.coerceIn(0, fitH)
+    }
     val fadeRows = (fitH - fadeStart).coerceAtLeast(1)
-    // 只取上部：下部整段就是氛围色，不用逐张 getPixels。
+
+    // 模糊层必须是「同一张图、同一个位置」的虚化版：渐过去只是变虚，
+    // 构图一点不动。以前这里混的是 ambient（整图竖向拉伸），内容对不上，
+    // 看着就像背景里还有第二张图。
+    val blurred = blur(fit, w, fitH)
+    val blurPx = IntArray(w * fitH)
+    blurred.getPixels(blurPx, 0, w, 0, 0, w, fitH)
+    blurred.recycle()
+
     for (y in 0 until fitH) {
         val row = y * w
         if (y < fadeStart) {
@@ -225,7 +443,7 @@ private fun fitThenAmbient(
         val k = t * t * (3f - 2f * t)
         val sharp = IntArray(w)
         fit.getPixels(sharp, 0, w, 0, y, w, 1)
-        for (x in 0 until w) out[row + x] = blendPx(sharp[x], ambPx[row + x], k)
+        for (x in 0 until w) out[row + x] = blendPx(sharp[x], blurPx[row + x], k)
     }
     for (y in fitH until h) {
         System.arraycopy(ambPx, y * w, out, y * w, w)

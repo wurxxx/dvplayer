@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -55,12 +56,14 @@ import com.dvplayer.ui.phone.ui.IconAction
 import com.dvplayer.core.Person
 import com.dvplayer.core.MediaItem
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.aspectRatio
 import com.dvplayer.design.DvGlyph
+import com.dvplayer.design.DvOnImage
 import com.dvplayer.design.DvPalettes
 import com.dvplayer.design.DvTheme
 import com.dvplayer.design.LocalDvPalette
@@ -68,7 +71,6 @@ import com.dvplayer.design.DvType
 import com.dvplayer.design.LocalDvWindow
 import com.dvplayer.design.TabReserve
 import com.dvplayer.design.clickableNoRipple
-import com.dvplayer.design.DvOnImage
 import com.dvplayer.ui.phone.data.PhoneRepository
 import com.dvplayer.ui.phone.data.TrackPrefs
 import com.dvplayer.ui.phone.ui.HeroBackdrop
@@ -91,10 +93,11 @@ fun DetailScreen(
     onBack: () -> Unit,
     onPlay: (String, String?) -> Unit,
 ) {
-    // 详情页整页压在大图（它的模糊版）上：标题、meta、chips 本来就是白色硬编码，
-    // 再用浅色调色板会出现「白字落在浅灰底上」。这里统一换成深色调色板，
-    // 背景、正文、信息卡片全走深色，和播放页一致。
-    CompositionLocalProvider(LocalDvPalette provides DvPalettes.Dark) {
+    // 详情页整页压在大图（它的模糊版）上。深色主题照旧用深色调色板；
+    // 浅色主题下背景压白雾、正文和卡片都走浅色，否则「浅色模式」打开还是
+    // 一整页黑底白字。图上的文字色由 DvPalette.onImage* 一组扩展决定。
+    val palette = if (isSystemInDarkTheme()) DvPalettes.Dark else DvPalettes.Light
+    CompositionLocalProvider(LocalDvPalette provides palette) {
         DetailBody(repo = repo, itemId = itemId, onBack = onBack, onPlay = onPlay)
     }
 }
@@ -107,6 +110,10 @@ private fun DetailBody(
     onPlay: (String, String?) -> Unit,
 ) {
     val p = DvTheme.palette
+    val window = LocalDvWindow.current
+    // 平板是「左海报 + 右信息」，海报尺寸同时决定背景从哪里开始糊。
+    val twoColumn = window.medium
+    val posterWidth = if (window.expanded) 250.dp else 200.dp
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var detail by remember(itemId) { mutableStateOf<MediaDetail?>(null) }
@@ -121,9 +128,15 @@ private fun DetailBody(
     var subtitleChoice by remember { mutableIntStateOf(TrackPrefs.subtitleIndex(context)) }
     var pickingAudio by remember { mutableStateOf(false) }
     var pickingSubtitle by remember { mutableStateOf(false) }
+    // 选集：快捷分段（1-30 / 31-60 …）要能把这一行滚过去。
+    val episodeListState = rememberLazyListState()
+    var selectedRangeStart by remember(itemId) { mutableIntStateOf(0) }
     // 上次看到的位置（秒）和那一集的集号，照桌面的「播放 第 20 集 01:53」。
     var resumeSeconds by remember(itemId) { mutableIntStateOf(0) }
     var resumeEpisode by remember(itemId) { mutableStateOf<Int?>(null) }
+    // 续播那一集的 id：集卡就靠它描边高亮（macOS 的 EpisodeCard.active）。
+    var resumeEpisodeId by remember(itemId) { mutableStateOf<String?>(null) }
+    var didAutoJumpEpisode by remember(itemId) { mutableStateOf(false) }
 
     LaunchedEffect(itemId) {
         runCatching { repo.detail(itemId) }
@@ -163,8 +176,31 @@ private fun DetailBody(
                     ?: records.firstOrNull { it.itemId == d.playItemId }
                 resumeSeconds = record?.positionSeconds?.toInt() ?: 0
                 resumeEpisode = resumeEp?.episodeNumber
+                resumeEpisodeId = resumeEp?.id
             }
             .onFailure { error = it.message }
+    }
+
+    // 一进详情就定位到看到一半的那一集：选集行滚过去（照 macOS 的
+    // autoJumpToResumeIfNeeded）。只在第一次生效，用户自己点分段后不再拉回。
+    LaunchedEffect(itemId, episodes, resumeEpisodeId) {
+        if (didAutoJumpEpisode || resumeEpisodeId == null) return@LaunchedEffect
+        val index = episodes.indexOfFirst { it.id == resumeEpisodeId }
+        if (index < 0) return@LaunchedEffect
+        didAutoJumpEpisode = true
+        // 用 scrollToItem 而不是 animate：打开页面时不应该看到选集行自己滑一下。
+        episodeListState.scrollToItem(index)
+    }
+
+    // 背景图实际占的高度（由 HeroBackdrop 量出来）：手机的文字从图下沿往下排，
+    // 首帧还没量到时先按 240dp 兜底。
+    var backdropImageHeight by remember(itemId) { mutableStateOf(0.dp) }
+    val textTopPadding = if (twoColumn) {
+        0.dp
+    } else if (backdropImageHeight > 0.dp) {
+        backdropImageHeight + 30.dp
+    } else {
+        240.dp
     }
 
     val d = detail
@@ -176,26 +212,37 @@ private fun DetailBody(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState()),
         ) {
-            // 背景铺满**整个内容高度**（不是一屏）：滚到哪都还是这张图的模糊版，
-            // 不会滚出一片页面底色。清晰图只在上部，下面全是同源氛围色。
-            // 平板宽屏时内容常常比屏幕短，这里再兜一个「至少一屏」，
-            // 否则图只铺到内容底、剩下的窗口露黑底。
+            // 背景分两种：
+            // - 手机：图按宽度完整显示在顶部，图的下沿一段渐变收到页面底色
+            //   （浅色白 / 深色黑），正文排在底色上。不做模糊、不做延伸。
+            // - 平板：双栏，海报和文字都压在图上，图要铺满第一屏并在下部
+            //   继续模糊，否则白字会落到浅底上看不清。
             Box(modifier = Modifier.fillMaxWidth().heightIn(min = LocalDvWindow.current.height)) {
-                HeroBackdrop(
-                    path = d?.backdropPath ?: d?.posterPath,
-                    modifier = Modifier.matchParentSize(),
-                    // 手机竖屏比横图窄得多：按宽度完整显示，别把两边裁掉。
-                    fitWhole = true,
-                    // 模糊往后挪：图的上 3/4 都保持清晰（标题压在图下沿也不糊）。
-                    blurStart = 0.75f,
-                    // 最底下再收到页面底色，滚到底不会硬切。
-                    bottomFadeStart = 0.90f,
-                )
+                if (twoColumn) {
+                    val heroBlock = 88.dp + posterWidth * 1.5f + 26.dp
+                    HeroBackdrop(
+                        path = d?.backdropPath ?: d?.posterPath,
+                        modifier = Modifier.matchParentSize(),
+                        fitWhole = true,
+                        blurStart = 0.32f,
+                        blurEnd = 0.58f,
+                        blurStartDp = heroBlock + 20.dp,
+                        blurEndDp = heroBlock + 280.dp,
+                        fadeStartDp = 310.dp,
+                        fadeEndDp = 500.dp,
+                    )
+                } else {
+                    HeroBackdrop(
+                        path = d?.backdropPath ?: d?.posterPath,
+                        modifier = Modifier.matchParentSize(),
+                        imageOnly = true,
+                        // 手机的文字从图下沿往下排；图高由背景量出来回调上来。
+                        onImageHeight = { backdropImageHeight = it },
+                    )
+                }
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    val window = LocalDvWindow.current
                     // 平板：左海报 + 右信息并排，标题不再孤零零地漂在大图上；
                     // 手机（compact）保持原样：图 240dp，文字照旧往下排。
-                    val twoColumn = window.medium
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -210,7 +257,7 @@ private fun DetailBody(
                             RemoteImage(
                                 path = d?.posterPath ?: d?.backdropPath,
                                 modifier = Modifier
-                                    .width(if (window.expanded) 250.dp else 200.dp)
+                                    .width(posterWidth)
                                     .aspectRatio(2f / 3f)
                                     .clip(RoundedCornerShape(14.dp)),
                             )
@@ -221,8 +268,8 @@ private fun DetailBody(
                                 .padding(
                                     start = if (twoColumn) 0.dp else 20.dp,
                                     end = if (twoColumn) 32.dp else 20.dp,
-                                    top = if (twoColumn) 0.dp else 240.dp,
-                                    bottom = 26.dp,
+                                    top = textTopPadding,
+                                    bottom = 0.dp,
                                 ),
                         ) {
                             // 标题位置在所有详情页都一致，不会因为简介长短忽上忽下。
@@ -230,7 +277,7 @@ private fun DetailBody(
                                 Text(
                                     error ?: "加载中…",
                                     style = DvType.Caption,
-                                    color = DvOnImage.Secondary,
+                                    color = photoSubText(),
                                     modifier = Modifier.padding(vertical = 24.dp),
                                 )
                             } else {
@@ -240,7 +287,7 @@ private fun DetailBody(
                                         fontSize = DvType.Display.fontSize,
                                         lineHeight = 36.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = DvOnImage.Primary,
+                                        color = photoText(),
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
@@ -255,7 +302,7 @@ private fun DetailBody(
                                         Text(
                                             meta,
                                             fontSize = DvType.CardTitle.fontSize,
-                                            color = DvOnImage.Secondary,
+                                            color = photoSubText(),
                                             modifier = Modifier.padding(top = 8.dp),
                                         )
                                     }
@@ -276,7 +323,7 @@ private fun DetailBody(
                                             overview,
                                             fontSize = DvType.CardTitle.fontSize,
                                             lineHeight = 19.sp,
-                                            color = DvOnImage.Secondary,
+                                            color = photoSubText(),
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.padding(top = 11.dp),
@@ -368,6 +415,9 @@ private fun DetailBody(
                             }
                         }
                     }
+                    // 这里必须用 Spacer 而不是 Box 的 padding：双栏时 Row 的高度由
+                    // 海报（300dp）决定，文字列上的 bottom padding 会被吃掉。
+                    Spacer(Modifier.height(32.dp))
 
                     // 图下方：媒体信息和链接。它们也压在图的下半部，滚过图之后才落在底色上。
                     // 大屏收在 1040dp 里居中：否则三条轨道卡摊在 1280dp 上，中间全是洞。
@@ -381,12 +431,54 @@ private fun DetailBody(
                         if (d != null) {
                             if (episodes.isNotEmpty()) {
                                 SectionTitle("选集", trailing = "${episodes.size} 集")
+
+                                // 集数多时给一排「1-30 / 31-60 …」：点一下滚到那一段
+                                // （照 macOS 的 episodeRangeChips）。段大小 30。
+                                val ranges = episodeRanges(episodes.size)
+                                if (ranges.isNotEmpty()) {
+                                    val activeStart = if (selectedRangeStart > 0) {
+                                        selectedRangeStart
+                                    } else {
+                                        val n = resumeEpisode ?: 1
+                                        ((n - 1) / EpisodeRangeSize) * EpisodeRangeSize + 1
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .padding(top = 10.dp)
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        ranges.forEach { (from, to) ->
+                                            RangeChip(
+                                                label = "$from-$to",
+                                                active = activeStart == from,
+                                                onClick = {
+                                                    selectedRangeStart = from
+                                                    val target = episodes.indexOfFirst {
+                                                        (it.episodeNumber ?: 0) >= from
+                                                    }
+                                                    if (target >= 0) {
+                                                        scope.launch {
+                                                            episodeListState.animateScrollToItem(target)
+                                                        }
+                                                    }
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+
                                 LazyRow(
+                                    state = episodeListState,
                                     modifier = Modifier.padding(top = 10.dp),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
                                     items(episodes, key = { it.id }) { ep ->
-                                        EpisodeCard(ep) { onPlay(ep.id, itemId) }
+                                        EpisodeCard(
+                                            ep = ep,
+                                            active = ep.id == resumeEpisodeId,
+                                            onClick = { onPlay(ep.id, itemId) },
+                                        )
                                     }
                                 }
                             }
@@ -395,7 +487,7 @@ private fun DetailBody(
                                 SectionTitle(
                                     "演职人员",
                                     trailing = "${people.size} 位",
-                                    modifier = Modifier.padding(top = 24.dp),
+                                    modifier = Modifier.padding(top = 32.dp),
                                 )
                                 LazyRow(
                                     modifier = Modifier.padding(top = 10.dp),
@@ -414,7 +506,13 @@ private fun DetailBody(
 
                             val tracks = trackCards(mediaInfo)
                             if (tracks.isNotEmpty()) {
-                                SectionTitle("媒体信息", trailing = "${tracks.size} 条轨道")
+                                SectionTitle(
+                                    "媒体信息",
+                                    trailing = "${tracks.size} 条轨道",
+                                    // 上面是选集卡片下的「第 N 集」小字，24 + 那 8dp
+                                    // 正好和其余小节的 32dp 对齐。
+                                    modifier = Modifier.padding(top = 24.dp),
+                                )
                                 // 高度交给内容：同一行用最高那张卡拉齐，行数不写死。
                                 Row(
                                     modifier = Modifier
@@ -437,7 +535,7 @@ private fun DetailBody(
                                 // 源没给轨道（本地目录 / 老版本服务器）：退回详情里的摘要字段。
                                 val info = infoCards(d)
                                 if (info.isNotEmpty()) {
-                                    SectionTitle("媒体信息")
+                                    SectionTitle("媒体信息", modifier = Modifier.padding(top = 24.dp))
                                     Row(
                                         modifier = Modifier
                                             .padding(top = 10.dp)
@@ -456,7 +554,7 @@ private fun DetailBody(
                             // 视频存放位置：电影 / 单集给文件路径，剧集给所在目录（和桌面一致）。
                             val location = locationText(mediaInfo, d.kind)
                             if (location != null) {
-                                SectionTitle("存储位置", modifier = Modifier.padding(top = 24.dp))
+                                SectionTitle("存储位置", modifier = Modifier.padding(top = 32.dp))
                                 Row(
                                     modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
                                     verticalAlignment = Alignment.Top,
@@ -475,7 +573,7 @@ private fun DetailBody(
 
                             val links = linkButtons(d)
                             if (links.isNotEmpty()) {
-                                SectionTitle("链接", modifier = Modifier.padding(top = 24.dp))
+                                SectionTitle("链接", modifier = Modifier.padding(top = 32.dp))
                                 Row(
                                     modifier = Modifier.padding(top = 10.dp),
                                     horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -556,21 +654,26 @@ private fun PlayPill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 压在剧照上时用白胶囊（macOS 的样子）；手机上浅色主题正文在浅底上，
+    // 白胶囊会糊掉，改强调色。
+    val light = onLightPage()
+    val bg = if (light) DvTheme.palette.accent else Color.White
+    val fg = if (light) DvTheme.palette.onAccent else Color.Black
     // 宽度写死：续播文案长短（第几集 / 时间）不再让按钮忽大忽小。
     Row(
         modifier = modifier
             .width(208.dp)
             .height(50.dp)
             .clip(RoundedCornerShape(percent = 50))
-            .background(Color.White)
+            .background(bg)
             .clickableNoRipple(onClick),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        DvGlyph(glyph = DvGlyph.Play, tint = Color.Black, sizeDp = 17)
+        DvGlyph(glyph = DvGlyph.Play, tint = fg, sizeDp = 17)
         Text(
             text,
-            color = Color.Black,
+            color = fg,
             fontSize = DvType.SectionTitle.fontSize,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -599,12 +702,16 @@ private fun RoundAction(
                 .size(44.dp)
                 .clip(RoundedCornerShape(percent = 50))
                 .background(
-                    if (active) p.accent.copy(alpha = 0.26f)
-                    else p.surface.copy(alpha = if (p.isDark) 0.44f else 0.52f),
+                    when {
+                        active -> p.accent.copy(alpha = 0.26f)
+                        onLightPage() -> p.glassPill
+                        else -> p.surface.copy(alpha = if (p.isDark) 0.44f else 0.52f)
+                    },
                 )
                 .border(
                     1.dp,
-                    Color.White.copy(alpha = 0.16f),
+                    if (onLightPage()) Color.Black.copy(alpha = 0.08f)
+                    else Color.White.copy(alpha = 0.16f),
                     RoundedCornerShape(percent = 50),
                 ),
             contentAlignment = Alignment.Center,
@@ -613,14 +720,14 @@ private fun RoundAction(
                 glyph = glyph,
                 // 这几个按钮压在照片上，不能用调色板里的灰（浅色主题下几乎看不见），
                 // 统一走白色 alpha，和 GlassAction 一致。
-                tint = if (active) p.accent else DvOnImage.Icon,
+                tint = if (active) p.accent else if (onLightPage()) p.text else DvOnImage.Icon,
                 sizeDp = 18,
                 strokeWidth = if (active) 0.085f else 0.07f,
             )
         }
         Text(
             label,
-            color = if (active) p.accent else DvOnImage.Secondary,
+            color = if (active) p.accent else photoSubText(),
             fontSize = DvType.Micro.fontSize,
             maxLines = 1,
             modifier = Modifier.padding(top = 6.dp),
@@ -675,9 +782,10 @@ private fun GlassAction(
 
 /** 选集卡：16:9 缩略图 + 第 N 集 + 标题 + 进度。 */
 @Composable
-private fun EpisodeCard(ep: MediaItem, onClick: () -> Unit) {
+private fun EpisodeCard(ep: MediaItem, active: Boolean = false, onClick: () -> Unit) {
     val p = DvTheme.palette
     val number = ep.episodeNumber?.takeIf { it > 0 }
+    val shape = RoundedCornerShape(10.dp)
     Column(
         modifier = Modifier
             .width(176.dp)
@@ -688,7 +796,9 @@ private fun EpisodeCard(ep: MediaItem, onClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(10.dp)),
+                .clip(shape)
+                // 看到一半的那一集描个边，进详情一眼能找到（和 macOS 一致）。
+                .border(2.dp, if (active) p.accent else Color.Transparent, shape),
         ) {
             RemoteImage(ep.backdropPath ?: ep.posterPath, Modifier.fillMaxSize())
             if (number != null) {
@@ -716,7 +826,8 @@ private fun EpisodeCard(ep: MediaItem, onClick: () -> Unit) {
                         Modifier
                             .fillMaxWidth(ep.progress.toFloat().coerceIn(0f, 1f))
                             .fillMaxHeight()
-                            .background(p.accent),
+                            // 高亮卡上进度条改成白色，和强调色描边分开。
+                            .background(if (active) Color.White.copy(alpha = 0.95f) else p.accent),
                     )
                 }
             }
@@ -724,7 +835,7 @@ private fun EpisodeCard(ep: MediaItem, onClick: () -> Unit) {
         Text(
             if (number != null) "第 $number 集" else cleanTitle(ep.title),
             fontSize = DvType.Caption.fontSize,
-            color = p.text,
+            color = if (active) p.accent else p.text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
@@ -805,7 +916,11 @@ private fun ActionPill(
             .background(background)
             .border(
                 width = 1.dp,
-                color = if (primary) Color.Transparent else Color.White.copy(alpha = 0.10f),
+                color = when {
+                    primary -> Color.Transparent
+                    p.isDark -> Color.White.copy(alpha = 0.10f)
+                    else -> Color.Black.copy(alpha = 0.08f)
+                },
                 shape = RoundedCornerShape(10.dp),
             )
             .clickableNoRipple(onClick)
@@ -829,13 +944,34 @@ private fun Chip(text: String) {
     Text(
         text = text,
         fontSize = DvType.Caption.fontSize,
-        color = DvOnImage.Primary,
+        color = photoText(),
         modifier = Modifier
             .clip(RoundedCornerShape(5.dp))
-            .background(Color.White.copy(alpha = 0.22f))
+            // 浅色主题的正文在浅底上：胶囊要立得住，否则和底色糊在一起。
+            .background(
+                if (onLightPage()) DvTheme.palette.glassPill
+                else Color.White.copy(alpha = 0.22f),
+            )
             .padding(horizontal = 8.dp, vertical = 3.dp),
     )
 }
+
+/**
+ * 正文颜色：平板双栏时文字压在图上（恒白）；手机上文字落在图的下面、
+ * 页面底色上——浅色主题用正文色，深色主题仍然是白字。
+ */
+@Composable
+private fun photoText(): Color =
+    if (LocalDvWindow.current.medium) DvOnImage.Primary else DvTheme.palette.text
+
+@Composable
+private fun photoSubText(): Color =
+    if (LocalDvWindow.current.medium) DvOnImage.Secondary else DvTheme.palette.muted
+
+/** 手机上浅色主题：文字在浅色底上，胶囊/圆底要换成白玻璃。 */
+@Composable
+private fun onLightPage(): Boolean =
+    !LocalDvWindow.current.medium && !DvTheme.palette.isDark
 
 @Composable
 private fun SectionTitle(
@@ -865,6 +1001,16 @@ private fun InfoCard(
     glyph: DvGlyph? = null,
     fillHeight: Boolean = false,
 ) {
+    InfoCardBody(title, rows, glyph, fillHeight)
+}
+
+@Composable
+private fun InfoCardBody(
+    title: String,
+    rows: List<Pair<String, String>>,
+    glyph: DvGlyph?,
+    fillHeight: Boolean,
+) {
     val p = DvTheme.palette
     Column(
         modifier = Modifier
@@ -873,10 +1019,17 @@ private fun InfoCard(
             .clip(RoundedCornerShape(14.dp))
             // 照 macOS 的 MediaInfoCard：详情页整页是模糊大图，卡片用半透明，
             // 让底下的画面透一点出来；实心 surfaceAlt 会变成一块死黑的板子，
-            // 和暖色调的背景也接不上。0.8 是「能看出底下有画面、但不再透字」的厚度，
-            // 再加一道极淡的白色内边，和上面的模糊图拉开层次。
-            .background(p.surface.copy(alpha = if (p.isDark) 0.80f else 0.86f))
-            .border(1.dp, Color.White.copy(alpha = if (p.isDark) 0.07f else 0.55f), RoundedCornerShape(14.dp))
+            // 和暖色调的背景也接不上。深色下 0.80 是「能看出底下有画面、但不再透字」
+            // 的厚度；浅色主题下卡是白的，给到 0.92 才是真的白玻璃。
+            .background(
+                if (p.isDark) p.surface.copy(alpha = 0.80f)
+                else Color.White.copy(alpha = 0.92f),
+            )
+            .border(
+                1.dp,
+                if (p.isDark) Color.White.copy(alpha = 0.07f) else Color.Black.copy(alpha = 0.06f),
+                RoundedCornerShape(14.dp),
+            )
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -910,13 +1063,25 @@ private fun InfoCard(
 
 @Composable
 private fun LinkPill(label: String, onClick: () -> Unit) {
+    LinkPillBody(label, onClick)
+}
+
+@Composable
+private fun LinkPillBody(label: String, onClick: () -> Unit) {
     val p = DvTheme.palette
     Row(
         modifier = Modifier
             .height(36.dp)
             .clip(RoundedCornerShape(percent = 50))
-            .background(p.surface.copy(alpha = if (p.isDark) 0.80f else 0.86f))
-            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(percent = 50))
+            .background(
+                if (p.isDark) p.surface.copy(alpha = 0.80f)
+                else Color.White.copy(alpha = 0.92f),
+            )
+            .border(
+                1.dp,
+                if (p.isDark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.06f),
+                RoundedCornerShape(percent = 50),
+            )
             .clickableNoRipple(onClick)
             .padding(horizontal = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1141,4 +1306,53 @@ private fun linkButtons(d: MediaDetail): List<Pair<String, String>> {
         links += "IMDb" to "https://www.imdb.com/title/$it/"
     }
     return links
+}
+
+/** 快捷选集一段多少集（和 macOS 的 `episodeRangeSize` 一致）。 */
+private const val EpisodeRangeSize = 30
+
+/** 集数超过一段时才分段：1-30 / 31-60 / 61-70。 */
+private fun episodeRanges(total: Int): List<Pair<Int, Int>> {
+    if (total <= EpisodeRangeSize) return emptyList()
+    return (1..total step EpisodeRangeSize).map { from ->
+        from to minOf(from + EpisodeRangeSize - 1, total)
+    }
+}
+
+/** 选集分段按钮：压在图上的半透明胶囊，选中段用更亮的底。 */
+@Composable
+private fun RangeChip(label: String, active: Boolean, onClick: () -> Unit) {
+    val p = DvTheme.palette
+    val shape = RoundedCornerShape(percent = 50)
+    Text(
+        text = label,
+        fontSize = DvType.Caption.fontSize,
+        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+        // 选集总落在图的下沿之后（页面底色上），跟着正文色走：
+        // 深色主题白字，浅色主题深色字。
+        color = if (active) p.text else p.muted,
+        modifier = Modifier
+            .clip(shape)
+            .background(
+                when {
+                    !LocalDvWindow.current.medium -> {
+                        // 手机：压在图外时是白胶囊，压在图上时仍是白色半透。
+                        if (onLightPage()) Color.White.copy(alpha = if (active) 0.92f else 0.55f)
+                        else Color.White.copy(alpha = if (active) 0.26f else 0.12f)
+                    }
+                    else -> Color.White.copy(alpha = if (active) 0.26f else 0.12f)
+                },
+            )
+            .border(
+                1.dp,
+                if (onLightPage()) {
+                    Color.Black.copy(alpha = if (active) 0.10f else 0.06f)
+                } else {
+                    Color.White.copy(alpha = if (active) 0.32f else 0.14f)
+                },
+                shape,
+            )
+            .clickableNoRipple(onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+    )
 }
